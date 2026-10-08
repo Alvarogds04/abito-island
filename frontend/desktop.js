@@ -8,7 +8,8 @@
    Rejections are typed objects { code, message }:
    - `denied`        — Electron's `Denied` (with the reason attached),
    - `rate-exceeded` — Electron's `Rate exceeded`,
-   - `not-yet-wired` — verb whose M2/M3 backing system does not exist yet. */
+   - `not-yet-wired` — verb whose M3 backing system does not exist yet
+     (`dismiss` became wired with the M2 notice transport). */
 (() => {
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
     || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke)

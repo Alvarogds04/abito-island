@@ -2,7 +2,7 @@
 name = "abito-island"
 version = "0.1.0"
 edition = "2021"
-description = "Abito island — Electron to Rust+Tauri migration, unit M1b (host/bridge)"
+description = "Abito island — Electron to Rust+Tauri migration, unit M2 (host/bridge + Pi transport receiver)"
 publish = false
 
 [build-dependencies]
@@ -15,3 +15,7 @@ serde_json = "1"
 x11rb = "0.13"
 # M1b lifecycle: a second launch focuses/shows the running island and exits.
 tauri-plugin-single-instance = "2"
+# M2 transport: Linux UDS peer credentials + SIGINT/SIGTERM cleanup (libc),
+# sha256 project id — byte-identical to core.cjs projectId (sha2 hex).
+libc = "0.2"
+sha2 = "0.10"

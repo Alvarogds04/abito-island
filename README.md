@@ -1,4 +1,4 @@
-# Abito island — Electron → Rust + Tauri, unit M1b (host/bridge)
+# Abito island — Electron → Rust + Tauri, units M1b (host/bridge) + M2 (Pi transport)
 
 Skeleton of the Abito desktop island as a normal Cargo project with Tauri v2
 (`tauri-build` in `build.rs`, static `frontendDist`, **no npm, no
@@ -9,6 +9,12 @@ Unit **M1b** adds the host/bridge layer on top of the M1a skeleton: the
 `window.desktop.*` facade over Tauri invoke/events, the Electron validation
 gate ported to Rust with unit tests, lifecycle (single instance, work-area
 re-clamp, clean quit), a least-privilege capability and a strict CSP.
+
+Unit **M2** adds the Pi → desktop notice transport: the Unix-domain-socket
+receiver ported from `transport.cjs`/`core.cjs` with the SAME wire format and
+limits, tested first (RED → GREEN) and integration-tested over real sockets,
+the now-wired `dismiss` verb, and display-only Sileo-style notice text in the
+island. The Node producer (`pi-extension.ts`/`adapter.cjs`) is unchanged.
 
 ## Run
 
@@ -34,7 +40,7 @@ DISPLAY=:0 XAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.UV9RW3 \
 
 The probe runs the scripted sequence **start → simulated drag near the bottom →
 release/snap → expand → collapse → drag to the top → facade evidence →
-frontend evidence** and,
+frontend evidence → transport evidence** and,
 after each step, waits for the window manager to apply, then prints one JSON
 line per step with:
 
@@ -53,7 +59,15 @@ line per step with:
   the snapshot returned by `snapshot`/`expand`/`close`, one typed rejection of
   an invalid call, a 40-call rate-limit burst with its typed rejections,
   `onState` event deliveries, and the `webview_label` / `webview_url` the
-  command-side sender gate actually sees.
+  command-side sender gate actually sees,
+- the `transport_evidence` line (M2) is the probe acting as the Pi producer
+  against the receiver this process owns: one `hello` frame, the byte-exact
+  `ready` line, one `settled` frame, then `notice_count` read back through
+  the REAL snapshot path, with `connections_while_connected` →
+  `connections_after_disconnect`. `preview_roots_detected_only` lists the
+  installed Preview's reserved socket roots READ-ONLY — detected and
+  reported, never connected, never unlinked (an `ABITO_SOCKET_DIR` override
+  keeps the probe in its own directory).
 
 Exits only this app (`std::process::exit(0)`).
 
@@ -130,7 +144,7 @@ IPC path (observed 2026-10-09, this stack):
 | `close()` | `desktop_action {action:"close"}` | wired — collapses from expanded, no-op otherwise (Electron `transition`) |
 | `hide()` | `desktop_action {action:"hide"}` | wired — window hide, state `hidden` |
 | `quit()` | `desktop_action {action:"quit"}` | wired — clean exit through `RunEvent::Exit` |
-| `dismiss()` | `desktop_action {action:"dismiss"}` | **not-yet-wired** — typed `not-yet-wired` error (M2: local UDS notice transport) |
+| `dismiss()` | `desktop_action {action:"dismiss"}` | wired (M2) — drops the FIRST notice (id + sessionId, `main.cjs:461` semantics), publishes and returns the fresh snapshot; a dismissal never approves or decides anything |
 | `allow()` / `deny()` | `desktop_action {action:"allow"\|"deny"}` | **not-yet-wired** — typed error (M3: approval HTTP bridge) |
 | `choose(index)` | `desktop_action {action:"choose",index}` | **not-yet-wired** — typed error (M3: standing proposal request; while none stands Electron answers `Denied`) |
 | `animateAnyway()` / `respectSystemMotion()` | `desktop_action …` | wired — one machine-wide `motionOverride`, persisted `motion.json` mode 0600, fail-closed read; the island animates only on an explicit `animateAnyway` snapshot |
@@ -168,7 +182,8 @@ IPC path (observed 2026-10-09, this stack):
   `prevent_close` + `app.exit(0)`), `RunEvent::Exit` releases the
   single-instance D-Bus name; the probe calls `single_instance::destroy`
   before `process::exit` so a later launch is never mistaken for a live one.
-  No signal handlers yet (nothing to clean up before M2 adds the socket).
+  SIGINT/SIGTERM handlers landed with M2: they run the same cleanup (socket
+  first, then exit) — see *What M2 proves*.
 - **Capabilities** (`capabilities/main.json`): `core:default` dropped; the
   webview may only `core:event:allow-listen` / `allow-unlisten`. Host actions
   go through the app's own commands, which Tauri gates by origin (a remote
@@ -184,10 +199,113 @@ IPC path (observed 2026-10-09, this stack):
   counterpart); no new-window handler is installed, so `window.open` /
   `target=_blank` create nothing.
 
-Not in this unit (later sessions): UDS transport receiver with
-`notices`/`connections`/`unavailable:false` (M2), approval HTTP with live
+Not in this unit (later sessions): approval HTTP with live
 `request`/`card`/`bridgeStatus` (M3), packaging and replacement of the
-installed Preview (M4, needs separate human authorisation).
+installed Preview (M4, needs separate human authorisation). The UDS
+transport receiver is no longer "later" — it landed in M2, below.
+
+## What M2 proves (and what it does not)
+
+**Same wire, same limits — parity table.** Legacy values come from the
+committed read-only Electron source (`worktrees/legacy-electron/apps/desktop`),
+Rust values from this crate; every rule is the same rule, not a
+re-interpretation (the receiver tests were written first: RED → GREEN):
+
+| contract | legacy value (file:line) | Rust value (file:line) |
+|---|---|---|
+| frame size cap | `frameBytes: 512` — `core.cjs:3` | `FRAME_BYTES = 512` — `src/protocol.rs:32` |
+| freshness window (no future, no stale) | `freshMs: 15000` — `core.cjs:3` | `FRESH_MS = 15_000` — `src/protocol.rs:33` |
+| notice expiry | `expiryMs: 60000` — `core.cjs:3` | `EXPIRY_MS = 60_000` — `src/protocol.rs:34` |
+| notice queue bound | `queue: 8` — `core.cjs:3` | `QUEUE = 8` — `src/protocol.rs:35` |
+| dedupe entries | `dedupe: 256` — `core.cjs:3` | `DEDUPE = 256` — `src/protocol.rs:36` |
+| connection quota | `connections: 4` — `core.cjs:3` | `CONNECTIONS = 4` — `src/protocol.rs:37` |
+| frame rate per connection | `framesPerMinute: 120` — `core.cjs:3` | `FRAMES_PER_MINUTE = 120` — `src/protocol.rs:38` |
+| handshake deadline | `handshakeMs: 3000` — `core.cjs:3` | `HANDSHAKE_MS = 3_000` — `src/protocol.rs:39` |
+| idle deadline (valid frames only) | `idleMs: 30000` — `core.cjs:3` | `IDLE_MS = 30_000` — `src/protocol.rs:40` |
+| batch cap | `frameBytes * 8` — `transport.cjs:66` | `BATCH_FACTOR = 8` — `src/protocol.rs:43` |
+| ready answer (byte-exact) | `'{"v":1,"type":"ready"}\n'` — `transport.cjs:81` | `READY_LINE` — `src/protocol.rs:48` |
+| project id = sha256(realpath) | `core.cjs:5` | `project_id` — `src/protocol.rs:54` |
+| session label / event id patterns | `core.cjs:6-7` | `session_token`/`token` — `src/protocol.rs:67,82` |
+| frame decode + scope/identity checks | `decode` — `core.cjs:10-33` | `decode`/`validate` — `src/protocol.rs:156,212` |
+| notice store (prune/dedupe/queue/dismiss) | `NoticeStore` — `core.cjs:35-60` | `src/protocol.rs:417` (`accept:441`, `snapshot:481`, `dismiss:488`) |
+| line framing: split, tail gate | `transport.cjs:69,86` | `Framer::push` — `src/protocol.rs:323` |
+| per-connection fixed-minute quota | `transport.cjs:73-75` | `FrameQuota::check` — `src/protocol.rs:379` |
+| endpoint naming `<runtime>/p-XXXXXX/s` | `transport.cjs:49,114-115` | `mkdtemp` — `src/transport.rs:557` |
+| dir chain: dir, no symlink, root/us, not world-writable | `directoryChain` — `transport.cjs:11-20` | `directory_chain` — `src/transport.rs:239` |
+| private dir = exactly 0700 + ours | `transport.cjs:22-26` | `private_directory` — `src/transport.rs:266` |
+| endpoint verify (shape/0600/uid/socket/no symlink) | `verifyEndpoint` — `transport.cjs:34-44` | `verify_endpoint` — `src/transport.rs:290` |
+| socket chmod 0600 after bind | `transport.cjs:117` | `create_transport` — `src/transport.rs:664` |
+| sockaddr_un ≤ 107 bytes | `transport.cjs:112` | `src/transport.rs:640` |
+| handshake/idle timers, rate check before decode | `transport.cjs:60-61,74-75` | `handle_connection` — `src/transport.rs:801` |
+| connections = handshaked clients only | `transport.cjs:57,82` | `Inner::report` — `src/transport.rs:426` |
+| cleanup: dir+socket inode identity, foreign paths untouched | `transport.cjs:91-106` | `cleanup` — `src/transport.rs:508` |
+| owner check | file uid + 0600 only — `transport.cjs:34-44` | `SO_PEERCRED` same-uid — `src/transport.rs:588` |
+| `onNotice` gated by a store before the app | `transport.cjs:83` | `Inner.store` — `src/transport.rs:801` handler |
+| `dismiss` drops the first notice | `main.cjs:461-463` | `main.rs:752` |
+| transport wiring + callbacks + publish | `main.cjs:488-491` | `start_transport` — `main.rs:138` |
+| `ABITO_DESKTOP_SOCKET=…` stdout line | `main.cjs:493` | `main.rs:182` |
+| `unavailable = true` only when the receiver fails to start | `main.cjs:495-497` | `start_transport` — `main.rs:138` |
+| cleanup refusal line on quit | `main.cjs:383-384` | `main.rs:108,119` |
+| SIGINT/SIGTERM run the clean quit | `main.cjs:393` | `install_shutdown_handlers` — `main.rs:71` |
+
+Deliberate, documented deltas (no wire change):
+
+- **Owner check on the wire**: the legacy receiver trusted the 0600 socket
+  file; the Rust receiver additionally requires the connecting peer's uid to
+  be ours via `SO_PEERCRED` (otherwise the connection is dropped before it is
+  counted). Strictly tighter admission, same protocol.
+- **`Linux identity required`** (legacy fails closed when `process.getuid`
+  is absent) has no Rust counterpart: `libc::getuid` always answers on
+  Linux, so the branch cannot exist — documented, not silently dropped.
+- **Reserved Preview roots**: `packaged.cjs` maps `com.abitog.Abito` →
+  `/run/user/<uid>/abito-desktop`. This receiver REFUSES any runtime root
+  that is or contains that directory or `…-preview`
+  (`runtime_allowed`, `src/transport.rs:186`): it never binds, unlinks or
+  connects there. Detection is read-only (`read_dir` + `lstat`, never a
+  connect) and the probe only reports what those roots hold.
+
+### Socket path contract (M2)
+
+- Default runtime root: `apps/desktop-tauri/.runtime` — the dev layout
+  `apps/desktop/.runtime` had — created 0700; endpoint
+  `<root>/p-XXXXXX/s` (`XXXXXX` = six alphanumerics per launch), generated
+  dir 0700, socket 0600. Startup prints `ABITO_DESKTOP_SOCKET=<endpoint>`
+  (`main.rs:182`), byte-for-byte the legacy line.
+- Override: `ABITO_SOCKET_DIR=<absolute, normalized dir>` for tests/probe.
+  Relative or unnormalized paths fail closed; anything resolving into the
+  installed Preview's reserved roots is refused (`resolve_runtime_from`,
+  `src/transport.rs:199`). **A socket this process did not create is never
+  removed**: cleanup verifies dir + socket dev/ino and `is_socket` first,
+  and a non-empty directory aborts it (legacy `close()` semantics).
+  Stale `p-XXXXXX` leftovers from earlier runs are never swept — exactly
+  like the legacy receiver.
+- Cleanup runs on: `quit` verb, window close, SIGINT, SIGTERM, and before
+  the probe's hard exit.
+
+### Notices are display text only (M2)
+
+Transport callback → `notices.accept` → snapshot fields `notices`,
+`connections`, `unavailable` (fed independently of `bridgeStatus`, which
+stays M3's `disabled` — legacy keeps health-failure and Pi-connection state
+separate too). The island renders them in the overview as Sileo-style text
+(own code, total silence): generic title `Pi terminó su turno`, the generic
+detail (never "the task went well", never "tests passed"), the count line,
+and a `Descartar aviso` button wired to `dismiss`. **A notice never decides,
+approves, focuses, expands or restores anything**; a snapshot never opens the
+island by itself. `allow`/`deny`/`choose` remain typed `not-yet-wired` (M3).
+
+### Unchanged Node producer against the Rust receiver (observed)
+
+Integration test `unchanged_node_producer_connects_and_settles` spawns the
+committed `adapter.cjs` + `core.cjs` + `transport.cjs` (read-only, plain
+`node`, no npm install, no network, no writes) through
+`test-node/producer-check.cjs` against a receiver bound in a private temp
+dir: a real `hello → ready → settled` handshake, the adapter's `projectId`
+sha256 equals the receiver's, the connection is counted, and the settlement
+becomes exactly one notice. `pi-extension.ts` and `adapter.cjs` are
+unmodified. (The adapter's own opt-in loader would only accept the legacy
+`.runtime` or the Preview's root; the harness passes the runtime explicitly,
+which is what a Pi session wiring would do through `ABITO_DESKTOP_SOCKET`.)
 
 ## What M1a proves (and what it does not)
 
@@ -233,6 +351,28 @@ DISPLAY=:0 XAUTHORITY=… GDK_BACKEND=x11 ./target/debug/abito-island  # exits 0
 pgrep -c -x abito-island   # → 1
 ```
 
+## Verifying M2
+
+```sh
+# all tests: 9 protocol unit (RED→GREEN) + 3 transport policy unit +
+# 37 M1b tests (unchanged) + 8 receiver integration tests over real sockets
+cargo test --manifest-path apps/desktop-tauri/Cargo.toml
+
+cargo build --manifest-path apps/desktop-tauri/Cargo.toml
+sha256sum apps/desktop-tauri/frontend/clay-engine.js   # R6 frozen, unchanged
+
+# probe WITH the socket override (its own dir — never the Preview's root):
+cd apps/desktop-tauri
+DISPLAY=:0 XAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.UV9RW3 \
+  GDK_BACKEND=x11 ABITO_PROBE=1 ABITO_SOCKET_DIR="$PWD/.runtime-probe" \
+  timeout 120 cargo run
+# → transport_evidence line:
+#     ready_ok true, frames_sent 2, notice_count 1,
+#     connections_while_connected 1 → connections_after_disconnect 0,
+#     preview_roots_detected_only[].connected_or_removed false
+# → stdout also prints ABITO_DESKTOP_SOCKET=<endpoint> (legacy line)
+```
+
 ## Behaviour notes
 
 - **Drag**: pointer tracked inside the webview; `drag_press/drag_move/
@@ -262,23 +402,31 @@ bearing, not cosmetic.
 
 ```
 apps/desktop-tauri/
-├── Cargo.toml            # normal crate; tauri v2 + single-instance plugin + x11rb
+├── Cargo.toml            # normal crate; tauri v2 + single-instance + x11rb + libc/sha2 (M2)
 ├── build.rs              # tauri_build::build()
 ├── tauri.conf.json       # window contract, static frontendDist, strict CSP (M1b)
 ├── capabilities/main.json# least privilege: core:event listen/unlisten only (M1b)
 ├── run.sh                # GDK_BACKEND=x11 + cargo run
+├── .gitignore            # /target/ + /.runtime*/ (M2 socket dirs, never committed)
+├── tests/
+│   └── transport_receiver.rs # M2 integration: real UDS receiver + clients (+ Node producer)
+├── test-node/
+│   └── producer-check.cjs    # drives the UNCHANGED legacy adapter.cjs (read-only) in tests
 ├── src/
+│   ├── lib.rs            # lib target: bridge/core/desktop/geometry/workarea/protocol/transport
 │   ├── bridge.rs         # PURE: payload/sender/rate gate + typed errors (+tests, RED→GREEN)
 │   ├── desktop.rs        # PURE: transition + snapshot shape (+tests)
 │   ├── geometry.rs       # PURE: sizes, clamp, snap, grow anchor, click threshold (+tests)
 │   ├── core.rs           # press/drag/release/toggle handlers shared by commands + probe (+tests)
+│   ├── protocol.rs       # PURE M2: framing/validation/quota/dedupe/expiry (+tests, RED→GREEN)
+│   ├── transport.rs      # M2: UDS receiver (perms, owner, quotas, cleanup) (+policy tests)
 │   ├── workarea.rs       # X11 _NET_WORKAREA ∩ monitor, fallbacks
-│   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade evidence)
-│   └── main.rs           # wiring, commands, publish, lifecycle, plugins, setup placement
+│   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade + transport evidence)
+│   └── main.rs           # wiring, commands, publish, lifecycle, transport/signal, setup placement
 └── frontend/
     ├── index.html        # island markup
     ├── style.css         # reused island tokens
     ├── desktop.js        # window.desktop facade over invoke/events (M1b)
-    ├── island.js         # motion, pointer forwarding, facade motion override, evidence
+    ├── island.js         # motion, pointer forwarding, motion override, notices display (M2)
     └── clay-engine.js    # frozen R6, byte-for-byte, DO NOT EDIT
 ```

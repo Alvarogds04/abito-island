@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use tauri::{AppHandle, Manager};
 
-use crate::core::{screen_at, ReleaseOutcome, WindowIo};
-use crate::geometry;
+use abito_island::core::{screen_at, ReleaseOutcome, WindowIo};
+use abito_island::geometry;
 use crate::{apply_plan, main_window, refresh_work_area, store_requested, AppState, TauriIo};
 
 const NO_POINTER: &str =
@@ -49,7 +49,7 @@ fn wait_for_size(app: &AppHandle, want: (i32, i32), timeout: Duration) -> bool {
 fn readback(app: &AppHandle, step: &str) {
     let win = main_window(app);
     let state = app.state::<AppState>();
-    let wa = crate::workarea::current(&win);
+    let wa = abito_island::workarea::current(&win);
     let pos = win.outer_position().ok().map(|p| (p.x, p.y));
     let size = win.inner_size().ok().map(|s| (s.width as i32, s.height as i32));
     let scale = win.scale_factor().ok();
@@ -61,7 +61,7 @@ fn readback(app: &AppHandle, step: &str) {
     };
     // Raw X11 ground truth for our own window (read-only): disambiguates the
     // Tauri getters from what the WM actually applied.
-    let x11win = crate::workarea::x11_find_window_by_title("Abito");
+    let x11win = abito_island::workarea::x11_find_window_by_title("Abito");
     let x11json = x11win.as_ref().map(|w| {
         json!({
             "id": format!("0x{:x}", w.id),
@@ -293,7 +293,7 @@ pub fn run(app: AppHandle) {
         }
         sleep(Duration::from_millis(100));
     }
-    let mut expected_verbs: Vec<&str> = crate::bridge::ACTIONS.to_vec();
+    let mut expected_verbs: Vec<&str> = abito_island::bridge::ACTIONS.to_vec();
     expected_verbs.push("onState"); // the one facade-only subscription verb
     expected_verbs.sort_unstable();
     let expected_json = serde_json::json!(expected_verbs);
@@ -316,10 +316,158 @@ pub fn run(app: AppHandle) {
         "received": evidence.is_some(),
     }));
 
+    // 9. transport evidence (M2): the probe itself acts as the Pi producer
+    //    against OUR OWN receiver (default `.runtime` or the ABITO_SOCKET_DIR
+    //    override this process owns): hello → ready → ONE settled frame, then
+    //    the notice count read back through the real snapshot path. The
+    //    installed Preview's reserved socket roots are DETECTED read-only —
+    //    never connected, never unlinked.
+    transport_evidence(&app);
+
+    // Close the receiver before the hard exit: identity-checked unlink of the
+    // socket this process created (never a foreign path).
+    crate::close_transport(&app);
     // Release the single-instance D-Bus name before skipping RunEvent::Exit
     // via process::exit, so a later instance is never mistaken for a live one.
     tauri_plugin_single_instance::destroy(&app);
     std::process::exit(0); // exits only this app
+}
+
+/// M2 transport read-back: one real UnixStream round trip to the receiver
+/// this process bound, plus the snapshot state it produced. Prints one JSON
+/// line (`transport_evidence`).
+fn transport_evidence(app: &AppHandle) {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    let state = app.state::<AppState>();
+    let scans = abito_island::transport::preview_scan();
+    let endpoint = state
+        .transport
+        .lock()
+        .expect("transport lock")
+        .as_ref()
+        .map(|transport| transport.endpoint().to_path_buf());
+    let mut line = json!({
+        "step": "transport_evidence",
+        "pointer_input": NO_POINTER,
+        "socket_dir_env": std::env::var(abito_island::transport::SOCKET_DIR_ENV).ok(),
+        "endpoint": endpoint.as_ref().map(|path| path.display().to_string()),
+        "socket_dir_owned_by_this_process": true,
+        "project": state.project.clone(),
+        "unavailable": state.unavailable.load(std::sync::atomic::Ordering::SeqCst),
+        "preview_roots_detected_only": scans.iter().map(|scan| json!({
+            "root": scan.root,
+            "sockets_detected": scan.sockets,
+            "connected_or_removed": false,
+        })).collect::<Vec<_>>(),
+        "frames_sent": 0,
+        "ready_ok": false,
+        "notice_count": 0,
+        "connections_while_connected": serde_json::Value::Null,
+        "connections_after_disconnect": serde_json::Value::Null,
+        "error": serde_json::Value::Null,
+    });
+    let Some(endpoint) = endpoint else {
+        line["error"] = json!("receiver unavailable (see startup log)");
+        emit(&line);
+        return;
+    };
+    let attempt = (|| -> Result<(u32, bool, usize, Option<u32>, Option<u32>), String> {
+        let mut stream =
+            UnixStream::connect(&endpoint).map_err(|error| format!("connect: {error}"))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .map_err(|error| format!("read timeout: {error}"))?;
+        let project = state.project.clone();
+        let hello = json!({"v":1, "type":"hello", "project":project,
+                           "sessionId":"probe-session", "at": crate::now_ms() as u64});
+        let mut frames = 0u32;
+        stream
+            .write_all(format!("{hello}\n").as_bytes())
+            .map_err(|error| format!("write hello: {error}"))?;
+        frames += 1;
+        let mut buffer = [0u8; 128];
+        let ready_ok = match stream.read(&mut buffer) {
+            Ok(count) => &buffer[..count] == abito_island::protocol::READY_LINE,
+            Err(error) => return Err(format!("read ready: {error}")),
+        };
+        if !ready_ok {
+            return Ok((frames, false, 0, None, None));
+        }
+        let settled = json!({"v":1, "type":"settled", "project":project,
+                             "sessionId":"probe-session", "at": crate::now_ms() as u64,
+                             "id":"probe-1"});
+        stream
+            .write_all(format!("{settled}\n").as_bytes())
+            .map_err(|error| format!("write settled: {error}"))?;
+        frames += 1;
+        let while_connected = state.connections.load(std::sync::atomic::Ordering::SeqCst);
+        // Read the notice back through the REAL snapshot path (same function
+        // every desktop:state event and the `snapshot` verb use).
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut notice_count;
+        loop {
+            let snapshot = crate::build_snapshot(&state);
+            notice_count = snapshot
+                .get("notices")
+                .and_then(serde_json::Value::as_array)
+                .map(|notices| notices.len())
+                .unwrap_or(0);
+            if notice_count >= 1 || Instant::now() >= deadline {
+                break;
+            }
+            sleep(Duration::from_millis(50));
+        }
+        drop(stream);
+        // The disconnect is reported asynchronously by the receiver thread.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut after = state.connections.load(std::sync::atomic::Ordering::SeqCst);
+        while after != 0 && Instant::now() < deadline {
+            sleep(Duration::from_millis(50));
+            after = state.connections.load(std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok((frames, ready_ok, notice_count, Some(while_connected), Some(after)))
+    })();
+    match attempt {
+        Ok((frames, ready_ok, notice_count, while_connected, after)) => {
+            line["frames_sent"] = json!(frames);
+            line["ready_ok"] = json!(ready_ok);
+            line["notice_count"] = json!(notice_count);
+            line["connections_while_connected"] = json!(while_connected);
+            line["connections_after_disconnect"] = json!(after);
+        }
+        Err(error) => line["error"] = json!(error),
+    }
+    // The `dismiss` verb (wired with M2): run the same dispatch the command
+    // funnel uses after validation, and read the count back. Wired means the
+    // first notice disappears — a not-yet-wired rejection would show here.
+    if line
+        .get("notice_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        >= 1
+    {
+        let count_notices = |app: &AppHandle| {
+            crate::build_snapshot(app.state::<AppState>().inner())
+                .get("notices")
+                .and_then(serde_json::Value::as_array)
+                .map(|notices| notices.len())
+                .unwrap_or(0)
+        };
+        let before = count_notices(app);
+        let outcome = crate::dispatch_verb(app, &state, abito_island::bridge::Action::Dismiss);
+        let after = count_notices(app);
+        line["dismiss"] = json!({
+            "dispatched_ok": outcome.is_ok(),
+            "error": outcome.as_ref().err().map(|error| serde_json::to_value(error).unwrap_or_default()),
+            "notices_before": before,
+            "notices_after": after,
+        });
+    } else {
+        line["dismiss"] = json!({ "skipped": "no notice to dismiss" });
+    }
+    emit(&line);
 }
 
 /// Driven inside the webview by the probe (step 7). Every call goes through

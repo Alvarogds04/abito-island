@@ -105,8 +105,9 @@ impl Action {
 ///                     attached (unknown key/action, bad index, oversized
 ///                     payload, wrong window label, wrong origin).
 /// - `rate-exceeded` — Electron's `throw new Error('Rate exceeded')`.
-/// - `not-yet-wired` — verb whose backing system (M2 transport, M3 approval
-///                     bridge) does not exist yet; never faked as success.
+/// - `not-yet-wired` — verb whose backing system (M3 approval bridge; the
+///                     M2 notice transport exists and `dismiss` is wired)
+///                     does not exist yet; never faked as success.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BridgeError {
     pub code: String,
@@ -491,8 +492,10 @@ mod tests {
         let value = serde_json::to_value(BridgeError::denied("unknown key")).unwrap();
         assert_eq!(value["code"], "denied");
         assert_eq!(value["message"], "Denied: unknown key");
-        let wired = BridgeError::not_yet_wired("dismiss", "M2");
+        // `dismiss` is wired since M2; the typed not-yet-wired shape remains
+        // for the M3 verbs (allow/deny/choose).
+        let wired = BridgeError::not_yet_wired("allow", "M3");
         assert_eq!(wired.code, "not-yet-wired");
-        assert!(wired.message.contains("dismiss"));
+        assert!(wired.message.contains("allow"));
     }
 }

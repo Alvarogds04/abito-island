@@ -194,6 +194,9 @@
   };
   window.addEventListener('pointerdown', e => {
     if (e.button !== 0 || !e.isPrimary) return;
+    // Interactive elements own their clicks: a press on the dismiss button
+    // must not drag or toggle the island (Rust still owns every decision).
+    if (e.target && e.target.closest && e.target.closest('button')) return;
     pressed = true;
     lastPoint = { x: e.clientX, y: e.clientY };
     document.body.classList.add('is-dragging');
@@ -210,6 +213,54 @@
   window.addEventListener('pointercancel', e => release({ x: e.clientX, y: e.clientY }, true));
   // Focus loss mid-drag (e.g. alt-tab): reconcile without toggling.
   window.addEventListener('blur', () => release(lastPoint, true));
+
+  // ---- notices (M2): DISPLAY text only ---------------------------------
+  // Sileo-style local notice in the island, own code, total silence: the
+  // snapshot carries the text, this block renders it, and nothing here ever
+  // decides, approves or opens anything. allow/deny/choose remain
+  // not-yet-wired (M3); `dismiss` only clears what is shown.
+  const noticesEl = $('notices');
+  const connectionEl = $('connection');
+  const noticeTitle = $('notice-title');
+  const noticeDetail = $('notice-detail');
+  const noticeCount = $('notice-count');
+  const noticeDismiss = $('notice-dismiss');
+
+  function renderNotices(snapshot) {
+    if (!snapshot || !noticesEl) return;
+    const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
+    const first = notices[0] || null;
+    const unavailable = snapshot.unavailable === true;
+    const connections = typeof snapshot.connections === 'number' ? snapshot.connections : 0;
+    connectionEl.textContent = unavailable ? 'Avisos locales no disponibles.'
+      : connections > 0 ? 'Conexión local activa · identidad declarada como Pi.'
+      : 'Sin conexión con Pi.';
+    noticeTitle.textContent = first ? first.title
+      : unavailable ? 'Avisos locales no disponibles'
+      : connections > 0 ? 'Sin avisos nuevos' : 'Sin conexión con Pi.';
+    noticeDetail.textContent = first ? (first.detail || '')
+      : unavailable ? 'El canal local de avisos no pudo iniciarse. No se hizo ninguna conexión con Pi.'
+      : connections > 0
+        ? 'La conexión está activa. Esto no confirma que Pi esté trabajando ni que una tarea haya terminado.'
+        : 'Los avisos están disponibles solo si conectas una sesión de Pi de forma explícita.';
+    noticeCount.textContent = first
+      ? `${notices.length} aviso${notices.length === 1 ? '' : 's'} reciente${notices.length === 1 ? '' : 's'} · se descartan al minuto`
+      : '';
+    noticeDismiss.hidden = !first;
+    noticesEl.hidden = false;
+  }
+  if (window.desktop) {
+    try { window.desktop.onState(renderNotices); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(renderNotices, () => {}); } catch { /* facade optional */ }
+  }
+  if (noticeDismiss) {
+    noticeDismiss.addEventListener('click', event => {
+      event.preventDefault();
+      // Wired with M2: clears the first notice; a dismissal is never a
+      // decision and never reaches Pi as approval.
+      try { window.desktop && window.desktop.dismiss().then(renderNotices, () => {}); } catch { /* facade optional */ }
+    });
+  }
 
   // ---- boot ---------------------------------------------------------------
   render();

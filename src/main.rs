@@ -1,4 +1,5 @@
-//! Abito island — Electron to Rust+Tauri migration, unit M1b (host/bridge).
+//! Abito island — Electron to Rust+Tauri migration, units M1b (host/bridge)
+//! + M2 (Pi transport receiver).
 //!
 //! M1a skeleton (X11 geometry, drag/snap, read-back probe) plus the host
 //! layer ported from the Electron sources (`preload.cjs`, `core.cjs`,
@@ -12,25 +13,24 @@
 //!   clean quit through `RunEvent::Exit`,
 //! - navigation locked to the local app page; strict CSP and a
 //!   least-privilege capability live in `tauri.conf.json` /
-//!   `capabilities/main.json`.
+//!   `capabilities/main.json`,
+//! - M2: the Unix-domain-socket notice receiver (see [`transport`]) feeds
+//!   `notices`/`connections`/`unavailable` into the snapshot, wires the
+//!   `dismiss` verb, and is cleaned up on quit and on SIGINT/SIGTERM.
 
-mod bridge;
-mod core;
-mod desktop;
-mod geometry;
 mod probe;
-mod workarea;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use bridge::{Action, BridgeError};
-use core::{Core, ReleaseOutcome, TogglePlan, WindowIo};
-use desktop::IslandState;
-use geometry::{Edge, Rect};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use abito_island::bridge::{self, Action, BridgeError};
+use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
+use abito_island::desktop::{self, IslandState};
+use abito_island::geometry::{self, Edge, Rect};
+use abito_island::{protocol, transport, workarea};
 use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 const COLLAPSE_RESIZE_DELAY_MS: u64 = 400; // frontend shrink anim is 340ms
 
@@ -45,13 +45,145 @@ fn now_ms() -> u128 {
         .unwrap_or(0)
 }
 
-/// Clean quit (main.cjs `quit()`): idempotent, leaves the normal exit path so
-/// plugins release their resources (the single-instance D-Bus name included).
+/// Clean quit (main.cjs `quit()`): idempotent, cleans the transport first,
+/// then leaves the normal exit path so plugins release their resources (the
+/// single-instance D-Bus name included).
 fn quit_clean(app: &AppHandle) {
     if QUITTING.swap(true, Ordering::SeqCst) {
         return;
     }
+    close_transport(app);
     app.exit(0);
+}
+
+// --- M2 transport lifecycle (main.cjs createTransport / quit / signals) ----
+
+/// Set by the SIGINT/SIGTERM handlers (async-signal-safe: one atomic store,
+/// nothing else runs on the signal context).
+static SHUTDOWN_SIGNAL: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn handle_shutdown_signal(_signal: libc::c_int) {
+    SHUTDOWN_SIGNAL.store(true, Ordering::SeqCst);
+}
+
+/// main.cjs line 393: SIGINT/SIGTERM run the clean quit instead of the
+/// default terminate (which would leave a stale socket behind).
+fn install_shutdown_handlers() {
+    // SAFETY: the handler only performs an atomic store.
+    unsafe {
+        libc::signal(
+            libc::SIGINT,
+            handle_shutdown_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGTERM,
+            handle_shutdown_signal as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+/// Signal thread: socket cleanup first, then exit — same cleanup a normal
+/// quit performs, so Ctrl-C never leaves the endpoint or dir behind.
+fn spawn_shutdown_watcher(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(50));
+        if !SHUTDOWN_SIGNAL.load(Ordering::SeqCst) {
+            continue;
+        }
+        if QUITTING.swap(true, Ordering::SeqCst) {
+            // A normal quit is already running: give it a moment, then leave.
+            std::thread::sleep(Duration::from_millis(500));
+            std::process::exit(0);
+        }
+        close_transport(&app);
+        // Release the single-instance name before a hard exit (probe does the
+        // same), so a later launch is never mistaken for a live one.
+        tauri_plugin_single_instance::destroy(&app);
+        std::process::exit(0);
+    });
+}
+
+/// main.cjs quit() transport half: identity-checked socket cleanup with the
+/// exact legacy refusal line; nothing is ever unlinked that we did not bind.
+fn close_transport(app: &AppHandle) {
+    let transport = app
+        .state::<AppState>()
+        .transport
+        .lock()
+        .expect("transport lock")
+        .take();
+    let Some(transport) = transport else {
+        return;
+    };
+    if let Err(error) = transport.close() {
+        eprintln!("Private socket cleanup refused; inspect the local runtime directory.");
+        eprintln!("transport cleanup: {error}");
+    }
+}
+
+/// Legacy dev `project` (main.cjs): sha256 hex of the canonical worktree root
+/// (`projectId(fs.realpathSync(__dirname/../..))`). None when the checkout
+/// path cannot be canonicalized — the transport then refuses to start instead
+/// of pretending a project identity.
+fn project_id_for_this_checkout() -> Option<String> {
+    let manifest = option_env!("CARGO_MANIFEST_DIR")?;
+    let apps = std::fs::canonicalize(manifest).ok()?;
+    let root = apps.parent()?.parent()?;
+    Some(protocol::project_id(root.to_str()?))
+}
+
+/// main.cjs lines 487-497: start the optional local notice transport; on any
+/// failure `unavailable` becomes true, the legacy line is printed, and
+/// nothing is faked.
+fn start_transport(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let fail = |reason: String| {
+        state.unavailable.store(true, Ordering::SeqCst);
+        eprintln!("Optional local notice transport unavailable; no Pi connection was made.");
+        eprintln!("transport: {reason}");
+    };
+    if state.project.is_empty() {
+        fail("canonical worktree root unavailable".into());
+        return;
+    }
+    let runtime = match transport::resolve_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            fail(error.to_string());
+            return;
+        }
+    };
+    let notice_app = app.clone();
+    let connections_app = app.clone();
+    let options = transport::TransportOptions::new(runtime, state.project.clone())
+        .on_notice(move |message| {
+            if QUITTING.load(Ordering::SeqCst) {
+                return; // main.cjs: `if (!quitting)`
+            }
+            let state = notice_app.state::<AppState>();
+            state
+                .notices
+                .lock()
+                .expect("notices lock")
+                .accept(&message, now_ms() as u64);
+            publish(&notice_app, &state);
+        })
+        .on_connections(move |count| {
+            if QUITTING.load(Ordering::SeqCst) {
+                return;
+            }
+            let state = connections_app.state::<AppState>();
+            state.connections.store(count, Ordering::SeqCst);
+            publish(&connections_app, &state);
+        });
+    match transport::create_transport(options) {
+        Ok(transport) => {
+            // Local address only; no received payloads or labels are logged.
+            println!("ABITO_DESKTOP_SOCKET={}", transport.endpoint().display());
+            *state.transport.lock().expect("transport lock") = Some(transport);
+        }
+        Err(error) => fail(error.to_string()),
+    }
 }
 
 /// Last values we asked the window manager for, reported by the probe.
@@ -96,6 +228,18 @@ struct AppState {
     rate: Mutex<bridge::RateLimiter>,
     /// M1b: one-shot facade evidence reported by the webview for the probe.
     facade: Mutex<Option<Value>>,
+    /// M2: received notices (single store behind `snapshot().notices`).
+    notices: Mutex<protocol::NoticeStore>,
+    /// M2: handshaked Pi connections (transport `on_connections`).
+    connections: AtomicU32,
+    /// M2: `unavailable` flips true ONLY when the receiver could not start
+    /// (main.cjs `unavailable = true` in the transport catch).
+    unavailable: AtomicBool,
+    /// M2: the bound receiver — endpoint for the producer/probe, cleanup on
+    /// quit/signal through the identity-checked `Transport::close`.
+    transport: Mutex<Option<transport::Transport>>,
+    /// M2: sha256 of the canonical worktree root (legacy dev `project`).
+    project: String,
 }
 
 /// Adapter: the pure core handlers see the real window through this.
@@ -261,11 +405,26 @@ fn build_snapshot(state: &AppState) -> Value {
     let edge = state.core.lock().expect("core lock").edge;
     let anchor = workarea::x11_window_origin().is_some().then(|| edge_str(edge));
     let revision = state.revision.load(Ordering::SeqCst);
+    let connections = state.connections.load(Ordering::SeqCst);
+    let unavailable = state.unavailable.load(Ordering::SeqCst);
+    // M2: the pruned notice queue (expiry runs on every snapshot read, the
+    // same way main.cjs `notices.snapshot(Date.now())` does).
+    let notices: Vec<Value> = state
+        .notices
+        .lock()
+        .expect("notices lock")
+        .snapshot(now_ms() as u64)
+        .into_iter()
+        .map(|notice| serde_json::to_value(notice).unwrap_or(Value::Null))
+        .collect();
     serde_json::to_value(desktop::Snapshot::new(
         revision,
         phase,
         anchor,
         state.motion_override.load(Ordering::SeqCst),
+        connections,
+        unavailable,
+        notices,
     ))
     .unwrap_or(Value::Null)
 }
@@ -590,10 +749,31 @@ fn dispatch_verb(app: &AppHandle, state: &AppState, action: Action) -> Result<Va
             publish(app, state);
             Ok(build_snapshot(state))
         }
+        Action::Dismiss => {
+            // main.cjs lines 461-463: drop the FIRST notice (id + sessionId),
+            // then publish. A notice is display-only: dismissing never
+            // approves, decides or opens anything.
+            let now = now_ms() as u64;
+            let first = state
+                .notices
+                .lock()
+                .expect("notices lock")
+                .snapshot(now)
+                .into_iter()
+                .next();
+            if let Some(notice) = first {
+                state
+                    .notices
+                    .lock()
+                    .expect("notices lock")
+                    .dismiss(&notice.id, &notice.session_id, now);
+            }
+            publish(app, state);
+            Ok(build_snapshot(state))
+        }
         // --- verbs whose backing system lands in a later unit ---------------
-        Action::Dismiss | Action::Allow | Action::Deny | Action::Choose => {
+        Action::Allow | Action::Deny | Action::Choose => {
             let unit = match action {
-                Action::Dismiss => "M2 (the local UDS notice transport)",
                 Action::Allow | Action::Deny => "M3 (the approval HTTP bridge)",
                 Action::Choose => {
                     "M3 (a standing proposal request; while none stands Electron answers Denied)"
@@ -710,6 +890,7 @@ fn main() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
 
+    let project = project_id_for_this_checkout().unwrap_or_default();
     let state = AppState {
         core: Mutex::new(Core::new()),
         work_area: Mutex::new(Rect {
@@ -729,6 +910,11 @@ fn main() {
         last_published: Mutex::new(String::new()),
         rate: Mutex::new(bridge::RateLimiter::new()),
         facade: Mutex::new(None),
+        notices: Mutex::new(protocol::NoticeStore::new(project.clone())),
+        connections: AtomicU32::new(0),
+        unavailable: AtomicBool::new(false),
+        transport: Mutex::new(None),
+        project,
     };
 
     tauri::Builder::default()
@@ -790,6 +976,12 @@ fn main() {
                 .store(load_motion_override(&handle), Ordering::SeqCst);
             spawn_workarea_watcher(handle.clone());
             spawn_publish_ticker(handle.clone());
+            // M2: local notice transport + SIGINT/SIGTERM socket cleanup
+            // (main.cjs creates the transport after the window loads; here it
+            // starts before the probe so the probe can use its endpoint).
+            start_transport(&handle);
+            install_shutdown_handlers();
+            spawn_shutdown_watcher(handle.clone());
             if probe_requested() {
                 std::thread::spawn(move || probe::run(handle));
             }

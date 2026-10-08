@@ -18,6 +18,16 @@
     <div id="island">
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <div id="label"><strong>Compañero</strong><span>Vista general</span></div>
+      <!-- M2: Sileo-style notice text, display only (own code, silence).
+           A notice never decides or approves anything; allow/deny/choose
+           stay not-yet-wired until M3. -->
+      <div id="notices" hidden>
+        <span id="connection"></span>
+        <strong id="notice-title"></strong>
+        <span id="notice-detail"></span>
+        <span id="notice-count"></span>
+        <button id="notice-dismiss" type="button" hidden>Descartar aviso</button>
+      </div>
     </div>
   </main>
 </body>

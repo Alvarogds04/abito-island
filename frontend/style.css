@@ -70,8 +70,41 @@ body.is-dragging { cursor: grabbing; }
 #label strong { display: block; font-weight: 600; line-height: 1.2; }
 #label span { display: block; font-size: 12px; color: var(--island-muted); }
 
+/* M2: notice block — Sileo-style TEXT only, own code, silence. Visible only
+   in the overview (data-phase="expanded"), hidden during compact and while
+   the island is mid-animation; a visibility-hidden block never takes
+   pointer events, so an invisible dismiss button cannot be clicked. */
+#notices {
+  position: absolute;
+  left: 16px;
+  top: 12px;
+  width: 236px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--island-muted);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+#capsule[data-phase="expanded"] #notices { opacity: 1; visibility: visible; }
+#notices #connection { display: block; font-size: 11px; }
+#notices #notice-title { display: block; color: var(--island-ink); font-weight: 600; font-size: 13px; margin-top: 4px; }
+#notices #notice-detail { display: block; margin-top: 2px; }
+#notices #notice-count { display: block; margin-top: 4px; font-size: 11px; opacity: .8; }
+#notice-dismiss {
+  margin-top: 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent;
+  color: var(--island-ink);
+  font: 600 11.5px/1.2 var(--font-ui);
+  cursor: pointer;
+}
+#notice-dismiss:hover { background: rgba(255, 255, 255, .08); }
+
 @media (prefers-reduced-motion: reduce) {
   /* island.js already snaps geometry under reduced motion; this also kills any
      residual CSS transition so the OS preference really wins. */
-  #label { transition: none; }
+  #label, #notices { transition: none; }
 }

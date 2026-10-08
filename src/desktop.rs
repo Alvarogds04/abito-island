@@ -87,10 +87,11 @@ pub const BRIDGE_DISABLED: BridgeStatus = BridgeStatus {
 /// value that depends on a later unit is filled with the honest current
 /// truth, never faked:
 /// - `request`/`card`: null until the proposal lane lands (M3),
-/// - `notices`: empty and `unavailable: true` until the local notice
-///   transport exists (M2) — today there is no receiver, so local notices
-///   genuinely are unavailable,
-/// - `connections`: 0 until M2.
+/// - `notices`/`connections`/`unavailable`: fed by the M2 transport — the
+///   received notice queue, the count of handshaked Pi connections, and
+///   whether the local receiver could start at all,
+/// - `bridgeStatus`: unchanged from M1b — the HTTP approval bridge is M3 and
+///   nothing about the notice transport may claim its state.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -117,6 +118,9 @@ impl Snapshot {
         phase: IslandState,
         anchor: Option<&'static str>,
         motion_override: bool,
+        connections: u32,
+        unavailable: bool,
+        notices: Vec<Value>,
     ) -> Self {
         Snapshot {
             revision,
@@ -126,9 +130,9 @@ impl Snapshot {
             request: Value::Null,
             motion_override,
             branding: BRANDING,
-            connections: 0,
-            unavailable: true, // no notice transport until M2
-            notices: Vec::new(),
+            connections,
+            unavailable,
+            notices,
             bridge_status: BRIDGE_DISABLED,
             card: Value::Null,
         }
@@ -185,7 +189,7 @@ mod tests {
 
     #[test]
     fn snapshot_has_the_exact_electron_key_set() {
-        let value = serde_json::to_value(Snapshot::new(7, IslandState::Compact, Some("top"), false))
+        let value = serde_json::to_value(Snapshot::new(7, IslandState::Compact, Some("top"), false, 0, true, Vec::new()))
             .expect("snapshot serializes");
         let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
         keys.sort();
@@ -222,15 +226,60 @@ mod tests {
     #[test]
     fn snapshot_tracks_phase_and_anchor_evidence() {
         let expanded =
-            serde_json::to_value(Snapshot::new(3, IslandState::Expanded, None, true)).unwrap();
+            serde_json::to_value(Snapshot::new(3, IslandState::Expanded, None, true, 0, true, Vec::new()))
+                .unwrap();
         assert_eq!(expanded["state"], "expanded");
         assert_eq!(expanded["view"], "island");
         assert!(expanded["anchor"].is_null(), "no evidence -> null, never a guess");
         assert_eq!(expanded["motionOverride"], true);
-        let hidden = serde_json::to_value(Snapshot::new(4, IslandState::Hidden, Some("bottom"), false))
+        let hidden = serde_json::to_value(Snapshot::new(4, IslandState::Hidden, Some("bottom"), false, 0, true, Vec::new()))
             .unwrap();
         assert_eq!(hidden["state"], "hidden");
         assert_eq!(hidden["view"], "bubble");
         assert_eq!(hidden["anchor"], "bottom");
+    }
+
+    #[test]
+    fn snapshot_carries_received_notices_and_connection_state() {
+        // M2: the transport feeds these three fields; the shape stays closed.
+        let notice = serde_json::json!({
+            "id": "event-1", "sessionId": "session-1", "at": 1_700_000_000_000_i64,
+            "expiresAt": 1_700_000_060_000_i64, "title": "Pi terminó su turno",
+            "detail": "No confirma que la tarea haya salido bien ni que las pruebas hayan pasado.",
+            "emotion": "idle"
+        });
+        let value = serde_json::to_value(Snapshot::new(
+            9,
+            IslandState::Compact,
+            Some("top"),
+            false,
+            1,     // one handshaked Pi connection
+            false, // receiver running
+            vec![notice],
+        ))
+        .unwrap();
+        assert_eq!(value["connections"], 1);
+        assert_eq!(value["unavailable"], false);
+        assert_eq!(value["notices"].as_array().expect("array").len(), 1);
+        assert_eq!(value["notices"][0]["title"], "Pi terminó su turno");
+        assert_eq!(value["notices"][0]["emotion"], "idle");
+        // a notice changes nothing else: no request, no card, no state
+        // transition — it only displays.
+        assert!(value["request"].is_null());
+        assert!(value["card"].is_null());
+        assert_eq!(value["state"], "compact");
+        // receiver failure is reported honestly
+        let failed = serde_json::to_value(Snapshot::new(
+            10,
+            IslandState::Compact,
+            None,
+            false,
+            0,
+            true,
+            Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(failed["unavailable"], true);
+        assert_eq!(failed["notices"], serde_json::json!([]));
     }
 }
