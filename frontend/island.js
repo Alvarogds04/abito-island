@@ -217,8 +217,9 @@
   // ---- notices (M2): DISPLAY text only ---------------------------------
   // Sileo-style local notice in the island, own code, total silence: the
   // snapshot carries the text, this block renders it, and nothing here ever
-  // decides, approves or opens anything. allow/deny/choose remain
-  // not-yet-wired (M3); `dismiss` only clears what is shown.
+  // decides, approves or opens anything. `dismiss` only clears what is
+  // shown; the approval card above is the ONLY thing that can reach
+  // `/execute`, and only through a trusted human click.
   const noticesEl = $('notices');
   const connectionEl = $('connection');
   const noticeTitle = $('notice-title');
@@ -250,8 +251,8 @@
     noticesEl.hidden = false;
   }
   if (window.desktop) {
-    try { window.desktop.onState(renderNotices); } catch { /* facade optional */ }
-    try { window.desktop.snapshot().then(renderNotices, () => {}); } catch { /* facade optional */ }
+    try { window.desktop.onState(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
   }
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {
@@ -262,7 +263,95 @@
     });
   }
 
+  // ---- approval card (M3): DISPLAY only; the host is the boundary ------
+  // The card fields come from the snapshot; the renderer sends NOTHING but
+  // the human's click (`allow`/`deny`, zero arguments — never an id or a
+  // hash). Rust re-validates card id, expiry and payload_hash before any
+  // `/execute`. A notice never approves anything, an untrusted event never
+  // reaches the host, and controls are locked while a decision is in
+  // flight. Ported guards from the legacy renderer.js (validCard shape +
+  // calendar, cardFeedback reasons, isTrusted + flight lock).
+  let current = null;
+  let cardFlight = null;
+  let cardFailure = null;
+
+  function validCard(card) {
+    if (!card || Array.isArray(card) || Object.keys(card).sort().join(',') !== 'expires_at,operation,reason,state' ||
+      typeof card.operation !== 'string' || !card.operation.trim() || card.operation.length > 120 ||
+      /[\x00-\x1f\x7f-\x9f]/.test(card.operation) || typeof card.expires_at !== 'string') return false;
+    const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(card.expires_at);
+    if (!parts || parts[0] !== card.expires_at || !Number.isFinite(Date.parse(card.expires_at))) return false;
+    const [, y, m, d, h, min, s, oh, om] = parts;
+    const leap = +y % 4 === 0 && (+y % 100 !== 0 || +y % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return +m >= 1 && +m <= 12 && +d >= 1 && +d <= days[+m - 1] && +h <= 23 && +min <= 59 &&
+      +s <= 59 && (oh === undefined || (+oh <= 23 && +om <= 59)) &&
+      ((card.state === 'pending' && card.reason === null) ||
+        (card.state === 'inert' && typeof card.reason === 'string' && Boolean(card.reason.trim())));
+  }
+  function cardKey(card) { return JSON.stringify([card.operation, card.expires_at]); }
+  function cardFeedback(card) {
+    if (card.state === 'inert') return card.reason;
+    if (Date.now() >= Date.parse(card.expires_at)) return 'Propuesta vencida.';
+    if (cardFlight) return 'Decisión en curso.';
+    if (cardFailure && cardFailure.key === cardKey(card) && current.revision <= cardFailure.revision)
+      return 'No se pudo confirmar la decisión. Esperá una actualización.';
+    if (current.state !== 'expanded' || capsule.dataset.phase !== 'expanded') return 'Abrí la tarjeta para decidir.';
+    return null;
+  }
+  function renderCard() {
+    const card = current && current.card;
+    const valid = validCard(card);
+    const permission = $('permission');
+    if (!permission) return;
+    permission.hidden = !valid;
+    for (const id of ['operation', 'expiry', 'card-state', 'card-reason']) { const el = $(id); if (el) el.textContent = ''; }
+    const expiry = $('expiry');
+    if (expiry) expiry.removeAttribute('datetime');
+    const allow = $('allow'), deny = $('deny');
+    if (allow) allow.disabled = true;
+    if (deny) deny.disabled = true;
+    if (!valid) return;
+    $('operation').textContent = card.operation;
+    expiry.textContent = card.expires_at;
+    expiry.setAttribute('datetime', card.expires_at);
+    const reason = cardFeedback(card);
+    $('card-state').textContent = reason ? 'No disponible' : 'Pendiente';
+    $('card-reason').textContent = reason || '';
+    $('card-reason').hidden = !reason;
+    allow.disabled = deny.disabled = Boolean(reason || cardFlight);
+  }
+  async function decideCard(verb, event) {
+    renderCard(); // Recheck expiry/phase even without a newer snapshot.
+    const card = current && current.card;
+    if (event.isTrusted !== true || !validCard(card) || cardFeedback(card) || cardFlight) return;
+    const intent = { key: cardKey(card), revision: current.revision };
+    cardFlight = intent;
+    renderCard(); // Lock BOTH controls before invoking the host verb.
+    try {
+      const state = await window.desktop[verb](); // zero arguments; never a proposal id
+      cardFlight = null;
+      if (state && Number.isSafeInteger(state.revision) && state.revision > intent.revision &&
+        state.revision > current.revision) {
+        current = state;
+        renderCard();
+        renderNotices(state);
+      } else if (validCard(current.card) && cardKey(current.card) === intent.key && current.card.state === 'pending')
+        cardFailure = { key: intent.key, revision: current.revision };
+    } catch {
+      cardFlight = null;
+      if (validCard(current.card) && cardKey(current.card) === intent.key)
+        cardFailure = { key: intent.key, revision: current.revision };
+    }
+    renderCard(); // Never blindly revive controls or infer success.
+  }
+  const allowButton = $('allow');
+  const denyButton = $('deny');
+  if (allowButton) allowButton.addEventListener('click', event => { void decideCard('allow', event); });
+  if (denyButton) denyButton.addEventListener('click', event => { void decideCard('deny', event); });
+
   // ---- boot ---------------------------------------------------------------
   render();
+  renderCard();
   requestAnimationFrame(() => reportEvidence(0));
 })();

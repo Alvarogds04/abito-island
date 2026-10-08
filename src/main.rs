@@ -21,14 +21,14 @@
 mod probe;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use abito_island::bridge::{self, Action, BridgeError};
 use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
 use abito_island::desktop::{self, IslandState};
 use abito_island::geometry::{self, Edge, Rect};
-use abito_island::{protocol, transport, workarea};
+use abito_island::{approval, fakebridge, protocol, transport, workarea};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
@@ -52,6 +52,10 @@ fn quit_clean(app: &AppHandle) {
     if QUITTING.swap(true, Ordering::SeqCst) {
         return;
     }
+    // main.cjs quit(): abort every active approval request FIRST — an
+    // in-flight /execute fails at once instead of holding the lane open
+    // (the card stays inert through the quitting rule).
+    approval::abort_lane(&app.state::<AppState>().approval);
     close_transport(app);
     app.exit(0);
 }
@@ -95,6 +99,7 @@ fn spawn_shutdown_watcher(app: AppHandle) {
             std::thread::sleep(Duration::from_millis(500));
             std::process::exit(0);
         }
+        approval::abort_lane(&app.state::<AppState>().approval);
         close_transport(&app);
         // Release the single-instance name before a hard exit (probe does the
         // same), so a later launch is never mistaken for a live one.
@@ -240,6 +245,16 @@ struct AppState {
     transport: Mutex<Option<transport::Transport>>,
     /// M2: sha256 of the canonical worktree root (legacy dev `project`).
     project: String,
+    /// M3: the approval lane itself (Electron `main.cjs` bridge globals —
+    /// status, auth ladder, in-memory cookie, pinned card, busy gates).
+    approval: approval::Shared,
+    /// M3: publish/context/log callbacks, installed in `setup` before the
+    /// bridge thread starts (they need the app handle).
+    hooks: Mutex<Option<approval::SharedHooks>>,
+    /// M3 probe only: the in-process fake backend THIS process started for
+    /// its approval read-back. `None` in production and whenever
+    /// `ABITO_BRIDGE_BASE` was already set from outside.
+    probe_fake: Mutex<Option<Arc<fakebridge::FakeBackend>>>,
 }
 
 /// Adapter: the pure core handlers see the real window through this.
@@ -398,9 +413,22 @@ fn apply_plan(app: &AppHandle, state: &AppState, plan: TogglePlan) {
 
 // --- M1b snapshots/events ---------------------------------------------------
 
+/// Host facts the approval lane needs (`approval::HostCtx`). Lock order:
+/// this reads ONLY the phase guard and never the approval mutex, so it is
+/// safe to call from the lane while it holds its own lock.
+fn host_ctx(app: &AppHandle, state: &AppState) -> approval::HostCtx {
+    approval::HostCtx {
+        now_ms: now_ms() as i64,
+        expanded: *state.phase.lock().expect("phase lock") == IslandState::Expanded,
+        visible: main_window(app).is_visible().unwrap_or(true),
+        quitting: QUITTING.load(Ordering::SeqCst),
+    }
+}
+
 /// Current snapshot in Electron's exact shape. `anchor` is reported only
 /// when the X server really answers for our window — evidence, not intent.
-fn build_snapshot(state: &AppState) -> Value {
+/// `bridgeStatus`/`card`/`request` come verbatim from the approval lane.
+fn build_snapshot(app: &AppHandle, state: &AppState) -> Value {
     let phase = *state.phase.lock().expect("phase lock");
     let edge = state.core.lock().expect("core lock").edge;
     let anchor = workarea::x11_window_origin().is_some().then(|| edge_str(edge));
@@ -417,6 +445,8 @@ fn build_snapshot(state: &AppState) -> Value {
         .into_iter()
         .map(|notice| serde_json::to_value(notice).unwrap_or(Value::Null))
         .collect();
+    let ctx = host_ctx(app, state);
+    let (bridge_status, card, request) = approval::snapshot_fields(&state.approval, &ctx);
     serde_json::to_value(desktop::Snapshot::new(
         revision,
         phase,
@@ -425,15 +455,22 @@ fn build_snapshot(state: &AppState) -> Value {
         connections,
         unavailable,
         notices,
+        bridge_status,
+        card,
+        request,
     ))
     .unwrap_or(Value::Null)
 }
 
 /// Publish on `desktop:state` with main.cjs `publish()` semantics: identical
 /// content (revision aside) is never re-emitted and the revision advances
-/// only when something actually changed.
+/// only when something actually changed. Never publishes after quit
+/// (legacy `if (quitting …) return`).
 fn publish(app: &AppHandle, state: &AppState) {
-    let value = build_snapshot(state);
+    if QUITTING.load(Ordering::SeqCst) {
+        return;
+    }
+    let value = build_snapshot(app, state);
     let mut normalized = value;
     if let Value::Object(map) = &mut normalized {
         map.insert("revision".to_string(), Value::from(0));
@@ -514,6 +551,8 @@ fn restore(app: &AppHandle) {
     let state = app.state::<AppState>();
     // transition(state, 'restore') -> compact, always.
     *state.phase.lock().expect("phase lock") = IslandState::Compact;
+    // main.cjs restore() bumps the overlay epoch on EVERY restore (375).
+    approval::bump_epoch(&state.approval);
     let area = refresh_work_area(app, &state);
     let win = main_window(app);
     let io = TauriIo(&win);
@@ -675,43 +714,90 @@ fn drag_release(
 /// `ipcMain.handle('desktop:action')`. The gate order mirrors main.cjs
 /// exactly: sender + payload validation FIRST, then the rate gate — an
 /// invalid call never consumes rate budget.
+///
+/// Async since M3: `allow`/`deny` perform blocking HTTP with the legacy 5 s
+/// deadline (Electron's `decide` was async there too), so those run on the
+/// blocking pool — never on the webkit main thread — and answer with the
+/// fresh snapshot only after the decision settled.
 #[tauri::command]
-fn desktop_action(
+async fn desktop_action(
     app: AppHandle,
     webview: tauri::Webview,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     payload: Value,
 ) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
-    let (action, _index) = bridge::validate_payload(&payload)?;
+    let (action, index) = bridge::validate_payload(&payload)?;
     state.rate.lock().expect("rate lock").check(now_ms())?;
-    dispatch_verb(&app, &state, action)
+    match action {
+        Action::Allow | Action::Deny => {
+            let approval = Arc::clone(&state.approval);
+            let hooks = state_hooks(&state)?;
+            let decision = if action == Action::Allow {
+                approval::Decision::Allow
+            } else {
+                approval::Decision::Deny
+            };
+            let handle = app.clone();
+            Ok(tauri::async_runtime::spawn_blocking(move || {
+                approval::decide(&approval, decision, &hooks);
+                let state = handle.state::<AppState>();
+                build_snapshot(&handle, &state)
+            })
+            .await
+            .map_err(|_| BridgeError::denied("decision aborted"))?)
+        }
+        _ => dispatch_verb(&app, &state, action, index),
+    }
 }
 
-/// Execute one validated verb with Electron main.cjs semantics. Verbs whose
-/// backing system is a later unit reject with a typed `not-yet-wired` error
-/// instead of pretending to succeed.
-fn dispatch_verb(app: &AppHandle, state: &AppState, action: Action) -> Result<Value, BridgeError> {
+/// The publish/context/log callbacks installed in `setup`.
+fn state_hooks(state: &AppState) -> Result<approval::SharedHooks, BridgeError> {
+    state
+        .hooks
+        .lock()
+        .expect("hooks lock")
+        .clone()
+        .ok_or_else(|| BridgeError::denied("approval lane not started"))
+}
+
+/// Execute one validated verb with Electron main.cjs semantics. `allow`/
+/// `deny`/`choose` are wired since M3: only an explicit human choice reaches
+/// the lane, which re-validates card id, expiry and `payload_hash` itself
+/// before any `/execute` (a notice can never approve anything).
+fn dispatch_verb(
+    app: &AppHandle,
+    state: &AppState,
+    action: Action,
+    index: Option<i32>,
+) -> Result<Value, BridgeError> {
     match action {
-        Action::Snapshot => Ok(build_snapshot(state)),
+        Action::Snapshot => Ok(build_snapshot(app, state)),
         Action::Expand | Action::Close => {
             let verb = if action == Action::Expand {
                 "expand"
             } else {
                 "close"
             };
-            let changed = {
+            let next = {
                 let mut phase = state.phase.lock().expect("phase lock");
                 let next = desktop::transition(*phase, verb);
                 if next == *phase {
-                    false // no-op, exactly like Electron's transition()
+                    None // no-op, exactly like Electron's transition()
                 } else {
                     *phase = next;
-                    true
+                    Some(next)
                 }
             };
-            if changed {
+            if let Some(next) = next {
+                // main.cjs 466-467, synchronous in one step: overlayEpoch++
+                // and, on expand, the pinned queue is promoted (a closed
+                // overlay never keeps the previous decision authority).
+                approval::bump_epoch(&state.approval);
+                if next == IslandState::Expanded {
+                    approval::promote_selection(&state.approval);
+                }
                 let area = refresh_work_area(app, state);
                 let win = main_window(app);
                 let io = TauriIo(&win);
@@ -722,7 +808,7 @@ fn dispatch_verb(app: &AppHandle, state: &AppState, action: Action) -> Result<Va
                 apply_plan(app, state, plan);
                 publish(app, state);
             }
-            Ok(build_snapshot(state))
+            Ok(build_snapshot(app, state))
         }
         Action::Hide => {
             let hidden = {
@@ -733,10 +819,11 @@ fn dispatch_verb(app: &AppHandle, state: &AppState, action: Action) -> Result<Va
                 changed
             };
             if hidden {
+                approval::bump_epoch(&state.approval); // main.cjs 467
                 let _ = main_window(app).hide();
                 publish(app, state);
             }
-            Ok(build_snapshot(state))
+            Ok(build_snapshot(app, state))
         }
         Action::Quit => {
             quit_clean(app);
@@ -747,7 +834,7 @@ fn dispatch_verb(app: &AppHandle, state: &AppState, action: Action) -> Result<Va
             state.motion_override.store(value, Ordering::SeqCst);
             persist_motion_override(app, value);
             publish(app, state);
-            Ok(build_snapshot(state))
+            Ok(build_snapshot(app, state))
         }
         Action::Dismiss => {
             // main.cjs lines 461-463: drop the FIRST notice (id + sessionId),
@@ -769,18 +856,30 @@ fn dispatch_verb(app: &AppHandle, state: &AppState, action: Action) -> Result<Va
                     .dismiss(&notice.id, &notice.session_id, now);
             }
             publish(app, state);
-            Ok(build_snapshot(state))
+            Ok(build_snapshot(app, state))
         }
-        // --- verbs whose backing system lands in a later unit ---------------
-        Action::Allow | Action::Deny | Action::Choose => {
-            let unit = match action {
-                Action::Allow | Action::Deny => "M3 (the approval HTTP bridge)",
-                Action::Choose => {
-                    "M3 (a standing proposal request; while none stands Electron answers Denied)"
-                }
-                _ => unreachable!("guarded by the match arm"),
+        Action::Allow | Action::Deny => {
+            // Direct host path (the probe drives this same funnel); the
+            // webview path arrives through the async command above.
+            let hooks = state_hooks(state)?;
+            let decision = if action == Action::Allow {
+                approval::Decision::Allow
+            } else {
+                approval::Decision::Deny
             };
-            Err(BridgeError::not_yet_wired(action.name(), unit))
+            approval::decide(&state.approval, decision, &hooks);
+            Ok(build_snapshot(app, state))
+        }
+        Action::Choose => {
+            // Read-and-consume in ONE synchronous step (main.cjs 444); with
+            // no producer of requests the lane has none standing, so every
+            // choice is `Denied` — exactly like Electron today.
+            let index =
+                index.ok_or_else(|| BridgeError::denied("choose requires an integer index"))?;
+            approval::choose(&state.approval, index)
+                .map_err(|()| BridgeError::denied("no standing request"))?;
+            publish(app, state); // legacy publishes only on success
+            Ok(build_snapshot(app, state))
         }
     }
 }
@@ -881,6 +980,32 @@ fn probe_requested() -> bool {
     env || std::env::args().any(|a| a == "--probe")
 }
 
+/// The three callbacks the approval lane needs from the host (`main.cjs`
+/// publish / Date / console equivalents). `ctx` must NEVER take the
+/// approval lock — the lane calls it while holding its own (it only reads
+/// the phase guard and window state).
+fn build_hooks(app: AppHandle) -> approval::SharedHooks {
+    Arc::new(approval::Hooks {
+        ctx: {
+            let app = app.clone();
+            Box::new(move || {
+                let state = app.state::<AppState>();
+                host_ctx(&app, &state)
+            })
+        },
+        changed: {
+            let app = app.clone();
+            Box::new(move || {
+                let state = app.state::<AppState>();
+                publish(&app, &state);
+            })
+        },
+        // legacy `mode(value)`: the auth diagnostics line is the mode name
+        // and nothing else — never a value, header or credential.
+        log: Box::new(|name| println!("{name}")),
+    })
+}
+
 fn main() {
     // Heavy constraint (HANDOFF): GTK/Tao under Wayland cannot position a window
     // absolutely nor keep it always-on-top, so the island must run on
@@ -891,6 +1016,47 @@ fn main() {
     }
 
     let project = project_id_for_this_checkout().unwrap_or_default();
+    // M3: approval lane configuration. The credential source follows legacy
+    // exactly — `<stateRoot>/bridge.json`, read ONCE per process with the
+    // descriptor-safe port of `readBridgeLogin`; absent/invalid means
+    // `disabled` and zero traffic. In probe mode the lane is pointed at an
+    // in-process FAKE backend through the ABITO_BRIDGE_BASE override before
+    // it is constructed: the probe never talks to a real backend.
+    let login = transport::resolve_runtime()
+        .ok()
+        .and_then(|root| approval::read_bridge_login(&root));
+    let mut probe_fake = None;
+    // In probe mode the lane gets the SAME credential plumbing as
+    // production: the `bridge.json` login when it exists, otherwise a
+    // clearly synthetic probe-only login (the fake accepts exactly what the
+    // lane sends and never logs it). The lane is then constructed with that
+    // effective login, so the approval read-back exercises the real start
+    // path — mint, poll, healthy — against the fake.
+    let login = if probe_requested() && std::env::var(approval::BASE_ENV).is_err() {
+        let effective = login
+            .unwrap_or_else(|| "probe@local.test".to_string());
+        let fake = fakebridge::FakeBackend::start(fakebridge::FakeConfig {
+            login: effective.clone(),
+            proposals: vec![serde_json::json!({
+                "id": format!("proposal_{}", "a".repeat(32)),
+                "payload_hash": "b".repeat(64),
+                "operation": "Prueba M3: propuesta servida por el backend falso",
+                "status": "pending",
+                "expires_at": "2999-12-31T23:59:59Z",
+                "principal": "probe",
+                "payload": { "probe": true },
+            })],
+            ..Default::default()
+        });
+        // The documented test/probe override: the approval client reads this
+        // env at construction, so this run mints and polls against the fake.
+        std::env::set_var(approval::BASE_ENV, fake.origin());
+        probe_fake = Some(fake);
+        Some(effective)
+    } else {
+        login
+    };
+    let approval_lane = approval::Approval::from_environment(login);
     let state = AppState {
         core: Mutex::new(Core::new()),
         work_area: Mutex::new(Rect {
@@ -915,6 +1081,9 @@ fn main() {
         unavailable: AtomicBool::new(false),
         transport: Mutex::new(None),
         project,
+        approval: Arc::new(Mutex::new(approval_lane)),
+        hooks: Mutex::new(None),
+        probe_fake: Mutex::new(probe_fake),
     };
 
     tauri::Builder::default()
@@ -982,6 +1151,13 @@ fn main() {
             start_transport(&handle);
             install_shutdown_handlers();
             spawn_shutdown_watcher(handle.clone());
+            // M3: approval lane — install the publish/context/log hooks,
+            // then start the bridge (mode 'jar', mint, first poll, 10 s
+            // cadence) exactly where main.cjs `startBridge` runs: after the
+            // transport, before the first publish tick.
+            let hooks = build_hooks(handle.clone());
+            *state.hooks.lock().expect("hooks lock") = Some(hooks.clone());
+            approval::spawn_bridge(Arc::clone(&state.approval), hooks);
             if probe_requested() {
                 std::thread::spawn(move || probe::run(handle));
             }

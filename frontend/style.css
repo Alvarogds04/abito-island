@@ -103,8 +103,47 @@ body.is-dragging { cursor: grabbing; }
 }
 #notice-dismiss:hover { background: rgba(255, 255, 255, .08); }
 
+/* M3: approval card — the other half of the overview, display-only like the
+   notices block: hidden (and pointer-dead) until the island is expanded and
+   the card is valid, so an invisible control can never be clicked. */
+#permission {
+  position: absolute;
+  right: 16px;
+  top: 12px;
+  width: 320px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--island-muted);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+#capsule[data-phase="expanded"] #permission { opacity: 1; visibility: visible; }
+#permission #operation {
+  margin: 0;
+  color: var(--island-ink);
+  font-weight: 600;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+#permission .muted { display: block; margin-top: 2px; font-size: 11px; }
+#permission #card-reason { display: block; margin-top: 4px; }
+#card-actions { display: flex; gap: 8px; margin-top: 8px; }
+#allow, #deny {
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent;
+  color: var(--island-ink);
+  font: 600 11.5px/1.2 var(--font-ui);
+  cursor: pointer;
+}
+#allow { border-color: var(--go); color: var(--go); }
+#allow:hover:not(:disabled), #deny:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
+#allow:disabled, #deny:disabled { opacity: .45; cursor: default; }
+
 @media (prefers-reduced-motion: reduce) {
   /* island.js already snaps geometry under reduced motion; this also kills any
      residual CSS transition so the OS preference really wins. */
-  #label, #notices { transition: none; }
+  #label, #notices, #permission { transition: none; }
 }

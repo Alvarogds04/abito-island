@@ -6,10 +6,12 @@
    Every call goes through the single `desktop_action` command, which
    re-validates sender, payload shape and rate on the Rust side.
    Rejections are typed objects { code, message }:
-   - `denied`        — Electron's `Denied` (with the reason attached),
-   - `rate-exceeded` — Electron's `Rate exceeded`,
-   - `not-yet-wired` — verb whose M3 backing system does not exist yet
-     (`dismiss` became wired with the M2 notice transport). */
+   - `denied`        — Electron's `Denied` (with the reason attached), also
+     the answer of `choose` while no request stands (M3),
+   - `rate-exceeded` — Electron's `Rate exceeded`.
+   Since M3, `allow`/`deny`/`choose` are wired: the WebView sends only the
+   human's choice and Rust re-validates card id, expiry and payload_hash
+   before any `/execute`; the cookie never exists on this side of the IPC. */
 (() => {
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
     || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke)

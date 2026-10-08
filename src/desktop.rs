@@ -69,29 +69,28 @@ pub const BRANDING: Branding = Branding {
     assistant: "Abito",
 };
 
-/// `main.cjs bridgeStatus`: no bridge login configuration exists before M3,
-/// so the honest projection is the same "disabled" state Electron reports
-/// when `bridge.json` is absent, with Electron's own reason string.
+/// `main.cjs bridgeStatus` (83): the lane's health projection, fed by the
+/// M3 approval state (`starting`/`healthy`/`unhealthy`/`stopped`, or
+/// `disabled` when no bridge configuration exists).
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BridgeStatus {
     pub state: &'static str,
     pub reason: &'static str,
 }
 
+/// The honest projection with no approval configuration at all (legacy
+/// `bridgeLogin` absent): `disabled`, and Electron's own reason string.
 pub const BRIDGE_DISABLED: BridgeStatus = BridgeStatus {
     state: "disabled",
     reason: "Puente deshabilitado: configuración no válida.",
 };
 
-/// The exact snapshot shape `main.cjs snapshot()` returns (13 keys). Every
-/// value that depends on a later unit is filled with the honest current
-/// truth, never faked:
-/// - `request`/`card`: null until the proposal lane lands (M3),
-/// - `notices`/`connections`/`unavailable`: fed by the M2 transport — the
-///   received notice queue, the count of handshaked Pi connections, and
-///   whether the local receiver could start at all,
-/// - `bridgeStatus`: unchanged from M1b — the HTTP approval bridge is M3 and
-///   nothing about the notice transport may claim its state.
+/// The exact snapshot shape `main.cjs snapshot()` returns (13 keys):
+/// - `notices`/`connections`/`unavailable`: fed by the M2 transport,
+/// - `bridgeStatus`/`card`/`request`: fed by the M3 approval lane (unit M1b
+///   projected the honest `disabled`/`null` because the lane did not exist
+///   yet; now every value comes from the live lane, never from here),
+/// - the rest is the M1b state machine, unchanged.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -113,6 +112,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         revision: u64,
         phase: IslandState,
@@ -121,20 +121,23 @@ impl Snapshot {
         connections: u32,
         unavailable: bool,
         notices: Vec<Value>,
+        bridge_status: BridgeStatus,
+        card: Value,
+        request: Value,
     ) -> Self {
         Snapshot {
             revision,
             state: phase.as_str(),
             view: phase.view(),
             anchor,
-            request: Value::Null,
+            request,
             motion_override,
             branding: BRANDING,
             connections,
             unavailable,
             notices,
-            bridge_status: BRIDGE_DISABLED,
-            card: Value::Null,
+            bridge_status,
+            card,
         }
     }
 }
@@ -189,7 +192,7 @@ mod tests {
 
     #[test]
     fn snapshot_has_the_exact_electron_key_set() {
-        let value = serde_json::to_value(Snapshot::new(7, IslandState::Compact, Some("top"), false, 0, true, Vec::new()))
+        let value = serde_json::to_value(Snapshot::new(7, IslandState::Compact, Some("top"), false, 0, true, Vec::new(), BRIDGE_DISABLED, Value::Null, Value::Null))
             .expect("snapshot serializes");
         let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
         keys.sort();
@@ -226,13 +229,13 @@ mod tests {
     #[test]
     fn snapshot_tracks_phase_and_anchor_evidence() {
         let expanded =
-            serde_json::to_value(Snapshot::new(3, IslandState::Expanded, None, true, 0, true, Vec::new()))
+            serde_json::to_value(Snapshot::new(3, IslandState::Expanded, None, true, 0, true, Vec::new(), BRIDGE_DISABLED, Value::Null, Value::Null))
                 .unwrap();
         assert_eq!(expanded["state"], "expanded");
         assert_eq!(expanded["view"], "island");
         assert!(expanded["anchor"].is_null(), "no evidence -> null, never a guess");
         assert_eq!(expanded["motionOverride"], true);
-        let hidden = serde_json::to_value(Snapshot::new(4, IslandState::Hidden, Some("bottom"), false, 0, true, Vec::new()))
+        let hidden = serde_json::to_value(Snapshot::new(4, IslandState::Hidden, Some("bottom"), false, 0, true, Vec::new(), BRIDGE_DISABLED, Value::Null, Value::Null))
             .unwrap();
         assert_eq!(hidden["state"], "hidden");
         assert_eq!(hidden["view"], "bubble");
@@ -256,6 +259,9 @@ mod tests {
             1,     // one handshaked Pi connection
             false, // receiver running
             vec![notice],
+            BRIDGE_DISABLED,
+            Value::Null,
+            Value::Null,
         ))
         .unwrap();
         assert_eq!(value["connections"], 1);
@@ -277,9 +283,46 @@ mod tests {
             0,
             true,
             Vec::new(),
+            BRIDGE_DISABLED,
+            Value::Null,
+            Value::Null,
         ))
         .unwrap();
         assert_eq!(failed["unavailable"], true);
         assert_eq!(failed["notices"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn snapshot_carries_the_live_approval_lane_verbatim() {
+        // M3: bridgeStatus/card/request come from the lane, never from here.
+        let bridge_status = BridgeStatus {
+            state: "healthy",
+            reason: "Puente disponible.",
+        };
+        let card = serde_json::json!({
+            "operation": "Review document",
+            "expires_at": "2999-12-31T23:59:59Z",
+            "state": "pending",
+            "reason": null,
+        });
+        let value = serde_json::to_value(Snapshot::new(
+            11,
+            IslandState::Expanded,
+            Some("top"),
+            false,
+            0,
+            false,
+            Vec::new(),
+            bridge_status,
+            card,
+            Value::Null,
+        ))
+        .unwrap();
+        assert_eq!(value["bridgeStatus"]["state"], "healthy");
+        assert_eq!(value["bridgeStatus"]["reason"], "Puente disponible.");
+        assert_eq!(value["card"]["state"], "pending");
+        assert!(value["request"].is_null());
+        // and the M1b shape is still exactly the legacy key set (12 keys)
+        assert_eq!(value.as_object().expect("object").len(), 12);
     }
 }

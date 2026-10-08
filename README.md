@@ -1,4 +1,4 @@
-# Abito island — Electron → Rust + Tauri, units M1b (host/bridge) + M2 (Pi transport)
+# Abito island — Electron → Rust + Tauri, units M1b (host/bridge) + M2 (Pi transport) + M3 (approval lane)
 
 Skeleton of the Abito desktop island as a normal Cargo project with Tauri v2
 (`tauri-build` in `build.rs`, static `frontendDist`, **no npm, no
@@ -15,6 +15,14 @@ receiver ported from `transport.cjs`/`core.cjs` with the SAME wire format and
 limits, tested first (RED → GREEN) and integration-tested over real sockets,
 the now-wired `dismiss` verb, and display-only Sileo-style notice text in the
 island. The Node producer (`pi-extension.ts`/`adapter.cjs`) is unchanged.
+
+Unit **M3** ports the approval lane — Electron's `main.cjs` HTTP authority —
+to Rust: the `bridge.json` credential read, the in-memory session cookie, the
+5 s-deadline HTTP client with manual redirects and abort-on-quit, the
+"only known rejected requests may be retried, never a network failure"
+auth ladder, polling (health + proposals), the pinned proposal card, and the
+wired `allow`/`deny`/`choose` verbs. The WebView only ever sends the human's
+click; Rust re-validates card id, expiry and `payload_hash` before `/execute`.
 
 ## Run
 
@@ -40,7 +48,7 @@ DISPLAY=:0 XAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.UV9RW3 \
 
 The probe runs the scripted sequence **start → simulated drag near the bottom →
 release/snap → expand → collapse → drag to the top → facade evidence →
-frontend evidence → transport evidence** and,
+frontend evidence → transport evidence → approval evidence** and,
 after each step, waits for the window manager to apply, then prints one JSON
 line per step with:
 
@@ -145,8 +153,8 @@ IPC path (observed 2026-10-09, this stack):
 | `hide()` | `desktop_action {action:"hide"}` | wired — window hide, state `hidden` |
 | `quit()` | `desktop_action {action:"quit"}` | wired — clean exit through `RunEvent::Exit` |
 | `dismiss()` | `desktop_action {action:"dismiss"}` | wired (M2) — drops the FIRST notice (id + sessionId, `main.cjs:461` semantics), publishes and returns the fresh snapshot; a dismissal never approves or decides anything |
-| `allow()` / `deny()` | `desktop_action {action:"allow"\|"deny"}` | **not-yet-wired** — typed error (M3: approval HTTP bridge) |
-| `choose(index)` | `desktop_action {action:"choose",index}` | **not-yet-wired** — typed error (M3: standing proposal request; while none stands Electron answers `Denied`) |
+| `allow()` / `deny()` | `desktop_action {action:"allow"\|"deny"}` | **wired (M3)** — the explicit human choice; the lane re-validates card id/expiry/`payload_hash` host-side, then `POST /api/proposals/{id}/execute` (body `{"payload_hash":…}`) or `/reject`. Returns the fresh snapshot; the outcome lives in the sticky card reason (`Decisión enviada.` / `No se pudo confirmar la decisión.`) |
+| `choose(index)` | `desktop_action {action:"choose",index}` | **wired (M3)** — read-and-consume of the standing request in one synchronous step; no producer of requests exists yet (same as legacy), so every choice answers the typed `denied` (`no standing request`) and nothing is consumed |
 | `animateAnyway()` / `respectSystemMotion()` | `desktop_action …` | wired — one machine-wide `motionOverride`, persisted `motion.json` mode 0600, fail-closed read; the island animates only on an explicit `animateAnyway` snapshot |
 | `onState(cb)` | `event listen "desktop:state"` | wired — Rust `publish()` with main.cjs dedupe + revision semantics |
 
@@ -162,7 +170,8 @@ IPC path (observed 2026-10-09, this stack):
 - **rate**: 30 calls per fixed 1 s window, rejected attempts keep consuming
   budget, validation runs BEFORE the gate (main.cjs order),
 - rejections are typed `{code, message}` objects: `denied` (Electron
-  `Denied`), `rate-exceeded` (`Rate exceeded`), `not-yet-wired`.
+  `Denied`), `rate-exceeded` (`Rate exceeded`). No verb is `not-yet-wired`
+  since M3 (that code remains in the error type, unused).
 
 ### Lifecycle, capabilities, CSP
 
@@ -199,10 +208,10 @@ IPC path (observed 2026-10-09, this stack):
   counterpart); no new-window handler is installed, so `window.open` /
   `target=_blank` create nothing.
 
-Not in this unit (later sessions): approval HTTP with live
-`request`/`card`/`bridgeStatus` (M3), packaging and replacement of the
+Not in this unit (later sessions): packaging and replacement of the
 installed Preview (M4, needs separate human authorisation). The UDS
-transport receiver is no longer "later" — it landed in M2, below.
+transport receiver is no longer "later" — it landed in M2, below; the
+approval HTTP lane landed in M3, below.
 
 ## What M2 proves (and what it does not)
 
@@ -292,7 +301,8 @@ separate too). The island renders them in the overview as Sileo-style text
 detail (never "the task went well", never "tests passed"), the count line,
 and a `Descartar aviso` button wired to `dismiss`. **A notice never decides,
 approves, focuses, expands or restores anything**; a snapshot never opens the
-island by itself. `allow`/`deny`/`choose` remain typed `not-yet-wired` (M3).
+island by itself. Since M3, `allow`/`deny`/`choose` are wired through the
+approval lane — a notice still never decides anything.
 
 ### Unchanged Node producer against the Rust receiver (observed)
 
@@ -306,6 +316,112 @@ becomes exactly one notice. `pi-extension.ts` and `adapter.cjs` are
 unmodified. (The adapter's own opt-in loader would only accept the legacy
 `.runtime` or the Preview's root; the harness passes the runtime explicitly,
 which is what a Pi session wiring would do through `ABITO_DESKTOP_SOCKET`.)
+
+## What M3 proves (and what it does not)
+
+The approval lane is a behaviour-equivalent port of the Electron host's HTTP
+authority. Legacy values come from the committed read-only Electron source
+(`worktrees/legacy-electron/apps/desktop`) and the read-only backend contract
+(`src/sb_bridge/api.py`, `webapp.py`); Rust values from this crate. The pure
+modules were written test-first (RED → GREEN) and the lane is
+integration-tested against an **in-process fake backend** (`fakebridge.rs`,
+`127.0.0.1:0`, std-only) — no real backend and no provider is ever contacted
+by the tests or the probe.
+
+### Parity table (M3)
+
+| contract | legacy value (file:line) | Rust value (file) |
+|---|---|---|
+| bridge origin | `http://127.0.0.1:11003` — `security.cjs:13` | `requests.rs` `BRIDGE_ORIGIN` (env override below) |
+| route allowlist (`GET /`, `/api/health`, `/api/proposals(?status=pending)`, `POST …/proposal_[0-9a-f]{32}/execute\|reject`) | `bridgeAllows` — `security.cjs:14-23` | `requests.rs bridge_allows` |
+| credential file `<stateRoot>/bridge.json`, descriptor-safe (O_NOFOLLOW, our uid, not group/world-writable, 1..=2048 B, dev/ino/size/mode/mtime/ctime re-read) | `readBridgeLogin` — `main.cjs:87-108` | `approval.rs read_bridge_login` |
+| login schema `{v:1, login}` + `^[a-z0-9][a-z0-9@._+\-]*$`, no whitespace/controls | `main.cjs:100-106` | `requests.rs validate_login_bytes` |
+| auth modes `jar`/`explicit`/`none`, printed as the bare mode name | `mode()` — `main.cjs:110` | `retry.rs AuthLadder::set_mode` + the `log` hook |
+| `bridgeStatus` transitions (`starting`/`healthy`/`unhealthy`/`stopped`/`disabled`) + `REASON` texts | `main.cjs:77-84,115` | `card.rs Reason`, `approval.rs set_status`/`stop_auth` |
+| session cookie: value charset `\x21\x23-\x2b…` ≤4096, `Path=/`, domain `127.0.0.1`, expiry, **memory only** | `sessionCookie` — `main.cjs:125-136` | `approval.rs cookie_value_valid`/`parse_set_cookie` |
+| one request: exact headers (`tailscale-user-login`, `X-SB-Request: 1` on POST, `Content-Type` only with a body, `Cookie` only as jar/explicit dictate), `redirect: manual`, 5 s absolute deadline covering the body, 401/3xx → stop auth, body discard, 1 MiB strict-UTF-8+strict-JSON cap | `request` — `main.cjs:138-192` | `approval.rs request` + `http.rs send` (`REQUEST_DEADLINE_MS=5000`, `MAX_BODY_BYTES=1 MiB`) |
+| abort-on-quit of every active request | `activeRequests`/`quit` — `main.cjs:56,380` | `http.rs ActiveRequests::abort_all`, `approval.rs abort_lane` (wired into `quit_clean` + SIGINT/SIGTERM) |
+| `mint`: ≤2 per process, `GET /`, jar must hold a valid cookie after, every failure stops auth | `mint` — `main.cjs:194-202` | `approval.rs mint` + `retry.rs try_mint` (`MAX_MINTS=2`) |
+| the ladder: "only known rejected requests may be retried, never a network failure" — 403→explicit→remint→stop; a transport failure never touches the ladder | `authenticated` — `main.cjs:204-218` | `approval.rs authenticated` + `retry.rs classify`/`recovery_after_403` |
+| proposals list: ≤100 entries, `pending` only, id `proposal_[a-f0-9]{32}`, hash 64 lowercase hex, operation ≤120 UTF-16 units/no controls, exact ISO-8601 expiry (leap-aware), duplicate ids fail closed, oldest-expiry sort with id tiebreak | `parseProposals`/`validExpiry` — `main.cjs:221-248` | `card.rs parse_proposals`/`valid_expiry` |
+| pinned card semantics (open overlay pins, close/re-expand swaps, same-id refresh, changed hash → inert, expiry sticky on every projection, empty overlay never acquires) | `receiveCandidate` — `main.cjs:250-262` | `card.rs receive_candidate` |
+| `cardReason` order: quitting → sticky → expiry → health → busy → compact → invisible | `main.cjs:265-274` | `card.rs card_reason` |
+| card projection keys `{operation, expires_at, state, reason}`; `request` always the standing-request value (null today) | `projectedCard`/`snapshot` — `main.cjs:276-280,330` | `card.rs project_card`, `approval.rs snapshot_fields` |
+| poll: health (`ok===true`) → proposals → receive; 10 s cadence; one in-flight; failure → unhealthy unless stopped | `poll`/`startBridge` — `main.cjs:282-303` | `approval.rs poll_once`/`run_bridge` (`POLL_MS=10000`) |
+| `decide`: synchronous lock first, gate re-validated before EVERY send, `/execute` body exactly `{"payload_hash":…}`, `/reject` bodyless, 2xx→`Decisión enviada.` else `No se pudo confirmar la decisión.`, quit → nothing is claimed | `decide` — `main.cjs:305-328` | `approval.rs decide` |
+| overlay epoch bumps on every phase transition; expand promotes the pinned queue | `main.cjs:375,466-467` | `approval.rs bump_epoch`/`promote_selection`, called from `main.rs` `restore`/`dispatch_verb` |
+| `choose`: read-and-consume in ONE synchronous step; no request stands → `Denied` | `main.cjs:444-449`, `core.cjs:89` | `approval.rs choose` + `card.rs choose_request` |
+| the three verbs run behind the same validation+rate gate | `main.cjs:452-456` | `main.rs desktop_action` (async since M3; allow/deny run on the blocking pool) |
+
+### What the approval evidence shows (probe, `approval_evidence` line)
+
+- The lane starts against the **in-process fake backend** through the
+  `ABITO_BRIDGE_BASE` override (set before the lane is built): the probe
+  never talks to a real backend, and when `ABITO_BRIDGE_BASE` was set from
+  OUTSIDE, the probe reads snapshots but refuses to decide.
+- `posts_before_choice: 0` — nothing (notice, snapshot, poll) ever writes;
+  only the explicit `allow` dispatch reaches `/execute`, and then
+  `execute_payload_hash_matches_card: true` with `session_cookie: true` and
+  `x_sb_request: true` on the POST. `bridge_status_before/after` and
+  `card_before/after` are read through the REAL snapshot path
+  (`pending` + `healthy` → `inert` + `Decisión enviada.`).
+- `facade_evidence.choose_wired_denied: true` — through the real webview
+  IPC, `choose(0)` answers the typed `denied`, not `not-yet-wired`.
+
+### Secrets and storage contract
+
+- The session cookie exists **only in the Rust process memory** of the lane
+  (`Approval.cookie`): never localStorage, never any value the WebView can
+  read, never written to a file, never logged — the only auth diagnostic is
+  the bare mode name (`jar`/`explicit`/`none`), exactly like legacy.
+- The credential is the `bridge.json` **login** (a Tailscale identity), read
+  from the state root with the legacy descriptor discipline. It is never
+  printed and never committed (`.runtime*/` is gitignored).
+
+## Configuration: pointing at the real backend later
+
+Nothing to do for the shipped default: the lane targets
+`http://127.0.0.1:11003` (`security.cjs BRIDGE_ORIGIN`) and reads
+`<stateRoot>/bridge.json` — the dev state root is `apps/desktop-tauri/.runtime`
+(`ABITO_SOCKET_DIR` overrides the whole state root, as for M2). To enable the
+real lane:
+
+1. Create `.runtime/bridge.json` (mode **0600** — the descriptor gate
+   refuses group/world-writable files, exactly like legacy) containing
+   `{"v":1,"login":"your-login@tailnet.ts.net"}` — the same tailnet login
+   the backend allows.
+2. Start the Second Brain bridge on `127.0.0.1:11003`. If it lives
+   elsewhere, set `ABITO_BRIDGE_BASE=http://127.0.0.1:<port>` (origin shape
+   only: `http://host:port`, no path/query/fragment). **Only point this at a
+   backend you intend the app to drive** — it is the approval authority.
+3. Without `bridge.json` the lane reports `bridgeStatus: disabled` and makes
+   zero requests (fail closed), which is also what the tests and the probe
+   rely on.
+
+## Verifying M3
+
+```sh
+# all tests: 88 unit (50 pre-M3 unchanged + 34 M3 pure RED→GREEN + 4 M3
+# unit) + 17 approval integration (in-process fake backend) + 8 M2 = 113
+cargo test --manifest-path apps/desktop-tauri/Cargo.toml
+cargo build --manifest-path apps/desktop-tauri/Cargo.toml
+sha256sum apps/desktop-tauri/frontend/clay-engine.js   # R6 frozen, unchanged
+
+# probe WITH the socket override; the approval step spawns its own fake
+# backend and sets ABITO_BRIDGE_BASE itself (in-process, loopback only):
+cd apps/desktop-tauri
+DISPLAY=:0 XAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.UV9RW3 \
+  GDK_BACKEND=x11 ABITO_PROBE=1 ABITO_SOCKET_DIR="$PWD/.runtime-probe" \
+  timeout 150 cargo run
+# → approval_evidence line:
+#     base_origin_env "http://127.0.0.1:<fake>", fake_backend_spawned true,
+#     posts_before_choice 0, card_before.state "pending" →
+#     card_after.reason "Decisión enviada.",
+#     execute_payload_hash_matches_card true,
+#     bridge_status_before/after "healthy"
+# → facade_evidence: choose_wired_denied true
+# → stdout also prints the bare auth mode line `jar` (legacy parity)
+```
 
 ## What M1a proves (and what it does not)
 
@@ -409,24 +525,31 @@ apps/desktop-tauri/
 ├── run.sh                # GDK_BACKEND=x11 + cargo run
 ├── .gitignore            # /target/ + /.runtime*/ (M2 socket dirs, never committed)
 ├── tests/
-│   └── transport_receiver.rs # M2 integration: real UDS receiver + clients (+ Node producer)
+│   ├── transport_receiver.rs # M2 integration: real UDS receiver + clients (+ Node producer)
+│   └── approval_bridge.rs    # M3 integration: approval lane vs in-process fake backend
 ├── test-node/
 │   └── producer-check.cjs    # drives the UNCHANGED legacy adapter.cjs (read-only) in tests
 ├── src/
-│   ├── lib.rs            # lib target: bridge/core/desktop/geometry/workarea/protocol/transport
+│   ├── lib.rs            # lib target: bridge/core/desktop/geometry/workarea/protocol/transport/approval…
 │   ├── bridge.rs         # PURE: payload/sender/rate gate + typed errors (+tests, RED→GREEN)
+│   ├── card.rs           # PURE M3: expiry/proposals/card reason/projection/choose (+tests, RED→GREEN)
+│   ├── requests.rs       # PURE M3: origin + route allowlist + login schema (+tests, RED→GREEN)
+│   ├── retry.rs          # PURE M3: auth ladder — known rejections only (+tests, RED→GREEN)
 │   ├── desktop.rs        # PURE: transition + snapshot shape (+tests)
 │   ├── geometry.rs       # PURE: sizes, clamp, snap, grow anchor, click threshold (+tests)
 │   ├── core.rs           # press/drag/release/toggle handlers shared by commands + probe (+tests)
 │   ├── protocol.rs       # PURE M2: framing/validation/quota/dedupe/expiry (+tests, RED→GREEN)
+│   ├── approval.rs       # M3: the lane (login read, cookie, request/authenticated/mint/poll/decide)
+│   ├── http.rs           # M3: loopback HTTP/1.1 client (deadline, discard, 1 MiB, abort registry)
+│   ├── fakebridge.rs     # M3: in-process fake api.py backend (tests + probe only)
 │   ├── transport.rs      # M2: UDS receiver (perms, owner, quotas, cleanup) (+policy tests)
 │   ├── workarea.rs       # X11 _NET_WORKAREA ∩ monitor, fallbacks
-│   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade + transport evidence)
-│   └── main.rs           # wiring, commands, publish, lifecycle, transport/signal, setup placement
+│   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade + transport + approval)
+│   └── main.rs           # wiring, commands, publish, lifecycle, transport/signal, approval, placement
 └── frontend/
-    ├── index.html        # island markup
+    ├── index.html        # island markup + M3 approval card (display-only)
     ├── style.css         # reused island tokens
     ├── desktop.js        # window.desktop facade over invoke/events (M1b)
-    ├── island.js         # motion, pointer forwarding, motion override, notices display (M2)
+    ├── island.js         # motion, pointer forwarding, notices + approval card (M2/M3)
     └── clay-engine.js    # frozen R6, byte-for-byte, DO NOT EDIT
 ```

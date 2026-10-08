@@ -143,7 +143,7 @@ pub fn run(app: AppHandle) {
     emit(&json!({
         "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
-        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence"],
+        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence"],
         "gdk_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "unset".into()),
     }));
 
@@ -298,10 +298,17 @@ pub fn run(app: AppHandle) {
     expected_verbs.sort_unstable();
     let expected_json = serde_json::json!(expected_verbs);
     let observed_verbs = facade.as_ref().and_then(|f| f.get("verbs")).cloned();
+    // M3: `choose` must be WIRED — its rejection while no request stands is
+    // the typed `denied` (Electron's `Denied`), never `not-yet-wired`.
+    let choose_wired_denied = facade.as_ref()
+        .and_then(|f| f.get("choose"))
+        .and_then(|choice| choice.get("code"))
+        == Some(&serde_json::json!("denied"));
     emit(&json!({
         "step": "facade_evidence",
         "expected_verbs": expected_json,
         "verbs_match_preload": observed_verbs.as_ref() == Some(&expected_json),
+        "choose_wired_denied": choose_wired_denied,
         "timed_out": facade.is_none(),
         "evidence": facade,
     }));
@@ -323,6 +330,12 @@ pub fn run(app: AppHandle) {
     //    installed Preview's reserved socket roots are DETECTED read-only —
     //    never connected, never unlinked.
     transport_evidence(&app);
+
+    // 10. approval evidence (M3): the lane already runs against the
+    //     in-process fake backend (env override set at startup), so this
+    //     performs the human's explicit choice and reads card/bridgeStatus
+    //     back through the REAL snapshot path before and after.
+    approval_evidence(&app);
 
     // Close the receiver before the hard exit: identity-checked unlink of the
     // socket this process created (never a foreign path).
@@ -408,7 +421,7 @@ fn transport_evidence(app: &AppHandle) {
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut notice_count;
         loop {
-            let snapshot = crate::build_snapshot(&state);
+            let snapshot = crate::build_snapshot(app, &state);
             notice_count = snapshot
                 .get("notices")
                 .and_then(serde_json::Value::as_array)
@@ -449,14 +462,15 @@ fn transport_evidence(app: &AppHandle) {
         >= 1
     {
         let count_notices = |app: &AppHandle| {
-            crate::build_snapshot(app.state::<AppState>().inner())
+            crate::build_snapshot(app, app.state::<AppState>().inner())
                 .get("notices")
                 .and_then(serde_json::Value::as_array)
                 .map(|notices| notices.len())
                 .unwrap_or(0)
         };
         let before = count_notices(app);
-        let outcome = crate::dispatch_verb(app, &state, abito_island::bridge::Action::Dismiss);
+        let outcome =
+            crate::dispatch_verb(app, &state, abito_island::bridge::Action::Dismiss, None);
         let after = count_notices(app);
         line["dismiss"] = json!({
             "dispatched_ok": outcome.is_ok(),
@@ -467,6 +481,113 @@ fn transport_evidence(app: &AppHandle) {
     } else {
         line["dismiss"] = json!({ "skipped": "no notice to dismiss" });
     }
+    emit(&line);
+}
+
+/// M3 approval read-back: the lane was started at `setup` against the
+/// in-process fake backend (`ABITO_BRIDGE_BASE` override), so this drives
+/// the LEGAL gates — expand (legacy requires an open overlay), wait for
+/// `healthy` + `pending` — then performs the human's explicit choice
+/// through the SAME dispatch funnel the webview's `allow` verb reaches,
+/// and reads `card` + `bridgeStatus` back through the REAL snapshot path
+/// before and after. The fake's request log proves that NOTHING was
+/// written before that click (a notice can never approve) and that
+/// `/execute` carried exactly the card's `payload_hash`.
+fn approval_evidence(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let fake = state.probe_fake.lock().expect("probe fake").clone();
+    let mut line = json!({
+        "step": "approval_evidence",
+        "pointer_input": NO_POINTER,
+        "base_origin_env": std::env::var(abito_island::approval::BASE_ENV).ok(),
+        "fake_backend_spawned": fake.is_some(),
+        "decision": serde_json::Value::Null,
+        "error": serde_json::Value::Null,
+    });
+    let Some(fake) = fake else {
+        line["error"] = json!(
+            "ABITO_BRIDGE_BASE was set from outside: the probe reads snapshots \
+             but NEVER decides against a non-probe backend"
+        );
+        emit(&line);
+        return;
+    };
+    // Legacy gates for an actionable card: open overlay + visible window.
+    let win = main_window(app);
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    let plan = {
+        let mut core = state.core.lock().expect("core lock");
+        core.toggle(&io, area)
+    };
+    apply_plan(app, &state, plan); // expand
+    let mut before = None;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        let snapshot = crate::build_snapshot(app, &state);
+        if snapshot["bridgeStatus"]["state"] == "healthy"
+            && snapshot["card"]["state"] == "pending"
+        {
+            before = Some(snapshot);
+            break;
+        }
+        sleep(Duration::from_millis(100));
+    }
+    let Some(before) = before else {
+        line["error"] = json!("bridge did not reach healthy+pending within 8s");
+        line["last_snapshot"] = crate::build_snapshot(app, &state);
+        line["requests"] = json!(fake
+            .log()
+            .iter()
+            .map(|entry| json!({"method": entry.method, "path": entry.path}))
+            .collect::<Vec<_>>());
+        emit(&line);
+        return;
+    };
+    line["bridge_status_before"] = before["bridgeStatus"].clone();
+    line["card_before"] = before["card"].clone();
+    let posts_before = fake.posts().len();
+    line["posts_before_choice"] = json!(posts_before);
+    // The human's explicit choice — the same dispatch funnel the webview's
+    // `allow` verb reaches after the IPC gate. The probe is neither a
+    // pointer nor the renderer: it drives the host handler
+    // programmatically, which is exactly what makes "nothing approves by
+    // itself" provable (posts_before_choice must be 0).
+    let outcome = crate::dispatch_verb(app, &state, abito_island::bridge::Action::Allow, None);
+    line["decision"] = json!({
+        "dispatched_ok": outcome.is_ok(),
+        "error": outcome.as_ref().err().map(|error| serde_json::to_value(error).unwrap_or_default()),
+    });
+    let after = crate::build_snapshot(app, &state);
+    line["bridge_status_after"] = after["bridgeStatus"].clone();
+    line["card_after"] = after["card"].clone();
+    let log: Vec<serde_json::Value> = fake
+        .log()
+        .iter()
+        .map(|entry| {
+            json!({
+                "method": entry.method,
+                "path": entry.path,
+                "session_cookie": entry.session_cookie,
+                "x_sb_request": entry.x_sb_request,
+                "payload_hash": entry.payload_hash,
+            })
+        })
+        .collect();
+    line["requests"] = json!(log);
+    let posts_after = fake.posts();
+    line["posts_after_choice"] = json!(posts_after.len());
+    let card_hash = "b".repeat(64);
+    line["execute_payload_hash_matches_card"] = json!(posts_after.iter().any(|entry| {
+        entry.path.ends_with("/execute")
+            && entry.payload_hash.as_deref() == Some(card_hash.as_str())
+    }));
+    // collapse back: the probe leaves the island at rest
+    let plan = {
+        let mut core = state.core.lock().expect("core lock");
+        core.toggle(&io, area)
+    };
+    apply_plan(app, &state, plan);
     emit(&line);
 }
 
@@ -497,6 +618,10 @@ const FACADE_JS: &str = r#"(async () => {
   try { ev.expand = await window.desktop.expand(); } catch (e) { ev.expand_error = e; }
   await new Promise(r => setTimeout(r, 150));
   try { ev.close = await window.desktop.close(); } catch (e) { ev.close_error = e; }
+  // M3: choose is wired — with no standing request it must answer the
+  // typed `denied`, not `not-yet-wired` (and it never reaches HTTP).
+  try { await window.desktop.choose(0); ev.choose = { rejected: false }; }
+  catch (e) { ev.choose = { rejected: true, code: e && e.code, message: e && e.message }; }
   await new Promise(r => setTimeout(r, 1100)); // fresh fixed 1s rate window
   const results = await Promise.all(Array.from({ length: 40 }, () =>
     window.desktop.snapshot().then(() => null, e => e)));
