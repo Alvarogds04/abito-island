@@ -1,0 +1,77 @@
+/* M1a island styles. Tokens reused from the legacy Electron island contract
+   (colors, radii, easing durations); geometry and motion are driven per-frame
+   by island.js: grow = spring response 0.5s / damping 0.72, shrink = 340ms
+   cubic-bezier(.45,0,.2,1), prefers-reduced-motion snaps instantly. Fonts use
+   the system stack on purpose: the legacy woff2 files are not copied. */
+
+:root {
+  --island: #000;
+  --island-ink: #fff;
+  --island-muted: #a1a1aa;
+  --go: #bdee63;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-xl: .75rem;
+  --radius-2xl: 1.125rem;
+  --radius-full: 999px;
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+  --dur-press: 120ms;
+  --dur-state: 160ms;
+}
+
+* { box-sizing: border-box; }
+html {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body {
+  margin: 0;
+  height: 100dvh;
+  background: transparent;
+  color: var(--island-ink);
+  font: 400 14px/1.4 var(--font-ui);
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grab;
+  overscroll-behavior: none;
+}
+body.is-dragging { cursor: grabbing; }
+[hidden] { display: none !important; }
+
+/* Full-window capsule; #island is the visible black shape (288x32 r14 at
+   rest, 640x160 r22 overview), centred horizontally and anchored to the
+   docked vertical edge (top/bottom gap of 6px/8px inside the native window). */
+#capsule { position: absolute; inset: 0; }
+#island {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--island);
+  will-change: width, height;
+}
+#clay {
+  position: absolute;
+  left: 50%;
+  display: block;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+#label {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+#label strong { display: block; font-weight: 600; line-height: 1.2; }
+#label span { display: block; font-size: 12px; color: var(--island-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  /* island.js already snaps geometry under reduced motion; this also kills any
+     residual CSS transition so the OS preference really wins. */
+  #label { transition: none; }
+}

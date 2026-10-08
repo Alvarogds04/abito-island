@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <!-- CSP/capability hardening lands in M1b; see tauri.conf.json (csp: null). -->
+  <title>Abito</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Frozen R6, copied byte-for-byte (sha256 e2dc5db3…): SVG-DOM, never redrawn. -->
+  <script defer src="clay-engine.js"></script>
+  <script defer src="island.js"></script>
+</head>
+<body>
+  <main id="capsule" data-phase="compact" data-edge="top">
+    <div id="island">
+      <svg id="clay" aria-hidden="true" focusable="false"></svg>
+      <div id="label"><strong>Compañero</strong><span>Vista general</span></div>
+    </div>
+  </main>
+</body>
+</html>

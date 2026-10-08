@@ -1,0 +1,6 @@
+{
+  "identifier": "main-capability",
+  "description": "M1a skeleton: core defaults for the main island window (full capabilities/CSP ownership lands in M1b)",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
