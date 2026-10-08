@@ -84,6 +84,25 @@ pub fn clamp_x(x: i32, w: i32, area: Rect) -> i32 {
     x.max(area.x).min(max_x)
 }
 
+/// Clamp a whole window rect into the work area (port of Electron core.cjs
+/// `clampBounds`, used by the monitor/work-area re-clamp in unit M1b): the
+/// size is capped to the area first, then the position is clamped so the
+/// window lies fully inside it. A window that cannot fit is shrunk to the
+/// area — being on screen wins over being complete.
+pub fn clamp_rect(rect: Rect, area: Rect) -> Rect {
+    let w = rect.w.max(1).min(area.w);
+    let h = rect.h.max(1).min(area.h);
+    Rect {
+        x: clamp_x(rect.x, w, area),
+        y: rect
+            .y
+            .max(area.y)
+            .min((area.y + area.h - h).max(area.y)),
+        w,
+        h,
+    }
+}
+
 /// Start position: top-centre of the work area.
 pub fn initial_position(area: Rect, w: i32, h: i32) -> Rect {
     Rect {
@@ -228,6 +247,83 @@ mod tests {
         assert_eq!(clamp_x(-20, 304, area()), 0);
         // window wider than the area collapses to the area origin, never past it
         assert_eq!(clamp_x(9999, 4000, area()), 0);
+    }
+
+    #[test]
+    fn clamp_rect_ports_electron_clamp_bounds() {
+        // ported from legacy test/core.test.cjs: negative coordinates
+        let area2 = Rect {
+            x: -1920,
+            y: -200,
+            w: 1920,
+            h: 1080,
+        };
+        assert_eq!(
+            clamp_rect(
+                Rect {
+                    x: -4000,
+                    y: -600,
+                    w: 520,
+                    h: 720,
+                },
+                area2
+            ),
+            Rect {
+                x: -1920,
+                y: -200,
+                w: 520,
+                h: 720,
+            }
+        );
+        // oversize window on a tiny display: shrunk to the area, inside it
+        let tiny = Rect {
+            x: -20,
+            y: -30,
+            w: 80,
+            h: 60,
+        };
+        assert_eq!(
+            clamp_rect(
+                Rect {
+                    x: 1000,
+                    y: 1000,
+                    w: 520,
+                    h: 720,
+                },
+                tiny
+            ),
+            tiny
+        );
+        // sweep: every result stays fully inside the area
+        let mut width = 1;
+        while width < 700 {
+            let work = Rect {
+                x: -1700,
+                y: -100,
+                w: width,
+                h: width + 10,
+            };
+            let r = clamp_rect(
+                Rect {
+                    x: 500,
+                    y: 900,
+                    w: 520,
+                    h: 720,
+                },
+                work,
+            );
+            assert!(r.x >= work.x && r.y >= work.y, "width {width}");
+            assert!(r.right() <= work.right() && r.bottom() <= work.bottom(), "width {width}");
+            width += 19;
+        }
+        // already inside: unchanged (idempotent)
+        let inside = Rect {
+            x: 100,
+            y: 100,
+            w: 304,
+            h: 44,
+        };
+        assert_eq!(clamp_rect(inside, area()), inside);
     }
 
     #[test]

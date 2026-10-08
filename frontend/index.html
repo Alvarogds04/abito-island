@@ -3,11 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <!-- CSP/capability hardening lands in M1b; see tauri.conf.json (csp: null). -->
+  <!-- M1b: strict CSP in tauri.conf.json — no remote origins, no
+       unsafe-eval, no inline script/style (this file carries none). -->
   <title>Abito</title>
   <link rel="stylesheet" href="style.css">
   <!-- Frozen R6, copied byte-for-byte (sha256 e2dc5db3…): SVG-DOM, never redrawn. -->
   <script defer src="clay-engine.js"></script>
+  <!-- window.desktop facade must exist before the island boots. -->
+  <script defer src="desktop.js"></script>
   <script defer src="island.js"></script>
 </head>
 <body>

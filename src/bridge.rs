@@ -1,0 +1,498 @@
+//! Command-side port of the Electron IPC gate — unit M1b, pure module.
+//!
+//! Electron equivalents (read-only source, `worktrees/legacy-electron`):
+//! - `core.cjs` `ipcPayloadValid` / `validateIPC` (lines 67-76): a closed set
+//!   of actions, a closed payload shape (`choose` is the only verb carrying an
+//!   argument and it is only ever an integer), and an exact sender check
+//!   (event.sender === expected sender, main frame, exact page URL).
+//! - `main.cjs` `ipcMain.handle('desktop:action', …)`: validate first, then a
+//!   rate gate of 30 calls per fixed 1-second window (`Rate exceeded`).
+//! - `security.cjs`: nothing outside the expected local origin may interact
+//!   with the app.
+//!
+//! Tauri cannot compare `event.sender` objects, so the sender half is ported
+//! as two exact string checks — the window label and the current page URL —
+//! which the command reads from the live webview. Everything here is pure so
+//! the checks are unit-testable without a webview.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// The exact actions `preload.cjs` can ever name (ACTIONS in core.cjs).
+/// `onState` is a facade-only subscription verb and never an IPC action.
+pub const ACTIONS: [&str; 11] = [
+    "snapshot",
+    "expand",
+    "close",
+    "hide",
+    "quit",
+    "dismiss",
+    "allow",
+    "deny",
+    "choose",
+    "animateAnyway",
+    "respectSystemMotion",
+];
+
+/// Hard cap for one action payload in bytes, mirroring core.cjs
+/// `LIMITS.frameBytes` (512). The largest legitimate frame is
+/// `{"action":"respectSystemMotion"}` (34 bytes); a stowaway key large enough
+/// to matter is rejected before anything else looks at it.
+pub const MAX_ACTION_BYTES: usize = 512;
+
+/// Rate gate: 30 calls per fixed 1s window (main.cjs: `++calls > 30` throws).
+pub const RATE_LIMIT_PER_WINDOW: u32 = 30;
+pub const RATE_WINDOW_MS: u128 = 1_000;
+
+/// One of the closed action set. `None` from [`Action::from_name`] is a
+/// rejection: the renderer never gets to name an arbitrary verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Snapshot,
+    Expand,
+    Close,
+    Hide,
+    Quit,
+    Dismiss,
+    Allow,
+    Deny,
+    Choose,
+    AnimateAnyway,
+    RespectSystemMotion,
+}
+
+impl Action {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "snapshot" => Some(Action::Snapshot),
+            "expand" => Some(Action::Expand),
+            "close" => Some(Action::Close),
+            "hide" => Some(Action::Hide),
+            "quit" => Some(Action::Quit),
+            "dismiss" => Some(Action::Dismiss),
+            "allow" => Some(Action::Allow),
+            "deny" => Some(Action::Deny),
+            "choose" => Some(Action::Choose),
+            "animateAnyway" => Some(Action::AnimateAnyway),
+            "respectSystemMotion" => Some(Action::RespectSystemMotion),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Action::Snapshot => "snapshot",
+            Action::Expand => "expand",
+            Action::Close => "close",
+            Action::Hide => "hide",
+            Action::Quit => "quit",
+            Action::Dismiss => "dismiss",
+            Action::Allow => "allow",
+            Action::Deny => "deny",
+            Action::Choose => "choose",
+            Action::AnimateAnyway => "animateAnyway",
+            Action::RespectSystemMotion => "respectSystemMotion",
+        }
+    }
+}
+
+/// Typed rejection. The webview sees it as the JSON object `{ code, message }`
+/// (the command's `Err` serializes straight into the rejected invoke promise),
+/// so callers can branch on `code` instead of parsing prose.
+///
+/// Codes:
+/// - `denied`        — Electron's `throw new Error('Denied')`, with the reason
+///                     attached (unknown key/action, bad index, oversized
+///                     payload, wrong window label, wrong origin).
+/// - `rate-exceeded` — Electron's `throw new Error('Rate exceeded')`.
+/// - `not-yet-wired` — verb whose backing system (M2 transport, M3 approval
+///                     bridge) does not exist yet; never faked as success.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BridgeError {
+    pub code: String,
+    pub message: String,
+}
+
+impl BridgeError {
+    pub fn denied(reason: &str) -> Self {
+        BridgeError {
+            code: "denied".to_string(),
+            message: format!("Denied: {reason}"),
+        }
+    }
+
+    pub fn rate_exceeded() -> Self {
+        BridgeError {
+            code: "rate-exceeded".to_string(),
+            message: "Rate exceeded".to_string(),
+        }
+    }
+
+    pub fn not_yet_wired(verb: &str, unit: &str) -> Self {
+        BridgeError {
+            code: "not-yet-wired".to_string(),
+            message: format!("Not yet wired: `{verb}` lands with {unit}"),
+        }
+    }
+}
+
+impl std::fmt::Display for BridgeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for BridgeError {}
+
+/// `core.cjs ipcPayloadValid`, ported:
+/// 1. size gate first (new, task-mandated: oversized payloads are rejected
+///    before any structural work),
+/// 2. payload must be a JSON object (not null, not an array, not a scalar),
+/// 3. `action` must be present and a member of the closed action set,
+/// 4. `choose` carries exactly one key beside `action` — an integer `index`;
+///    every other action carries no other key at all (a known action cannot
+///    smuggle a payload).
+///
+/// Returns the action and, for `choose` only, its index.
+pub fn validate_payload(payload: &Value) -> Result<(Action, Option<i32>), BridgeError> {
+    // 1. size gate first: measured on the canonical JSON re-encoding of the
+    //    payload the command received, so a stowaway key cannot buy parsing
+    //    or dispatch work before being turned away.
+    let encoded = serde_json::to_string(payload).unwrap_or_default();
+    if encoded.len() > MAX_ACTION_BYTES {
+        return Err(BridgeError::denied("payload too large"));
+    }
+    // 2. object shape
+    let Value::Object(map) = payload else {
+        return Err(BridgeError::denied("payload must be an object"));
+    };
+    // 3. closed action set
+    let name = map
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| BridgeError::denied("missing string `action` key"))?;
+    let action =
+        Action::from_name(name).ok_or_else(|| BridgeError::denied("unknown action"))?;
+    // 4. closed payload shape
+    if action == Action::Choose {
+        // exactly { action, index } with an integer index; anything else is a
+        // malformed frame, not a choice (core.cjs ipcPayloadValid).
+        if map.len() != 2 || !map.contains_key("index") {
+            return Err(BridgeError::denied(
+                "choose carries exactly one integer `index`",
+            ));
+        }
+        let index = map
+            .get("index")
+            .and_then(Value::as_i64)
+            .filter(|v| *v >= i64::from(i32::MIN) && *v <= i64::from(i32::MAX))
+            .ok_or_else(|| BridgeError::denied("`index` must be an integer"))?;
+        Ok((action, Some(index as i32)))
+    } else {
+        // argument-free verbs: no stowaway keys, a known action cannot smuggle
+        // a payload (core.cjs: keys.length === 1).
+        if map.len() != 1 {
+            return Err(BridgeError::denied("unknown key"));
+        }
+        Ok((action, None))
+    }
+}
+
+/// Sender half of `core.cjs validateIPC` + the origin rule of `security.cjs`:
+/// only the main window, loaded on the exact local app page, may call the
+/// host. The label and URL are read from the live webview by the command, so
+/// a stray webview (or a webview that somehow navigated away) is rejected.
+pub fn sender_ok(label: &str, url: &str) -> Result<(), BridgeError> {
+    if label != "main" {
+        return Err(BridgeError::denied("wrong window label"));
+    }
+    if !page_url_allowed(url) {
+        return Err(BridgeError::denied("wrong origin"));
+    }
+    Ok(())
+}
+
+/// Closed allowlist for the page URL the bridge accepts. Electron compared
+/// one exact `file://…/index.html` string; Tauri's loader normalizes the app
+/// URL differently depending on entry point, so the allowlist is the exact
+/// set of those normalizations of the same single page — no prefix matching,
+/// no query, no fragment (Electron rejected `index.html#extra` too).
+pub fn page_url_allowed(url: &str) -> bool {
+    // Exact closed set: `tauri://localhost` with no path, `/`, or
+    // `/index.html` — the same one page, in the three normalizations the
+    // Tauri/WebKitGTK loader reports (pinned by the probe's webview_url
+    // evidence). No prefix matching: `…localhostx`, `#fragment`, `?query`,
+    // other paths, other hosts and other schemes are all outside the set.
+    matches!(
+        url,
+        "tauri://localhost" | "tauri://localhost/" | "tauri://localhost/index.html"
+    )
+}
+
+/// `main.cjs` rate gate, ported verbatim in behaviour: a fixed 1-second window
+/// (not sliding); the window resets only when a call arrives at least 1000ms
+/// after the window started; every attempt increments the counter, so a
+/// rejected call still consumes budget.
+#[derive(Debug)]
+pub struct RateLimiter {
+    calls: u32,
+    window_started_ms: Option<u128>,
+}
+
+impl RateLimiter {
+    pub const fn new() -> Self {
+        RateLimiter {
+            calls: 0,
+            window_started_ms: None,
+        }
+    }
+
+    pub fn check(&mut self, now_ms: u128) -> Result<(), BridgeError> {
+        // Fixed 1s window, verbatim main.cjs ordering: reset when the current
+        // window is at least RATE_WINDOW_MS old, then always increment, then
+        // reject past the limit.
+        match self.window_started_ms {
+            Some(start) if now_ms.saturating_sub(start) < RATE_WINDOW_MS => {}
+            _ => {
+                self.calls = 0;
+                self.window_started_ms = Some(now_ms);
+            }
+        }
+        self.calls += 1;
+        if self.calls > RATE_LIMIT_PER_WINDOW {
+            Err(BridgeError::rate_exceeded())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn action(name: &str) -> Value {
+        json!({ "action": name })
+    }
+
+    fn deny_reason(payload: &Value) -> String {
+        match validate_payload(payload) {
+            Ok(v) => panic!("expected rejection, got {v:?}"),
+            Err(e) => e.message,
+        }
+    }
+
+    // --- payload shape (ported from test/core.test.cjs) -------------------
+
+    #[test]
+    fn accepts_the_closed_action_set() {
+        for name in ACTIONS {
+            // `choose` is the one verb that carries an argument
+            let payload = if name == "choose" {
+                json!({ "action": "choose", "index": 0 })
+            } else {
+                action(name)
+            };
+            let (got, index) =
+                validate_payload(&payload).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(got.name(), name);
+            assert_eq!(
+                index,
+                if name == "choose" { Some(0) } else { None },
+                "{name} argument shape"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_choose_with_exactly_one_integer() {
+        let (got, index) = validate_payload(&json!({ "action": "choose", "index": 2 })).unwrap();
+        assert_eq!(got, Action::Choose);
+        assert_eq!(index, Some(2));
+        // negative and zero are integers too; the standing-request check (M3)
+        // decides validity later, exactly like core.chooseRequest.
+        assert_eq!(
+            validate_payload(&json!({ "action": "choose", "index": -1 })).unwrap().1,
+            Some(-1)
+        );
+    }
+
+    #[test]
+    fn rejects_non_object_payloads() {
+        for payload in [json!(null), json!([]), json!("quit"), json!(0), json!(true)] {
+            let reason = deny_reason(&payload);
+            assert!(reason.contains("object"), "got: {reason}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_actions() {
+        // {action:'approve'}, {action:'open',url}, {action:'move',dx,dy} from
+        // the legacy matrix, plus a payload that tries to name a URL.
+        for payload in [
+            json!({ "action": "approve" }),
+            json!({ "action": "open", "url": "https://x" }),
+            json!({ "action": "move", "dx": 1, "dy": 2 }),
+        ] {
+            let reason = deny_reason(&payload);
+            assert!(reason.contains("unknown action"), "got: {reason}");
+        }
+    }
+
+    #[test]
+    fn rejects_missing_action_key() {
+        for payload in [json!({}), json!({ "index": 3 })] {
+            let reason = deny_reason(&payload);
+            assert!(reason.contains("action"), "got: {reason}");
+        }
+    }
+
+    #[test]
+    fn rejects_stowaway_keys_on_argument_free_actions() {
+        // A known action cannot smuggle a payload: extra keys are denied even
+        // when the action itself is valid.
+        for payload in [
+            json!({ "action": "hide", "extra": true }),
+            json!({ "action": "expand", "index": 0 }),
+            json!({ "action": "snapshot", "text": "open the door" }),
+        ] {
+            let reason = deny_reason(&payload);
+            assert!(reason.contains("key"), "got: {reason}");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_choose_frames() {
+        // choose is the only action with an argument, and it is only ever an
+        // integer: missing, string, float or stowaway keys are malformed
+        // frames, not choices.
+        for payload in [
+            json!({ "action": "choose" }),
+            json!({ "action": "choose", "index": "1" }),
+            json!({ "action": "choose", "index": 1.5 }),
+            json!({ "action": "choose", "index": 1, "revision": 3 }),
+            json!({ "action": "choose", "text": "open the door" }),
+            json!({ "action": "choose", "index": null }),
+        ] {
+            let reason = deny_reason(&payload);
+            assert!(
+                reason.contains("index") || reason.contains("key"),
+                "got: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_payloads_before_anything_else() {
+        let pad = "a".repeat(MAX_ACTION_BYTES + 64);
+        let reason = deny_reason(&json!({ "action": "snapshot", "pad": pad }));
+        assert!(reason.contains("large"), "got: {reason}");
+        // even an unknown action behind a huge frame reports the size first
+        let reason = deny_reason(&json!({ "action": "approve", "pad": pad }));
+        assert!(reason.contains("large"), "got: {reason}");
+        // exactly at the cap is still structural validation
+        assert!(validate_payload(&action("snapshot")).is_ok());
+    }
+
+    // --- sender / origin (ported from validateIPC + security.cjs) ---------
+
+    #[test]
+    fn sender_requires_the_main_window_on_the_exact_local_page() {
+        for url in [
+            "tauri://localhost",
+            "tauri://localhost/",
+            "tauri://localhost/index.html",
+        ] {
+            assert!(sender_ok("main", url).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn sender_rejects_wrong_label_or_origin() {
+        assert!(sender_ok("second", "tauri://localhost").is_err());
+        assert!(sender_ok("", "tauri://localhost").is_err());
+        // origin variants Electron would never have accepted either
+        for url in [
+            "https://evil.example/",
+            "file:///app/index.html",
+            "tauri://localhost/index.html#extra",
+            "tauri://localhost/index.html?x=1",
+            "tauri://localhost.evil/",
+            "http://tauri.localhost/",
+            "tauri://localhost/other.html",
+            "",
+        ] {
+            let err = sender_ok("main", url).expect_err(url);
+            assert_eq!(err.code, "denied", "{url}");
+            assert!(err.message.contains("origin"), "{url}: {err}");
+        }
+    }
+
+    #[test]
+    fn page_url_allowlist_is_exact_not_prefix() {
+        assert!(page_url_allowed("tauri://localhost/index.html"));
+        assert!(page_url_allowed("tauri://localhost/"));
+        assert!(page_url_allowed("tauri://localhost"));
+        // nothing else, ever: no prefix matches, no trailing segments
+        assert!(!page_url_allowed("tauri://localhost/index.html/"));
+        assert!(!page_url_allowed("tauri://localhostx"));
+        assert!(!page_url_allowed("tauri://localhost//"));
+    }
+
+    // --- rate gate (ported from main.cjs) ---------------------------------
+
+    #[test]
+    fn rate_gate_allows_thirty_then_rejects() {
+        let mut rl = RateLimiter::new();
+        for i in 0..RATE_LIMIT_PER_WINDOW {
+            rl.check(1_000 + u128::from(i)).unwrap_or_else(|e| panic!("call {i}: {e}"));
+        }
+        let err = rl.check(1_050).expect_err("call 31 must be rejected");
+        assert_eq!(err.code, "rate-exceeded");
+        assert_eq!(err.message, "Rate exceeded");
+        // rejected attempts keep consuming budget inside the window
+        assert!(rl.check(1_060).is_err());
+    }
+
+    #[test]
+    fn rate_gate_window_resets_after_one_second() {
+        let mut rl = RateLimiter::new();
+        for i in 0..RATE_LIMIT_PER_WINDOW {
+            rl.check(5_000 + u128::from(i)).unwrap();
+        }
+        assert!(rl.check(5_010).is_err());
+        // fixed window: exactly at window start + 1000ms the counter resets
+        assert!(rl.check(6_000).is_ok());
+    }
+
+    #[test]
+    fn rate_gate_window_is_fixed_not_sliding() {
+        let mut rl = RateLimiter::new();
+        rl.check(0).unwrap();
+        // a second call 900ms later still shares the window that started at 0
+        for i in 1..RATE_LIMIT_PER_WINDOW {
+            rl.check(900 + u128::from(i)).unwrap();
+        }
+        assert!(rl.check(999).is_err());
+        assert!(rl.check(1_000).is_ok());
+    }
+
+    // --- typed error surface ----------------------------------------------
+
+    #[test]
+    fn errors_serialize_to_code_and_message_for_the_webview() {
+        let value = serde_json::to_value(BridgeError::denied("unknown key")).unwrap();
+        assert_eq!(value["code"], "denied");
+        assert_eq!(value["message"], "Denied: unknown key");
+        let wired = BridgeError::not_yet_wired("dismiss", "M2");
+        assert_eq!(wired.code, "not-yet-wired");
+        assert!(wired.message.contains("dismiss"));
+    }
+}

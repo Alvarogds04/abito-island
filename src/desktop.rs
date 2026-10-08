@@ -1,0 +1,236 @@
+//! Island state machine and snapshot projection — unit M1b.
+//!
+//! Port of the Electron state handling that `preload.cjs` consumers read:
+//! - `core.cjs transition(state, action)` — the only writer of the phase,
+//! - `main.cjs snapshot()` / `view()` — the exact snapshot shape sent on
+//!   `desktop:state` and returned by the `snapshot` action.
+//!
+//! Pure module: no window-system calls, values are wired in by `main.rs`.
+
+use serde::Serialize;
+use serde_json::Value;
+
+/// The island phase, exactly the three strings Electron publishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IslandState {
+    Compact,
+    Expanded,
+    Hidden,
+}
+
+impl IslandState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IslandState::Compact => "compact",
+            IslandState::Expanded => "expanded",
+            IslandState::Hidden => "hidden",
+        }
+    }
+
+    /// `main.cjs view()`: the renderer draws exactly two shapes — the full
+    /// island only when expanded, the small bubble otherwise (including
+    /// hidden: a hidden window keeps its shape).
+    pub fn view(self) -> &'static str {
+        match self {
+            IslandState::Expanded => "island",
+            IslandState::Compact | IslandState::Hidden => "bubble",
+        }
+    }
+}
+
+/// `core.cjs transition(state, action)`, ported exactly:
+/// - `hide` always hides,
+/// - `restore` always lands compact,
+/// - `expand` only opens from compact, `close` only closes from expanded,
+/// - everything else is a no-op (a notice or a decision can never open or
+///   restore the capsule by itself).
+pub fn transition(state: IslandState, action: &str) -> IslandState {
+    match action {
+        "hide" => IslandState::Hidden,
+        "restore" => IslandState::Compact,
+        "expand" if state == IslandState::Compact => IslandState::Expanded,
+        "close" if state == IslandState::Expanded => IslandState::Compact,
+        _ => state,
+    }
+}
+
+/// Declared branding, byte-equal to the single declaration Electron reads
+/// (`src/sb_bridge/branding.py`: `BRANDING = Branding(product="Second Brain",
+/// assistant="Abito")`); the Tauri app never executes Python, it embeds the
+/// same validated values.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Branding {
+    pub product: &'static str,
+    pub assistant: &'static str,
+}
+
+pub const BRANDING: Branding = Branding {
+    product: "Second Brain",
+    assistant: "Abito",
+};
+
+/// `main.cjs bridgeStatus`: no bridge login configuration exists before M3,
+/// so the honest projection is the same "disabled" state Electron reports
+/// when `bridge.json` is absent, with Electron's own reason string.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct BridgeStatus {
+    pub state: &'static str,
+    pub reason: &'static str,
+}
+
+pub const BRIDGE_DISABLED: BridgeStatus = BridgeStatus {
+    state: "disabled",
+    reason: "Puente deshabilitado: configuración no válida.",
+};
+
+/// The exact snapshot shape `main.cjs snapshot()` returns (13 keys). Every
+/// value that depends on a later unit is filled with the honest current
+/// truth, never faked:
+/// - `request`/`card`: null until the proposal lane lands (M3),
+/// - `notices`: empty and `unavailable: true` until the local notice
+///   transport exists (M2) — today there is no receiver, so local notices
+///   genuinely are unavailable,
+/// - `connections`: 0 until M2.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    pub revision: u64,
+    pub state: &'static str,
+    pub view: &'static str,
+    /// The docked edge the app has placement evidence for, or null when the
+    /// X server did not answer (never a guess — same honesty rule as
+    /// Electron's `confirmPlacement`).
+    pub anchor: Option<&'static str>,
+    pub request: Value,
+    pub motion_override: bool,
+    pub branding: Branding,
+    pub connections: u32,
+    pub unavailable: bool,
+    pub notices: Vec<Value>,
+    pub bridge_status: BridgeStatus,
+    pub card: Value,
+}
+
+impl Snapshot {
+    pub fn new(
+        revision: u64,
+        phase: IslandState,
+        anchor: Option<&'static str>,
+        motion_override: bool,
+    ) -> Self {
+        Snapshot {
+            revision,
+            state: phase.as_str(),
+            view: phase.view(),
+            anchor,
+            request: Value::Null,
+            motion_override,
+            branding: BRANDING,
+            connections: 0,
+            unavailable: true, // no notice transport until M2
+            notices: Vec::new(),
+            bridge_status: BRIDGE_DISABLED,
+            card: Value::Null,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transition_matrix_is_the_electron_one() {
+        // ported verbatim from legacy test/core.test.cjs
+        assert_eq!(
+            transition(IslandState::Compact, "expand"),
+            IslandState::Expanded
+        );
+        assert_eq!(
+            transition(IslandState::Expanded, "close"),
+            IslandState::Compact
+        );
+        assert_eq!(
+            transition(IslandState::Expanded, "hide"),
+            IslandState::Hidden
+        );
+        assert_eq!(
+            transition(IslandState::Hidden, "notice"),
+            IslandState::Hidden
+        );
+        assert_eq!(
+            transition(IslandState::Compact, "notice"),
+            IslandState::Compact
+        );
+        assert_eq!(
+            transition(IslandState::Hidden, "restore"),
+            IslandState::Compact
+        );
+        assert_eq!(
+            transition(IslandState::Hidden, "expand"),
+            IslandState::Hidden
+        );
+        assert_eq!(
+            transition(IslandState::Expanded, "approve"),
+            IslandState::Expanded
+        );
+    }
+
+    #[test]
+    fn view_is_a_projection_of_state() {
+        assert_eq!(IslandState::Expanded.view(), "island");
+        assert_eq!(IslandState::Compact.view(), "bubble");
+        assert_eq!(IslandState::Hidden.view(), "bubble");
+    }
+
+    #[test]
+    fn snapshot_has_the_exact_electron_key_set() {
+        let value = serde_json::to_value(Snapshot::new(7, IslandState::Compact, Some("top"), false))
+            .expect("snapshot serializes");
+        let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        let mut expected = vec![
+            "revision",
+            "state",
+            "view",
+            "anchor",
+            "request",
+            "motionOverride",
+            "branding",
+            "connections",
+            "unavailable",
+            "notices",
+            "bridgeStatus",
+            "card",
+        ];
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
+        assert_eq!(value["revision"], 7);
+        assert_eq!(value["state"], "compact");
+        assert_eq!(value["view"], "bubble");
+        assert_eq!(value["anchor"], "top");
+        assert!(value["request"].is_null());
+        assert!(value["card"].is_null());
+        assert_eq!(value["notices"], serde_json::json!([]));
+        assert_eq!(value["connections"], 0);
+        assert_eq!(value["motionOverride"], false);
+        assert_eq!(value["branding"]["product"], "Second Brain");
+        assert_eq!(value["branding"]["assistant"], "Abito");
+        assert_eq!(value["bridgeStatus"]["state"], "disabled");
+    }
+
+    #[test]
+    fn snapshot_tracks_phase_and_anchor_evidence() {
+        let expanded =
+            serde_json::to_value(Snapshot::new(3, IslandState::Expanded, None, true)).unwrap();
+        assert_eq!(expanded["state"], "expanded");
+        assert_eq!(expanded["view"], "island");
+        assert!(expanded["anchor"].is_null(), "no evidence -> null, never a guess");
+        assert_eq!(expanded["motionOverride"], true);
+        let hidden = serde_json::to_value(Snapshot::new(4, IslandState::Hidden, Some("bottom"), false))
+            .unwrap();
+        assert_eq!(hidden["state"], "hidden");
+        assert_eq!(hidden["view"], "bubble");
+        assert_eq!(hidden["anchor"], "bottom");
+    }
+}

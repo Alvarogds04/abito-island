@@ -9,7 +9,10 @@
      decision (click-vs-drag threshold, edge snap keeping X, clamping, grow
      anchoring). This file never decides geometry policy.
    - Reports frontend evidence (SVG element count, canvas absence) to Rust.
-   No window.desktop bridge (M1b), no sounds, no Coucou assets. */
+   - Reads the motion override through the window.desktop facade (M1b):
+     `animateAnyway` forces motion even under prefers-reduced-motion;
+     everything else fails CLOSED to accessibility (M1a behaviour).
+   No sounds, no Coucou assets. */
 (() => {
   const $ = id => document.getElementById(id);
   const capsule = $('capsule');
@@ -126,12 +129,26 @@
     if (mode !== 'idle') raf = requestAnimationFrame(tick);
   }
 
+  // ---- motion override via the window.desktop facade (M1b) --------------
+  // Contract 2026-10-07: one machine-wide boolean; only an explicit
+  // `animateAnyway` snapshot (motionOverride === true) may animate against
+  // prefers-reduced-motion. A missing facade, a failed snapshot or
+  // `respectSystemMotion` all leave this false — accessibility wins.
+  let forceMotion = false;
+  const applyMotionPref = snap => {
+    forceMotion = !!(snap && snap.motionOverride === true);
+  };
+  if (window.desktop) {
+    try { window.desktop.onState(applyMotionPref); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(applyMotionPref, () => {}); } catch { /* facade optional */ }
+  }
+
   // Called from Rust (WebviewWindow::eval) after every core toggle.
   function setPhase(phase, nextEdge) {
     if (nextEdge === 'top' || nextEdge === 'bottom') edge = nextEdge;
     const t = phase === 'overview' ? 1 : 0;
     target = t;
-    if (reduced.matches || Math.abs(t - p) < 1e-9) {
+    if ((reduced.matches && !forceMotion) || Math.abs(t - p) < 1e-9) {
       p = t; v = 0; mode = 'idle'; render(); return;
     }
     if (t === 1) { mode = 'spring'; last = 0; }

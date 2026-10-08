@@ -1,6 +1,6 @@
 {
-  "identifier": "main-capability",
-  "description": "M1a skeleton: core defaults for the main island window (full capabilities/CSP ownership lands in M1b)",
+  "identifier": "island-capability",
+  "description": "M1b least privilege: the island webview may only subscribe/unsubscribe the desktop:state event. Host actions go through the app's own desktop_action/drag/evidence commands (app commands are gated by origin, not by plugin ACL); no window, path, image, menu, tray, shell, http or fs core commands are exposed, and permissions are denied everywhere else.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -107,6 +107,12 @@ impl Core {
         });
     }
 
+    /// True while a pointer press is active: the work-area watcher must not
+    /// re-clamp under a live drag (the release snap owns geometry then).
+    pub fn press_active(&self) -> bool {
+        self.press.is_some()
+    }
+
     /// Pointer move while held: the window follows the pointer freely (X
     /// clamped into the work area, Y free until release). Returns the new
     /// window origin, or `None` when no press is active.

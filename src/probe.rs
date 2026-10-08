@@ -141,9 +141,9 @@ fn simulated_drag(app: &AppHandle, area: geometry::Rect, target: (f64, f64)) {
 
 pub fn run(app: AppHandle) {
     emit(&json!({
-        "probe": "abito M1a geometry/state read-back",
+        "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
-        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "frontend_evidence"],
+        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence"],
         "gdk_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "unset".into()),
     }));
 
@@ -276,7 +276,37 @@ pub fn run(app: AppHandle) {
     sleep(Duration::from_millis(300));
     readback(&app, "drag_to_top_snap");
 
-    // 7. frontend evidence from the webview command.
+    // 7. facade evidence: exercise `window.desktop` through the REAL webview
+    //    IPC path — verbs list, one typed rejection of an invalid call, a
+    //    rate-limit rejection burst, onState event delivery, and the page
+    //    URL/label the command-side sender gate actually sees. The JS reports
+    //    back through record_facade_evidence; nothing here is synthesised.
+    if let Err(e) = win.eval(FACADE_JS) {
+        emit(&json!({"step": "facade_evidence", "eval_failed": e.to_string()}));
+    }
+    let mut facade: Option<serde_json::Value> = None;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if let Some(v) = state.facade.lock().expect("facade lock").clone() {
+            facade = Some(v);
+            break;
+        }
+        sleep(Duration::from_millis(100));
+    }
+    let mut expected_verbs: Vec<&str> = crate::bridge::ACTIONS.to_vec();
+    expected_verbs.push("onState"); // the one facade-only subscription verb
+    expected_verbs.sort_unstable();
+    let expected_json = serde_json::json!(expected_verbs);
+    let observed_verbs = facade.as_ref().and_then(|f| f.get("verbs")).cloned();
+    emit(&json!({
+        "step": "facade_evidence",
+        "expected_verbs": expected_json,
+        "verbs_match_preload": observed_verbs.as_ref() == Some(&expected_json),
+        "timed_out": facade.is_none(),
+        "evidence": facade,
+    }));
+
+    // 8. frontend evidence from the webview command.
     emit(&json!({
         "step": "frontend_evidence",
         "pointer_input": "produced by the webview itself via the record_frontend_evidence command",
@@ -286,5 +316,50 @@ pub fn run(app: AppHandle) {
         "received": evidence.is_some(),
     }));
 
+    // Release the single-instance D-Bus name before skipping RunEvent::Exit
+    // via process::exit, so a later instance is never mistaken for a live one.
+    tauri_plugin_single_instance::destroy(&app);
     std::process::exit(0); // exits only this app
 }
+
+/// Driven inside the webview by the probe (step 7). Every call goes through
+/// the real `window.desktop` facade / `desktop_action` command path; the
+/// report is typed back through `record_facade_evidence`.
+const FACADE_JS: &str = r#"(async () => {
+  const ev = { verbs: null, snapshot: null, snapshot_error: null, invalid_call: null,
+    expand: null, close: null, state_events: 0, last_event_revision: null, rate: null,
+    webview_url: location.href,
+    webview_label: (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
+      && window.__TAURI_INTERNALS__.metadata.currentWebview
+      && window.__TAURI_INTERNALS__.metadata.currentWebview.label) || null };
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+  try {
+    ev.verbs = window.desktop ? Object.keys(window.desktop).sort() : null;
+    if (window.desktop && typeof window.desktop.onState === 'function') {
+      window.desktop.onState(s => { ev.state_events += 1; ev.last_event_revision = s.revision; });
+    }
+  } catch (e) { ev.verbs_error = String(e); }
+  try { ev.snapshot = await window.desktop.snapshot(); } catch (e) { ev.snapshot_error = e; }
+  await new Promise(r => setTimeout(r, 150)); // let the onState listener land
+  try {
+    await invoke('desktop_action', { payload: { action: 'approve-everything' } });
+    ev.invalid_call = { rejected: false };
+  } catch (e) { ev.invalid_call = { rejected: true, error: e }; }
+  try { ev.expand = await window.desktop.expand(); } catch (e) { ev.expand_error = e; }
+  await new Promise(r => setTimeout(r, 150));
+  try { ev.close = await window.desktop.close(); } catch (e) { ev.close_error = e; }
+  await new Promise(r => setTimeout(r, 1100)); // fresh fixed 1s rate window
+  const results = await Promise.all(Array.from({ length: 40 }, () =>
+    window.desktop.snapshot().then(() => null, e => e)));
+  const rejections = results.filter(r => r !== null);
+  ev.rate = { attempts: 40, rejections: rejections.length, first_error: rejections[0] || null };
+  try { await invoke('record_facade_evidence', { evidence: ev }); }
+  catch (e) { /* probe reports the timeout */ }
+})().catch(async e => {
+  try {
+    const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+      || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+    await invoke('record_facade_evidence', { evidence: { script_error: String(e) } });
+  } catch { /* probe reports the timeout */ }
+});"#;
