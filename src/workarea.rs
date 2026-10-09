@@ -95,14 +95,88 @@ fn get_string_property(
     Some(String::from_utf8_lossy(&bytes).trim_matches('\0').to_string())
 }
 
-/// Find our window by title (read-only; never modifies any window) and report
-/// its raw X11 state.
-pub fn x11_find_window_by_title(title: &str) -> Option<X11Window> {
+/// One top-level client window as the scan saw it (identity facts only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub id: u32,
+    /// `_NET_WM_PID`, when the client set it.
+    pub pid: Option<u32>,
+    /// `_NET_WM_NAME` (UTF-8), falling back to `WM_NAME`.
+    pub title: Option<String>,
+}
+
+/// Why our own window could not be identified. Every variant is reported
+/// (probe line / stderr) — the caller never falls back to a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnWindowError {
+    /// No X server / EWMH client list readable.
+    NoX11,
+    /// No listed window carries our pid.
+    NotFound,
+    /// A window titled like ours has no `_NET_WM_PID`: we cannot prove it
+    /// is ours, so we refuse instead of matching by title alone.
+    PidMissing,
+    /// Several of OUR windows, none with the expected title.
+    Ambiguous,
+}
+
+impl OwnWindowError {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OwnWindowError::NoX11 => "no_x11_client_list",
+            OwnWindowError::NotFound => "own_window_not_found",
+            OwnWindowError::PidMissing => "net_wm_pid_missing",
+            OwnWindowError::Ambiguous => "own_window_ambiguous",
+        }
+    }
+}
+
+/// Identity criterion for "our window" (FIX-B, spec lane 4aa7c63):
+/// 1. PRIMARY: `_NET_WM_PID` equals this process id. A title is not an
+///    identity — any other client can set its title to "Abito".
+/// 2. SECONDARY: among our own windows, the one titled `title` wins; a single
+///    own window is ours even untitled; several untitled → `Ambiguous`.
+/// 3. No own window, but a window with our title and NO `_NET_WM_PID` →
+///    `PidMissing` (fail visibly, never guess); otherwise `NotFound`.
+///
+/// Pure: unit-tested without an X server.
+pub fn pick_own_window(list: &[Candidate], pid: u32, title: &str) -> Result<u32, OwnWindowError> {
+    let own: Vec<&Candidate> = list.iter().filter(|c| c.pid == Some(pid)).collect();
+    if let Some(c) = own.iter().find(|c| c.title.as_deref() == Some(title)) {
+        return Ok(c.id);
+    }
+    match own.as_slice() {
+        [only] => return Ok(only.id),
+        [] => {}
+        _ => return Err(OwnWindowError::Ambiguous),
+    }
+    if list
+        .iter()
+        .any(|c| c.pid.is_none() && c.title.as_deref() == Some(title))
+    {
+        return Err(OwnWindowError::PidMissing);
+    }
+    Err(OwnWindowError::NotFound)
+}
+
+/// Find OUR window (read-only; never modifies any window) by
+/// [`pick_own_window`] over the EWMH client list, and report its raw X11
+/// state. The title is only the secondary condition.
+pub fn x11_find_own_window(title: &str) -> Result<X11Window, OwnWindowError> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::AtomEnum;
     use x11rb::protocol::xproto::ConnectionExt;
-    let (conn, screen_num) = x11rb::connect(None).ok()?;
+    let no_x = |_| OwnWindowError::NoX11;
+    let (conn, screen_num) = x11rb::connect(None).map_err(|_| OwnWindowError::NoX11)?;
     let screen = &conn.setup().roots[screen_num];
+    let atom = |name: &[u8]| -> Result<u32, OwnWindowError> {
+        Ok(conn
+            .intern_atom(false, name)
+            .map_err(|_| OwnWindowError::NoX11)?
+            .reply()
+            .map_err(|_| OwnWindowError::NoX11)?
+            .atom)
+    };
     // Prefer the stacking list, fall back to _NET_CLIENT_LIST.
     let windows: Vec<u32> = [b"_NET_CLIENT_LIST_STACKING".as_ref(), b"_NET_CLIENT_LIST".as_ref()]
         .into_iter()
@@ -111,96 +185,77 @@ pub fn x11_find_window_by_title(title: &str) -> Option<X11Window> {
             // Type is WINDOW (atom 33), not ATOM (4): filter with
             // AnyPropertyType or X returns an empty reply on type mismatch.
             let reply = conn
-                .get_property(
-                    false,
-                    screen.root,
-                    list.atom,
-                    AtomEnum::ANY,
-                    0,
-                    512,
-                )
+                .get_property(false, screen.root, list.atom, AtomEnum::ANY, 0, 512)
                 .ok()?
                 .reply()
                 .ok()?;
             let v: Vec<u32> = reply.value32()?.collect();
             (!v.is_empty()).then_some(v)
         })
-        .unwrap_or_default();
-    let net_wm_name = conn.intern_atom(false, b"_NET_WM_NAME").ok()?.reply().ok()?;
-    let utf8_string = conn.intern_atom(false, b"UTF8_STRING").ok()?.reply().ok()?;
-    let wm_name = conn.intern_atom(false, b"WM_NAME").ok()?.reply().ok()?;
-    let wm_class = conn.intern_atom(false, b"WM_CLASS").ok()?.reply().ok()?;
-    let gtk_ext = conn
-        .intern_atom(false, b"_GTK_FRAME_EXTENTS")
-        .ok()?
+        .ok_or(OwnWindowError::NoX11)?;
+    let net_wm_name = atom(b"_NET_WM_NAME")?;
+    let net_wm_pid = atom(b"_NET_WM_PID")?;
+    let utf8_string = atom(b"UTF8_STRING")?;
+    let wm_name = atom(b"WM_NAME")?;
+    let wm_class = atom(b"WM_CLASS")?;
+    let gtk_ext = atom(b"_GTK_FRAME_EXTENTS")?;
+    let net_state = atom(b"_NET_WM_STATE")?;
+    let state_above = atom(b"_NET_WM_STATE_ABOVE")?;
+    let candidates: Vec<Candidate> = windows
+        .iter()
+        .map(|&wid| {
+            let pid = conn
+                .get_property(false, wid, net_wm_pid, AtomEnum::CARDINAL, 0, 1)
+                .ok()
+                .and_then(|r| r.reply().ok())
+                .and_then(|r| r.value32()?.next());
+            // _NET_WM_NAME (UTF8) first, plain WM_NAME as fallback.
+            let title = conn
+                .get_property(false, wid, net_wm_name, utf8_string, 0, 256)
+                .ok()
+                .and_then(|r| r.reply().ok())
+                .and_then(|r| {
+                    let bytes: Vec<u8> = r.value8()?.collect();
+                    (!bytes.is_empty())
+                        .then(|| String::from_utf8_lossy(&bytes).trim_matches('\0').to_string())
+                })
+                .or_else(|| get_string_property(&conn, wid, wm_name));
+            Candidate { id: wid, pid, title }
+        })
+        .collect();
+    let wid = pick_own_window(&candidates, std::process::id(), title)?;
+    let geom = conn.get_geometry(wid).map_err(no_x)?.reply().map_err(|_| OwnWindowError::NoX11)?;
+    let tr = conn
+        .translate_coordinates(screen.root, wid, 0, 0)
+        .map_err(no_x)?
         .reply()
-        .ok()?;
-    let net_state = conn
-        .intern_atom(false, b"_NET_WM_STATE")
-        .ok()?
-        .reply()
-        .ok()?;
-    let state_above = conn
-        .intern_atom(false, b"_NET_WM_STATE_ABOVE")
-        .ok()?
-        .reply()
-        .ok()?;
-    for wid in windows {
-        // _NET_WM_NAME (UTF8) first, plain WM_NAME as fallback.
-        let net = conn
-            .get_property(false, wid, net_wm_name.atom, utf8_string.atom, 0, 256)
-            .ok()
-            .and_then(|r| r.reply().ok())
-            .and_then(|r| {
-                let bytes: Vec<u8> = r.value8()?.collect();
-                Some(String::from_utf8_lossy(&bytes).trim_matches('\0').to_string())
-            });
-        let plain = get_string_property(&conn, wid, wm_name.atom);
-        let class = get_string_property(&conn, wid, wm_class.atom).unwrap_or_default();
-        let title_ok = net.as_deref() == Some(title) || plain.as_deref() == Some(title);
-        // WM_CLASS raw bytes carry both res_name and res_class separated by NUL.
-        let class_ok = class.contains("abito-island") || class.contains("AbitoTauri");
-        if !title_ok && !class_ok {
-            continue; // never abort the scan on a window we do not own
-        }
-        let geom = conn.get_geometry(wid).ok()?.reply().ok()?;
-        let tr = conn
-            .translate_coordinates(screen.root, wid, 0, 0)
-            .ok()?
-            .reply()
-            .ok()?;
-        let extents = conn
-            .get_property(false, wid, gtk_ext.atom, AtomEnum::CARDINAL, 0, 4)
-            .ok()
-            .and_then(|r| r.reply().ok())
-            .and_then(|r| {
-                let v: Vec<u32> = r.value32()?.collect();
-                (v.len() == 4).then(|| [v[0] as i32, v[1] as i32, v[2] as i32, v[3] as i32])
-            });
-        let above = conn
-            .get_property(false, wid, net_state.atom, AtomEnum::ATOM, 0, 64)
-            .ok()
-            .and_then(|r| r.reply().ok())
-            .and_then(|r| {
-                r.value32()
-                    .map(|mut it| it.any(|a| a == state_above.atom))
-            });
-        let class = get_string_property(&conn, wid, wm_class.atom);
-        return Some(X11Window {
-            id: wid,
-            // translate_coordinates(root -> wid, 0, 0) reports the root origin
-            // in window coordinates, i.e. the negated window origin.
-            x: -(tr.dst_x as i32),
-            y: -(tr.dst_y as i32),
-            w: geom.width as i32,
-            h: geom.height as i32,
-            border: geom.border_width as i32,
-            frame_extents: extents,
-            wm_state_above: above,
-            wm_class: class,
+        .map_err(|_| OwnWindowError::NoX11)?;
+    let extents = conn
+        .get_property(false, wid, gtk_ext, AtomEnum::CARDINAL, 0, 4)
+        .ok()
+        .and_then(|r| r.reply().ok())
+        .and_then(|r| {
+            let v: Vec<u32> = r.value32()?.collect();
+            (v.len() == 4).then(|| [v[0] as i32, v[1] as i32, v[2] as i32, v[3] as i32])
         });
-    }
-    None
+    let above = conn
+        .get_property(false, wid, net_state, AtomEnum::ATOM, 0, 64)
+        .ok()
+        .and_then(|r| r.reply().ok())
+        .and_then(|r| r.value32().map(|mut it| it.any(|a| a == state_above)));
+    Ok(X11Window {
+        id: wid,
+        // translate_coordinates(root -> wid, 0, 0) reports the root origin
+        // in window coordinates, i.e. the negated window origin.
+        x: -(tr.dst_x as i32),
+        y: -(tr.dst_y as i32),
+        w: geom.width as i32,
+        h: geom.height as i32,
+        border: geom.border_width as i32,
+        frame_extents: extents,
+        wm_state_above: above,
+        wm_class: get_string_property(&conn, wid, wm_class),
+    })
 }
 
 /// Cached X id of our window: after the first scan every origin read costs
@@ -235,7 +290,21 @@ pub fn x11_window_origin() -> Option<(i32, i32)> {
         }
         *cache.lock().expect("wid cache lock") = None; // stale id: rescan
     }
-    let win = x11_find_window_by_title("Abito")?;
+    let win = match x11_find_own_window("Abito") {
+        Ok(win) => win,
+        Err(error) => {
+            // Visible, once per distinct reason: the caller falls back to
+            // Tauri's getter — never to another client's window.
+            static LAST: OnceLock<Mutex<Option<OwnWindowError>>> = OnceLock::new();
+            let last = LAST.get_or_init(|| Mutex::new(None));
+            let mut seen = last.lock().expect("own window error lock");
+            if *seen != Some(error) {
+                eprintln!("x11 own window: {} (pid {})", error.as_str(), std::process::id());
+                *seen = Some(error);
+            }
+            return None;
+        }
+    };
     *cache.lock().expect("wid cache lock") = Some(win.id);
     Some((win.x, win.y))
 }
@@ -271,5 +340,54 @@ pub fn current(win: &WebviewWindow) -> WorkArea {
         source,
         x11,
         monitor: mon,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cand(id: u32, pid: Option<u32>, title: &str) -> Candidate {
+        Candidate { id, pid, title: Some(title.to_string()) }
+    }
+
+    #[test]
+    fn our_window_is_the_one_with_our_pid_and_our_title() {
+        let list = [cand(1, Some(999), "Abito"), cand(2, Some(42), "Abito")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Ok(2));
+    }
+
+    #[test]
+    fn a_foreign_window_titled_abito_is_never_taken_for_ours() {
+        // another process opens a window titled exactly "Abito"
+        let list = [cand(7, Some(999), "Abito")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Err(OwnWindowError::NotFound));
+    }
+
+    #[test]
+    fn a_window_without_net_wm_pid_fails_visibly_instead_of_guessing() {
+        let list = [cand(7, None, "Abito")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Err(OwnWindowError::PidMissing));
+        // even when a pid-less window is listed first, a proven own one wins
+        let list = [cand(7, None, "Abito"), cand(8, Some(42), "Abito")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Ok(8));
+    }
+
+    #[test]
+    fn title_is_secondary_among_our_own_windows() {
+        // our process may own helper windows; prefer the titled one
+        let list = [cand(3, Some(42), "helper"), cand(4, Some(42), "Abito")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Ok(4));
+        // exactly one own top-level window: it is ours even untitled
+        let list = [cand(5, Some(42), "")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Ok(5));
+        // several own windows, none titled: ambiguous, refuse
+        let list = [cand(5, Some(42), "a"), cand(6, Some(42), "b")];
+        assert_eq!(pick_own_window(&list, 42, "Abito"), Err(OwnWindowError::Ambiguous));
+    }
+
+    #[test]
+    fn empty_list_is_not_found() {
+        assert_eq!(pick_own_window(&[], 42, "Abito"), Err(OwnWindowError::NotFound));
     }
 }

@@ -61,7 +61,11 @@ fn readback(app: &AppHandle, step: &str) {
     };
     // Raw X11 ground truth for our own window (read-only): disambiguates the
     // Tauri getters from what the WM actually applied.
-    let x11win = abito_island::workarea::x11_find_window_by_title("Abito");
+    // FIX-B: identified by _NET_WM_PID == our pid (title secondary); a
+    // failure is printed as `x11_window_error`, never replaced by a guess.
+    let found = abito_island::workarea::x11_find_own_window("Abito");
+    let x11_error = found.as_ref().err().map(|e| e.as_str());
+    let x11win = found.ok();
     let x11json = x11win.as_ref().map(|w| {
         json!({
             "id": format!("0x{:x}", w.id),
@@ -86,6 +90,8 @@ fn readback(app: &AppHandle, step: &str) {
             "work_area_x11_raw": wa.x11.map(|r| [r.x, r.y, r.w, r.h]),
             "work_area_monitor_raw": wa.monitor.map(|r| [r.x, r.y, r.w, r.h]),
             "x11_window": x11json,
+            "x11_window_error": x11_error,
+            "x11_window_match": "_NET_WM_PID == own pid, title secondary",
         },
         "requested": {
             "position": rpos.map(|p| [p.0, p.1]),

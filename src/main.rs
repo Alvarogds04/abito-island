@@ -633,8 +633,7 @@ fn spawn_workarea_watcher(app: AppHandle) {
         let io = TauriIo(&win);
         let (x, y) = io.outer_position();
         let (w, h) = io.size();
-        let safe = geometry::clamp_rect(Rect { x, y, w: h.min(w), h }, wa.rect);
-        if (safe.x, safe.y, safe.w, safe.h) != (x, y, w, h) {
+        if let Some(safe) = geometry::reclamp_on_workarea_change(Rect { x, y, w, h }, wa.rect) {
             io.set_size(safe.w, safe.h);
             io.set_outer_position(safe.x, safe.y);
             store_requested(

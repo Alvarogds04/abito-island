@@ -121,6 +121,17 @@ pub fn clamp_rect(rect: Rect, area: Rect) -> Rect {
     }
 }
 
+/// Work-area watcher decision (M1b re-clamp): the rect the window must move
+/// to after the work area changed, or `None` when it already fits. The
+/// window keeps its OWN width and height (FIX-A: the watcher used to pass
+/// `h.min(w)` as the width, which asked a 304x44 compact window to become
+/// 44x44 on any work-area change); only a window larger than the area is
+/// shrunk, by `clamp_rect`.
+pub fn reclamp_on_workarea_change(current: Rect, area: Rect) -> Option<Rect> {
+    let safe = clamp_rect(current, area);
+    (safe != current).then_some(safe)
+}
+
 /// Start position: top-centre of the work area.
 pub fn initial_position(area: Rect, w: i32, h: i32) -> Rect {
     Rect {
@@ -524,5 +535,39 @@ mod tests {
         let top = Rect { x: 624, y: a.y, w: 672, h: 176 };
         let chat = anchor_toggle(Edge::Top, top, LOGICAL_CHAT, a);
         assert_eq!((chat.y, chat.h), (a.y, 256));
+    }
+
+    // --- FIX-A (spec lane 4aa7c63): watcher re-clamp must keep the width ----
+
+    #[test]
+    fn workarea_change_never_shrinks_the_compact_window_to_44x44() {
+        let compact = Rect { x: 808, y: 32, w: 304, h: 44 };
+        // dock autohide / monitor change: the area moves but the island fits
+        let moved = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        assert_eq!(reclamp_on_workarea_change(compact, moved), None);
+        // the area shrank under the island: it is MOVED, still 304x44
+        let narrow = Rect { x: 1000, y: 32, w: 920, h: 1048 };
+        let moved = reclamp_on_workarea_change(compact, narrow).expect("must move");
+        assert_eq!((moved.x, moved.y, moved.w, moved.h), (1000, 32, 304, 44));
+    }
+
+    #[test]
+    fn workarea_change_keeps_overview_and_chat_sizes() {
+        for (w, h) in [LOGICAL_OVERVIEW, LOGICAL_CHAT] {
+            let r = Rect { x: 100, y: 32, w, h };
+            assert_eq!(reclamp_on_workarea_change(r, area()), None);
+            let off = Rect { x: 1700, y: 32, w, h };
+            let moved = reclamp_on_workarea_change(off, area()).unwrap();
+            assert_eq!((moved.w, moved.h), (w, h));
+            assert_eq!(moved.right(), area().right());
+        }
+    }
+
+    #[test]
+    fn workarea_smaller_than_the_window_still_shrinks_it_onto_the_screen() {
+        let r = Rect { x: 0, y: 0, w: 672, h: 256 };
+        let tiny = Rect { x: 0, y: 0, w: 500, h: 200 };
+        let moved = reclamp_on_workarea_change(r, tiny).unwrap();
+        assert_eq!((moved.w, moved.h), (500, 200));
     }
 }
