@@ -181,6 +181,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   /* island.js already snaps geometry under reduced motion; this also kills any
      residual CSS transition so the OS preference really wins. */
   #notices, #permission { transition: none; }
+  #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg, [data-kind="checking"] .ico svg { animation: none; }
   /* Contract §4: no meaning depends on animation. The in-flight ring stays
      still: the blue open arc (shape + --island-live) is the cue. */
   [data-kind="busy"] .ico svg { animation: none; }

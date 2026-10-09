@@ -198,6 +198,14 @@ test('UI.2 chat markup: icon-only controls are named, copy is voseo, labels Vos/
   assert.doesNotMatch(css, /content: "(Vos|Abito): "/);
 });
 
+test('UI.2 reduced motion: the chat ring (busy/checking, #id specificity) is still under prefers-reduced-motion', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+  const block = css.split('@media (prefers-reduced-motion: reduce)')[1];
+  assert.match(css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)')), /#chat-state\[data-kind="busy"\] \.ico svg[^}]*animation: none/);
+  assert.match(css, /#chat-state\[data-kind="checking"\] \.ico svg[^}]*animation: none/);
+  assert.ok(block);
+});
+
 test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {
   assert.equal(V.gateLabel('ready'), 'Listo');
   assert.equal(V.gateLabel('queue'), 'En cola');
