@@ -40,6 +40,30 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{self, Message};
+use crate::question::{self, Inbound};
+use serde::Serialize;
+
+const WRITE_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Local host diagnostic, NOT a new wire message or a capability promise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionOutcome {
+    CapabilityNotImplementedYet,
+}
+
+/// QP.2 slice 1 retains only one static reason, never question/answer text,
+/// scope or tokens. Lifecycle and host answer APIs arrive in the next slice.
+#[derive(Clone, Default, Serialize)]
+pub struct QuestionSnapshot {
+    pub notice: Option<QuestionOutcome>,
+}
+
+fn write_line(writer: &Mutex<UnixStream>, line: &[u8]) -> std::io::Result<()> {
+    let mut writer = writer.lock().expect("origin writer lock");
+    writer.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    writer.write_all(line)
+}
 
 /// Override env: transport runtime root (tests/probe).
 pub const SOCKET_DIR_ENV: &str = "ABITO_SOCKET_DIR";
@@ -117,6 +141,8 @@ pub struct TransportOptions {
     pub idle_ms: u64,
     pub on_notice: Box<dyn Fn(Message) + Send + Sync>,
     pub on_connections: Box<dyn Fn(u32) + Send + Sync>,
+    /// Invalidation only; callbacks run after all transport locks are dropped.
+    pub on_question_change: Box<dyn Fn() + Send + Sync>,
 }
 
 impl TransportOptions {
@@ -128,6 +154,7 @@ impl TransportOptions {
             idle_ms: protocol::IDLE_MS,
             on_notice: Box::new(|_| {}),
             on_connections: Box::new(|_| {}),
+            on_question_change: Box::new(|| {}),
         }
     }
 
@@ -148,6 +175,11 @@ impl TransportOptions {
 
     pub fn on_connections(mut self, callback: impl Fn(u32) + Send + Sync + 'static) -> Self {
         self.on_connections = Box::new(callback);
+        self
+    }
+
+    pub fn on_question_change(mut self, callback: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_question_change = Box::new(callback);
         self
     }
 }
@@ -419,9 +451,15 @@ struct Inner {
     store: Mutex<protocol::NoticeStore>,
     on_notice: Box<dyn Fn(Message) + Send + Sync>,
     on_connections: Box<dyn Fn(u32) + Send + Sync>,
+    questions: Mutex<QuestionSnapshot>,
+    on_question_change: Box<dyn Fn() + Send + Sync>,
 }
 
 impl Inner {
+    fn question_changed(&self) {
+        // Observer panics cannot poison transport state or prevent teardown.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.on_question_change)()));
+    }
     /// `transport.cjs report()`: clients that completed the handshake.
     fn report(&self) {
         let identified = self
@@ -451,6 +489,11 @@ impl Transport {
         &self.inner.runtime
     }
 
+    /// Read the local negotiation diagnostic without exposing wire authority.
+    pub fn question_snapshot(&self) -> QuestionSnapshot {
+        self.inner.questions.lock().expect("questions lock").clone()
+    }
+
     /// Legacy `close()`: stop accepting, destroy clients, verify dir + socket
     /// inode identity, unlink only our own socket, rmdir only our own (empty)
     /// dir. Idempotent; foreign paths are never removed.
@@ -468,7 +511,7 @@ impl Transport {
             .expect("listener lock")
             .take()
         {
-            let _ = handle.join();
+            join_other_thread(handle);
         }
         let streams: Vec<Arc<UnixStream>> = self
             .inner
@@ -484,7 +527,7 @@ impl Transport {
         let handlers: Vec<std::thread::JoinHandle<()>> =
             std::mem::take(&mut *self.inner.handlers.lock().expect("handlers lock"));
         for handle in handlers {
-            let _ = handle.join();
+            join_other_thread(handle);
         }
         cleanup(
             &self.inner.directory,
@@ -499,6 +542,15 @@ impl Transport {
 impl Drop for Transport {
     fn drop(&mut self) {
         let _ = self.close();
+    }
+}
+
+fn join_other_thread(handle: std::thread::JoinHandle<()>) {
+    // A host callback can close/drop the receiver on its own read/expiry
+    // thread. Detach only that current handle; shutdown/running=false ensures
+    // it finishes on return. Joining ourselves would panic or deadlock.
+    if handle.thread().id() != std::thread::current().id() {
+        let _ = handle.join();
     }
 }
 
@@ -626,6 +678,7 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
         idle_ms,
         on_notice,
         on_connections,
+        on_question_change,
     } = options;
 
     prepare_runtime(&runtime)?;
@@ -717,6 +770,8 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
         store: Mutex::new(protocol::NoticeStore::new(project)),
         on_notice,
         on_connections,
+        on_question_change,
+        questions: Mutex::new(QuestionSnapshot::default()),
     });
 
     let accept_inner = inner.clone();
@@ -798,15 +853,72 @@ fn accept_loop(inner: Arc<Inner>, listener: UnixListener) {
     }
 }
 
+/// Transport-local framing; the legacy protocol module stays byte-for-byte
+/// unchanged. Identification allows question negotiation in this buffer;
+/// this slice does not advertise subscription and never widens legacy decode.
+#[derive(Default)]
+struct QuestionFramer { pending: Vec<u8> }
+impl QuestionFramer {
+    fn push(&mut self, chunk: &[u8], identified: bool) -> Result<protocol::Framed, ()> {
+        // After v1 identification, allow a full-size questions_hello as well.
+        // This is framing permission, NOT subscription or admission authority.
+        let cap = if identified { question::FRAME_BYTES } else { protocol::FRAME_BYTES };
+        if self.pending.len() + chunk.len() > cap * protocol::BATCH_FACTOR { return Err(()); }
+        self.pending.extend_from_slice(chunk);
+        let mut frames = Vec::new();
+        let mut start = 0;
+        let mut legacy_bytes = 0;
+        for (end, &byte) in self.pending.iter().enumerate() {
+            if byte == b'\n' {
+                let frame = &self.pending[start..end];
+                // Classification only affects the tighter legacy batch bound.
+                // Both real decoders still enforce their original full schema,
+                // UTF-8, per-type byte bound and connection/opt-in authority.
+                let qp = serde_json::from_slice::<serde_json::Value>(frame).ok()
+                    .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|t| matches!(t,
+                        "questions_hello" | "question" | "question_cancel" |
+                        "question_resolved" | "question_answer_rejected"))).unwrap_or(false);
+                if !qp { legacy_bytes += end + 1 - start; }
+                if legacy_bytes > protocol::FRAME_BYTES * protocol::BATCH_FACTOR { return Err(()); }
+                frames.push(frame.to_vec()); start = end + 1;
+            }
+        }
+        self.pending.drain(..start);
+        let fatal = (self.pending.len() > cap).then_some(protocol::FramingError::OversizedTail);
+        Ok(protocol::Framed { frames, fatal })
+    }
+}
+
+fn reject_question_negotiation(inner: &Inner, stream: &UnixStream, inbound: Inbound) {
+    if matches!(inbound, Inbound::Hello) {
+        // A validated opt-in is recognized, but lifecycle support is knowingly
+        // absent in this slice. Never send questions_ready or invent a wire
+        // rejection schema. The stable producer reports unsupported_receiver
+        // when this scoped socket closes before capability readiness.
+        inner.questions.lock().expect("questions lock").notice =
+            Some(QuestionOutcome::CapabilityNotImplementedYet);
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        // No question/socket-map/writer lock is held during the observer.
+        inner.question_changed();
+    }
+}
+
 fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
-    let mut framer = protocol::Framer::new();
+    let writer = match stream.try_clone() {
+        Ok(writer) => Arc::new(Mutex::new(writer)),
+        Err(_) => {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            inner.clients.lock().expect("clients lock").remove(&id); inner.report(); return;
+        }
+    };
+    let mut framer = QuestionFramer::default();
     let mut identity: Option<protocol::Identity> = None;
     let mut quota = protocol::FrameQuota::new(now_millis());
     let handshake_deadline = Instant::now() + Duration::from_millis(inner.handshake_ms);
     // Only a complete, valid message renews the lease (legacy `active()`):
     // partial bytes or invalid frames never move this.
     let mut last_valid: Option<Instant> = None;
-    let mut buffer = [0u8; 1024];
+    let mut buffer = [0u8; question::FRAME_BYTES * protocol::BATCH_FACTOR];
 
     'outer: loop {
         let deadline = match (&identity, last_valid) {
@@ -827,12 +939,14 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
         match reader.read(&mut buffer) {
             Ok(0) => break, // peer closed
             Ok(count) => {
-                let framed = match framer.push(&buffer[..count]) {
+                let framed = match framer.push(&buffer[..count], identity.is_some()) {
                     Ok(framed) => framed,
                     Err(_) => break, // batch cap (line 66): destroy
                 };
                 let mut rejected = false;
                 for frame in &framed.frames {
+                    // A previous frame's observer may close/drop the receiver.
+                    if !inner.running.load(Ordering::SeqCst) { rejected = true; break; }
                     // rate gate BEFORE decode (transport.cjs line 74-75)
                     if quota.check(now_millis()).is_err() {
                         rejected = true;
@@ -847,8 +961,7 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
                                     session_id: message.session_id.clone(),
                                     at: message.at,
                                 });
-                                let mut writer = &*stream; // Write for &UnixStream
-                                if writer.write_all(protocol::READY_LINE).is_err() {
+                                if write_line(&writer, protocol::READY_LINE).is_err() {
                                     rejected = true;
                                     break;
                                 }
@@ -875,8 +988,12 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
                             }
                         }
                         Err(_) => {
+                            let inbound = identity.as_ref().and_then(|bound| question::decode(frame, bound, now_ms()).ok());
+                            if let Some(inbound) = inbound {
+                                reject_question_negotiation(&inner, &stream, inbound);
+                            }
                             rejected = true;
-                            break; // destroy on invalid frame
+                            break; // unsupported negotiation/unsubscribed frame: fail closed
                         }
                     }
                 }
@@ -897,6 +1014,8 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
     }
 
     let _ = stream.shutdown(std::net::Shutdown::Both);
+    // Keep the explicit local capability reason through teardown. The legacy
+    // connection callback still reports disconnect; no pending state exists.
     inner.clients.lock().expect("clients lock").remove(&id);
     inner.report();
 }
@@ -906,6 +1025,19 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn question_framing_preserves_legacy_batch_after_identification() {
+        let legacy = b"{\"type\":\"heartbeat\"}\n";
+        let chunk = legacy.repeat(4096 / legacy.len() + 1);
+        assert!(QuestionFramer::default().push(&chunk, true).is_err());
+        let qp = b"{\"type\":\"question\"}\n";
+        let mut chunk = qp.repeat(32768 / qp.len());
+        chunk.resize(32768, b' ');
+        assert!(QuestionFramer::default().push(&chunk, true).is_ok());
+        assert!(QuestionFramer::default().push(&vec![b'x';32769], true).is_err());
+        assert!(QuestionFramer::default().push(&vec![b'x';513], false).unwrap().fatal.is_some());
+    }
 
     #[test]
     fn reserved_preview_roots_are_never_allowed() {
