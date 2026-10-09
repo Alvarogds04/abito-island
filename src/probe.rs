@@ -768,7 +768,7 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// before and after. The fake's request log proves that NOTHING was
 /// written before that click (a notice can never approve) and that
 /// `/execute` carried exactly the card's `payload_hash`.
-/// Seven R6 poses at the overview framing (viewBox 38 36 124 124), one PNG
+/// Seven R6 poses at the overview framing (viewBox 36 32 128 128), one PNG
 /// each, BEFORE any setState is wired to real events. Probe-only: a second,
 /// non-live engine instance is mounted on a clone of #clay (same size,
 /// position and viewBox as the island's character) held in the engine's own
@@ -783,6 +783,7 @@ fn capture_poses(app: &AppHandle, suffix: &str) {
         "(() => { const real = document.getElementById('clay');
           const tmp = real.cloneNode(false); tmp.id = 'clay-pose';
           tmp.setAttribute('viewBox', real.getAttribute('viewBox'));
+          tmp.style.position = 'absolute'; tmp.style.display = 'block'; tmp.style.transform = 'translateX(-50%)'; tmp.style.pointerEvents = 'none';
           real.after(tmp); real.style.visibility = 'hidden';
           window.__poseInst = AbitoClay.create(tmp, { seed: 505, viewBox: real.getAttribute('viewBox'), live: false, state: 'idle' });
           tmp.setAttribute('viewBox', real.getAttribute('viewBox')); })()",

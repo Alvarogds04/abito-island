@@ -75,6 +75,18 @@
     if (state === 'unavailable') return mk('down', 'red', 'triangle', 'Modelo caído');
     return mk('checking', 'live', 'ring', '');
   }
+  // R6 pose for the chat lane, from real state only: a turn thinking -> think,
+  // streaming -> speak; the model down/blocked or a failed last turn -> error;
+  // everything else (ready, queued, waiting for approval) -> rest (null).
+  function poseFor(view) {
+    if (!view) return null;
+    const active = activeTurn(view);
+    if (active) return active.state === 'thinking' ? 'think' : active.state === 'streaming' ? 'speak' : null;
+    const a = view.availability && view.availability.state;
+    if (a === 'unavailable' || a === 'blocked') return 'error';
+    const last = Array.isArray(view.turns) && view.turns.length ? view.turns[view.turns.length - 1] : null;
+    return last && last.state === 'error' ? 'error' : null;
+  }
   // Draft problem as one visible word; empty draft shows nothing.
   function draftWord(text) {
     const normalized = String(text).replace(/\r\n?/g, '\n');
@@ -246,5 +258,5 @@
   }
   const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
 
-  return { statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  return { poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });

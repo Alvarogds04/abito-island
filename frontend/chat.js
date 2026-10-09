@@ -116,6 +116,11 @@
     draftWord.hidden = !dw;
     draftWord.textContent = dw;
     input.dataset.invalid = dw ? 'true' : 'false';
+    // R6 pose from REAL lane state only (docs/r6-states-mapping.md): thinking,
+    // streaming a reply, or the model down/blocked. Anything else = rest.
+    const pose = V.poseFor(view);
+    document.dispatchEvent(new CustomEvent('abito:pose', { detail: pose }));
+
   }
 
   function apply(next) {

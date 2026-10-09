@@ -198,12 +198,92 @@ test('UI.2 chat markup: icon-only controls are named, copy is voseo, labels Vos/
   assert.doesNotMatch(css, /content: "(Vos|Abito): "/);
 });
 
-test('UI.2 reduced motion: the chat ring (busy/checking, #id specificity) is still under prefers-reduced-motion', () => {
+// Real cascade resolution (not a text regex): which `animation` declaration
+// WINS for a described element under a given media preference. Supports the
+// selector subset style.css uses: tag, #id, .class, [attr="v"], descendant.
+function cascadeAnimation(css, chain, reduced) {
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = []; // {sel, value, spec, order}
+  let order = 0;
+  const walk = (text, media) => {
+    let i = 0;
+    while (i < text.length) {
+      const open = text.indexOf('{', i);
+      if (open < 0) break;
+      const head = text.slice(i, open).trim();
+      let depth = 1, j = open + 1;
+      while (j < text.length && depth) { depth += text[j] === '{' ? 1 : text[j] === '}' ? -1 : 0; j++; }
+      const body = text.slice(open + 1, j - 1);
+      i = j;
+      if (head.startsWith('@media')) {
+        const ok = head.includes('prefers-reduced-motion: reduce') ? reduced
+          : head.includes('prefers-reduced-motion: no-preference') ? !reduced : false;
+        if (ok) walk(body, head);
+        continue;
+      }
+      if (head.startsWith('@')) continue;
+      const m = /(?:^|;)\s*animation\s*:\s*([^;]+)/.exec(body);
+      if (!m) continue;
+      for (const sel of head.split(',')) rules.push({ sel: sel.trim(), value: m[1].trim(), order: order++ });
+    }
+  };
+  walk(plain, null);
+  const parseCompound = c => {
+    const out = { tag: null, id: null, classes: [], attrs: [], spec: [0, 0, 0] };
+    const re = /([#.]?[\w-]+)|\[([\w-]+)="([^"]*)"\]/g;
+    let m;
+    while ((m = re.exec(c))) {
+      if (m[2]) { out.attrs.push([m[2], m[3]]); out.spec[1]++; }
+      else if (m[1][0] === '#') { out.id = m[1].slice(1); out.spec[0]++; }
+      else if (m[1][0] === '.') { out.classes.push(m[1].slice(1)); out.spec[1]++; }
+      else { out.tag = m[1]; out.spec[2]++; }
+    }
+    return out;
+  };
+  const matches = (c, el) => (!c.tag || c.tag === el.tag) && (!c.id || c.id === el.id) &&
+    c.classes.every(k => (el.classes || []).includes(k)) && c.attrs.every(([k, v]) => (el.attrs || {})[k] === v);
+  const winners = rules.map(r => {
+    const parts = r.sel.split(/\s+/).map(parseCompound);
+    // last compound must match the element; earlier ones an ancestor, in order
+    let k = parts.length - 1;
+    if (!matches(parts[k], chain[chain.length - 1])) return null;
+    let e = chain.length - 2; k -= 1;
+    while (k >= 0 && e >= 0) { if (matches(parts[k], chain[e])) k -= 1; e -= 1; }
+    if (k >= 0) return null;
+    return { ...r, spec: parts.reduce((a, p) => a.map((v, n) => v + p.spec[n]), [0, 0, 0]) };
+  }).filter(Boolean);
+  winners.sort((a, b) => a.spec[0] - b.spec[0] || a.spec[1] - b.spec[1] || a.spec[2] - b.spec[2] || a.order - b.order);
+  return winners.length ? winners[winners.length - 1].value : null;
+}
+
+test('UI.2 reduced motion: the CASCADE (not a regex) leaves the chat ring still and spins it otherwise', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
-  const block = css.split('@media (prefers-reduced-motion: reduce)')[1];
-  assert.match(css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)')), /#chat-state\[data-kind="busy"\] \.ico svg[^}]*animation: none/);
-  assert.match(css, /#chat-state\[data-kind="checking"\] \.ico svg[^}]*animation: none/);
-  assert.ok(block);
+  for (const kind of ['busy', 'checking']) {
+    const chain = [{ tag: 'span', id: 'chat-state', attrs: { 'data-kind': kind }, classes: ['chip'] },
+      { tag: 'span', classes: ['ico'] }, { tag: 'svg' }];
+    const reduced = cascadeAnimation(css, chain, true);
+    assert.ok(reduced === null || reduced === 'none', `reduced: ${kind} resolves to ${reduced}`);
+    assert.match(cascadeAnimation(css, chain, false), /^spin /, `normal: ${kind} spins`);
+  }
+  // the harness itself must detect the old bug: a spinning rule AFTER the stop wins
+  const buggy = '@media (prefers-reduced-motion: reduce) { #a .b { animation: none; } }\n#a .b { animation: spin 1s; }';
+  assert.match(cascadeAnimation(buggy, [{ tag: 'p', id: 'a' }, { tag: 'i', classes: ['b'] }], true), /^spin/);
+});
+
+test('Q2 poseFor: only real lane state maps to a pose; the rest is rest', () => {
+  const t = state => ({ turn_id: 't', state, user_text: 'x', reply: '', trimmed_turns: 0 });
+  const v = (state, turns = [], active = null) => ({ turns, active_turn: active, availability: { state, message: '' } });
+  assert.equal(V.poseFor(null), null);
+  assert.equal(V.poseFor(v('ready')), null);
+  assert.equal(V.poseFor(v('ready', [t('thinking')], 't')), 'think');
+  assert.equal(V.poseFor(v('ready', [t('streaming')], 't')), 'speak');
+  assert.equal(V.poseFor(v('ready', [t('queued')], 't')), null);
+  assert.equal(V.poseFor(v('ready', [t('waiting_approval')], 't')), null);
+  assert.equal(V.poseFor(v('unavailable')), 'error');
+  assert.equal(V.poseFor(v('blocked')), 'error');
+  assert.equal(V.poseFor(v('ready', [t('error')])), 'error');
+  assert.equal(V.poseFor(v('ready', [t('completed')])), null);
+  assert.equal(V.poseFor(v('unchecked')), null);
 });
 
 test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {

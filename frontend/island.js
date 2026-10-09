@@ -25,15 +25,15 @@
   const COMPACT = { w: 288, h: 32, r: 14, gap: 6, clay: 44, drop: 0 };
   // UI.1: R6 is 128px at the left of the plain overview and 72px while the
   // approval card is shown (only scale/position; the engine is frozen).
-  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 136, drop: 0, clayX: 80 };
-  const OVERVIEW_CARD = { clay: 77, clayX: 56 };
+  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 0, clayX: 82 };
+  const OVERVIEW_CARD = { clay: 80, clayX: 62 };
   // The engine draws its body ~112 viewBox units wide inside its 200x160
   // canvas (measured from the captures), so a box of 128px shows a ~70px
   // character. In the overview the SVG viewBox is tightened (attribute only,
   // engine bytes untouched) so box 136 shows ~127px and box 77 shows ~72px.
   const R6_VISIBLE_UNITS = 112;
   const BASE_VB = [0, 20, 200, 160];
-  const OVERVIEW_VB = [38, 36, 124, 124];
+  const OVERVIEW_VB = [36, 32, 128, 128];
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
@@ -49,6 +49,31 @@
   if (typeof AbitoClay !== 'undefined') {
     clay = AbitoClay.create(clayEl, { seed: 505, viewBox: '0 20 200 160' });
   }
+
+  // ---- R6 pose (Q2): only REAL events drive it, through the engine's own
+  // setState (no new poses, no redraw). Sources: the chat lane (chat.js
+  // dispatches `abito:pose`: think/speak/error while a turn or the model is in
+  // that state) and the human's decision once the host says it was SENT
+  // (confirm after Permitir, reject after Denegar: a gesture, not a result).
+  let chatPose = null;
+  let flashPose = null;
+  let flashTimer = 0;
+  const POSES = new Set(['think', 'speak', 'error']);
+  function applyPose() {
+    const next = flashPose || chatPose || 'idle';
+    if (clay && clay.state !== next) clay.setState(next);
+  }
+  function flash(state) {
+    flashPose = state;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { flashPose = null; applyPose(); }, 2600);
+    applyPose();
+  }
+  document.addEventListener('abito:pose', event => {
+    const state = event.detail;
+    chatPose = POSES.has(state) ? state : null;
+    applyPose();
+  });
 
   // ---- motion (contract numbers, JS-driven per frame) --------------------
   const W0 = 2 * Math.PI / 0.5; // spring response: 0.5 s
@@ -439,6 +464,8 @@
     flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : 'Avisos caídos');
     $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
   }
+  let lastVerb = null;
+  let sentFlashedFor = null;
   function renderCard() {
     paintCompactFlag();
     const card = current && current.card;
@@ -455,6 +482,7 @@
     if (!valid) { delete capsule.dataset.card; delete capsule.dataset.cardTone; return; }
     const reason = cardFeedback(card);
     const view = O.cardView(reason);
+    if (view.kind === 'sent' && lastVerb && sentFlashedFor !== cardKey(card)) { sentFlashedFor = cardKey(card); flash(lastVerb === 'allow' ? 'confirm' : 'reject'); }
     $('operation').textContent = card.operation;
     paintExpiry(card);
     $('card-expiry').hidden = view.kind === 'expired' || view.kind === 'sent';
@@ -495,6 +523,7 @@
     cardFlight = intent;
     renderCard(); // Lock BOTH controls before invoking the host verb.
     try {
+      lastVerb = verb; // remembered only to pick the gesture once the host says SENT
       const state = await window.desktop[verb](); // zero arguments; never a proposal id
       cardFlight = null;
       if (state && Number.isSafeInteger(state.revision) && state.revision > intent.revision &&

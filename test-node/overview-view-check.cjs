@@ -279,4 +279,18 @@ test('R6 visible size: ~128px plain overview, ~72px with the card (scale/viewBox
   assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex').slice(0, 8), 'e2dc5db3');
 });
 
+test('R6 margins: card box keeps >=20px from the island edge (reject shake ~2px), viewBox top air', () => {
+  const [clay, clayX] = /OVERVIEW_CARD = \{ clay: (\d+), clayX: (\d+)/.exec(islandSrc).slice(1).map(Number);
+  assert.ok(clayX - clay / 2 >= 20, `box left ${clayX - clay / 2}`);
+  const vb = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
+  assert.deepEqual(vb, [36, 32, 128, 128]);
+});
+
+test('Q2 pose wiring: engine setState only, from abito:pose and the SENT gesture; no new poses', () => {
+  assert.match(islandSrc, /clay\.setState\(next\)/);
+  assert.match(islandSrc, /'abito:pose'/);
+  assert.match(islandSrc, /view\.kind === 'sent' && lastVerb/);
+  assert.doesNotMatch(islandSrc, /staticPose|AbitoClay\.STATES/);
+});
+
 console.log(`overview-view-check: ${passed} passed`);
