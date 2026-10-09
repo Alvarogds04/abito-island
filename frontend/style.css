@@ -94,7 +94,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 
 #notices {
   position: absolute;
-  left: 160px; right: 72px; top: 8px; bottom: 64px; /* 88px = row 44 + pill 44; stops 8px before the bubble column (16+48) and 4px above it */
+  left: 160px; right: 72px; top: 8px; bottom: 56px; /* 96px = row 44 + 4px gap + pill 44 + 4px slack; the «i» and cross circles never touch; stops 8px before the bubble column (16+48) */
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
@@ -104,7 +104,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #capsule[data-phase="expanded"] #notices { opacity: 1; visibility: visible; }
 #notice-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 #notice-pill {
-  display: flex; align-items: center; gap: 8px; margin-top: 0; padding: 0 0 0 10px;
+  display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 0 0 10px;
   min-height: 44px; border-radius: var(--radius-full); background: #18181b;
 }
 #notice-ring { display: inline-grid; place-items: center; color: var(--go); }

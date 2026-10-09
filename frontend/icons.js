@@ -31,6 +31,7 @@
     'lock': '<rect x="4" y="9" width="12" height="8" rx="2"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/>',
     'refresh': '<path d="M16 10a6 6 0 1 1-2-4.5M16 3v3.5h-3.5"/>',
     'info': '<circle cx="10" cy="10" r="8"/><path d="M10 9v5M10 6v.01"/>',
+    'plane': '<path d="M18 2L9 11M18 2l-6 16-3-7-7-3z"/>', // paper plane: sent, result not confirmed
     'ring': '<path d="M10 2a8 8 0 1 0 8 8"/>', // open arc; the page spins it
   });
   const NAMES = Object.freeze(Object.keys(PATHS));

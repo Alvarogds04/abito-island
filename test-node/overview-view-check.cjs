@@ -16,7 +16,7 @@ const test = (name, fn) => { fn(); passed += 1; };
 
 // ---- icons ---------------------------------------------------------------
 const CONTRACT = ['bubble', 'arrow-up', 'square', 'arrow-left', 'chip', 'plug', 'plug-off',
-  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info'];
+  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info', 'plane'];
 
 test('registry has every contract icon (14 rows, plug/unplugged = 2 shapes)', () => {
   for (const name of CONTRACT) assert.ok(I.NAMES.includes(name), name);
@@ -73,12 +73,14 @@ test('pending: sun tone, no extra word, actionable', () => {
   assert.equal(v.actionable, true);
 });
 
-test('SENT is "Enviada" with a go check, never "No disponible"', () => {
+test('SENT is "Enviada": neutral live paper plane, never a go check (contract §1.1/§8.4)', () => {
   const v = O.cardView('Decisión enviada.');
   assert.equal(v.kind, 'sent');
   assert.equal(v.word, 'Enviada');
-  assert.equal(v.icon, 'check');
-  assert.equal(v.tone, 'go');
+  assert.equal(v.icon, 'plane');
+  assert.equal(v.tone, 'live');
+  assert.notEqual(v.tone, 'go');
+  assert.notEqual(v.icon, 'check');
   assert.equal(v.actionable, false);
   assert.doesNotMatch(JSON.stringify(v), /No disponible/);
 });

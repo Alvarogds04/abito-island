@@ -46,7 +46,7 @@
     }
     const text = String(reason);
     const inert = (kind, tone, icon, word, aria) => ({ kind, tone, icon, word, aria, actionable: false });
-    if (text === SENT) return inert('sent', 'go', 'check', 'Enviada', 'Decisión enviada');
+    if (text === SENT) return inert('sent', 'live', 'plane', 'Enviada', 'Decisión enviada; el resultado todavía no está confirmado');
     if (text === EXPIRED) return inert('expired', 'faint', 'clock-off', 'Vencida', 'Propuesta vencida');
     if (text === BUSY) return inert('busy', 'live', 'ring', '', 'Enviando decisión');
     if (text === COVERED) return inert('covered', 'sun', '', '', text);
