@@ -48,6 +48,36 @@ fn question_handshake_exact_bytes_and_legacy_unchanged() {
 }
 
 #[test]
+fn question_busy_reason_capability_is_exact_closed_and_body_bounded() {
+    let mut hello = base("questions_hello"); hello["busyReason"] = json!(1);
+    assert!(parse(&hello).is_ok());
+    for bad in [json!(null),json!(0),json!(2),json!(true),json!("1"),json!(1.0),json!(1.5)] {
+        hello["busyReason"] = bad; assert!(parse(&hello).is_err());
+    }
+    hello["busyReason"] = json!(1);
+    let raw = hello.to_string();
+    let duplicate = raw.replacen("{", "{\"busyReason\":1,", 1);
+    assert!(decode(duplicate.as_bytes(), &identity(), NOW).is_err());
+    let exact = format!("{raw}{}", " ".repeat(FRAME_BYTES-raw.len()));
+    assert!(decode(exact.as_bytes(), &identity(), NOW).is_ok());
+    assert!(decode(format!("{exact} ").as_bytes(), &identity(), NOW).is_err());
+    let mut q = question_value(); q["busyReason"] = json!(1); assert!(parse(&q).is_err());
+}
+#[test]
+fn question_busy_detail_is_only_system_busy_and_minimal_frames_stay_unchanged() {
+    for (reason, code) in [(BusyReason::NativeTransitionBusy,"native_transition_busy"),
+                           (BusyReason::NativeTransitionDegraded,"native_transition_degraded")] {
+        let frame = body(&busy_line_with_reason(&identity(), ID, NOW, reason).unwrap());
+        assert_eq!(frame["busyReason"], code); assert_eq!(frame["reason"], "busy");
+        assert_eq!(frame["source"], "system"); assert_eq!(frame.as_object().unwrap().len(), 10);
+    }
+    for (reason, human) in [(CloseReason::Cancelled,false),(CloseReason::Expired,false),(CloseReason::Busy,true)] {
+        assert!(closed_with_detail(&identity(), ID, reason, human, NOW, Some(BusyReason::NativeTransitionBusy)).is_err());
+    }
+    assert!(body(&busy_line(&identity(), ID, NOW).unwrap()).get("busyReason").is_none());
+    assert!(body(slot().prepare_decline(7, &identity(), ID, NOW).unwrap().line()).get("busyReason").is_none());
+}
+#[test]
 fn question_schema_scope_and_integer_timestamps_fail_closed() {
     for invalid in [json!(null), json!([]), json!({}), base("unknown"), base("answer")] {
         assert!(parse(&invalid).is_err());

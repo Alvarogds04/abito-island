@@ -135,6 +135,12 @@ fn number(output: &str, label: &str) -> i32 {
         .expect("xwininfo numeric field")
 }
 
+// The contract is LOGICAL: compact 304x44, overview 672x176, chat 672x256.
+// Physical scale varies between sessions: real GTK/Tauri factors 2 and 1
+// were observed, without attributing the difference to an environment cause.
+// Use this run's SDK scale, never fixed physical dimensions. NOAUDIT is a
+// separate observer-off check whose factor must come from the same environment's
+// preceding SDK audit; ABITO_NATIVE_EXPECT_SCALE does not change GTK scaling.
 #[test]
 #[ignore = "real display + NORMAL executable; ABITO_NATIVE_NORMAL_TEST=1 opts in"]
 fn normal_compact_matches_actual_runtime_scale() {

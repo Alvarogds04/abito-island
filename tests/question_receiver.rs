@@ -15,7 +15,9 @@ fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_milli
 struct Fixture { transport: Arc<Transport>, root: PathBuf, project: String, changes: Arc<AtomicU64> }
 impl Fixture {
     fn new() -> Self { Self::with_callback_close(false) }
-    fn with_callback_close(close_from_callback: bool) -> Self {
+    fn with_callback_close(close_from_callback: bool) -> Self { Self::with_options(close_from_callback, None) }
+    fn with_native_clock(clock: Arc<AtomicU64>) -> Self { Self::with_options(false, Some(clock)) }
+    fn with_options(close_from_callback: bool, clock: Option<Arc<AtomicU64>>) -> Self {
         // Three-byte leaves keep sockaddr_un within 107 bytes in this long
         // worktree. Exclusive creation also isolates simultaneous test runs;
         // existing fixtures are never reused or removed.
@@ -43,6 +45,7 @@ impl Fixture {
                 let _ = transport.question_snapshot();
             }
         });
+        let options = match clock { Some(clock) => options.native_resize_clock(move || clock.load(Ordering::SeqCst)), None => options };
         let transport = Arc::new(transport::create_transport(options).unwrap());
         *holder.lock().unwrap() = Some(Arc::downgrade(&transport));
         Self { transport, root, project, changes }
@@ -60,6 +63,13 @@ impl Fixture {
         v["kind"] = json!("question"); v["text"] = json!("Private question");
         v["options"] = json!([{"value":"opaque-A","label":"First","description":"One"}, {"value":"opaque-B","label":"Second","description":"Two"}]);
         v["allowFreeText"] = json!(true); v["expiresAt"] = json!(now()+30_000); v
+    }
+    fn connect_level2(&self, session: &str) -> UnixStream {
+        let mut s = self.connect(session, false);
+        let mut hello = self.qp("questions_hello", session, ID); hello["busyReason"] = json!(1);
+        send(&mut s, &hello);
+        assert_eq!(line(&mut s), b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"busyReason\":1}\n");
+        s
     }
     fn connect(&self, session: &str, opt_in: bool) -> UnixStream {
         let mut s = UnixStream::connect(self.transport.endpoint()).unwrap();
@@ -97,6 +107,126 @@ fn wait(mut f: impl FnMut() -> bool) {
     while !f() { assert!(Instant::now()<end, "state deadline"); std::thread::sleep(Duration::from_millis(10)); }
 }
 
+#[test]
+fn question_native_transition_returns_standard_busy_without_queue_until_matching_ack() {
+    use abito_island::questioncmd::NativeTransition;
+    let f = Fixture::new(); let mut a = f.connect("session-1", true);
+    let applied = AtomicU64::new(0);
+    a.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    assert!(f.transport.compact_resize(7, (304,44), || true, || Some((672,176)), |resize| {
+        assert!(resize); applied.fetch_add(1, Ordering::SeqCst);
+        // Send while native application still holds admission lock; never
+        // wait for a reply under that lock. Admission must observe the barrier.
+        send(&mut a, &f.question("session-1", ID));
+    }));
+    assert_eq!(applied.load(Ordering::SeqCst), 1);
+    let busy = reply(&mut a);
+    assert_eq!(busy["type"], "question_closed"); assert_eq!(busy["reason"], "busy");
+    assert_eq!(busy["source"], "system"); assert_eq!(busy.as_object().unwrap().len(), 9);
+    let v = f.transport.question_snapshot();
+    assert!(v.pending.is_none()); assert!(v.deliveries.is_empty());
+    assert_eq!(v.native_transition, NativeTransition::NativeTransitionBusy);
+    assert!(!serde_json::to_string(&v).unwrap().contains("Private question"));
+    f.transport.native_resize_observed(7, (304,45));
+    f.transport.native_resize_observed(6, (304,44));
+    assert_eq!(f.transport.question_snapshot().native_transition, NativeTransition::NativeTransitionBusy);
+    f.transport.native_resize_observed(7, (304,44));
+    assert_eq!(f.transport.question_snapshot().native_transition, NativeTransition::Idle);
+    assert!(f.transport.question_snapshot().pending.is_none()); // never queue rejected question
+    send(&mut a, &f.question("session-1", OTHER)); pending(&f, OTHER);
+    assert!(!f.transport.compact_resize(8, (304,44), || true, || None, |_| panic!("pending must prevent request")));
+    pending(&f, OTHER);
+}
+#[test]
+fn question_native_transition_deadline_is_visible_fail_closed_and_late_ack_recovers() {
+    use abito_island::questioncmd::NativeTransition;
+    let clock = Arc::new(AtomicU64::new(100)); let f = Fixture::with_native_clock(clock.clone());
+    let mut a = f.connect("session-1", true);
+    wait(|| f.changes.load(Ordering::SeqCst) > 0 && f.transport.question_snapshot().ready_connections == 1);
+    assert!(f.transport.compact_resize(1, (304,44), || true, || None, |_| {}));
+    let before = f.changes.load(Ordering::SeqCst);
+    clock.store(2100, Ordering::SeqCst);
+    // No view or input wakes the timeout: the existing lifecycle worker must
+    // publish degradation by itself, with no new timer/thread/poll loop.
+    wait(|| f.changes.load(Ordering::SeqCst) > before);
+    assert_eq!(f.transport.question_snapshot().native_transition, NativeTransition::NativeTransitionDegraded);
+    let started = Instant::now(); send(&mut a, &f.question("session-1", ID));
+    assert_eq!(reply(&mut a)["reason"], "busy"); assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(f.transport.question_snapshot().pending.is_none());
+    assert!(f.transport.question_snapshot().deliveries.is_empty());
+    f.transport.native_resize_observed(1, (304,44));
+    assert_eq!(f.transport.question_snapshot().native_transition, NativeTransition::Idle);
+    send(&mut a, &f.question("session-1", OTHER)); pending(&f, OTHER);
+    assert!(f.changes.load(Ordering::SeqCst) >= 4); // reentrant observer saw begin, timeout, ACK, admission
+}
+#[test]
+fn question_native_transition_known_size_and_stale_plan_do_not_request_resize() {
+    use abito_island::questioncmd::NativeTransition;
+    let f = Fixture::new();
+    assert!(!f.transport.compact_resize(1, (304,44), || false, || panic!(), |_| panic!()));
+    assert!(f.transport.compact_resize(1, (304,44), || true, || Some((304,44)), |resize| assert!(!resize)));
+    assert_eq!(f.transport.question_snapshot().native_transition, NativeTransition::Idle);
+    assert!(!f.transport.compact_resize(1, (304,44), || true, || None, |_| panic!("duplicate generation")));
+}
+#[test]
+fn question_level2_native_reasons_are_scoped_negotiated_and_global_busy_stays_minimal() {
+    let clock = Arc::new(AtomicU64::new(0)); let f = Fixture::with_native_clock(clock.clone());
+    let mut old = f.connect("same-session", true); let mut new = f.connect_level2("same-session");
+    f.transport.compact_resize(7, (304,44), || true, || None, |_| {});
+    for (time, code) in [(0,"native_transition_busy"), (2000,"native_transition_degraded")] {
+        clock.store(time, Ordering::SeqCst);
+        for (s, detail) in [(&mut old,false), (&mut new,true)] {
+            send(s, &f.question("same-session", ID)); let busy = reply(s);
+            assert_eq!(busy["reason"], "busy"); assert_eq!(busy["source"], "system");
+            let expected = detail.then(|| json!(code));
+            assert_eq!(busy.get("busyReason"), expected.as_ref());
+            assert!(f.transport.question_snapshot().pending.is_none());
+        }
+    }
+    f.transport.native_resize_observed(7, (304,44));
+    send(&mut new, &f.question("same-session", ID)); pending(&f, ID);
+    send(&mut new, &f.question("same-session", OTHER)); let busy = reply(&mut new);
+    assert_eq!(busy["reason"], "busy"); assert!(busy.get("busyReason").is_none()); pending(&f, ID);
+}
+#[test]
+fn question_level2_malformed_capability_and_duplicate_negotiation_fail_closed() {
+    let f = Fixture::new();
+    for bad in [json!(null),json!(0),json!(true),json!("1"),json!(1.0),json!(1.5),json!(2)] {
+        let mut s = f.connect("session-1", false);
+        let mut hello = f.qp("questions_hello", "session-1", ID); hello["busyReason"] = bad;
+        send(&mut s, &hello); closed(&mut s);
+    }
+    for mode in ["duplicate","extra","oversize"] {
+        let mut s = f.connect("session-1", false);
+        let mut hello = f.qp("questions_hello", "session-1", ID); hello["busyReason"] = json!(1);
+        let raw = match mode {
+            "duplicate" => hello.to_string().replacen("{", "{\"busyReason\":1,", 1),
+            "extra" => { hello["source"] = json!("human"); hello.to_string() },
+            _ => { let raw = hello.to_string(); format!("{raw}{}", " ".repeat(4097-raw.len())) },
+        };
+        s.write_all(format!("{raw}\n").as_bytes()).unwrap(); closed(&mut s);
+    }
+    let mut s = f.connect_level2("session-1");
+    send(&mut s, &f.qp("questions_hello", "session-1", ID)); closed(&mut s);
+}
+#[test]
+fn question_current_target_observation_recovers_new_view_not_old_compact_or_unknown() {
+    use abito_island::questioncmd::NativeTransition;
+    for timed_out in [false,true] {
+        let clock = Arc::new(AtomicU64::new(0)); let f = Fixture::with_native_clock(clock.clone());
+        let mut s = f.connect("session-1", true);
+        f.transport.compact_resize(7, (304,44), || true, || None, |_| {});
+        if timed_out { clock.store(2000, Ordering::SeqCst); }
+        f.transport.native_resize_observed_current((304,44), || Some((8,(672,176))));
+        f.transport.native_resize_observed_current((672,176), || None); // native getter/scale unknown
+        assert_ne!(f.transport.question_snapshot().native_transition, NativeTransition::Idle);
+        send(&mut s, &f.question("session-1", ID)); assert_eq!(reply(&mut s)["reason"], "busy");
+        assert!(f.transport.question_snapshot().pending.is_none());
+        f.transport.native_resize_observed_current((672,176), || Some((8,(672,176))));
+        assert_eq!(f.transport.question_snapshot().native_transition, NativeTransition::Idle);
+        send(&mut s, &f.question("session-1", OTHER)); pending(&f, OTHER);
+    }
+}
 #[test]
 fn legacy_ready_has_no_unsolicited_capability() {
     let f = Fixture::new(); let mut s = f.connect("session-1", false); quiet(&mut s);

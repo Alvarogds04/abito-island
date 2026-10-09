@@ -23,6 +23,8 @@ use std::fmt;
 pub const FRAME_BYTES: usize = 4096;
 pub const QUESTIONS_READY_LINE: &[u8] =
     b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1}\n";
+pub const QUESTIONS_BUSY_REASON_READY_LINE: &[u8] =
+    b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"busyReason\":1}\n";
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Static codes only: never expose parser diagnostics or private payloads.
@@ -126,7 +128,7 @@ impl Resolved {
     pub fn status(&self) -> ResolutionStatus { self.status }
 }
 pub enum Inbound {
-    Hello, Question(Question), Cancel(Cancel), AnswerRejected(AnswerRejected), Resolved(Resolved),
+    Hello, HelloBusyReason, Question(Question), Cancel(Cancel), AnswerRejected(AnswerRejected), Resolved(Resolved),
 }
 
 // No flatten/Value intermediate: serde's struct visitor rejects duplicates,
@@ -138,6 +140,8 @@ enum Wire {
     Hello {
         v: u8, #[serde(rename = "questionVersion")] question_version: u8,
         project: String, #[serde(rename = "sessionId")] session_id: String, at: u64,
+        #[serde(default, rename = "busyReason", deserialize_with = "busy_reason_capability")]
+        busy_reason: bool,
     },
     #[serde(rename = "question")]
     Question {
@@ -167,14 +171,21 @@ enum Wire {
     },
 }
 
+// Absence is level 1; present MUST be integer 1. Option<u8> would accept null.
+fn busy_reason_capability<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    if u8::deserialize(deserializer)? != 1 { return Err(serde::de::Error::custom("invalid capability")); }
+    Ok(true)
+}
+
 /// A proved v1 identity is required, including for the question opt-in hello.
 /// The caller owns the separate per-connection subscription state.
 pub fn decode(body: &[u8], identity: &Identity, now: u64) -> Result<Inbound, Error> {
     if body.len() > FRAME_BYTES { return Err(Error::FrameTooLarge); }
     let wire: Wire = serde_json::from_slice(body).map_err(|_| Error::InvalidFrame)?;
     let (v, version, base, inbound) = match wire {
-        Wire::Hello { v, question_version, project, session_id, at } => {
-            (v, question_version, Base { project, session_id, at }, Inbound::Hello)
+        Wire::Hello { v, question_version, project, session_id, at, busy_reason } => {
+            (v, question_version, Base { project, session_id, at },
+             if busy_reason { Inbound::HelloBusyReason } else { Inbound::Hello })
         }
         Wire::Question { v, question_version, project, session_id, at, id, kind, text,
                          options, allow_free_text, expires_at } => {
@@ -291,6 +302,8 @@ enum Outbound<'a> {
         v: u8, #[serde(rename = "questionVersion")] question_version: u8,
         project: &'a str, #[serde(rename = "sessionId")] session_id: &'a str,
         at: u64, id: &'a str, reason: CloseReason, source: &'static str,
+        #[serde(rename = "busyReason", skip_serializing_if = "Option::is_none")]
+        busy_reason: Option<BusyReason>,
     },
 }
 #[derive(Serialize)]
@@ -303,19 +316,34 @@ fn encode(frame: &Outbound<'_>) -> Result<Vec<u8>, Error> {
     Ok(body)
 }
 fn closed(identity: &Identity, id: &str, reason: CloseReason, human: bool, now: u64) -> Result<Vec<u8>, Error> {
+    closed_with_detail(identity, id, reason, human, now, None)
+}
+fn closed_with_detail(identity: &Identity, id: &str, reason: CloseReason, human: bool, now: u64, busy_reason: Option<BusyReason>) -> Result<Vec<u8>, Error> {
     validate_now(identity, now)?;
     validate_id(id)?;
     // Only the dedicated human decline path can request human/cancelled.
-    if human && !matches!(reason, CloseReason::Cancelled) { return Err(Error::InvalidSchema); }
+    if (human && !matches!(reason, CloseReason::Cancelled))
+        || (busy_reason.is_some() && (human || !matches!(reason, CloseReason::Busy))) {
+        return Err(Error::InvalidSchema);
+    }
     encode(&Outbound::QuestionClosed { v: 1, question_version: 1, project: &identity.project,
         session_id: &identity.session_id, at: now, id, reason,
-        source: if human { "human" } else { "system" } })
+        source: if human { "human" } else { "system" }, busy_reason })
 }
 
 /// Admission refusal without retaining the incoming question's display text.
 /// Transport also uses this when its bounded unacknowledged receipts are full.
 pub fn busy_line(identity: &Identity, id: &str, now: u64) -> Result<Vec<u8>, Error> {
     closed(identity, id, CloseReason::Busy, false, now)
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BusyReason { NativeTransitionBusy, NativeTransitionDegraded }
+/// Transport may call only after per-connection level-2 negotiation. A closed
+/// enum and dedicated system/busy encoder prohibit reasons on other sources.
+pub fn busy_line_with_reason(identity: &Identity, id: &str, now: u64, reason: BusyReason) -> Result<Vec<u8>, Error> {
+    closed_with_detail(identity, id, CloseReason::Busy, false, now, Some(reason))
 }
 
 pub struct Active { connection_id: u64, identity: Identity, question: Question, generation: u64 }

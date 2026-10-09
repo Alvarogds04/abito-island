@@ -14,15 +14,18 @@ for (const name of ['adapter.cjs', 'questions.cjs']) {
   assert(file.isFile() && !file.isSymbolicLink(), 'real producer source required');
 }
 const [endpoint, runtime, cwd, mode] = process.argv.slice(2);
-assert(['questions', 'legacy'].includes(mode));
+assert(['questions', 'legacy', 'native-busy', 'native-degraded'].includes(mode));
 assert.equal(fs.realpathSync(cwd), cwd);
-const enabled = mode === 'questions';
+const nativeBusy = mode.startsWith('native-');
+const questionLevel = mode === 'legacy' ? 0 : nativeBusy ? 2 : 1;
+process.env.ABITO_QUESTIONS = String(questionLevel); // explicit real source level, no second flag
+const enabled = questionLevel > 0;
 const sessionId = 'qp-real-session';
 const diagnostics = [];
 const legacy = {};
 const received = [];
 const types = [];
-let question, ack, transportError;
+let question, ack, transportError, questionsHello;
 let incoming = Buffer.alloc(0);
 
 // Observe the real socket returned by the original factory. No fabricated
@@ -36,6 +39,7 @@ net.createConnection = function (...args) {
     const frame = JSON.parse(raw);
     if (types.length < 16) types.push(frame.type);
     if (['hello', 'heartbeat', 'settled'].includes(frame.type) && !legacy[frame.type]) legacy[frame.type] = raw;
+    if (frame.type === 'questions_hello') questionsHello = raw;
     if (frame.type === 'question') question = { id: frame.id, project: frame.project, sessionId: frame.sessionId };
     if (frame.type === 'question_resolved') ack = { id: frame.id, status: frame.status };
     return write.call(this, chunk, ...rest);
@@ -60,7 +64,7 @@ const events = new Map();
 const pi = { on(name, callback) { assert(!events.has(name)); events.set(name, callback); } };
 const ctx = { cwd, sessionManager: { getSessionId: () => sessionId } };
 const adapter = registerAdapter(pi, { endpoint, runtime, retryMs: 10000, heartbeatMs: 200,
-  ...(enabled ? { questionLevel: 1 } : {}),
+  questionLevel,
   onDiagnostic: d => diagnostics.push(d), onTransportError: error => { transportError = error; } });
 const watchdog = setTimeout(() => { process.stderr.write('pi-question-producer: deadline\n'); process.exit(2); }, 8000);
 const control = readline.createInterface({ input: process.stdin });
@@ -73,7 +77,9 @@ const request = { kind: 'question', text: 'QP2_PRIVATE_QUESTION_CANARY', options
 
 async function main() {
   events.get('session_start')({}, ctx);
-  await wait(() => received.includes(enabled ? '{"v":1,"type":"questions_ready","questionVersion":1}\n' : '{"v":1,"type":"ready"}\n') || transportError);
+  const ready = questionLevel === 2 ? '{"v":1,"type":"questions_ready","questionVersion":1,"busyReason":1}\n' :
+    enabled ? '{"v":1,"type":"questions_ready","questionVersion":1}\n' : '{"v":1,"type":"ready"}\n';
+  await wait(() => received.includes(ready) || transportError);
   if (transportError) {
     assert.equal(transportError.status, 'unsupported_receiver');
     assert.equal(transportError.runtime, runtime);
@@ -84,11 +90,12 @@ async function main() {
     const answer = adapter.ask(request, ctx, abort.signal);
     assert(question, 'ask must write a real question');
     assert.equal(question.project, projectId(cwd)); assert.equal(question.sessionId, sessionId);
-    emit({ phase: 'question_pending', id: question.id, project: question.project, sessionId, received });
+    emit({ phase: 'question_pending', id: question.id, project: question.project, sessionId, received, questionsHello });
     const result = await answer;
     clearTimeout(timeout);
     for (const d of diagnostics) assert.deepEqual(Object.keys(d).sort(), ['id', 'reason']);
-    emit({ phase: 'result', result, ack, diagnostics, types });
+    const copy = nativeBusy ? require(path.join(source, 'questions.cjs')).formatResult(result) : undefined;
+    emit({ phase: 'result', result, ack, diagnostics, types, copy });
   } else {
     await wait(() => legacy.heartbeat);
     events.get('agent_settled')({}, ctx);

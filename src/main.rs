@@ -23,17 +23,18 @@ mod modelshost;
 mod nativeaudit;
 mod nativewindow;
 mod probe;
+mod questionhost;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use abito_island::bridge::{self, Action, BridgeError};
+use abito_island::chat::ChatError;
+use abito_island::chatlane::{self, Target};
 use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
 use abito_island::desktop::{self, IslandState};
 use abito_island::geometry::{self, Edge, Rect};
-use abito_island::chat::ChatError;
-use abito_island::chatlane::{self, Target};
 use abito_island::{approval, fakebridge, protocol, transport, workarea};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -166,6 +167,7 @@ fn start_transport(app: &AppHandle) {
     };
     let notice_app = app.clone();
     let connections_app = app.clone();
+    let question_app = app.clone();
     let options = transport::TransportOptions::new(runtime, state.project.clone())
         .on_notice(move |message| {
             if QUITTING.load(Ordering::SeqCst) {
@@ -186,7 +188,8 @@ fn start_transport(app: &AppHandle) {
             let state = connections_app.state::<AppState>();
             state.connections.store(count, Ordering::SeqCst);
             publish(&connections_app, &state);
-        });
+        })
+        .on_question_change(move || questionhost::invalidate(&question_app));
     match transport::create_transport(options) {
         Ok(transport) => {
             // Local address only; no received payloads or labels are logged.
@@ -289,7 +292,11 @@ struct AppState {
 /// queue, unknown → refuse, context budget) runs per turn in the
 /// `chatlane` preflight right before the single request.
 fn model_gate(state: &AppState, target: &Target) -> Result<(), ChatError> {
-    let registry = state.models_registry.lock().expect("models registry lock").clone();
+    let registry = state
+        .models_registry
+        .lock()
+        .expect("models registry lock")
+        .clone();
     let entry = abito_island::models::select(&registry, &target.profile.profile_id)?;
     if entry.revision != target.profile.revision
         || Some(target.alias.as_str()) != entry.alias
@@ -383,7 +390,12 @@ fn push_edge(app: &AppHandle, edge: Edge) {
     ));
 }
 
-fn store_requested(state: &AppState, action: &str, pos: Option<(i32, i32)>, size: Option<(i32, i32)>) {
+fn store_requested(
+    state: &AppState,
+    action: &str,
+    pos: Option<(i32, i32)>,
+    size: Option<(i32, i32)>,
+) {
     let mut req = state.requested.lock().expect("requested lock");
     if let Some(p) = pos {
         req.pos = Some(p);
@@ -399,6 +411,46 @@ fn refresh_work_area(app: &AppHandle, state: &AppState) -> Rect {
     let wa = workarea::current(&win);
     *state.work_area.lock().expect("work area lock") = wa.rect;
     wa.rect
+}
+
+/// Enqueue the guarded transaction, not a native resize previously authorized
+/// on a worker. The barrier stays until actual physical Resized or degrades;
+/// GTK/OS/WM queues still provide no causal request identifier.
+fn queue_compact_request(
+    app: AppHandle,
+    generation: u64,
+    size: (i32, i32),
+    position: (i32, i32),
+    delay_ms: u64,
+) {
+    std::thread::spawn(move || {
+        if delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+        }
+        let (guard_app, apply_app) = (app.clone(), app.clone());
+        abito_island::questioncmd::queue_compact_apply(
+            move |task| {
+                let _ = app.run_on_main_thread(task);
+            },
+            move |operation| {
+                questionhost::compact_resize_request(
+                    &guard_app,
+                    generation,
+                    (size.0 as u32, size.1 as u32),
+                    operation,
+                )
+            },
+            move |resize| {
+                // The shared helper installs a later GLib idle; GTK property
+                // signals cannot reenter this admission transaction inline.
+                let win = main_window(&apply_app);
+                if resize {
+                    TauriIo(&win).set_size(size.0, size.1);
+                }
+                TauriIo(&win).set_outer_position(position.0, position.1);
+            },
+        );
+    });
 }
 
 /// Apply a toggle plan. Expand resizes immediately (the window must be big
@@ -426,10 +478,7 @@ fn apply_plan(app: &AppHandle, state: &AppState, plan: TogglePlan) {
         Some((r.x, r.y)),
         Some((w, h)),
     );
-    let generation = state
-        .generation
-        .fetch_add(1, Ordering::SeqCst)
-        + 1;
+    let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
     let win = main_window(app);
     if expand {
         TauriIo(&win).set_size(w, h);
@@ -437,17 +486,13 @@ fn apply_plan(app: &AppHandle, state: &AppState, plan: TogglePlan) {
         push_phase(app, "overview", edge);
     } else {
         push_phase(app, "compact", edge);
-        let app = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(COLLAPSE_RESIZE_DELAY_MS));
-            let state = app.state::<AppState>();
-            if state.generation.load(Ordering::SeqCst) != generation {
-                return; // a newer plan superseded this deferred resize
-            }
-            let win = main_window(&app);
-            TauriIo(&win).set_size(w, h);
-            TauriIo(&win).set_outer_position(r.x, r.y);
-        });
+        queue_compact_request(
+            app.clone(),
+            generation,
+            (w, h),
+            (r.x, r.y),
+            COLLAPSE_RESIZE_DELAY_MS,
+        );
     }
     // U1: a collapse always leaves the chat view (core resets it); tell the
     // chat surface which view is current.
@@ -474,7 +519,9 @@ fn host_ctx(app: &AppHandle, state: &AppState) -> approval::HostCtx {
 fn build_snapshot(app: &AppHandle, state: &AppState) -> Value {
     let phase = *state.phase.lock().expect("phase lock");
     let edge = state.core.lock().expect("core lock").edge;
-    let anchor = workarea::x11_window_origin().is_some().then(|| edge_str(edge));
+    let anchor = workarea::x11_window_origin()
+        .is_some()
+        .then(|| edge_str(edge));
     let revision = state.revision.load(Ordering::SeqCst);
     let connections = state.connections.load(Ordering::SeqCst);
     let unavailable = state.unavailable.load(Ordering::SeqCst);
@@ -592,11 +639,25 @@ fn persist_motion_override(app: &AppHandle, value: bool) {
 /// process exits before reaching `Builder::run`.
 pub(crate) fn restore(app: &AppHandle) {
     let state = app.state::<AppState>();
-    // transition(state, 'restore') -> compact, always.
+    questionhost::with_pending(&state, |pending| {
+        if pending {
+            // Preserve phase, view and geometry; a second launch is not an answer.
+            let win = main_window(app);
+            let _ = win.unminimize();
+            let _ = win.show();
+            publish(app, &state);
+            return;
+        }
+        restore_without_question(app, &state);
+    });
+}
+
+fn restore_without_question(app: &AppHandle, state: &AppState) {
+    // transition(state, 'restore') -> compact when no question is pending.
     *state.phase.lock().expect("phase lock") = IslandState::Compact;
     // main.cjs restore() bumps the overlay epoch on EVERY restore (375).
     approval::bump_epoch(&state.approval);
-    let area = refresh_work_area(app, &state);
+    let area = refresh_work_area(app, state);
     let win = main_window(app);
     let io = TauriIo(&win);
     let plan = {
@@ -608,21 +669,21 @@ pub(crate) fn restore(app: &AppHandle) {
         }
     };
     if let Some(plan) = plan {
-        apply_plan(app, &state, plan);
+        apply_plan(app, state, plan);
     } else {
         let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, io.scale());
         let (x, y) = io.outer_position();
         let (cw, ch) = io.size();
         let safe = geometry::clamp_rect(Rect { x, y, w: cw, h: ch }, area);
-        io.set_size(w, h);
-        io.set_outer_position(safe.x, safe.y);
-        store_requested(&state, "restore", Some((safe.x, safe.y)), Some((w, h)));
+        let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        queue_compact_request(app.clone(), generation, (w, h), (safe.x, safe.y), 0);
+        store_requested(state, "restore", Some((safe.x, safe.y)), Some((w, h)));
     }
     let _ = win.unminimize();
     // Q1: show, never focus — the island must not take the keyboard from
     // the app the human is working in (legacy `restore()` focused it).
     let _ = win.show();
-    publish(app, &state);
+    publish(app, state);
 }
 
 /// Q1: the deliberate "Open Abito chat and type" activation (second launch
@@ -734,35 +795,37 @@ fn drag_move(app: AppHandle, state: State<AppState>, x: f64, y: f64) {
 }
 
 #[tauri::command]
-fn drag_release(
-    app: AppHandle,
-    state: State<AppState>,
-    x: f64,
-    y: f64,
-    cancelled: bool,
-) -> String {
+fn drag_release(app: AppHandle, state: State<AppState>, x: f64, y: f64, cancelled: bool) -> String {
     let area = refresh_work_area(&app, &state);
     let win = main_window(&app);
     let io = TauriIo(&win);
-    let outcome = {
-        let mut core = state.core.lock().expect("core lock");
-        core.release(&io, area, (x, y), cancelled)
-    };
-    match outcome {
-        ReleaseOutcome::Toggle(plan) => {
-            // Short click: toggle goes through the same funnel as the facade
-            // verbs, so `onState` subscribers see the phase change.
-            apply_plan(&app, &state, plan);
-            publish(&app, &state);
-            "toggle".to_string()
+    questionhost::with_pending(&state, |pending| {
+        let outcome = {
+            let mut core = state.core.lock().expect("core lock");
+            abito_island::questioncmd::guarded_release(
+                &mut core,
+                &io,
+                area,
+                (x, y),
+                cancelled,
+                pending,
+            )
+        };
+        match outcome {
+            ReleaseOutcome::Toggle(plan) => {
+                // The admission guard spans both planning and application.
+                apply_plan(&app, &state, plan);
+                publish(&app, &state);
+                "toggle".to_string()
+            }
+            ReleaseOutcome::Snapped { rect, edge } => {
+                store_requested(&state, "snap", Some((rect.x, rect.y)), None);
+                push_edge(&app, edge);
+                "snap".to_string()
+            }
+            ReleaseOutcome::Cancelled => "cancelled".to_string(),
         }
-        ReleaseOutcome::Snapped { rect, edge } => {
-            store_requested(&state, "snap", Some((rect.x, rect.y)), None);
-            push_edge(&app, edge);
-            "snap".to_string()
-        }
-        ReleaseOutcome::Cancelled => "cancelled".to_string(),
-    }
+    })
 }
 
 /// The single IPC entry point behind `window.desktop.*` — Electron's
@@ -822,6 +885,24 @@ fn state_hooks(state: &AppState) -> Result<approval::SharedHooks, BridgeError> {
 /// the lane, which re-validates card id, expiry and `payload_hash` itself
 /// before any `/execute` (a notice can never approve anything).
 fn dispatch_verb(
+    app: &AppHandle,
+    state: &AppState,
+    action: Action,
+    index: Option<i32>,
+) -> Result<Value, BridgeError> {
+    if action == Action::Close {
+        return questionhost::with_pending(state, |pending| {
+            let expanded = state.core.lock().expect("core lock").expanded;
+            if !abito_island::questioncmd::collapse_allowed(expanded, pending) {
+                return Err(questionhost::pending_error());
+            }
+            dispatch_action(app, state, action, index)
+        });
+    }
+    dispatch_action(app, state, action, index)
+}
+
+fn dispatch_action(
     app: &AppHandle,
     state: &AppState,
     action: Action,
@@ -904,11 +985,11 @@ fn dispatch_verb(
                 .into_iter()
                 .next();
             if let Some(notice) = first {
-                state
-                    .notices
-                    .lock()
-                    .expect("notices lock")
-                    .dismiss(&notice.id, &notice.session_id, now);
+                state.notices.lock().expect("notices lock").dismiss(
+                    &notice.id,
+                    &notice.session_id,
+                    now,
+                );
             }
             publish(app, state);
             Ok(build_snapshot(app, state))
@@ -1096,8 +1177,7 @@ fn main() {
     // effective login, so the approval read-back exercises the real start
     // path — mint, poll, healthy — against the fake.
     let login = if probe_requested() && std::env::var(approval::BASE_ENV).is_err() {
-        let effective = login
-            .unwrap_or_else(|| "probe@local.test".to_string());
+        let effective = login.unwrap_or_else(|| "probe@local.test".to_string());
         let fake = fakebridge::FakeBackend::start(fakebridge::FakeConfig {
             login: effective.clone(),
             proposals: vec![serde_json::json!({
@@ -1182,6 +1262,7 @@ fn main() {
             desktop_action,
             chathost::chat_action,
             modelshost::models_action,
+            questionhost::question_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence
@@ -1196,6 +1277,7 @@ fn main() {
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let tauri::WindowEvent::Resized(size) = event {
+                    questionhost::native_resized(window.app_handle(), (size.width, size.height));
                     nativeaudit::sample(
                         window.app_handle(),
                         "resized",
