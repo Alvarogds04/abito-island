@@ -28,7 +28,7 @@
 //! so the single store at the snapshot boundary (app state) reproduces the
 //! observable behaviour — same dedupe, same queue, same decisions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -40,23 +40,118 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{self, Message};
-use crate::question::{self, Inbound};
+use crate::question::{self, Admission, HumanAnswer, Inbound, QuestionSlot, ResolutionStatus};
 use serde::Serialize;
 
+/// No transcript: at most eight unacknowledged, text-free delivery receipts.
+const DELIVERY_LIMIT: usize = 8;
 const WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// Local host diagnostic, NOT a new wire message or a capability promise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuestionOutcome {
-    CapabilityNotImplementedYet,
+    Busy, Expired, Disconnected, Cancelled, Sent, Answered, HumanCancelled,
+    Rejected, AckLost, OutcomeUnknown,
 }
-
-/// QP.2 slice 1 retains only one static reason, never question/answer text,
-/// scope or tokens. Lifecycle and host answer APIs arrive in the next slice.
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Serialize)]
+pub struct QuestionOptionView { pub index: usize, pub label: String, pub description: String }
+#[derive(Clone, Serialize)]
+pub struct PendingQuestionView {
+    pub id: String, pub kind: question::Kind, pub text: String,
+    pub options: Vec<QuestionOptionView>, pub allow_free_text: bool, pub expires_at: u64,
+}
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryState { Sent }
+#[derive(Clone, Serialize)]
+pub struct QuestionDeliveryView { pub id: String, pub expires_at: u64, pub state: DeliveryState }
+/// Only pending display text crosses this boundary. No scope, socket handle,
+/// option token or answer text is serializable to the frontend.
+#[derive(Clone, Serialize)]
 pub struct QuestionSnapshot {
-    pub notice: Option<QuestionOutcome>,
+    pub pending: Option<PendingQuestionView>, pub deliveries: Vec<QuestionDeliveryView>,
+    pub ready_connections: usize, pub notice: Option<QuestionOutcome>,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub enum HumanReplyError { Validation(question::Error), OutcomeUnknown }
+impl fmt::Display for HumanReplyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self { Self::Validation(e) => e.fmt(f), Self::OutcomeUnknown => f.write_str("outcome_unknown") }
+    }
+}
+impl std::error::Error for HumanReplyError {}
+
+#[derive(Clone)]
+struct QuestionOrigin { stream: Arc<UnixStream>, writer: Arc<Mutex<UnixStream>> }
+struct Delivery { connection: u64, view: QuestionDeliveryView, expected: ResolutionStatus }
+#[derive(Default)]
+struct Questions {
+    slot: QuestionSlot, origin: Option<QuestionOrigin>, deliveries: Vec<Delivery>,
+    ready: HashSet<u64>, notice: Option<QuestionOutcome>,
+}
+impl Questions {
+    fn snapshot(&self) -> QuestionSnapshot {
+        let pending = self.slot.active().map(|active| {
+            let q = active.question();
+            PendingQuestionView { id: q.id().into(), kind: q.kind(), text: q.text().into(),
+                options: q.options().iter().enumerate().map(|(index, o)| QuestionOptionView {
+                    index, label: o.label().into(), description: o.description().into(),
+                }).collect(), allow_free_text: q.allow_free_text(), expires_at: q.expires_at() }
+        });
+        QuestionSnapshot { pending, deliveries: self.deliveries.iter().map(|d| d.view.clone()).collect(),
+            ready_connections: self.ready.len(), notice: self.notice }
+    }
+    /// No expiry wire reply is necessary. Frozen producer deadline only; no
+    /// answer/default and no serialization failure can retain private text.
+    fn prune(&mut self, now: u64) -> bool {
+        let expired = self.slot.active().filter(|a| now >= a.question().expires_at()).map(|a| a.connection_id());
+        let before = self.deliveries.len();
+        self.deliveries.retain(|d| now < d.view.expires_at);
+        let lost = before != self.deliveries.len();
+        if lost { self.notice = Some(QuestionOutcome::AckLost); }
+        if let Some(connection) = expired {
+            self.slot.disconnect(connection); self.origin = None;
+            self.notice = Some(QuestionOutcome::Expired);
+        }
+        expired.is_some() || lost
+    }
+    fn revoke(&mut self, connection: u64, outcome: QuestionOutcome) -> bool {
+        let pending = self.slot.disconnect(connection);
+        if pending { self.origin = None; }
+        let before = self.deliveries.len();
+        self.deliveries.retain(|d| d.connection != connection);
+        let changed = pending || before != self.deliveries.len();
+        if changed { self.notice = Some(outcome); }
+        changed
+    }
+    /// The caller holds the single question mutex throughout this function.
+    /// The writer closure is also the deterministic partial-write test seam.
+    fn human_with(&mut self, id: &str, answer: Option<HumanAnswer>, now: u64,
+        write: impl FnOnce(&QuestionOrigin, &[u8]) -> std::io::Result<()>) -> Result<(), HumanReplyError> {
+        let active = self.slot.active().filter(|a| a.question().id() == id)
+            .ok_or(HumanReplyError::Validation(question::Error::NotLive))?;
+        let connection = active.connection_id();
+        let identity = active.identity().clone();
+        let expiry = active.question().expires_at();
+        let expected = if answer.is_some() { ResolutionStatus::Answered } else { ResolutionStatus::HumanCancelled };
+        let prepared = match answer {
+            Some(answer) => self.slot.prepare_answer(connection, &identity, id, answer, now),
+            None => self.slot.prepare_decline(connection, &identity, id, now),
+        }.map_err(HumanReplyError::Validation)?;
+        let origin = self.origin.as_ref().expect("live question origin").clone();
+        if write(&origin, prepared.line()).is_err() {
+            // Delivery might already have happened: never restore or retry.
+            self.revoke(connection, QuestionOutcome::OutcomeUnknown);
+            let _ = origin.stream.shutdown(std::net::Shutdown::Both);
+            return Err(HumanReplyError::OutcomeUnknown);
+        }
+        self.slot.commit_delivery(prepared).expect("same locked generation");
+        self.origin = None;
+        self.deliveries.push(Delivery { connection, expected,
+            view: QuestionDeliveryView { id: id.into(), expires_at: expiry, state: DeliveryState::Sent } });
+        self.notice = Some(QuestionOutcome::Sent);
+        Ok(())
+    }
 }
 
 fn write_line(writer: &Mutex<UnixStream>, line: &[u8]) -> std::io::Result<()> {
@@ -451,14 +546,18 @@ struct Inner {
     store: Mutex<protocol::NoticeStore>,
     on_notice: Box<dyn Fn(Message) + Send + Sync>,
     on_connections: Box<dyn Fn(u32) + Send + Sync>,
-    questions: Mutex<QuestionSnapshot>,
+    questions: Mutex<Questions>,
     on_question_change: Box<dyn Fn() + Send + Sync>,
 }
 
 impl Inner {
     fn question_changed(&self) {
-        // Observer panics cannot poison transport state or prevent teardown.
+        // Observer panics cannot kill the expiry worker or poison live state.
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.on_question_change)()));
+    }
+    fn expire_questions(&self) {
+        let changed = self.questions.lock().expect("questions lock").prune(now_ms());
+        if changed { self.question_changed(); }
     }
     /// `transport.cjs report()`: clients that completed the handshake.
     fn report(&self) {
@@ -489,9 +588,36 @@ impl Transport {
         &self.inner.runtime
     }
 
-    /// Read the local negotiation diagnostic without exposing wire authority.
     pub fn question_snapshot(&self) -> QuestionSnapshot {
-        self.inner.questions.lock().expect("questions lock").clone()
+        let (snapshot, changed) = {
+            let mut q = self.inner.questions.lock().expect("questions lock");
+            let changed = q.prune(now_ms()); (q.snapshot(), changed)
+        };
+        if changed { self.inner.question_changed(); }
+        snapshot
+    }
+    /// Host-only entry points. UI supplies exactly an id and index/text, never
+    /// scope/source/connection or an opaque wire token. Trusted human input must
+    /// still be enforced by the later closed IPC/UI gate; this is not attestation.
+    pub fn answer(&self, id: &str, index: usize) -> Result<(), HumanReplyError> {
+        self.human_reply(id, Some(HumanAnswer::Option { index }))
+    }
+    pub fn answer_text(&self, id: &str, text: String) -> Result<(), HumanReplyError> {
+        self.human_reply(id, Some(HumanAnswer::Text { text }))
+    }
+    pub fn decline(&self, id: &str) -> Result<(), HumanReplyError> {
+        self.human_reply(id, None)
+    }
+    fn human_reply(&self, id: &str, answer: Option<HumanAnswer>) -> Result<(), HumanReplyError> {
+        let (result, changed) = {
+            let mut q = self.inner.questions.lock().expect("questions lock");
+            let pruned = q.prune(now_ms());
+            let result = q.human_with(id, answer, now_ms(), |origin, line| write_line(&origin.writer, line));
+            let changed = pruned || result.is_ok() || result == Err(HumanReplyError::OutcomeUnknown);
+            (result, changed)
+        };
+        if changed { self.inner.question_changed(); }
+        result
     }
 
     /// Legacy `close()`: stop accepting, destroy clients, verify dir + socket
@@ -771,7 +897,7 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
         on_notice,
         on_connections,
         on_question_change,
-        questions: Mutex::new(QuestionSnapshot::default()),
+        questions: Mutex::new(Questions::default()),
     });
 
     let accept_inner = inner.clone();
@@ -798,6 +924,9 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
 fn accept_loop(inner: Arc<Inner>, listener: UnixListener) {
     let _ = listener.set_nonblocking(true);
     while inner.running.load(Ordering::SeqCst) {
+        inner.expire_questions();
+        // The expiry observer may have closed us on this very accept thread.
+        if !inner.running.load(Ordering::SeqCst) { break; }
         match listener.accept() {
             Ok((stream, _)) => {
                 // Owner check on the wire: same-uid peer only (SO_PEERCRED).
@@ -855,7 +984,7 @@ fn accept_loop(inner: Arc<Inner>, listener: UnixListener) {
 
 /// Transport-local framing; the legacy protocol module stays byte-for-byte
 /// unchanged. Identification allows question negotiation in this buffer;
-/// this slice does not advertise subscription and never widens legacy decode.
+/// subscription still gates admission and never widens legacy decode.
 #[derive(Default)]
 struct QuestionFramer { pending: Vec<u8> }
 impl QuestionFramer {
@@ -889,18 +1018,87 @@ impl QuestionFramer {
     }
 }
 
-fn reject_question_negotiation(inner: &Inner, stream: &UnixStream, inbound: Inbound) {
-    if matches!(inbound, Inbound::Hello) {
-        // A validated opt-in is recognized, but lifecycle support is knowingly
-        // absent in this slice. Never send questions_ready or invent a wire
-        // rejection schema. The stable producer reports unsupported_receiver
-        // when this scoped socket closes before capability readiness.
-        inner.questions.lock().expect("questions lock").notice =
-            Some(QuestionOutcome::CapabilityNotImplementedYet);
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        // No question/socket-map/writer lock is held during the observer.
+fn receive_question(inner: &Inner, connection: u64, identity: &protocol::Identity,
+    origin: &QuestionOrigin, subscribed: &mut bool, inbound: Inbound) -> bool {
+    if let Inbound::Hello = inbound {
+        if *subscribed || write_line(&origin.writer, question::QUESTIONS_READY_LINE).is_err() { return false; }
+        *subscribed = true;
+        inner.questions.lock().expect("questions lock").ready.insert(connection);
         inner.question_changed();
+        return true;
     }
+    if !*subscribed { return false; }
+    let (valid, changed) = {
+        let mut state = inner.questions.lock().expect("questions lock");
+        let now = now_ms();
+        let mut changed = state.prune(now);
+        let valid = match inbound {
+            Inbound::Question(q) => {
+                // Capacity is deliberately bounded: admission is busy, never
+                // evict a sent receipt early or build an unbounded transcript.
+                let duplicate = state.deliveries.iter().any(|d| d.view.id == q.id());
+                let admission = if state.deliveries.len() >= DELIVERY_LIMIT || duplicate {
+                    question::busy_line(identity, q.id(), now).map(Admission::Busy)
+                } else { state.slot.admit(connection, identity, q, now) };
+                match admission {
+                    Ok(Admission::Accepted) => {
+                        state.origin = Some(origin.clone()); state.notice = None; changed = true; true
+                    }
+                    Ok(Admission::Busy(line)) => {
+                        state.notice = Some(QuestionOutcome::Busy); changed = true;
+                        if write_line(&origin.writer, &line).is_err() {
+                            state.revoke(connection, QuestionOutcome::OutcomeUnknown);
+                            // Even with no originating slot, failure is uncertain.
+                            state.notice = Some(QuestionOutcome::OutcomeUnknown);
+                            let _ = origin.stream.shutdown(std::net::Shutdown::Both);
+                            false
+                        } else { true }
+                    }
+                    Err(_) => false,
+                }
+            }
+            Inbound::Cancel(cancel) => {
+                let too_early = cancel.reason() == question::CancelReason::Expired && (
+                    state.slot.active().is_some_and(|a| a.connection_id() == connection && a.question().id() == cancel.id() && now < a.question().expires_at())
+                    || state.deliveries.iter().any(|d| d.connection == connection && d.view.id == cancel.id() && now < d.view.expires_at));
+                if !too_early {
+                    let pending_cancelled = matches!(state.slot.cancel(connection, identity, &cancel, now), Ok(Some(_)));
+                    if pending_cancelled { state.origin = None; }
+                    let before = state.deliveries.len();
+                    state.deliveries.retain(|d| !(d.connection == connection && d.view.id == cancel.id()));
+                    let cancelled = pending_cancelled || before != state.deliveries.len();
+                    changed |= cancelled;
+                    // An unrelated cancel cannot relabel a deadline notice
+                    // produced by pruning some other originating connection.
+                    if cancelled { state.notice = Some(if cancel.reason() == question::CancelReason::Expired {
+                        QuestionOutcome::Expired
+                    } else { QuestionOutcome::Cancelled }); }
+                }
+                true
+            }
+            Inbound::Resolved(resolved) => {
+                if let Some(index) = state.deliveries.iter().position(|d| d.connection == connection && d.view.id == resolved.id() && d.expected == resolved.status()) {
+                    state.deliveries.remove(index); changed = true;
+                    state.notice = Some(match resolved.status() {
+                        ResolutionStatus::Answered => QuestionOutcome::Answered,
+                        ResolutionStatus::HumanCancelled => QuestionOutcome::HumanCancelled,
+                    });
+                }
+                true
+            }
+            Inbound::AnswerRejected(rejected) => {
+                if let Some(index) = state.deliveries.iter().position(|d| d.connection == connection && d.view.id == rejected.id()) {
+                    state.deliveries.remove(index); changed = true;
+                    state.notice = Some(QuestionOutcome::Rejected);
+                }
+                true
+            }
+            Inbound::Hello => unreachable!(),
+        };
+        (valid, changed)
+    };
+    if changed { inner.question_changed(); }
+    valid
 }
 
 fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
@@ -911,6 +1109,8 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
             inner.clients.lock().expect("clients lock").remove(&id); inner.report(); return;
         }
     };
+    let origin = QuestionOrigin { stream: stream.clone(), writer };
+    let mut subscribed = false;
     let mut framer = QuestionFramer::default();
     let mut identity: Option<protocol::Identity> = None;
     let mut quota = protocol::FrameQuota::new(now_millis());
@@ -961,7 +1161,7 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
                                     session_id: message.session_id.clone(),
                                     at: message.at,
                                 });
-                                if write_line(&writer, protocol::READY_LINE).is_err() {
+                                if write_line(&origin.writer, protocol::READY_LINE).is_err() {
                                     rejected = true;
                                     break;
                                 }
@@ -990,10 +1190,13 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
                         Err(_) => {
                             let inbound = identity.as_ref().and_then(|bound| question::decode(frame, bound, now_ms()).ok());
                             if let Some(inbound) = inbound {
-                                reject_question_negotiation(&inner, &stream, inbound);
+                                if receive_question(&inner, id, identity.as_ref().expect("identified"), &origin, &mut subscribed, inbound) {
+                                    last_valid = Some(Instant::now());
+                                    continue;
+                                }
                             }
                             rejected = true;
-                            break; // unsupported negotiation/unsubscribed frame: fail closed
+                            break; // invalid/unsubscribed question: fail closed
                         }
                     }
                 }
@@ -1014,9 +1217,15 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
     }
 
     let _ = stream.shutdown(std::net::Shutdown::Both);
-    // Keep the explicit local capability reason through teardown. The legacy
-    // connection callback still reports disconnect; no pending state exists.
+    // Never acquire the client map while holding the question lock. A host
+    // write may be finishing under that lock; teardown waits, then revokes.
+    let changed = {
+        let mut q = inner.questions.lock().expect("questions lock");
+        let changed = q.revoke(id, QuestionOutcome::Disconnected);
+        q.ready.remove(&id) || changed
+    };
     inner.clients.lock().expect("clients lock").remove(&id);
+    if changed { inner.question_changed(); }
     inner.report();
 }
 
@@ -1026,14 +1235,48 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
 mod tests {
     use super::*;
 
+    fn question_fixture() -> (Questions, UnixStream) {
+        let identity = protocol::Identity { project: "a".repeat(64), session_id: "session-1".into(), at: 100_000 };
+        let body = serde_json::json!({"v":1,"type":"question","questionVersion":1,"project":identity.project,
+            "sessionId":"session-1","at":100_000,"id":"12345678-1234-4abc-8abc-123456789abc",
+            "kind":"question","text":"private body","options":[],"allowFreeText":true,"expiresAt":130_000});
+        let Inbound::Question(question) = question::decode(body.to_string().as_bytes(), &identity, 100_000).unwrap() else { unreachable!() };
+        let (stream, peer) = UnixStream::pair().unwrap();
+        let origin = QuestionOrigin { writer: Arc::new(Mutex::new(stream.try_clone().unwrap())), stream: Arc::new(stream) };
+        let mut state = Questions::default(); state.slot.admit(7, &identity, question, 100_000).unwrap();
+        state.origin = Some(origin); (state, peer)
+    }
     #[test]
-    fn question_framing_preserves_legacy_batch_after_identification() {
+    fn question_partial_write_is_unknown_revoked_and_never_replayed() {
+        let (mut state, mut peer) = question_fixture();
+        let id = "12345678-1234-4abc-8abc-123456789abc";
+        let result = state.human_with(id, Some(HumanAnswer::Text { text: "private answer".into() }), 100_000, |origin, line| {
+            origin.writer.lock().unwrap().write_all(&line[..7]).unwrap();
+            Err(std::io::Error::new(ErrorKind::BrokenPipe, "injected partial write"))
+        });
+        assert_eq!(result, Err(HumanReplyError::OutcomeUnknown));
+        assert!(state.slot.active().is_none()); assert!(state.origin.is_none()); assert!(state.deliveries.is_empty());
+        assert_eq!(state.notice, Some(QuestionOutcome::OutcomeUnknown));
+        assert_eq!(state.human_with(id, None, 100_000, |_, _| panic!("never retry")), Err(HumanReplyError::Validation(question::Error::NotLive)));
+        let mut bytes = Vec::new(); peer.read_to_end(&mut bytes).unwrap(); assert_eq!(bytes.len(), 7);
+        assert!(!serde_json::to_string(&state.snapshot()).unwrap().contains("private"));
+    }
+    #[test]
+    fn question_encoding_error_keeps_pending_without_touching_writer() {
+        let (mut state, _peer) = question_fixture();
+        let result = state.human_with("12345678-1234-4abc-8abc-123456789abc",
+            Some(HumanAnswer::Text { text: "🙂".repeat(2000) }), 100_000, |_, _| panic!("encode before write"));
+        assert_eq!(result, Err(HumanReplyError::Validation(question::Error::FrameTooLarge)));
+        assert!(state.slot.active().is_some()); assert!(state.deliveries.is_empty());
+    }
+
+    #[test]
+    fn question_framing_preserves_legacy_batch_even_after_subscription() {
         let legacy = b"{\"type\":\"heartbeat\"}\n";
         let chunk = legacy.repeat(4096 / legacy.len() + 1);
         assert!(QuestionFramer::default().push(&chunk, true).is_err());
         let qp = b"{\"type\":\"question\"}\n";
-        let mut chunk = qp.repeat(32768 / qp.len());
-        chunk.resize(32768, b' ');
+        let chunk = qp.repeat(32768 / qp.len());
         assert!(QuestionFramer::default().push(&chunk, true).is_ok());
         assert!(QuestionFramer::default().push(&vec![b'x';32769], true).is_err());
         assert!(QuestionFramer::default().push(&vec![b'x';513], false).unwrap().fatal.is_some());

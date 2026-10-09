@@ -312,6 +312,12 @@ fn closed(identity: &Identity, id: &str, reason: CloseReason, human: bool, now: 
         source: if human { "human" } else { "system" } })
 }
 
+/// Admission refusal without retaining the incoming question's display text.
+/// Transport also uses this when its bounded unacknowledged receipts are full.
+pub fn busy_line(identity: &Identity, id: &str, now: u64) -> Result<Vec<u8>, Error> {
+    closed(identity, id, CloseReason::Busy, false, now)
+}
+
 pub struct Active { connection_id: u64, identity: Identity, question: Question, generation: u64 }
 impl Active {
     pub fn connection_id(&self) -> u64 { self.connection_id }
