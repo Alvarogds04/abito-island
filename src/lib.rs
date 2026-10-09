@@ -24,6 +24,7 @@ pub mod fakebridge;
 pub mod fakemodel;
 pub mod geometry;
 pub mod http;
+pub mod identity;
 pub mod localmodel;
 pub mod models;
 pub mod protocol;

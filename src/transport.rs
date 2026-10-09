@@ -354,12 +354,43 @@ pub fn resolve_runtime_from(
     Ok(path)
 }
 
-/// Default runtime root: `.runtime` next to this crate (the dev layout the
-/// legacy app used: `apps/desktop/.runtime`).
+/// Own leaf of the installed app inside `$XDG_RUNTIME_DIR` (M4 packaging
+/// plan §3): never one of [`RESERVED_RUNTIME_NAMES`].
+pub const INSTALLED_RUNTIME_LEAF: &str = "abito-island";
+
+/// Build-tree path baked by cargo — compiled ONLY into debug (dev) builds. A
+/// release/packaged binary carries no pointer to the source tree at all.
+#[cfg(debug_assertions)]
+fn dev_manifest_dir() -> Option<&'static str> {
+    option_env!("CARGO_MANIFEST_DIR")
+}
+#[cfg(not(debug_assertions))]
+fn dev_manifest_dir() -> Option<&'static str> {
+    None
+}
+
+/// Pure choice of the default root. `Some(manifest)` = dev layout
+/// (`<crate>/.runtime`, the one the legacy app used); `None` = installed
+/// layout `$XDG_RUNTIME_DIR/abito-island`, which needs an absolute,
+/// normalized XDG dir and otherwise refuses (no invented location).
+pub fn default_runtime_for(
+    xdg_runtime_dir: Option<&str>,
+    dev_manifest: Option<&str>,
+) -> Result<PathBuf, TransportError> {
+    if let Some(manifest) = dev_manifest {
+        return Ok(Path::new(manifest).join(".runtime"));
+    }
+    let xdg = xdg_runtime_dir
+        .filter(|text| is_absolute_normalized(text))
+        .ok_or(TransportError::NoRuntimeRoot)?;
+    Ok(Path::new(xdg).join(INSTALLED_RUNTIME_LEAF))
+}
+
+/// Default runtime root: dev layout in debug builds, the installed own leaf
+/// in release builds (never the source tree).
 pub fn default_runtime() -> Result<PathBuf, TransportError> {
-    let manifest =
-        option_env!("CARGO_MANIFEST_DIR").ok_or(TransportError::NoRuntimeRoot)?;
-    Ok(Path::new(manifest).join(".runtime"))
+    let xdg = std::env::var("XDG_RUNTIME_DIR").ok();
+    default_runtime_for(xdg.as_deref(), dev_manifest_dir())
 }
 
 /// Runtime root for this process (`ABITO_SOCKET_DIR` or the default).

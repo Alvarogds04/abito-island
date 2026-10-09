@@ -1254,7 +1254,7 @@ fn chat_state_scenes(app: &AppHandle) {
         "(async()=>{{ const v = await {invoke}('chat_action', {{ payload: {{ action: 'view' }} }}); \
          if (v.active_turn) await {invoke}('chat_action', {{ payload: {{ action: 'cancel', turn_id: v.active_turn }} }}); }})()"
     );
-    let mut scene = |cfg: FakeModelConfig, script: Vec<(String, u64, &str)>| {
+    let scene = |cfg: FakeModelConfig, script: Vec<(String, u64, &str)>| {
         let fake = FakeModel::start(cfg);
         let origin: &'static str = Box::leak(fake.origin().into_boxed_str());
         reset(origin);
