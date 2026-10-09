@@ -286,6 +286,11 @@ test('Q2 poseFor: only real lane state maps to a pose; the rest is rest', () => 
   assert.equal(V.poseFor(v('unchecked')), null);
 });
 
+test('UI.3: «Respuesta nueva» is hidden whenever the conversation is empty (found in the probe PNGs)', () => {
+  const chatSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  assert.match(chatSrc, /if \(!turns\.length\) \{\s*newer\.hidden = true;/);
+});
+
 test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {
   assert.equal(V.gateLabel('ready'), 'Listo');
   assert.equal(V.gateLabel('queue'), 'En cola');

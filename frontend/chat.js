@@ -93,7 +93,9 @@
         log.appendChild(li);
       }
     }
-    if (pinned) {
+    if (!turns.length) {
+      newer.hidden = true; // nothing left to scroll to (conversation reset)
+    } else if (pinned) {
       log.scrollTop = log.scrollHeight;
       newer.hidden = true;
     } else if (log.scrollHeight > before) {

@@ -1100,6 +1100,7 @@ fn chat_evidence(app: &AppHandle) {
         "timed_out": lines.is_empty(),
     }));
 
+    chat_state_scenes(app);
     // back to the overview (same window shrinks to 672x176), then collapse
     crate::chathost::switch_view(app, &state, false);
     let back = wait_for_size(app, overview, Duration::from_secs(3));
@@ -1197,6 +1198,145 @@ const CHAT_JS_DOWN: &str = r#"(async () => {
   } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
   await invoke('record_chat_evidence', { evidence: ev });
 })();"#;
+
+/// Chat state scenes (UI.3 evidence, opt-in `ABITO_PROBE_VISUAL=1`): REAL turns
+/// through the real `chat_action` IPC against in-process fake local routers
+/// (never the real router). One PNG per state on the sand background.
+/// The lane conversation is reset between scenes (probe-only).
+fn chat_state_scenes(app: &AppHandle) {
+    use abito_island::chatlane::{self, Target};
+    use abito_island::fakemodel::{FakeModel, FakeModelConfig, Reply};
+    use abito_island::localmodel::LocalEndpoint;
+
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let registry = state.models_registry.lock().expect("models registry lock").clone();
+    let invoke = "(window.__TAURI__.core.invoke)";
+    let say = |text: &str, id: &str| {
+        format!(
+            "{invoke}('chat_action', {{ payload: {{ action: 'submit', text: {}, client_request_id: '{id}' }} }})",
+            serde_json::to_string(text).unwrap()
+        )
+    };
+    let reset = |origin: &'static str| {
+        *state.models_registry.lock().expect("models registry lock") = registry
+            .iter()
+            .map(|e| if e.profile_id == "local-abito-gpt" {
+                abito_island::models::Entry { origin, ..*e }
+            } else { *e })
+            .collect();
+        *state.chat_target.lock().expect("chat target lock") = Some(Target {
+            endpoint: LocalEndpoint::parse(origin).expect("loopback origin"),
+            alias: "Abito-gpt".into(),
+            profile: chatlane::default_target().profile,
+            max_output: 128,
+        });
+        {
+            let mut lane = state.chat.lock().expect("chat lane lock");
+            lane.convo = abito_island::chat::Conversation::new("c-island");
+            lane.queue_note = None;
+        }
+        // the models panel (opened by the models step) must not cover the chat
+        let _ = win.eval("(()=>{ if (!document.getElementById('models').hidden) document.getElementById('models-close').click(); })()");
+        let _ = win.eval(format!("{invoke}('chat_action', {{ payload: {{ action: 'check' }} }})"));
+        sleep(Duration::from_millis(900));
+    };
+    let stream = |pieces: Vec<String>, gap_ms: u64, n_ctx: u64, busy: bool| FakeModelConfig {
+        n_ctx,
+        busy,
+        reply: Reply::Stream { reasoning: false, pieces, finish: "stop", gap_ms },
+        ..Default::default()
+    };
+    let cancel_js = format!(
+        "(async()=>{{ const v = await {invoke}('chat_action', {{ payload: {{ action: 'view' }} }}); \
+         if (v.active_turn) await {invoke}('chat_action', {{ payload: {{ action: 'cancel', turn_id: v.active_turn }} }}); }})()"
+    );
+    let mut scene = |cfg: FakeModelConfig, script: Vec<(String, u64, &str)>| {
+        let fake = FakeModel::start(cfg);
+        let origin: &'static str = Box::leak(fake.origin().into_boxed_str());
+        reset(origin);
+        for (js, wait_ms, name) in script {
+            if !js.is_empty() {
+                let _ = win.eval(js);
+            }
+            sleep(Duration::from_millis(wait_ms));
+            if !name.is_empty() {
+                capture_visual(app, name);
+            }
+        }
+        fake.shutdown();
+    };
+    let words = |n: usize| vec!["palabra ".repeat(n)];
+
+    // pensando -> cancelado (head sent, then silence: the turn stays «thinking»)
+    scene(
+        FakeModelConfig { reply: Reply::StallAfterHead, ..Default::default() },
+        vec![
+            (say("Contame algo largo", "req-v-0001"), 1300, "chat-pensando"),
+            (cancel_js.clone(), 900, "chat-cancelado"),
+        ],
+    );
+    // escribiendo
+    scene(
+        stream((0..12).map(|i| format!("parte {i} ")).collect(), 500, 65_536, false),
+        vec![(say("¿Qué podés hacer?", "req-v-0002"), 1700, "chat-escribiendo")],
+    );
+    // error de turno
+    scene(
+        FakeModelConfig { reply: Reply::Status(500), ..Default::default() },
+        vec![(say("hola", "req-v-0003"), 1500, "chat-error-turno")],
+    );
+    // cola (router busy)
+    scene(
+        stream(vec!["Ya voy ".into(), "terminando.".into()], 900, 65_536, true),
+        vec![(say("¿Estás ahí?", "req-v-0004"), 900, "chat-cola")],
+    );
+    // cortado por largo (response limit 32 000)
+    scene(
+        FakeModelConfig {
+            reply: Reply::Stream { reasoning: false, pieces: vec!["a".repeat(33_000)], finish: "stop", gap_ms: 0 },
+            ..Default::default()
+        },
+        vec![(say("Escribí muchísimo", "req-v-0005"), 2500, "chat-cortado-por-largo")],
+    );
+    // recortado: tiny context window, several answered turns
+    let mut turns = Vec::new();
+    for i in 0..5 {
+        turns.push((say(&"mensaje largo ".repeat(14), &format!("req-v-01{i}")), 1500, if i == 4 { "chat-recortado" } else { "" }));
+    }
+    scene(stream(words(8), 0, 700, false), turns);
+    // chat largo + «Respuesta nueva» (scrolled up when the answer lands)
+    let mut long = Vec::new();
+    for i in 0..6 {
+        long.push((say(&format!("pregunta {i}"), &format!("req-v-02{i}")), 1100, ""));
+    }
+    long.push(("document.getElementById('chat-log').scrollTop = 0".to_string(), 300, "chat-largo"));
+    long.push((say("una más", "req-v-029"), 1500, "chat-largo-respuesta-nueva"));
+    scene(stream(words(10), 0, 65_536, false), long);
+    // Muy largo / caracteres no válidos: draft problems, no turn
+    scene(
+        FakeModelConfig::default(),
+        vec![
+            ("(()=>{const i=document.getElementById('chat-input'); i.value='x'.repeat(8001); i.dispatchEvent(new Event('input'));})()".into(), 500, "chat-muy-largo"),
+            ("(()=>{const i=document.getElementById('chat-input'); i.value='hola\\u0001'; i.dispatchEvent(new Event('input'));})()".into(), 500, "chat-caracteres-no-validos"),
+            ("(()=>{const i=document.getElementById('chat-input'); i.value=''; i.dispatchEvent(new Event('input'));})()".into(), 200, ""),
+        ],
+    );
+    // «i» open on the models panel
+    scene(
+        FakeModelConfig::default(),
+        vec![
+            ("(()=>{ if (document.getElementById('models').hidden) document.getElementById('chat-models').click(); })()".into(), 1500, ""),
+            ("document.getElementById('models-info').click()".into(), 500, "modelos-i-abierto"),
+            ("document.getElementById('models-close').click()".into(), 300, ""),
+        ],
+    );
+    *state.models_registry.lock().expect("models registry lock") = registry;
+    *state.chat_target.lock().expect("chat target lock") = Some(chatlane::default_target());
+}
 
 /// Webview side of the models step.
 const MODELS_JS: &str = r#"(async () => {
