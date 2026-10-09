@@ -54,20 +54,13 @@
   // setState (no new poses, no redraw). Sources: the chat lane (chat.js
   // dispatches `abito:pose`: think/speak/error while a turn or the model is in
   // that state) and the human's decision once the host says it was SENT
-  // (confirm after Permitir, reject after Denegar: a gesture, not a result).
+  // A SENT decision keeps the character at rest (O.gestureFor): confirm/reject
+  // wait for a real host confirmation.
   let chatPose = null;
-  let flashPose = null;
-  let flashTimer = 0;
   const POSES = new Set(['think', 'speak', 'error']);
   function applyPose() {
-    const next = flashPose || chatPose || 'idle';
+    const next = chatPose || 'idle';
     if (clay && clay.state !== next) clay.setState(next);
-  }
-  function flash(state) {
-    flashPose = state;
-    clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => { flashPose = null; applyPose(); }, 2600);
-    applyPose();
   }
   document.addEventListener('abito:pose', event => {
     const state = event.detail;
@@ -464,8 +457,6 @@
     flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : 'Avisos caídos');
     $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
   }
-  let lastVerb = null;
-  let sentFlashedFor = null;
   function renderCard() {
     paintCompactFlag();
     const card = current && current.card;
@@ -482,7 +473,6 @@
     if (!valid) { delete capsule.dataset.card; delete capsule.dataset.cardTone; return; }
     const reason = cardFeedback(card);
     const view = O.cardView(reason);
-    if (view.kind === 'sent' && lastVerb && sentFlashedFor !== cardKey(card)) { sentFlashedFor = cardKey(card); flash(lastVerb === 'allow' ? 'confirm' : 'reject'); }
     $('operation').textContent = card.operation;
     paintExpiry(card);
     $('card-expiry').hidden = view.kind === 'expired' || view.kind === 'sent';
@@ -514,6 +504,7 @@
     if (!current || !O) return;
     if (validCard(current.card)) paintExpiry(current.card);
     paintRing(Array.isArray(current.notices) ? current.notices : []);
+    paintCompactFlag(); // an expired card must stop saying «waiting»
   }, 5000);
   async function decideCard(verb, event) {
     renderCard(); // Recheck expiry/phase even without a newer snapshot.
@@ -523,7 +514,6 @@
     cardFlight = intent;
     renderCard(); // Lock BOTH controls before invoking the host verb.
     try {
-      lastVerb = verb; // remembered only to pick the gesture once the host says SENT
       const state = await window.desktop[verb](); // zero arguments; never a proposal id
       cardFlight = null;
       if (state && Number.isSafeInteger(state.revision) && state.revision > intent.revision &&

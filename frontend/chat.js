@@ -62,6 +62,8 @@
   function renderLog() {
     const pinned = V.atBottom(log.scrollTop, log.scrollHeight, log.clientHeight);
     const before = log.scrollHeight;
+    const priorRows = log.children.length;
+    let rowIndex = 0;
     log.textContent = '';
     const turns = (view && Array.isArray(view.turns)) ? view.turns : [];
     if (!turns.length) {
@@ -77,6 +79,8 @@
       for (const row of V.turnRows(turn)) {
         const li = document.createElement('li');
         li.className = row.kind;
+        if (priorRows && rowIndex >= priorRows) li.classList.add('enter'); // only NEW rows animate
+        rowIndex += 1;
         if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
           li.setAttribute('aria-label', row.text);
           const i = document.createElement('span');
@@ -215,6 +219,8 @@
     const inChat = capsule.dataset.view === 'chat';
     const typing = document.activeElement === input;
     if (event.key === 'Escape') {
+      // The model panel is the innermost layer: Escape closes it first.
+      if (capsule.dataset.models === 'open') { event.preventDefault(); $('models-close').click(); return; }
       if (typing) { input.blur(); log.focus(); event.preventDefault(); return; } // leave typing mode
       if (expanded && window.desktop) { event.preventDefault(); window.desktop.close().catch(() => {}); }
       return;

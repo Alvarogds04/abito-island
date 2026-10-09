@@ -93,6 +93,12 @@
       fraction: Math.max(0, Math.min(1, left / NOTICE_WINDOW_MS)), aria: full };
   }
 
+  // R6 gesture after the human's click. A SENT decision is NOT a confirmed
+  // result (§1.1, C23): «Enviada»/«Sin confirmar» keep the character at REST;
+  // lifting/smiling (confirm) or shaking (reject) may only come from a real
+  // host confirmation, which does not exist yet. Pure, so it is testable.
+  const gestureFor = () => null;
+
   // ---- «i» button name: announces the real state, then what it opens ---------
   const infoLabel = (base, stateAria) => (stateAria ? `${base}: ${stateAria}` : base);
 
@@ -101,5 +107,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor };
 });

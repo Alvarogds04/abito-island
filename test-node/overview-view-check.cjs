@@ -286,11 +286,27 @@ test('R6 margins: card box keeps >=20px from the island edge (reject shake ~2px)
   assert.deepEqual(vb, [36, 32, 128, 128]);
 });
 
-test('Q2 pose wiring: engine setState only, from abito:pose and the SENT gesture; no new poses', () => {
+test('Q2 pose wiring: engine setState only, from abito:pose; no gesture on a SENT/unconfirmed decision', () => {
   assert.match(islandSrc, /clay\.setState\(next\)/);
   assert.match(islandSrc, /'abito:pose'/);
-  assert.match(islandSrc, /view\.kind === 'sent' && lastVerb/);
-  assert.doesNotMatch(islandSrc, /staticPose|AbitoClay\.STATES/);
+  assert.doesNotMatch(islandSrc, /staticPose|AbitoClay\.STATES|flash\(/);
+  // behaviour: every card outcome the host can report keeps R6 at rest
+  for (const reason of ['Decisión enviada.', 'No se pudo confirmar la decisión. Esperá una actualización.', 'Decisión en curso.', 'Propuesta vencida.', null]) {
+    const kind = O.cardView(reason).kind;
+    for (const verb of ['allow', 'deny']) assert.equal(O.gestureFor(kind, verb), null, `${kind}/${verb}`);
+  }
+});
+
+test('UI.3: compact only carries the sun contour; Escape closes models first; new-answer dot is neutral; rows animate 160ms, still under reduced motion', () => {
+  const compactOnly = [...css.matchAll(/#capsule\[data-card-tone="(go|red|faint|live)"\] #island/g)];
+  assert.equal(compactOnly.length, 0, 'non-sun contours need data-phase="expanded"');
+  assert.match(css, /#capsule\[data-card-tone="sun"\] #island/);
+  const chatSrc = fs.readFileSync(path.join(frontend, 'chat.js'), 'utf8');
+  assert.ok(chatSrc.indexOf("dataset.models === 'open'") < chatSrc.indexOf('if (typing)'), 'models closes before leaving the composer');
+  assert.match(css, /#chat-new \.dot \{ background: var\(--island-live\)/);
+  assert.match(css, /#chat-log li\.enter \{ animation: row-in 160ms/);
+  assert.match(css, /prefers-reduced-motion: reduce\) \{ #chat-log li\.enter \{ animation: none/);
+  assert.match(islandSrc, /paintCompactFlag\(\); \/\/ an expired card/);
 });
 
 console.log(`overview-view-check: ${passed} passed`);

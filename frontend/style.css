@@ -172,10 +172,10 @@ body.probe-capture-bg { background: #d8c9a3; }
 #allow:disabled, #deny:disabled { opacity: .45; cursor: default; }
 /* The card state is also the island's contour: sun = waits for your yes. */
 #capsule[data-card-tone="sun"] #island { box-shadow: inset 0 0 0 2px var(--sun); }
-#capsule[data-card-tone="go"] #island { box-shadow: inset 0 0 0 2px var(--go); }
-#capsule[data-card-tone="red"] #island { box-shadow: inset 0 0 0 2px var(--red-11); }
-#capsule[data-card-tone="faint"] #island { box-shadow: inset 0 0 0 2px var(--faint); }
-#capsule[data-card-tone="live"] #island { box-shadow: inset 0 0 0 2px var(--island-live); }
+#capsule[data-phase="expanded"][data-card-tone="go"] #island { box-shadow: inset 0 0 0 2px var(--go); }
+#capsule[data-phase="expanded"][data-card-tone="red"] #island { box-shadow: inset 0 0 0 2px var(--red-11); }
+#capsule[data-phase="expanded"][data-card-tone="faint"] #island { box-shadow: inset 0 0 0 2px var(--faint); }
+#capsule[data-phase="expanded"][data-card-tone="live"] #island { box-shadow: inset 0 0 0 2px var(--island-live); }
 
 @media (prefers-reduced-motion: reduce) {
   /* island.js already snaps geometry under reduced motion; this also kills any
@@ -308,6 +308,10 @@ body.probe-capture-bg { background: #d8c9a3; }
 #chat-send:disabled { opacity: .4; cursor: default; }
 #chat-input[data-invalid="true"] { border-color: var(--red-11); }
 #chat-draft-word { position: absolute; right: 108px; bottom: 56px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
+#chat-new .dot { background: var(--island-live); }
+@keyframes row-in { from { opacity: 0; transform: translateY(4px); } }
+#chat-log li.enter { animation: row-in 160ms var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { #chat-log li.enter { animation: none; } }
 #chat-new {
   display: inline-flex; align-items: center; gap: 2px;
   position: absolute;
