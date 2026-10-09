@@ -732,3 +732,35 @@ apps/desktop-tauri/
     ├── models.js         # U2 model picker panel (inside the chat view)
     └── clay-engine.js    # frozen R6, byte-for-byte, DO NOT EDIT
 ```
+
+## M4 format A — user-local package (staged only)
+
+Contract: `docs/desktop-packaging-plan.md`. Nothing here installs, replaces or
+launches an installed app.
+
+```sh
+node packaging/build.cjs --out "$PWD/dist"   # offline release build + stage + receipt
+node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no launch
+```
+
+- Build: `cargo build --release --locked --offline --features tauri/custom-protocol`
+  (`custom-protocol` makes Tauri a real release: without it the binary embeds
+  the build-tree path as a dev build). Gates before building: R6 pin
+  (`e2dc5db3…`), curated `frontend/` list, CSP without remote/unsafe sources,
+  capabilities = listen/unlisten only, no `devtools`/shell/fs/http features.
+- Stage: `abito-island` (release binary), `abito-island-launcher` (no args;
+  refuses `LD_*`, `GDK_DEBUG`, `ABITO_PROBE*`, inspector vars; forces X11),
+  `com.abitog.AbitoTauri.desktop` (template, `@INSTALL_DIR@`), `receipt.json`
+  (sha256 of every file, `Cargo.lock`, config, frontend, rustc).
+- Identity: `com.abitog.AbitoTauri`; installed runtime root
+  `$XDG_RUNTIME_DIR/abito-island` (never `abito-desktop*`); the project root of
+  an installed build comes only from `ABITO_PROJECT_ROOT` (absolute,
+  normalized, existing dir) — otherwise the transport reports unavailable.
+  Debug builds keep the dev layout. Tests: `tests/install_root.rs`
+  (also under `cargo test --release`), `test-node/packaging-check.cjs`.
+- Verified here: release build offline; identical binary hash on a rebuild at
+  the same path; the verifier rejects a binary that embeds the source-tree
+  path or devtools markers; a smoke run of the release binary (probe, private
+  roots) reached `ready_ok: true`, 18 SVG R6 elements, exit 0.
+- NOT verified: reproducibility across different checkout paths; behaviour
+  of an actually installed copy; Pi session against the new root.
