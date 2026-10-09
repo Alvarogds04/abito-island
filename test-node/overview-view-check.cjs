@@ -16,7 +16,7 @@ const test = (name, fn) => { fn(); passed += 1; };
 
 // ---- icons ---------------------------------------------------------------
 const CONTRACT = ['bubble', 'arrow-up', 'square', 'arrow-left', 'chip', 'plug', 'plug-off',
-  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info'];
+  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info', 'plane'];
 
 test('registry has every contract icon (14 rows, plug/unplugged = 2 shapes)', () => {
   for (const name of CONTRACT) assert.ok(I.NAMES.includes(name), name);
@@ -73,12 +73,14 @@ test('pending: sun tone, no extra word, actionable', () => {
   assert.equal(v.actionable, true);
 });
 
-test('SENT is "Enviada" with a go check, never "No disponible"', () => {
+test('SENT is "Enviada": neutral live paper plane, never a go check (contract §1.1/§8.4)', () => {
   const v = O.cardView('Decisión enviada.');
   assert.equal(v.kind, 'sent');
   assert.equal(v.word, 'Enviada');
-  assert.equal(v.icon, 'check');
-  assert.equal(v.tone, 'go');
+  assert.equal(v.icon, 'plane');
+  assert.equal(v.tone, 'live');
+  assert.notEqual(v.tone, 'go');
+  assert.notEqual(v.icon, 'check');
   assert.equal(v.actionable, false);
   assert.doesNotMatch(JSON.stringify(v), /No disponible/);
 });
@@ -275,6 +277,36 @@ test('R6 visible size: ~128px plain overview, ~72px with the card (scale/viewBox
   assert.ok(Math.abs(units * scale * plain - 128) <= 6, `plain visible ${units * scale * plain}`);
   assert.ok(Math.abs(units * scale * card - 72) <= 4, `card visible ${units * scale * card}`);
   assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex').slice(0, 8), 'e2dc5db3');
+});
+
+test('R6 margins: card box keeps >=20px from the island edge (reject shake ~2px), viewBox top air', () => {
+  const [clay, clayX] = /OVERVIEW_CARD = \{ clay: (\d+), clayX: (\d+)/.exec(islandSrc).slice(1).map(Number);
+  assert.ok(clayX - clay / 2 >= 20, `box left ${clayX - clay / 2}`);
+  const vb = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
+  assert.deepEqual(vb, [36, 32, 128, 128]);
+});
+
+test('Q2 pose wiring: engine setState only, from abito:pose; no gesture on a SENT/unconfirmed decision', () => {
+  assert.match(islandSrc, /clay\.setState\(next\)/);
+  assert.match(islandSrc, /'abito:pose'/);
+  assert.doesNotMatch(islandSrc, /staticPose|AbitoClay\.STATES|flash\(/);
+  // behaviour: every card outcome the host can report keeps R6 at rest
+  for (const reason of ['Decisión enviada.', 'No se pudo confirmar la decisión. Esperá una actualización.', 'Decisión en curso.', 'Propuesta vencida.', null]) {
+    const kind = O.cardView(reason).kind;
+    for (const verb of ['allow', 'deny']) assert.equal(O.gestureFor(kind, verb), null, `${kind}/${verb}`);
+  }
+});
+
+test('UI.3: compact only carries the sun contour; Escape closes models first; new-answer dot is neutral; rows animate 160ms, still under reduced motion', () => {
+  const compactOnly = [...css.matchAll(/#capsule\[data-card-tone="(go|red|faint|live)"\] #island/g)];
+  assert.equal(compactOnly.length, 0, 'non-sun contours need data-phase="expanded"');
+  assert.match(css, /#capsule\[data-card-tone="sun"\] #island/);
+  const chatSrc = fs.readFileSync(path.join(frontend, 'chat.js'), 'utf8');
+  assert.ok(chatSrc.indexOf("dataset.models === 'open'") < chatSrc.indexOf('if (typing)'), 'models closes before leaving the composer');
+  assert.match(css, /#chat-new \.dot \{ background: var\(--island-live\)/);
+  assert.match(css, /#chat-log li\.enter \{ animation: row-in 160ms/);
+  assert.match(css, /prefers-reduced-motion: reduce\) \{ #chat-log li\.enter \{ animation: none/);
+  assert.match(islandSrc, /paintCompactFlag\(\); \/\/ an expired card/);
 });
 
 console.log(`overview-view-check: ${passed} passed`);

@@ -2,6 +2,7 @@
 /* U1 — pure checks for frontend/chat-view.js (no DOM, no network).
    Run: node apps/desktop-tauri/test-node/chat-view-check.cjs
    Also run by `cargo test` (tests/frontend_chat_view.rs). */
+const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const V = require(path.join(__dirname, '..', 'frontend', 'chat-view.js'));
@@ -121,8 +122,173 @@ test('model rows are visible metadata, never "listed" mistaken for "ready"', () 
   assert.match(rows[0].facts, /sin visión/);
   assert.equal(rows[0].state, 'Listo');
   assert.equal(rows[1].selectable, false);
-  assert.equal(rows[1].title, 'Puerto 11014 (sin identificar)');
+  assert.equal(rows[1].title, 'Puerto 11014');
   assert.equal(rows[1].state, 'Desconocido');
+});
+
+test('UI.2 model rows: chips carry numbers, one word only for non-ready gates, full sentence in aria', () => {
+  const ready = { profile_id: 'local-abito-gpt', origin: 'http://127.0.0.1:11002', alias: 'Abito-gpt', selectable: true,
+    gate: { state: 'ready', message: 'Cargado y libre.' }, context_tokens: 65536, size_bytes: 18198045184,
+    params: 35505251456, vision: false };
+  const [r, n, d] = V.modelRows({ selected: 'local-abito-gpt', profiles: [ready,
+    { ...ready, profile_id: 'x', alias: 'Otro', gate: { state: 'needs_load', message: 'm' } },
+    { profile_id: null, origin: 'http://127.0.0.1:11014', alias: null, selectable: false, gate: { state: 'unavailable', message: 'caído' } }] });
+  assert.deepEqual(r.chips.map(c => c.text), ['local', '64k', '18,2 GB', '35,5B', '']);
+  assert.equal(r.chips[4].icon, 'eye-off');
+  assert.equal(r.word, ''); assert.equal(r.tone, 'go');
+  assert.match(r.aria, /127\.0\.0\.1:11002/);
+  assert.equal(n.word, 'Sin cargar'); assert.equal(n.wordIcon, 'load-off');
+  assert.equal(d.word, 'No disponible'); assert.equal(d.tone, 'red'); assert.equal(d.title, 'Puerto 11014');
+});
+
+test('UI.2 meters: used share, numbers only in aria, unknown stays honest', () => {
+  const m = V.modelMeters({ resources: { mem_total: 100e9, mem_available: 25e9, gpu: { vram_total: 10e9, vram_used: 5e9, gtt_total: 20e9, gtt_used: 0 } } });
+  assert.deepEqual(m.map(x => x.key), ['ram', 'vram', 'gtt']);
+  assert.equal(m[0].fraction, 0.75);
+  assert.match(m[0].aria, /RAM: 75,0 GB en uso de 100,0 GB/);
+  const u = V.modelMeters({ resources: { mem_total: null, mem_available: null, gpu: null } });
+  assert.ok(u.every(x => !x.known && /desconocida/.test(x.aria)));
+  assert.equal(V.modelsCount({ profiles: [{ selectable: true, profile_id: 'a' }, { selectable: false }] }), 1);
+});
+
+test('UI.2 chat status: a word only for problems; shapes carry the rest', () => {
+  const base = { turns: [], active_turn: null, queue_note: null };
+  const v = (state, msg) => V.statusView({ ...base, availability: { state, message: msg || '' } });
+  assert.deepEqual([v('ready').kind, v('ready').word, v('ready').tone], ['ready', '', 'go']);
+  assert.equal(v('unavailable', 'El modelo local no responde').word, 'Modelo caído');
+  assert.equal(v('unavailable', 'x').tone, 'red');
+  assert.equal(v('blocked').word, 'Bloqueado');
+  assert.equal(v('busy').word, 'Ocupado');
+  assert.equal(v('unchecked').icon, 'ring');
+  assert.match(v('unavailable', 'El modelo local no responde').aria, /no responde/);
+  const turn = state => ({ turn_id: 't', state, user_text: 'x', reply: '', trimmed_turns: 0 });
+  const act = state => V.statusView({ turns: [turn(state)], active_turn: 't', availability: { state: 'ready', message: '' } });
+  assert.equal(act('thinking').icon, 'ring');
+  assert.equal(act('streaming').tone, 'live');
+  assert.equal(act('waiting_approval').tone, 'sun');
+  assert.equal(act('queued').icon, 'clock');
+  assert.equal(V.statusView(null).word, 'Modelo caído');
+});
+
+test('UI.2 composer: one visible word for draft problems, none for empty', () => {
+  assert.equal(V.draftWord('a'.repeat(8001)), 'Muy largo');
+  assert.equal(V.draftWord('hola\u0001'), 'Caracteres no válidos');
+  assert.equal(V.draftWord(''), '');
+  assert.equal(V.draftWord('   '), '');
+});
+
+test('UI.2 rows: short word + icon, full text kept for aria', () => {
+  const rows = V.turnRows({ turn_id: 't', state: 'cancelled', user_text: 'x', reply: 'me', trimmed_turns: 2, finish_reason: 'limit' });
+  assert.equal(rows.find(r => r.short === 'Recortado').icon, 'info');
+  const cut = V.turnRows({ turn_id: 't', state: 'completed', user_text: 'x', reply: 'r', trimmed_turns: 0, finish_reason: 'limit' });
+  assert.equal(cut[cut.length - 1].short, 'Cortado por largo');
+  const can = V.turnRows({ turn_id: 't', state: 'cancelled', user_text: 'x', reply: 'r', trimmed_turns: 0 });
+  assert.equal(can[can.length - 1].short, 'Cancelado');
+  const err = V.turnRows({ turn_id: 't', state: 'error', user_text: 'x', reply: '', error: { safe_message: 'Sin modelo.' }, trimmed_turns: 0 });
+  assert.equal(err[err.length - 1].icon, 'triangle');
+});
+
+test('UI.2 chat markup: icon-only controls are named, copy is voseo, labels Vos/Abito gone', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+  for (const id of ['chat-models', 'chat-back', 'chat-send', 'chat-cancel', 'chat-new']) {
+    assert.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html)[0], /aria-label="[^"]{3,}"/, id);
+  }
+  assert.match(html, /placeholder="Escribí…"/);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+  assert.doesNotMatch(css, /content: "(Vos|Abito): "/);
+});
+
+// Real cascade resolution (not a text regex): which `animation` declaration
+// WINS for a described element under a given media preference. Supports the
+// selector subset style.css uses: tag, #id, .class, [attr="v"], descendant.
+function cascadeAnimation(css, chain, reduced) {
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = []; // {sel, value, spec, order}
+  let order = 0;
+  const walk = (text, media) => {
+    let i = 0;
+    while (i < text.length) {
+      const open = text.indexOf('{', i);
+      if (open < 0) break;
+      const head = text.slice(i, open).trim();
+      let depth = 1, j = open + 1;
+      while (j < text.length && depth) { depth += text[j] === '{' ? 1 : text[j] === '}' ? -1 : 0; j++; }
+      const body = text.slice(open + 1, j - 1);
+      i = j;
+      if (head.startsWith('@media')) {
+        const ok = head.includes('prefers-reduced-motion: reduce') ? reduced
+          : head.includes('prefers-reduced-motion: no-preference') ? !reduced : false;
+        if (ok) walk(body, head);
+        continue;
+      }
+      if (head.startsWith('@')) continue;
+      const m = /(?:^|;)\s*animation\s*:\s*([^;]+)/.exec(body);
+      if (!m) continue;
+      for (const sel of head.split(',')) rules.push({ sel: sel.trim(), value: m[1].trim(), order: order++ });
+    }
+  };
+  walk(plain, null);
+  const parseCompound = c => {
+    const out = { tag: null, id: null, classes: [], attrs: [], spec: [0, 0, 0] };
+    const re = /([#.]?[\w-]+)|\[([\w-]+)="([^"]*)"\]/g;
+    let m;
+    while ((m = re.exec(c))) {
+      if (m[2]) { out.attrs.push([m[2], m[3]]); out.spec[1]++; }
+      else if (m[1][0] === '#') { out.id = m[1].slice(1); out.spec[0]++; }
+      else if (m[1][0] === '.') { out.classes.push(m[1].slice(1)); out.spec[1]++; }
+      else { out.tag = m[1]; out.spec[2]++; }
+    }
+    return out;
+  };
+  const matches = (c, el) => (!c.tag || c.tag === el.tag) && (!c.id || c.id === el.id) &&
+    c.classes.every(k => (el.classes || []).includes(k)) && c.attrs.every(([k, v]) => (el.attrs || {})[k] === v);
+  const winners = rules.map(r => {
+    const parts = r.sel.split(/\s+/).map(parseCompound);
+    // last compound must match the element; earlier ones an ancestor, in order
+    let k = parts.length - 1;
+    if (!matches(parts[k], chain[chain.length - 1])) return null;
+    let e = chain.length - 2; k -= 1;
+    while (k >= 0 && e >= 0) { if (matches(parts[k], chain[e])) k -= 1; e -= 1; }
+    if (k >= 0) return null;
+    return { ...r, spec: parts.reduce((a, p) => a.map((v, n) => v + p.spec[n]), [0, 0, 0]) };
+  }).filter(Boolean);
+  winners.sort((a, b) => a.spec[0] - b.spec[0] || a.spec[1] - b.spec[1] || a.spec[2] - b.spec[2] || a.order - b.order);
+  return winners.length ? winners[winners.length - 1].value : null;
+}
+
+test('UI.2 reduced motion: the CASCADE (not a regex) leaves the chat ring still and spins it otherwise', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+  for (const kind of ['busy', 'checking']) {
+    const chain = [{ tag: 'span', id: 'chat-state', attrs: { 'data-kind': kind }, classes: ['chip'] },
+      { tag: 'span', classes: ['ico'] }, { tag: 'svg' }];
+    const reduced = cascadeAnimation(css, chain, true);
+    assert.ok(reduced === null || reduced === 'none', `reduced: ${kind} resolves to ${reduced}`);
+    assert.match(cascadeAnimation(css, chain, false), /^spin /, `normal: ${kind} spins`);
+  }
+  // the harness itself must detect the old bug: a spinning rule AFTER the stop wins
+  const buggy = '@media (prefers-reduced-motion: reduce) { #a .b { animation: none; } }\n#a .b { animation: spin 1s; }';
+  assert.match(cascadeAnimation(buggy, [{ tag: 'p', id: 'a' }, { tag: 'i', classes: ['b'] }], true), /^spin/);
+});
+
+test('Q2 poseFor: only real lane state maps to a pose; the rest is rest', () => {
+  const t = state => ({ turn_id: 't', state, user_text: 'x', reply: '', trimmed_turns: 0 });
+  const v = (state, turns = [], active = null) => ({ turns, active_turn: active, availability: { state, message: '' } });
+  assert.equal(V.poseFor(null), null);
+  assert.equal(V.poseFor(v('ready')), null);
+  assert.equal(V.poseFor(v('ready', [t('thinking')], 't')), 'think');
+  assert.equal(V.poseFor(v('ready', [t('streaming')], 't')), 'speak');
+  assert.equal(V.poseFor(v('ready', [t('queued')], 't')), null);
+  assert.equal(V.poseFor(v('ready', [t('waiting_approval')], 't')), null);
+  assert.equal(V.poseFor(v('unavailable')), 'error');
+  assert.equal(V.poseFor(v('blocked')), 'error');
+  assert.equal(V.poseFor(v('ready', [t('error')])), 'error');
+  assert.equal(V.poseFor(v('ready', [t('completed')])), null);
+  assert.equal(V.poseFor(v('unchecked')), null);
+});
+
+test('UI.3: «Respuesta nueva» is hidden whenever the conversation is empty (found in the probe PNGs)', () => {
+  const chatSrc = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  assert.match(chatSrc, /if \(!turns\.length\) \{\s*newer\.hidden = true;/);
 });
 
 test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {

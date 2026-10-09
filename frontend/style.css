@@ -58,6 +58,11 @@ body.probe-capture-bg { background: #d8c9a3; }
   background: var(--island);
   will-change: width, height;
 }
+#compact-flag { position: absolute; right: 12px; top: 6px; width: 20px; height: 20px; display: none; place-items: center; pointer-events: none; }
+#compact-flag .ico svg { width: 16px; height: 16px; }
+#compact-flag[data-tone="sun"] { color: var(--sun); }
+#compact-flag[data-tone="red"] { color: var(--red-11); }
+#capsule[data-phase="compact"] #compact-flag:not([hidden]) { display: grid; }
 #clay {
   position: absolute;
   left: 50%;
@@ -80,6 +85,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 [data-tone="live"] .ico { color: var(--island-live); }
 [data-tone="faint"] .ico { color: var(--faint); }
 .dot { width: 10px; height: 10px; margin: 5px; border-radius: 50%; background: var(--sun); }
+.ico .dot { background: currentColor; }
 @keyframes spin { to { transform: rotate(360deg); } }
 [data-kind="busy"] .ico svg { animation: spin 900ms linear infinite; } /* in-flight ring; still under reduced motion (see @media below): the blue open arc is the cue */
 .icon-btn {
@@ -94,7 +100,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 
 #notices {
   position: absolute;
-  left: 160px; right: 72px; top: 8px; bottom: 64px; /* 88px = row 44 + pill 44; stops 8px before the bubble column (16+48) and 4px above it */
+  left: 160px; right: 72px; top: 8px; bottom: 56px; /* 96px = row 44 + 4px gap + pill 44 + 4px slack; the «i» and cross circles never touch; stops 8px before the bubble column (16+48) */
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
@@ -104,7 +110,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #capsule[data-phase="expanded"] #notices { opacity: 1; visibility: visible; }
 #notice-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 #notice-pill {
-  display: flex; align-items: center; gap: 8px; margin-top: 0; padding: 0 0 0 10px;
+  display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 0 0 10px;
   min-height: 44px; border-radius: var(--radius-full); background: #18181b;
 }
 #notice-ring { display: inline-grid; place-items: center; color: var(--go); }
@@ -166,15 +172,16 @@ body.probe-capture-bg { background: #d8c9a3; }
 #allow:disabled, #deny:disabled { opacity: .45; cursor: default; }
 /* The card state is also the island's contour: sun = waits for your yes. */
 #capsule[data-card-tone="sun"] #island { box-shadow: inset 0 0 0 2px var(--sun); }
-#capsule[data-card-tone="go"] #island { box-shadow: inset 0 0 0 2px var(--go); }
-#capsule[data-card-tone="red"] #island { box-shadow: inset 0 0 0 2px var(--red-11); }
-#capsule[data-card-tone="faint"] #island { box-shadow: inset 0 0 0 2px var(--faint); }
-#capsule[data-card-tone="live"] #island { box-shadow: inset 0 0 0 2px var(--island-live); }
+#capsule[data-phase="expanded"][data-card-tone="go"] #island { box-shadow: inset 0 0 0 2px var(--go); }
+#capsule[data-phase="expanded"][data-card-tone="red"] #island { box-shadow: inset 0 0 0 2px var(--red-11); }
+#capsule[data-phase="expanded"][data-card-tone="faint"] #island { box-shadow: inset 0 0 0 2px var(--faint); }
+#capsule[data-phase="expanded"][data-card-tone="live"] #island { box-shadow: inset 0 0 0 2px var(--island-live); }
 
 @media (prefers-reduced-motion: reduce) {
   /* island.js already snaps geometry under reduced motion; this also kills any
      residual CSS transition so the OS preference really wins. */
   #notices, #permission { transition: none; }
+  #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg, [data-kind="checking"] .ico svg { animation: none; }
   /* Contract §4: no meaning depends on animation. The in-flight ring stays
      still: the blue open arc (shape + --island-live) is the cue. */
   [data-kind="busy"] .ico svg { animation: none; }
@@ -228,27 +235,16 @@ body.probe-capture-bg { background: #d8c9a3; }
   transition: opacity var(--dur-state) var(--ease-out);
 }
 #capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; }
-#chat-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
+#chat-header { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+#chat-header .icon-btn:first-of-type { margin-left: auto; }
+#chat-target-chip .ico { color: var(--island-muted); }
+#capsule[data-chat-availability="unavailable"] #chat-state .word,
+#capsule[data-chat-availability="blocked"] #chat-state .word { color: var(--red-11); }
+/* Spins ONLY when the user has not asked for reduced motion: wrapped so no
+   source-order trick can make it win (the blue open arc is the still cue). */
+@media (prefers-reduced-motion: no-preference) {
+  #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg { animation: spin 900ms linear infinite; }
 }
-#chat-heading { display: flex; flex-direction: column; min-width: 0; }
-#chat-heading strong { font-size: 13.5px; line-height: 1.2; }
-#chat-target { font-size: 11px; color: var(--island-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#chat-status {
-  flex: 1;
-  margin: 0;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--island-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#capsule[data-chat-availability="unavailable"] #chat-status,
-#capsule[data-chat-availability="blocked"] #chat-status { color: #fca5a5; }
 #chat-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #chat-log {
   flex: 1;
@@ -256,6 +252,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   margin: 0;
   padding: 2px 4px 2px 0;
   list-style: none;
+  display: flex; flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-user-select: text;
@@ -265,12 +262,16 @@ body.probe-capture-bg { background: #d8c9a3; }
   line-height: 1.4;
 }
 #chat-log li { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-#chat-log li.user { color: var(--island-muted); }
-#chat-log li.user::before { content: "Vos: "; font-weight: 600; }
-#chat-log li.assistant::before { content: "Abito: "; font-weight: 600; color: var(--go); }
-#chat-log li.note { font-size: 11.5px; color: var(--island-muted); font-style: italic; }
-#chat-log li.error { color: #fca5a5; }
-#chat-log li.empty { color: var(--island-muted); }
+/* UI.2: «Vos»/«Abito» labels are gone: you sit on the right (tinted bubble),
+   Abito on the left (plain). Notes/errors are icon + one word. */
+#chat-log li.user { margin-left: 18%; padding: 6px 12px; border-radius: 14px 14px 4px 14px; background: rgba(255, 255, 255, .1); color: var(--island-ink); width: fit-content; max-width: 82%; align-self: flex-end; }
+#chat-log li.assistant { max-width: 90%; color: var(--island-ink); }
+#chat-log li.note, #chat-log li.error { display: flex; align-items: center; gap: 6px; font: 600 12px/1.2 var(--font-ui); color: var(--island-muted); white-space: normal; }
+#chat-log li.note .ico svg, #chat-log li.error .ico svg { width: 16px; height: 16px; }
+#chat-log li.error { color: var(--red-11); }
+#chat-log li.error .ico { color: var(--red-11); }
+#chat-log li.empty { display: flex; justify-content: center; align-items: center; gap: 18px; height: 100%; min-height: 80px; color: var(--island-muted); }
+#chat-log li.empty .ico svg { width: 28px; height: 28px; }
 #chat-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 6px; }
 #chat-input {
   flex: 1;
@@ -288,7 +289,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   cursor: text;
 }
 #chat-input::placeholder { color: var(--island-muted); }
-#chat-back, #chat-send, #chat-cancel, #chat-new {
+#chat-new {
   min-width: 44px;
   min-height: 44px;
   padding: 0 16px;
@@ -299,9 +300,20 @@ body.probe-capture-bg { background: #d8c9a3; }
   font: 600 13px/1 var(--font-ui);
   cursor: pointer;
 }
-#chat-send { background: var(--go); border-color: var(--go); color: #000; }
+#chat-composer .round {
+  display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; padding: 0;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); cursor: pointer;
+}
+#chat-send { background: var(--go) !important; border-color: var(--go) !important; color: #000 !important; }
 #chat-send:disabled { opacity: .4; cursor: default; }
+#chat-input[data-invalid="true"] { border-color: var(--red-11); }
+#chat-draft-word { position: absolute; right: 108px; bottom: 56px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
+#chat-new .dot { background: var(--island-live); }
+@keyframes row-in { from { opacity: 0; transform: translateY(4px); } }
+#chat-log li.enter { animation: row-in 160ms var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { #chat-log li.enter { animation: none; } }
 #chat-new {
+  display: inline-flex; align-items: center; gap: 2px;
   position: absolute;
   left: 50%;
   bottom: 56px;
@@ -322,32 +334,53 @@ body.probe-capture-bg { background: #d8c9a3; }
 }
 #chat-models[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
 #capsule[data-models="open"] #chat-body { display: none; }
-#models {
-  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px;
-  font-size: 12px; color: var(--island-muted);
-}
+/* UI.2 — visual model view (docs/desktop-visual-language.md §2.4). Panel =
+   one 44px bar (count chip, «i», three meters, refresh, done) + a scrolling
+   list of 44px rows. Rows are never clipped by a fixed height: the list
+   scrolls and every row keeps its full height (BLOCKER 2 of the review). */
+#models { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; gap: 4px; color: var(--island-muted); }
 #models[hidden] { display: none; }
-#models-note { margin: 0; color: var(--island-ink); font-size: 12px; }
-#models-list { flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
-#models-list li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-#models-list li .model-text { flex: 1; min-width: 0; }
-#models-list li .model-title { color: var(--island-ink); font-weight: 600; font-size: 12.5px; }
-#models-list li .model-facts, #models-list li .model-state { display: block; overflow-wrap: anywhere; }
-#models-list li.disabled { opacity: .6; }
-#models-list button {
-  min-width: 44px; min-height: 44px; padding: 0 14px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
-  background: transparent; color: var(--island-ink); font: 600 12.5px/1 var(--font-ui); cursor: pointer;
+#models-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+#models-bar .icon-btn:first-of-type { margin-left: 0; }
+#models-meters { display: flex; gap: 14px; margin: 0 auto; padding: 0; list-style: none; }
+.meter { display: inline-flex; align-items: center; gap: 6px; color: var(--island-muted); }
+.meter-label { font: 600 11px/1 var(--font-ui); color: var(--island-ink); }
+.meter-bar { display: inline-flex; }
+.meter[data-known="false"] { color: var(--faint); }
+#models-note:not(.sr-only) {
+  position: absolute; left: 0; right: 0; top: 48px; z-index: 2; margin: 0; padding: 8px 10px;
+  background: #18181b; border-radius: var(--radius-xl); color: var(--island-ink); font-size: 12px; line-height: 1.35;
 }
-#models-list button[aria-pressed="true"] { background: var(--go); border-color: var(--go); color: #000; }
-#models-list button:disabled { opacity: .45; cursor: default; }
-#models-resources { margin: 0; font-size: 11px; }
-#models-actions { display: flex; gap: 8px; justify-content: flex-end; }
-#models-actions button {
-  min-width: 44px; min-height: 44px; padding: 0 16px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
-  background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
+#models-list { flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y proximity; }
+#models-list li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 0 0 2px; scroll-snap-align: start; }
+#models-list li[aria-label] { cursor: default; }
+.model-title { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); }
+.model-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; overflow: hidden; }
+.model-chips .chip { min-height: 24px; font-size: 12px; }
+.model-chips .chip .ico svg { width: 16px; height: 16px; }
+.model-word { flex: none; }
+.model-word .word { color: var(--island-ink); }
+.model-ok { flex: none; width: 10px; height: 10px; margin: 0 5px; border-radius: 50%; background: var(--go); }
+#models-list li.disabled .model-title, #models-list li.disabled .model-chips { opacity: .6; }
+#models-list .choose {
+  flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border-radius: var(--radius-full); border: 0; background: transparent; color: #000; cursor: pointer; position: relative;
 }
+/* the circle itself is the control's shape: hollow ring = pick it, lime check = chosen */
+#models-list .choose::before {
+  content: ""; position: absolute; width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .45); box-sizing: border-box;
+}
+#models-list .choose[aria-pressed="true"]::before { background: var(--go); border-color: var(--go); }
+#models-list .choose:hover:not(:disabled)::before { border-color: var(--island-ink); }
+#models-list .choose:disabled:not([aria-pressed="true"]) { cursor: default; }
+#models-list .choose:disabled:not([aria-pressed="true"])::before { border-color: var(--faint); }
+#models-list .choose .ico { position: relative; z-index: 1; }
+#models-list .choose .ico svg { width: 18px; height: 18px; }
+#models-list .skeleton { height: 44px; margin: 0 0 4px; border-radius: var(--radius-xl); background: rgba(99, 179, 255, .16); }
+@keyframes pulse { 50% { opacity: .45; } }
+#models-list .skeleton { animation: pulse 1200ms ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #models-list .skeleton { animation: none; } }
 
 /* ---- Q1: keyboard focus of the island itself -------------------------- */
 #capsule:has(#island-toggle:focus-visible) #island { outline: 2px solid var(--go); outline-offset: 2px; }

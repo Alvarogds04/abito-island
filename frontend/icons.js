@@ -31,6 +31,10 @@
     'lock': '<rect x="4" y="9" width="12" height="8" rx="2"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/>',
     'refresh': '<path d="M16 10a6 6 0 1 1-2-4.5M16 3v3.5h-3.5"/>',
     'info': '<circle cx="10" cy="10" r="8"/><path d="M10 9v5M10 6v.01"/>',
+    'plane': '<path d="M18 2L9 11M18 2l-6 16-3-7-7-3z"/>', // paper plane: sent, result not confirmed
+    'load-off': `<path d="M10 3v8M6.5 8L10 11.5 13.5 8M3 13v3h14v-3"/><path d="${SLASH}"/>`, // loading needed (Abito never loads)
+    'eye': EYE,
+    'arrow-down': '<path d="M10 4v12M5 11l5 5 5-5"/>',
     'ring': '<path d="M10 2a8 8 0 1 0 8 8"/>', // open arc; the page spins it
   });
   const NAMES = Object.freeze(Object.keys(PATHS));
@@ -43,5 +47,14 @@
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">' +
       `<circle cx="14" cy="14" r="12" pathLength="100" stroke-dasharray="${Math.round(f * 100)} 100" transform="rotate(-90 14 14)"/></svg>`;
   }
-  return { NAMES, svg, ring };
+  // Usage meter (docs §1.3): the fill IS the value, so a still frame already
+  // shows it. 56x8, rounded track + fill; colour from currentColor.
+  function meter(fraction) {
+    const f = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0));
+    const w = Math.round(f * 52 * 10) / 10;
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 8" width="56" height="8" aria-hidden="true" focusable="false">' +
+      '<rect x="0" y="0" width="56" height="8" rx="4" fill="currentColor" opacity=".22"/>' +
+      (w > 0 ? `<rect x="2" y="2" width="${w}" height="4" rx="2" fill="currentColor"/>` : '') + '</svg>';
+  }
+  return { NAMES, svg, ring, meter };
 });

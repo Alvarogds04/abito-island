@@ -25,19 +25,19 @@
   const COMPACT = { w: 288, h: 32, r: 14, gap: 6, clay: 44, drop: 0 };
   // UI.1: R6 is 128px at the left of the plain overview and 72px while the
   // approval card is shown (only scale/position; the engine is frozen).
-  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 136, drop: 0, clayX: 80 };
-  const OVERVIEW_CARD = { clay: 77, clayX: 56 };
+  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 0, clayX: 82 };
+  const OVERVIEW_CARD = { clay: 80, clayX: 62 };
   // The engine draws its body ~112 viewBox units wide inside its 200x160
   // canvas (measured from the captures), so a box of 128px shows a ~70px
   // character. In the overview the SVG viewBox is tightened (attribute only,
   // engine bytes untouched) so box 136 shows ~127px and box 77 shows ~72px.
   const R6_VISIBLE_UNITS = 112;
   const BASE_VB = [0, 20, 200, 160];
-  const OVERVIEW_VB = [40, 46, 120, 120];
+  const OVERVIEW_VB = [36, 32, 128, 128];
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
-  const CHAT = { w: 640, h: 240, r: 22, clay: 36, clayLeft: 34, clayTop: 8 };
+  const CHAT = { w: 640, h: 240, r: 22, clay: 40, clayLeft: 34, clayTop: 8 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -49,6 +49,24 @@
   if (typeof AbitoClay !== 'undefined') {
     clay = AbitoClay.create(clayEl, { seed: 505, viewBox: '0 20 200 160' });
   }
+
+  // ---- R6 pose (Q2): only REAL events drive it, through the engine's own
+  // setState (no new poses, no redraw). Sources: the chat lane (chat.js
+  // dispatches `abito:pose`: think/speak/error while a turn or the model is in
+  // that state) and the human's decision once the host says it was SENT
+  // A SENT decision keeps the character at rest (O.gestureFor): confirm/reject
+  // wait for a real host confirmation.
+  let chatPose = null;
+  const POSES = new Set(['think', 'speak', 'error']);
+  function applyPose() {
+    const next = chatPose || 'idle';
+    if (clay && clay.state !== next) clay.setState(next);
+  }
+  document.addEventListener('abito:pose', event => {
+    const state = event.detail;
+    chatPose = POSES.has(state) ? state : null;
+    applyPose();
+  });
 
   // ---- motion (contract numbers, JS-driven per frame) --------------------
   const W0 = 2 * Math.PI / 0.5; // spring response: 0.5 s
@@ -424,7 +442,23 @@
     expiry.setAttribute('datetime', card.expires_at);
     $('card-expiry').setAttribute('aria-label', O.expiryAria(card.expires_at, now));
   }
+  // UI.2 §6 compact indicator: waiting card -> sun dot, channel down -> red
+  // triangle. Pure shape+colour; the accessible name says what it means.
+  function paintCompactFlag() {
+    const flag = $('compact-flag');
+    if (!flag) return;
+    const card = current && current.card;
+    const waiting = validCard(card) && Date.now() < Date.parse(card.expires_at) &&
+      (card.state === 'pending' || card.reason === 'Abrí la tarjeta para decidir.'); // covered = still waiting for you
+    const down = !!(current && current.unavailable === true);
+    flag.hidden = !(waiting || down);
+    if (flag.hidden) return;
+    flag.dataset.tone = waiting ? 'sun' : 'red';
+    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : 'Avisos caídos');
+    $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
+  }
   function renderCard() {
+    paintCompactFlag();
     const card = current && current.card;
     const valid = validCard(card);
     const permission = $('permission');
@@ -470,6 +504,7 @@
     if (!current || !O) return;
     if (validCard(current.card)) paintExpiry(current.card);
     paintRing(Array.isArray(current.notices) ? current.notices : []);
+    paintCompactFlag(); // an expired card must stop saying «waiting»
   }, 5000);
   async function decideCard(verb, event) {
     renderCard(); // Recheck expiry/phase even without a newer snapshot.

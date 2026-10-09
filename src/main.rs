@@ -134,14 +134,11 @@ fn close_transport(app: &AppHandle) {
 }
 
 /// Legacy dev `project` (main.cjs): sha256 hex of the canonical worktree root
-/// (`projectId(fs.realpathSync(__dirname/../..))`). None when the checkout
-/// path cannot be canonicalized — the transport then refuses to start instead
-/// of pretending a project identity.
+/// in dev builds; an installed build takes it from `ABITO_PROJECT_ROOT` only
+/// (see `identity`). None when no root can be established — the transport
+/// then refuses to start instead of pretending a project identity.
 fn project_id_for_this_checkout() -> Option<String> {
-    let manifest = option_env!("CARGO_MANIFEST_DIR")?;
-    let apps = std::fs::canonicalize(manifest).ok()?;
-    let root = apps.parent()?.parent()?;
-    Some(protocol::project_id(root.to_str()?))
+    abito_island::identity::project_id_of_this_process()
 }
 
 /// main.cjs lines 487-497: start the optional local notice transport; on any
