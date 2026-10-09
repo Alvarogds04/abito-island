@@ -582,6 +582,7 @@ fn overview_visual_evidence(app: &AppHandle) {
         }
         sleep(Duration::from_millis(200));
         capture_visual(app, "overview-sinpi");
+        capture_poses(app, "grande");
         // i-abierto: the «i» detail open (a real click on the real button).
         let _ = main_window(app).eval("document.getElementById('notice-info').click()");
         sleep(Duration::from_millis(300));
@@ -685,6 +686,9 @@ fn overview_visual_evidence(app: &AppHandle) {
         }
         sleep(Duration::from_millis(200));
         capture_visual(app, "overview-tarjeta-pendiente");
+        if !sent_run && pending_ok {
+            capture_poses(app, "tarjeta");
+        }
         // compacta-espera: same pending card, island collapsed -> sun dot.
         if !sent_run && pending_ok {
             let plan = state.core.lock().expect("core lock").toggle(&io, area);
@@ -764,6 +768,41 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// before and after. The fake's request log proves that NOTHING was
 /// written before that click (a notice can never approve) and that
 /// `/execute` carried exactly the card's `payload_hash`.
+/// Seven R6 poses at the overview framing (viewBox 38 36 124 124), one PNG
+/// each, BEFORE any setState is wired to real events. Probe-only: a second,
+/// non-live engine instance is mounted on a clone of #clay (same size,
+/// position and viewBox as the island's character) held in the engine's own
+/// `staticPose`; the island's real #clay is hidden for the grab and restored.
+/// Nothing in production code changes the pose.
+fn capture_poses(app: &AppHandle, suffix: &str) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let page = main_window(app);
+    let _ = page.eval(
+        "(() => { const real = document.getElementById('clay');
+          const tmp = real.cloneNode(false); tmp.id = 'clay-pose';
+          tmp.setAttribute('viewBox', real.getAttribute('viewBox'));
+          real.after(tmp); real.style.visibility = 'hidden';
+          window.__poseInst = AbitoClay.create(tmp, { seed: 505, viewBox: real.getAttribute('viewBox'), live: false, state: 'idle' });
+          tmp.setAttribute('viewBox', real.getAttribute('viewBox')); })()",
+    );
+    sleep(Duration::from_millis(300));
+    for state in ["idle", "listen", "think", "speak", "reject", "confirm", "error"] {
+        let _ = page.eval(format!(
+            "window.__poseInst.staticPose('{state}'); \
+             document.getElementById('clay-pose').setAttribute('viewBox', document.getElementById('clay').getAttribute('viewBox'))"
+        ));
+        sleep(Duration::from_millis(250));
+        capture_visual(app, &format!("pose-{state}-{suffix}"));
+    }
+    let _ = page.eval(
+        "(() => { const t = document.getElementById('clay-pose'); if (t) t.remove();
+          document.getElementById('clay').style.visibility = ''; delete window.__poseInst; })()",
+    );
+    sleep(Duration::from_millis(200));
+}
+
 fn approval_evidence(app: &AppHandle) {
     let state = app.state::<AppState>();
     let fake = state.probe_fake.lock().expect("probe fake").clone();

@@ -33,7 +33,7 @@
   // engine bytes untouched) so box 136 shows ~127px and box 77 shows ~72px.
   const R6_VISIBLE_UNITS = 112;
   const BASE_VB = [0, 20, 200, 160];
-  const OVERVIEW_VB = [40, 46, 120, 120];
+  const OVERVIEW_VB = [38, 36, 124, 124];
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
