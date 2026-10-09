@@ -143,7 +143,7 @@ pub fn run(app: AppHandle) {
     emit(&json!({
         "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
-        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence"],
+        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence", "chat_open", "chat_evidence", "chat_back_to_overview", "chat_collapse"],
         "gdk_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "unset".into()),
     }));
 
@@ -336,6 +336,14 @@ pub fn run(app: AppHandle) {
     //     performs the human's explicit choice and reads card/bridgeStatus
     //     back through the REAL snapshot path before and after.
     approval_evidence(&app);
+
+    // 11. chat (U1): overview -> chat in the SAME window (672x256 read back
+    //     from the X server), one turn through the REAL `chat_action` IPC
+    //     against an in-process FAKE local router (the real router and any
+    //     provider are never contacted by the probe), then an unreachable
+    //     target to prove the honest "unavailable" with no fallback, then
+    //     back to the overview and collapse.
+    chat_evidence(&app);
 
     // Close the receiver before the hard exit: identity-checked unlink of the
     // socket this process created (never a foreign path).
@@ -636,3 +644,181 @@ const FACADE_JS: &str = r#"(async () => {
     await invoke('record_facade_evidence', { evidence: { script_error: String(e) } });
   } catch { /* probe reports the timeout */ }
 });"#;
+
+/// Wait for the webview to report `n` chat evidence lines.
+fn wait_chat_lines(app: &AppHandle, n: usize, timeout: Duration) -> Vec<serde_json::Value> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let lines = app.state::<AppState>().chat_probe.lock().expect("chat probe lock").clone();
+        if lines.len() >= n || Instant::now() >= deadline {
+            return lines;
+        }
+        sleep(Duration::from_millis(100));
+    }
+}
+
+fn chat_evidence(app: &AppHandle) {
+    use abito_island::chatlane::{self, Target};
+    use abito_island::fakemodel::{closed_port, FakeModel, FakeModelConfig, Reply};
+    use abito_island::localmodel::LocalEndpoint;
+
+    let state = app.state::<AppState>();
+    let fake = FakeModel::start(FakeModelConfig {
+        reply: Reply::Stream {
+            reasoning: true,
+            pieces: vec!["Hola, ".into(), "soy Abito ".into(), "(modelo local falso del probe).".into()],
+            finish: "stop",
+            gap_ms: 60,
+        },
+        ..Default::default()
+    });
+    let fake_target = |origin: &str| Target {
+        endpoint: LocalEndpoint::parse(origin).expect("loopback origin"),
+        alias: "Abito-gpt".into(),
+        profile: chatlane::default_target().profile,
+        max_output: 128,
+    };
+    *state.chat_target.lock().expect("chat target lock") = Some(fake_target(&fake.origin()));
+
+    let win = main_window(app);
+    let io = TauriIo(&win);
+    let scale = io.scale();
+    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
+    let chat_size = geometry::scaled_size(geometry::LOGICAL_CHAT, scale);
+    let compact = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
+
+    // expand (overview), then the `open` verb of the chat lane
+    let area = refresh_work_area(app, &state);
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, overview, Duration::from_secs(3));
+    sleep(Duration::from_millis(400));
+    crate::chathost::switch_view(app, &state, true);
+    let opened = wait_for_size(app, chat_size, Duration::from_secs(3));
+    sleep(Duration::from_millis(900)); // spring settles; availability check lands
+    readback(app, "chat_open");
+    if !opened {
+        emit(&json!({"step": "chat_open", "warning": "window did not reach the chat size within 3s"}));
+    }
+
+    if let Err(e) = win.eval(CHAT_JS_SEND) {
+        emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
+    }
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
+    // now an unreachable local target: honest unavailable, no fallback
+    let completions_before = fake.completions();
+    *state.chat_target.lock().expect("chat target lock") =
+        Some(fake_target(&format!("http://127.0.0.1:{}", closed_port())));
+    if let Err(e) = win.eval(CHAT_JS_DOWN) {
+        emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
+    }
+    let lines = if !lines.is_empty() { wait_chat_lines(app, 2, Duration::from_secs(20)) } else { lines };
+    let seen: Vec<_> = fake.seen().iter().map(|s| json!({"method": s.method, "path": s.path})).collect();
+    emit(&json!({
+        "step": "chat_evidence",
+        "pointer_input": "the webview drives the REAL chat_action IPC itself; no pointer events",
+        "chat_visible_constant": [geometry::CHAT_VISIBLE.0, geometry::CHAT_VISIBLE.1],
+        "chat_native_constant": [geometry::LOGICAL_CHAT.0, geometry::LOGICAL_CHAT.1],
+        "fake_local_router": fake.origin(),
+        "fake_requests": seen,
+        "fake_completions_total": fake.completions(),
+        "fake_completions_while_target_down": fake.completions() - completions_before,
+        "webview": lines,
+        "timed_out": lines.len() < 2,
+    }));
+
+    // back to the overview (same window shrinks to 672x176), then collapse
+    crate::chathost::switch_view(app, &state, false);
+    let back = wait_for_size(app, overview, Duration::from_secs(3));
+    sleep(Duration::from_millis(200));
+    readback(app, "chat_back_to_overview");
+    if !back {
+        emit(&json!({"step": "chat_back_to_overview", "warning": "did not return to the overview size within 3s"}));
+    }
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, compact, Duration::from_secs(3));
+    sleep(Duration::from_millis(200));
+    readback(app, "chat_collapse");
+    // restore the production target for the (exiting) process
+    *state.chat_target.lock().expect("chat target lock") = Some(chatlane::default_target());
+    fake.shutdown();
+}
+
+/// Webview side of the chat step, phase 1: measure the visible chat and its
+/// controls, submit one message through `chat_action`, read the view until
+/// the turn ends, and report.
+const CHAT_JS_SEND: &str = r#"(async () => {
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+  const rect = id => { const el = document.getElementById(id); if (!el) return null;
+    const r = el.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; };
+  const ev = { phase: 'send' };
+  try {
+    const island = document.getElementById('island').getBoundingClientRect();
+    ev.island_visible = [Math.round(island.width), Math.round(island.height)];
+    ev.island_radius = getComputedStyle(document.getElementById('island')).borderTopLeftRadius;
+    ev.view_attr = document.getElementById('capsule').dataset.view;
+    ev.chat_hidden = document.getElementById('chat').hidden;
+    ev.controls = { back: rect('chat-back'), send: rect('chat-send'), input: rect('chat-input') };
+    ev.reduced_motion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    ev.audio_elements = document.querySelectorAll('audio, video').length;
+    ev.focus_in_composer_before_typing = document.activeElement === document.getElementById('chat-input');
+    const before = await invoke('chat_action', { payload: { action: 'view' } });
+    ev.availability_before = before.availability;
+    ev.target = before.target;
+    ev.producer = before.producer;
+    try { await invoke('chat_action', { payload: { action: 'submit', text: 'hola', client_request_id: 'req-probe-0001', model: 'gpt-4' } });
+      ev.smuggled_model_rejected = false; } catch (e) { ev.smuggled_model_rejected = e && e.code; }
+    ev.accepted = await invoke('chat_action', { payload: { action: 'submit', text: '¿Quién sos?', client_request_id: 'req-probe-0001' } });
+    ev.duplicate = await invoke('chat_action', { payload: { action: 'submit', text: '¿Quién sos?', client_request_id: 'req-probe-0001' } });
+    const states = [];
+    let last = null;
+    for (let i = 0; i < 150; i++) {
+      last = await invoke('chat_action', { payload: { action: 'view' } });
+      const t = last.turns[last.turns.length - 1];
+      if (t && states[states.length - 1] !== t.state) states.push(t.state);
+      if (t && ['completed', 'error', 'cancelled'].includes(t.state)) break;
+      await new Promise(r => setTimeout(r, 40));
+    }
+    await new Promise(r => setTimeout(r, 200));
+    const turn = last.turns[last.turns.length - 1];
+    ev.observed_states = states;
+    ev.final = { state: turn.state, reply: turn.reply, finish_reason: turn.finish_reason, error: turn.error };
+    ev.log_text = document.getElementById('chat-log').textContent;
+    ev.status_text = document.getElementById('chat-status').textContent;
+    ev.live_text = document.getElementById('chat-live').textContent;
+  } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
+  await invoke('record_chat_evidence', { evidence: ev });
+})();"#;
+
+/// Phase 2: the local target is unreachable — `check` must say so, Send must
+/// be disabled, and a submit must end `local_model_unavailable`.
+const CHAT_JS_DOWN: &str = r#"(async () => {
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+  const ev = { phase: 'target_down' };
+  try {
+    const checked = await invoke('chat_action', { payload: { action: 'check' } });
+    ev.availability = checked.availability;
+    await new Promise(r => setTimeout(r, 200));
+    const input = document.getElementById('chat-input');
+    input.value = 'hola';
+    input.dispatchEvent(new Event('input'));
+    ev.send_disabled_with_draft = document.getElementById('chat-send').disabled;
+    ev.status_text = document.getElementById('chat-status').textContent;
+    await invoke('chat_action', { payload: { action: 'submit', text: 'hola', client_request_id: 'req-probe-0002' } });
+    let last = null;
+    for (let i = 0; i < 100; i++) {
+      last = await invoke('chat_action', { payload: { action: 'view' } });
+      const t = last.turns[last.turns.length - 1];
+      if (t && ['completed', 'error', 'cancelled'].includes(t.state)) break;
+      await new Promise(r => setTimeout(r, 40));
+    }
+    const t = last.turns[last.turns.length - 1];
+    ev.final = { state: t.state, reply: t.reply, error: t.error };
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+  } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
+  await invoke('record_chat_evidence', { evidence: ev });
+})();"#;

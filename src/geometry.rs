@@ -47,6 +47,24 @@ pub enum Edge {
 pub const LOGICAL_COMPACT: (i32, i32) = (304, 44);
 pub const LOGICAL_OVERVIEW: (i32, i32) = (672, 176);
 
+/// Visible overview island (approved contract, 640x160 r22). Only used to
+/// derive window margins; the overview itself is frozen.
+pub const OVERVIEW_VISIBLE: (i32, i32) = (640, 160);
+
+/// Unit U1 — THE chat height. The visible chat view of the same expanded
+/// surface, in logical px. Parent decision (HANDOFF-chat-and-models.md):
+/// 640x240; the design's minimum alternative is 640x160 — switching is this
+/// ONE line (the test `chat_view_is_640x240_visible_672x256_native` is the
+/// tripwire). The frontend receives it from Rust, never hard-codes it.
+pub const CHAT_VISIBLE: (i32, i32) = (640, 240);
+
+/// Native chat window: the visible chat plus the overview's window margins
+/// (672-640, 176-160) — 672x256 for the 240 chat.
+pub const LOGICAL_CHAT: (i32, i32) = (
+    CHAT_VISIBLE.0 + (LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0),
+    CHAT_VISIBLE.1 + (LOGICAL_OVERVIEW.1 - OVERVIEW_VISIBLE.1),
+);
+
 /// Pointer movement at or above this many physical px on release counts as a
 /// drag (snap, no toggle). Below it the release is a short click (toggle).
 pub const CLICK_THRESHOLD_PX: f64 = 6.0;
@@ -465,5 +483,46 @@ mod tests {
         assert!(!is_click(42.0, CLICK_THRESHOLD_PX));
         // NaN movement degrades to drag, never to an accidental toggle
         assert!(!is_click(f64::NAN, CLICK_THRESHOLD_PX));
+    }
+
+    // --- unit U1 (chat in the island): ONE named height, tested ----------
+
+    #[test]
+    fn chat_view_is_640x240_visible_672x256_native() {
+        // Parent decision (HANDOFF-chat-and-models.md): the chat view uses
+        // 240. Switching back to the 160 proposal is a one-line change of
+        // CHAT_VISIBLE; this test is the tripwire for that line.
+        assert_eq!(CHAT_VISIBLE, (640, 240));
+        assert_eq!(LOGICAL_CHAT, (672, 256));
+        // native = visible + the same window margins the overview uses
+        assert_eq!(
+            LOGICAL_CHAT,
+            (
+                CHAT_VISIBLE.0 + (LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0),
+                CHAT_VISIBLE.1 + (LOGICAL_OVERVIEW.1 - OVERVIEW_VISIBLE.1),
+            )
+        );
+        assert_eq!(scaled_size(LOGICAL_CHAT, 2.0), (1344, 512));
+    }
+
+    #[test]
+    fn approved_overview_and_compact_are_untouched_by_the_chat_view() {
+        assert_eq!(OVERVIEW_VISIBLE, (640, 160));
+        assert_eq!(LOGICAL_OVERVIEW, (672, 176));
+        assert_eq!(LOGICAL_COMPACT, (304, 44));
+        // the chat is the SAME surface: same width, only taller
+        assert_eq!(LOGICAL_CHAT.0, LOGICAL_OVERVIEW.0);
+    }
+
+    #[test]
+    fn chat_grows_upward_when_docked_at_the_bottom() {
+        let a = area();
+        let overview = Rect { x: 624, y: a.bottom() - 176, w: 672, h: 176 };
+        let chat = anchor_toggle(Edge::Bottom, overview, LOGICAL_CHAT, a);
+        assert_eq!(chat.bottom(), a.bottom());
+        assert_eq!((chat.x, chat.w, chat.h), (624, 672, 256));
+        let top = Rect { x: 624, y: a.y, w: 672, h: 176 };
+        let chat = anchor_toggle(Edge::Top, top, LOGICAL_CHAT, a);
+        assert_eq!((chat.y, chat.h), (a.y, 256));
     }
 }

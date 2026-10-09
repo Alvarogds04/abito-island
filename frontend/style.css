@@ -147,3 +147,137 @@ body.is-dragging { cursor: grabbing; }
      residual CSS transition so the OS preference really wins. */
   #label, #notices, #permission { transition: none; }
 }
+
+/* ---- U1: chat in the island ------------------------------------------- */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+/* Overview blocks show only in the overview view of the expanded island. */
+#capsule[data-view="chat"] #notices,
+#capsule[data-view="chat"] #permission { opacity: 0; visibility: hidden; }
+
+/* Primary overview control: the most prominent element, >=44px target,
+   in the bottom-centre slot (the label stays readable to screen readers). */
+#open-chat {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  min-width: 132px;
+  min-height: 44px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--go);
+  color: #000;
+  font: 700 14px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+#capsule[data-phase="expanded"][data-view="overview"] #open-chat { opacity: 1; visibility: visible; }
+#capsule[data-phase="expanded"][data-view="overview"] #label { visibility: hidden; }
+#open-chat:hover { filter: brightness(1.08); }
+
+:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+
+#chat {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 12px 8px 60px; /* left: room for the scaled R6 in the header */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+#capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; }
+#chat-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+#chat-heading { display: flex; flex-direction: column; min-width: 0; }
+#chat-heading strong { font-size: 13.5px; line-height: 1.2; }
+#chat-target { font-size: 11px; color: var(--island-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chat-status {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--island-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#capsule[data-chat-availability="unavailable"] #chat-status,
+#capsule[data-chat-availability="blocked"] #chat-status { color: #fca5a5; }
+#chat-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#chat-log {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 4px 2px 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  font-size: 13px;
+  line-height: 1.4;
+}
+#chat-log li { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#chat-log li.user { color: var(--island-muted); }
+#chat-log li.user::before { content: "Vos: "; font-weight: 600; }
+#chat-log li.assistant::before { content: "Abito: "; font-weight: 600; color: var(--go); }
+#chat-log li.note { font-size: 11.5px; color: var(--island-muted); font-style: italic; }
+#chat-log li.error { color: #fca5a5; }
+#chat-log li.empty { color: var(--island-muted); }
+#chat-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 6px; }
+#chat-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 44px;
+  resize: none;
+  padding: 12px 14px;
+  border-radius: var(--radius-2xl);
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .06);
+  color: var(--island-ink);
+  font: 400 13.5px/1.35 var(--font-ui);
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+#chat-input::placeholder { color: var(--island-muted); }
+#chat-back, #chat-send, #chat-cancel, #chat-new {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent;
+  color: var(--island-ink);
+  font: 600 13px/1 var(--font-ui);
+  cursor: pointer;
+}
+#chat-send { background: var(--go); border-color: var(--go); color: #000; }
+#chat-send:disabled { opacity: .4; cursor: default; }
+#chat-new {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  background: #18181b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #open-chat, #chat { transition: none; }
+  #chat-log { scroll-behavior: auto; }
+}

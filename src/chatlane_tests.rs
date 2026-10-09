@@ -1,0 +1,98 @@
+//! Unit U1 — tests for the pure preflight decision (metadata only, no
+//! inference). RED → GREEN.
+
+use super::*;
+use serde_json::json;
+
+fn health() -> Value {
+    json!({"status": "ok"})
+}
+fn props(sleeping: bool) -> Value {
+    json!({"model_alias": "Abito-gpt", "total_slots": 1, "is_sleeping": sleeping})
+}
+fn slots(busy: bool) -> Value {
+    json!([{"id": 0, "n_ctx": 65536, "is_processing": busy}])
+}
+fn models() -> Value {
+    json!({"data": [{"id": "Abito-gpt", "meta": {"n_ctx": 65536, "size": 18198045184u64}}]})
+}
+
+#[test]
+fn awake_idle_model_is_ready_with_its_real_context() {
+    let r = assess("Abito-gpt", Some(&health()), Some(&props(false)), Some(&slots(false)), Some(&models()))
+        .unwrap();
+    assert_eq!(r.context_limit, 65536);
+    assert!(!r.busy);
+    assert_eq!(r.size_bytes, Some(18198045184));
+}
+
+#[test]
+fn unreachable_router_is_unavailable_and_nothing_else_is_tried() {
+    let e = assess("Abito-gpt", None, None, None, None).unwrap_err();
+    assert_eq!(e.code, "local_model_unavailable");
+}
+
+#[test]
+fn a_sleeping_model_is_never_loaded_silently() {
+    let e = assess("Abito-gpt", Some(&health()), Some(&props(true)), Some(&slots(false)), Some(&models()))
+        .unwrap_err();
+    assert_eq!(e.code, "resource_authorization_required");
+    assert!(e.safe_message.contains("dormido"));
+    assert!(e.safe_message.contains("18,2 GB"));
+    assert!(e.safe_message.contains("No se cargó nada"));
+}
+
+#[test]
+fn a_busy_slot_is_reported_as_queue_not_hidden() {
+    let r = assess("Abito-gpt", Some(&health()), Some(&props(false)), Some(&slots(true)), Some(&models()))
+        .unwrap();
+    assert!(r.busy);
+}
+
+#[test]
+fn a_different_alias_on_the_endpoint_is_not_substituted() {
+    let other = json!({"model_alias": "Otro", "is_sleeping": false});
+    let e = assess("Abito-gpt", Some(&health()), Some(&other), Some(&slots(false)), Some(&models()))
+        .unwrap_err();
+    assert_eq!(e.code, "local_model_unavailable");
+}
+
+#[test]
+fn unknown_state_or_context_refuses_instead_of_guessing() {
+    let e = assess("Abito-gpt", Some(&health()), None, Some(&slots(false)), Some(&models()))
+        .unwrap_err();
+    assert_eq!(e.code, "resource_authorization_required");
+    let e = assess("Abito-gpt", Some(&health()), Some(&props(false)), None, None).unwrap_err();
+    assert_eq!(e.code, "resource_authorization_required");
+}
+
+#[test]
+fn context_falls_back_to_the_model_listing_when_slots_are_hidden() {
+    let r = assess("Abito-gpt", Some(&health()), Some(&props(false)), None, Some(&models())).unwrap();
+    assert_eq!(r.context_limit, 65536);
+}
+
+#[test]
+fn bytes_are_shown_in_spanish_gigabytes() {
+    assert_eq!(gigabytes(18_198_045_184), "18,2 GB");
+    assert_eq!(gigabytes(536_870_912), "0,5 GB");
+}
+
+#[test]
+fn availability_maps_the_preflight_honestly() {
+    let ok = Ok(Ready { context_limit: 65536, busy: false, size_bytes: None });
+    let busy = Ok(Ready { context_limit: 65536, busy: true, size_bytes: None });
+    assert_eq!(availability_of(&ok).state, "ready");
+    assert_eq!(availability_of(&busy).state, "busy");
+    let down = availability_of(&Err(ChatError::local_model_unavailable()));
+    assert_eq!(down.state, "unavailable");
+    assert!(down.message.contains("No se usó ningún otro modelo"));
+    let asleep = availability_of(&Err(ChatError::resource_authorization_required("dormido")));
+    assert_eq!(asleep.state, "blocked");
+    assert!(availability_of(&ok).can_send());
+    assert!(availability_of(&busy).can_send());
+    assert!(!down.can_send());
+    assert!(!asleep.can_send());
+    assert!(!Availability::unchecked().can_send());
+    assert_eq!(Availability::unchecked().state, "unchecked");
+}

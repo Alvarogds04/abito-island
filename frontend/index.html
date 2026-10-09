@@ -12,12 +12,19 @@
   <!-- window.desktop facade must exist before the island boots. -->
   <script defer src="desktop.js"></script>
   <script defer src="island.js"></script>
+  <!-- U1: pure chat view helpers + the chat surface (same island). -->
+  <script defer src="chat-view.js"></script>
+  <script defer src="chat.js"></script>
 </head>
 <body>
   <main id="capsule" data-phase="compact" data-edge="top">
     <div id="island">
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <div id="label"><strong>Compañero</strong><span>Vista general</span></div>
+      <!-- U1: the overview's primary control. Opens the chat view of THIS
+           island (no other window). Enter in the overview does the same. -->
+      <button id="open-chat" type="button" aria-describedby="open-chat-hint">Conversar</button>
+      <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
       <!-- M2: Sileo-style notice text, display only (own code, silence).
            A notice never decides or approves anything. -->
       <div id="notices" hidden>
@@ -41,6 +48,32 @@
           <button id="deny" type="button" disabled aria-describedby="card-reason">Denegar</button>
         </div>
       </div>
+      <!-- U1: chat view — same island, 640x240 (geometry::CHAT_VISIBLE).
+           Every text below is written with textContent: plain text only. -->
+      <section id="chat" hidden aria-label="Conversación con Abito">
+        <header id="chat-header">
+          <div id="chat-heading">
+            <strong>Abito</strong>
+            <span id="chat-target"></span>
+          </div>
+          <p id="chat-status"></p>
+          <button id="chat-back" type="button">Volver</button>
+        </header>
+        <div id="chat-body">
+          <ol id="chat-log" tabindex="0" aria-label="Historial de la conversación"></ol>
+          <button id="chat-new" type="button" hidden>Respuesta nueva</button>
+          <form id="chat-composer" novalidate>
+            <label for="chat-input" class="sr-only">Mensaje para Abito</label>
+            <textarea id="chat-input" rows="1" maxlength="8000" spellcheck="true"
+              aria-describedby="chat-help chat-problem" placeholder="Escribile a Abito…"></textarea>
+            <span id="chat-help" class="sr-only">Enter envía. Mayúsculas más Enter agrega una línea. Escape sale del campo; otro Escape cierra la isla.</span>
+            <button id="chat-cancel" type="button" hidden>Cancelar</button>
+            <button id="chat-send" type="submit" disabled>Enviar</button>
+          </form>
+          <p id="chat-problem" class="sr-only" aria-live="polite"></p>
+        </div>
+        <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
+      </section>
     </div>
   </main>
 </body>

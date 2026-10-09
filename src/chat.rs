@@ -1,0 +1,616 @@
+//! Unit U1 — the island chat contract, pure (no I/O, no window system).
+//!
+//! The subset of `abito.chat.v1` (docs/abito-features.md §2) that a LOCAL
+//! model behind the loopback llama.cpp router can honestly produce today:
+//! native-assigned ids, one turn per conversation, monotonic `seq`, plain-text
+//! deltas, terminal `completed`/`cancelled`/`error`, typed safe errors, bounded
+//! draft/response/cache, and visible history trimming against the context
+//! budget (never a bigger context allocation).
+//!
+//! Not here, on purpose: the Pi chat producer. The desktop has none yet, so
+//! this conversation talks to the selected local model only (chatlane.rs);
+//! `waiting_approval` exists in the state machine because the contract names
+//! it, but nothing in this unit can enter it (no producer emits proposals).
+//! A future Pi adapter plugs in at the same `Event` boundary.
+
+use std::collections::VecDeque;
+
+use serde::Serialize;
+use serde_json::{json, Value};
+
+/// Draft limit: Unicode scalar values (contract: ≤8,000).
+pub const DRAFT_MAX_SCALARS: usize = 8_000;
+/// Streamed response limit (contract: ≤32,000); reaching it ends the turn
+/// with `finish_reason: limit`, never with another automatic request.
+pub const RESPONSE_MAX_SCALARS: usize = 32_000;
+/// Presentation cache: ≤100 turns or 256 KiB of text, whichever first.
+/// Eviction is presentation-only (page/process memory, nothing persisted).
+pub const CACHE_MAX_TURNS: usize = 100;
+pub const CACHE_MAX_BYTES: usize = 256 * 1024;
+/// Per-message chat-template overhead in the token estimate.
+pub const MESSAGE_OVERHEAD_TOKENS: usize = 4;
+
+/// Turn states, exactly the contract strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnState {
+    Queued,
+    Thinking,
+    Streaming,
+    WaitingApproval,
+    Completed,
+    Cancelled,
+    Error,
+}
+
+impl TurnState {
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            TurnState::Completed | TurnState::Cancelled | TurnState::Error
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stop,
+    Limit,
+    Cancelled,
+}
+
+/// `chat.error`: a code, a safe message, retryable. Never a raw provider
+/// body, header, key or URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChatError {
+    pub code: String,
+    pub safe_message: String,
+    pub retryable: bool,
+}
+
+impl ChatError {
+    fn new(code: &str, safe_message: &str, retryable: bool) -> Self {
+        ChatError {
+            code: code.to_string(),
+            safe_message: safe_message.to_string(),
+            retryable,
+        }
+    }
+    pub fn invalid_input(why: &str) -> Self {
+        Self::new("invalid_input", why, false)
+    }
+    pub fn local_model_unavailable() -> Self {
+        Self::new(
+            "local_model_unavailable",
+            "El modelo local no responde: el chat no está disponible. No se usó ningún otro modelo.",
+            true,
+        )
+    }
+    pub fn queue_full() -> Self {
+        Self::new(
+            "queue_full",
+            "Ya hay una respuesta en curso. Esperá o cancelala antes de enviar otra.",
+            true,
+        )
+    }
+    pub fn inference_error() -> Self {
+        Self::new(
+            "inference_error",
+            "El modelo local devolvió un error. No se reintentó ni se usó otro modelo.",
+            true,
+        )
+    }
+    pub fn stream_gap() -> Self {
+        Self::new(
+            "stream_gap",
+            "La respuesta llegó incompleta o mal formada. No se reintentó.",
+            true,
+        )
+    }
+    pub fn context_limit() -> Self {
+        Self::new(
+            "context_limit",
+            "El mensaje no entra en el contexto del modelo elegido. Acortalo.",
+            false,
+        )
+    }
+    pub fn profile_missing() -> Self {
+        Self::new(
+            "profile_missing",
+            "No hay un modelo local elegido para conversar.",
+            false,
+        )
+    }
+    /// The resource gate refused (U2): the message names what to do.
+    pub fn resource_authorization_required(safe_message: &str) -> Self {
+        Self::new("resource_authorization_required", safe_message, true)
+    }
+}
+
+/// Validate and normalize a draft: CRLF/CR → LF, no control characters other
+/// than LF and TAB (C0, DEL and C1 are refused), non-blank, ≤8,000 scalars.
+pub fn validate_text(text: &str) -> Result<String, ChatError> {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.chars().count() > DRAFT_MAX_SCALARS {
+        return Err(ChatError::invalid_input(
+            "El mensaje supera los 8.000 caracteres.",
+        ));
+    }
+    if normalized
+        .chars()
+        .any(|c| c != '\n' && c != '\t' && (c.is_control()))
+    {
+        return Err(ChatError::invalid_input(
+            "El mensaje contiene caracteres de control.",
+        ));
+    }
+    if normalized.trim().is_empty() {
+        return Err(ChatError::invalid_input("El mensaje está vacío."));
+    }
+    Ok(normalized)
+}
+
+/// The page's own idempotency token: 8..=64 of `[A-Za-z0-9_-]`.
+pub fn valid_client_request_id(id: &str) -> bool {
+    (8..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Conservative token estimate: ⌈UTF-8 bytes / 3⌉ + template overhead.
+/// Over-estimating keeps the request inside the context budget.
+pub fn estimate_tokens(text: &str) -> usize {
+    text.len().div_ceil(3) + MESSAGE_OVERHEAD_TOKENS
+}
+
+/// The profile a turn is frozen to (no halfway swap on selection change).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProfileRef {
+    pub profile_id: String,
+    pub revision: u64,
+    pub lane_id: String,
+}
+
+/// `chat.accepted`: queued work, not completion and not approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Accepted {
+    pub turn_id: String,
+    pub request_id: String,
+    pub lane_id: String,
+    pub profile_id: String,
+    pub profile_revision: u64,
+    /// True when this is the same accepted turn for a repeated client id.
+    pub duplicate: bool,
+}
+
+/// One producer event, applied with a monotonic `seq` (1, 2, 3, …).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Event {
+    Thinking,
+    Delta(String),
+    WaitingApproval,
+    Complete(FinishReason),
+    Error(ChatError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applied {
+    Ok,
+    /// The delta crossed the response limit: kept up to the limit, turn
+    /// completed with `finish_reason: limit`.
+    Truncated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reject {
+    UnknownTurn,
+    Regressing,
+    Gap,
+    AfterTerminal,
+    InvalidTransition,
+}
+
+#[derive(Debug, Clone)]
+pub struct Turn {
+    pub turn_id: String,
+    pub request_id: String,
+    pub client_request_id: String,
+    pub user_text: String,
+    pub reply: String,
+    pub state: TurnState,
+    pub seq: u64,
+    pub finish: Option<FinishReason>,
+    pub error: Option<ChatError>,
+    pub profile: ProfileRef,
+    /// Older turns left out of this turn's prompt (shown in the UI).
+    pub trimmed_turns: usize,
+}
+
+impl Turn {
+    fn bytes(&self) -> usize {
+        self.user_text.len() + self.reply.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Message {
+    pub role: &'static str,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prompt {
+    pub messages: Vec<Message>,
+    pub estimated_tokens: usize,
+    pub trimmed_turns: usize,
+}
+
+/// One conversation (V1: one per process, page/process memory only).
+#[derive(Debug)]
+pub struct Conversation {
+    id: String,
+    turns: VecDeque<Turn>,
+    next: u64,
+    evicted: usize,
+}
+
+impl Conversation {
+    pub fn new(id: &str) -> Self {
+        Conversation {
+            id: id.to_string(),
+            turns: VecDeque::new(),
+            next: 0,
+            evicted: 0,
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn len(&self) -> usize {
+        self.turns.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.turns.is_empty()
+    }
+    pub fn evicted(&self) -> usize {
+        self.evicted
+    }
+    pub fn bytes(&self) -> usize {
+        self.turns.iter().map(Turn::bytes).sum()
+    }
+    pub fn turn(&self, turn_id: &str) -> Option<&Turn> {
+        self.turns.iter().find(|t| t.turn_id == turn_id)
+    }
+    fn turn_mut(&mut self, turn_id: &str) -> Option<&mut Turn> {
+        self.turns.iter_mut().find(|t| t.turn_id == turn_id)
+    }
+    /// The running (non-terminal) turn, if any.
+    pub fn active(&self) -> Option<&Turn> {
+        self.turns.back().filter(|t| !t.state.is_terminal())
+    }
+
+    /// `chat.submit`: native assigns `turn_id`/`request_id`; a repeated
+    /// client id returns the SAME accepted turn (never a second job); a
+    /// running turn refuses a new one (`queue_full`, one turn per
+    /// conversation in V1).
+    pub fn submit(
+        &mut self,
+        text: &str,
+        client_request_id: &str,
+        profile: &ProfileRef,
+    ) -> Result<Accepted, ChatError> {
+        if !valid_client_request_id(client_request_id) {
+            return Err(ChatError::invalid_input("Identificador de envío inválido."));
+        }
+        if let Some(t) = self
+            .turns
+            .iter()
+            .find(|t| t.client_request_id == client_request_id)
+        {
+            return Ok(Self::accepted(t, true));
+        }
+        if self.active().is_some() {
+            return Err(ChatError::queue_full());
+        }
+        let text = validate_text(text)?;
+        self.next += 1;
+        let turn = Turn {
+            turn_id: format!("t-{}", self.next),
+            request_id: format!("{}/r-{}", self.id, self.next),
+            client_request_id: client_request_id.to_string(),
+            user_text: text,
+            reply: String::new(),
+            state: TurnState::Queued,
+            seq: 0,
+            finish: None,
+            error: None,
+            profile: profile.clone(),
+            trimmed_turns: 0,
+        };
+        let accepted = Self::accepted(&turn, false);
+        self.turns.push_back(turn);
+        self.enforce_cache();
+        Ok(accepted)
+    }
+
+    /// The accepted turn for a client id the page already used, if any.
+    pub fn lookup(&self, client_request_id: &str) -> Option<Accepted> {
+        self.turns
+            .iter()
+            .find(|t| t.client_request_id == client_request_id)
+            .map(|t| Self::accepted(t, true))
+    }
+
+    fn accepted(t: &Turn, duplicate: bool) -> Accepted {
+        Accepted {
+            turn_id: t.turn_id.clone(),
+            request_id: t.request_id.clone(),
+            lane_id: t.profile.lane_id.clone(),
+            profile_id: t.profile.profile_id.clone(),
+            profile_revision: t.profile.revision,
+            duplicate,
+        }
+    }
+
+    /// Apply one producer event. Rejected events change nothing.
+    pub fn apply(&mut self, turn_id: &str, seq: u64, event: Event) -> Result<Applied, Reject> {
+        let turn = self.turn_mut(turn_id).ok_or(Reject::UnknownTurn)?;
+        if turn.state.is_terminal() {
+            return Err(Reject::AfterTerminal);
+        }
+        if seq <= turn.seq {
+            return Err(Reject::Regressing);
+        }
+        if seq != turn.seq + 1 {
+            return Err(Reject::Gap);
+        }
+        let mut outcome = Applied::Ok;
+        match event {
+            Event::Thinking => match turn.state {
+                TurnState::Queued | TurnState::Thinking => turn.state = TurnState::Thinking,
+                _ => return Err(Reject::InvalidTransition),
+            },
+            Event::Delta(text) => match turn.state {
+                TurnState::Queued | TurnState::Thinking | TurnState::Streaming => {
+                    let have = turn.reply.chars().count();
+                    let room = RESPONSE_MAX_SCALARS.saturating_sub(have);
+                    if text.chars().count() > room {
+                        turn.reply.extend(text.chars().take(room));
+                        turn.state = TurnState::Completed;
+                        turn.finish = Some(FinishReason::Limit);
+                        outcome = Applied::Truncated;
+                    } else {
+                        turn.reply.push_str(&text);
+                        turn.state = TurnState::Streaming;
+                    }
+                }
+                _ => return Err(Reject::InvalidTransition),
+            },
+            Event::WaitingApproval => match turn.state {
+                TurnState::Thinking | TurnState::Streaming => {
+                    turn.state = TurnState::WaitingApproval
+                }
+                _ => return Err(Reject::InvalidTransition),
+            },
+            Event::Complete(reason) => {
+                turn.state = if reason == FinishReason::Cancelled {
+                    TurnState::Cancelled
+                } else {
+                    TurnState::Completed
+                };
+                turn.finish = Some(reason);
+            }
+            Event::Error(error) => {
+                turn.state = TurnState::Error;
+                turn.error = Some(error);
+            }
+        }
+        turn.seq = seq;
+        self.enforce_cache();
+        Ok(outcome)
+    }
+
+    /// `chat.cancel`: terminal, later deltas are discarded. Returns whether a
+    /// running turn was cancelled (never creates a turn).
+    pub fn cancel(&mut self, turn_id: &str) -> bool {
+        match self.turn_mut(turn_id) {
+            Some(turn) if !turn.state.is_terminal() => {
+                turn.state = TurnState::Cancelled;
+                turn.finish = Some(FinishReason::Cancelled);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Drop the oldest TERMINAL turns until both bounds hold. The active
+    /// turn is never evicted.
+    fn enforce_cache(&mut self) {
+        while self.turns.len() > CACHE_MAX_TURNS || self.bytes() > CACHE_MAX_BYTES {
+            match self.turns.front() {
+                Some(front) if front.state.is_terminal() => {
+                    self.turns.pop_front();
+                    self.evicted += 1;
+                }
+                _ => break,
+            }
+        }
+    }
+
+    /// Build the bounded prompt for `turn_id`: system + newest history that
+    /// fits + the new user message. `context_limit - max_output` is the
+    /// input budget; older turns that do not fit are left out and counted
+    /// (shown to the human), and a message that cannot fit alone is a
+    /// `context_limit` error — never a silently larger context.
+    pub fn prompt_for(
+        &mut self,
+        turn_id: &str,
+        system: &str,
+        context_limit: usize,
+        max_output: usize,
+    ) -> Result<Prompt, ChatError> {
+        let index = self
+            .turns
+            .iter()
+            .position(|t| t.turn_id == turn_id)
+            .ok_or_else(ChatError::profile_missing)?;
+        let budget = context_limit.saturating_sub(max_output);
+        let user = self.turns[index].user_text.clone();
+        let mut used = estimate_tokens(system) + estimate_tokens(&user);
+        if used > budget {
+            return Err(ChatError::context_limit());
+        }
+        let eligible: Vec<&Turn> = self
+            .turns
+            .iter()
+            .take(index)
+            .filter(|t| {
+                !t.reply.is_empty()
+                    && matches!(t.state, TurnState::Completed | TurnState::Cancelled)
+            })
+            .collect();
+        let mut kept: Vec<&Turn> = Vec::new();
+        for t in eligible.iter().rev() {
+            let cost = estimate_tokens(&t.user_text) + estimate_tokens(&t.reply);
+            if used + cost > budget {
+                break;
+            }
+            used += cost;
+            kept.push(t);
+        }
+        let trimmed = eligible.len() - kept.len();
+        let mut messages = vec![Message {
+            role: "system",
+            content: system.to_string(),
+        }];
+        for t in kept.iter().rev() {
+            messages.push(Message {
+                role: "user",
+                content: t.user_text.clone(),
+            });
+            messages.push(Message {
+                role: "assistant",
+                content: t.reply.clone(),
+            });
+        }
+        messages.push(Message {
+            role: "user",
+            content: user,
+        });
+        self.turns[index].trimmed_turns = trimmed;
+        Ok(Prompt {
+            messages,
+            estimated_tokens: used,
+            trimmed_turns: trimmed,
+        })
+    }
+
+    /// Plain-data projection for the WebView (`chat:state`). The page's own
+    /// client request ids are not echoed back.
+    pub fn view(&self) -> Value {
+        let turns: Vec<Value> = self
+            .turns
+            .iter()
+            .map(|t| {
+                json!({
+                    "turn_id": t.turn_id,
+                    "request_id": t.request_id,
+                    "state": t.state,
+                    "seq": t.seq,
+                    "user_text": t.user_text,
+                    "reply": t.reply,
+                    "finish_reason": t.finish,
+                    "error": t.error,
+                    "trimmed_turns": t.trimmed_turns,
+                    "profile_id": t.profile.profile_id,
+                    "profile_revision": t.profile.revision,
+                })
+            })
+            .collect();
+        json!({
+            "conversation_id": self.id,
+            "active_turn": self.active().map(|t| t.turn_id.clone()),
+            "turns": turns,
+            "evicted": self.evicted,
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "chat_tests.rs"]
+mod tests;
+
+// --- chat_action IPC payload --------------------------------------------------
+
+/// Whole serialized `chat_action` payload cap (8,000 scalars × 4 bytes +
+/// JSON overhead). Checked before any field is read.
+pub const CHAT_COMMAND_MAX_BYTES: usize = 33 * 1024;
+
+/// The closed set of things the WebView may ask the chat lane. There is no
+/// endpoint, model, alias, key or approval field: Rust owns all of those.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// Read the current conversation projection.
+    View,
+    /// Overview → chat view (same island, native window grows to the chat).
+    Open,
+    /// Chat view → overview (draft stays in page memory).
+    Back,
+    /// Re-read the local model's availability (metadata only, no inference).
+    Check,
+    Submit {
+        text: String,
+        client_request_id: String,
+    },
+    Cancel {
+        turn_id: String,
+    },
+}
+
+fn valid_turn_id(id: &str) -> bool {
+    id.len() <= 24
+        && id
+            .strip_prefix("t-")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Validate a `chat_action` payload: size cap first, a JSON object, an
+/// action in the closed set and EXACTLY that action's keys.
+pub fn parse_command(payload: &Value) -> Result<Command, ChatError> {
+    let bad = || ChatError::invalid_input("Pedido de chat inválido.");
+    if serde_json::to_vec(payload).map_or(true, |b| b.len() > CHAT_COMMAND_MAX_BYTES) {
+        return Err(bad());
+    }
+    let map = payload.as_object().ok_or_else(bad)?;
+    let action = map.get("action").and_then(Value::as_str).ok_or_else(bad)?;
+    let keys = |expected: &[&str]| {
+        map.len() == expected.len() && expected.iter().all(|k| map.contains_key(*k))
+    };
+    let text_of = |key: &str| map.get(key).and_then(Value::as_str).map(str::to_string);
+    match action {
+        "view" if keys(&["action"]) => Ok(Command::View),
+        "open" if keys(&["action"]) => Ok(Command::Open),
+        "back" if keys(&["action"]) => Ok(Command::Back),
+        "check" if keys(&["action"]) => Ok(Command::Check),
+        "submit" if keys(&["action", "text", "client_request_id"]) => {
+            let text = text_of("text").ok_or_else(bad)?;
+            let client_request_id = text_of("client_request_id")
+                .filter(|id| valid_client_request_id(id))
+                .ok_or_else(bad)?;
+            Ok(Command::Submit {
+                text,
+                client_request_id,
+            })
+        }
+        "cancel" if keys(&["action", "turn_id"]) => {
+            let turn_id = text_of("turn_id")
+                .filter(|id| valid_turn_id(id))
+                .ok_or_else(bad)?;
+            Ok(Command::Cancel { turn_id })
+        }
+        _ => Err(bad()),
+    }
+}

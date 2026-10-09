@@ -25,6 +25,10 @@
   // 672x176 overview (set by Rust); margins are the difference.
   const COMPACT = { w: 288, h: 32, r: 14, gap: 6, clay: 44, drop: 0 };
   const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 104, drop: 16 };
+  // U1: chat view of the SAME expanded island. Its height arrives from Rust
+  // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
+  // pre-first-push default and must match that constant.
+  const CHAT = { w: 640, h: 240, r: 22, clay: 36, clayLeft: 34, clayTop: 8 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -49,6 +53,8 @@
   let mode = 'idle';    // 'idle' | 'spring' | 'shrink'
   let t0 = 0, p0 = 0, last = 0, raf = 0;
   let edge = 'top';     // docked vertical edge (mirrors the Rust state)
+  // U1: second channel, 0 = overview, 1 = chat (same contract motion).
+  const q = { x: 0, v: 0, target: 0, mode: 'idle', t0: 0, x0: 0, last: 0 };
 
   function cubicBezier(x1, y1, x2, y2) {
     const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
@@ -81,8 +87,8 @@
   const lerp = (a, b, t) => a + (b - a) * t;
 
   function render() {
-    const w = lerp(COMPACT.w, OVERVIEW.w, p);
-    const h = lerp(COMPACT.h, OVERVIEW.h, p);
+    const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
+    const h = lerp(COMPACT.h, lerp(OVERVIEW.h, CHAT.h, q.x), p);
     const r = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
     const cs = lerp(COMPACT.clay, OVERVIEW.clay, p);
@@ -99,14 +105,20 @@
       island.style.bottom = gap + 'px';
       island.style.top = 'auto';
     }
-    clayEl.style.width = cs + 'px';
-    clayEl.style.height = cs + 'px';
-    clayEl.style.top = (h / 2 - drop - cs / 2) + 'px';
-    label.style.opacity = String(Math.max(0, Math.min(1, (p - 0.7) / 0.3)));
+    // R6 is only scaled and positioned (never redrawn): centred in the
+    // overview, small at the left of the header in the chat view.
+    const csv = lerp(cs, CHAT.clay, q.x);
+    const overviewTop = lerp(COMPACT.h, OVERVIEW.h, p) / 2 - drop - cs / 2;
+    clayEl.style.width = csv + 'px';
+    clayEl.style.height = csv + 'px';
+    clayEl.style.left = lerp(w / 2, CHAT.clayLeft, q.x) + 'px';
+    clayEl.style.top = lerp(overviewTop, CHAT.clayTop, q.x) + 'px';
+    label.style.opacity = String(Math.max(0, Math.min(1, (p - 0.7) / 0.3)) * (1 - q.x));
     capsule.dataset.edge = edge;
-    capsule.dataset.phase = p >= 1 ? 'expanded'
-      : p <= 0 ? 'compact'
-      : (target > p ? 'expanding' : 'collapsing');
+    capsule.dataset.view = q.target === 1 ? 'chat' : 'overview';
+    capsule.dataset.phase = p <= 0 && mode === 'idle' ? 'compact'
+      : p >= 1 && mode === 'idle' && q.mode === 'idle' ? 'expanded'
+      : (target > p || q.target > q.x ? 'expanding' : 'collapsing');
   }
 
   function tick(now) {
@@ -125,8 +137,33 @@
       p = p0 * (1 - easeShrink(t));
       if (t >= 1) { p = target; mode = 'idle'; }
     }
+    if (q.mode === 'spring') {
+      const dt = Math.min(1 / 30, q.last ? (now - q.last) / 1000 : 1 / 60);
+      q.last = now;
+      const a = -2 * ZETA * W0 * q.v - W0 * W0 * (q.x - q.target);
+      q.v += a * dt;
+      q.x += q.v * dt;
+      if (Math.abs(q.x - q.target) < 0.002 && Math.abs(q.v) < 0.03) {
+        q.x = q.target; q.v = 0; q.mode = 'idle';
+      }
+    } else if (q.mode === 'shrink') {
+      const t = Math.min(1, (now - q.t0) / SHRINK_MS);
+      q.x = q.target + (q.x0 - q.target) * (1 - easeShrink(t));
+      if (t >= 1) { q.x = q.target; q.mode = 'idle'; }
+    }
     render();
-    if (mode !== 'idle') raf = requestAnimationFrame(tick);
+    if (mode !== 'idle' || q.mode !== 'idle') raf = requestAnimationFrame(tick);
+  }
+
+  // U1: move the chat channel with the contract motion (grow = spring,
+  // shrink = 340 ms curve, reduced motion snaps).
+  function moveView(t) {
+    q.target = t;
+    if ((reduced.matches && !forceMotion) || Math.abs(t - q.x) < 1e-9) {
+      q.x = t; q.v = 0; q.mode = 'idle'; return;
+    }
+    if (t > q.x) { q.mode = 'spring'; q.last = 0; }
+    else { q.mode = 'shrink'; q.t0 = performance.now(); q.x0 = q.x; }
   }
 
   // ---- motion override via the window.desktop facade (M1b) --------------
@@ -148,8 +185,12 @@
     if (nextEdge === 'top' || nextEdge === 'bottom') edge = nextEdge;
     const t = phase === 'overview' ? 1 : 0;
     target = t;
+    // A collapse always leaves the chat view (Rust resets it too).
+    if (t === 0) moveView(0);
     if ((reduced.matches && !forceMotion) || Math.abs(t - p) < 1e-9) {
-      p = t; v = 0; mode = 'idle'; render(); return;
+      p = t; v = 0; mode = 'idle'; render();
+      if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
+      return;
     }
     if (t === 1) { mode = 'spring'; last = 0; }
     else { mode = 'shrink'; t0 = performance.now(); p0 = p; }
@@ -157,6 +198,15 @@
     if (!raf) raf = requestAnimationFrame(tick);
   }
   window.__islandSetState = setPhase;
+  // U1: called from Rust (chathost::apply_view) with the chat height from
+  // geometry::CHAT_VISIBLE — the frontend never owns that number.
+  window.__islandSetView = (view, vw, vh) => {
+    if (Number.isInteger(vw) && Number.isInteger(vh) && vw > 0 && vh > 0) { CHAT.w = vw; CHAT.h = vh; }
+    moveView(view === 'chat' ? 1 : 0);
+    render();
+    if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
+    document.dispatchEvent(new CustomEvent('island:view', { detail: view === 'chat' ? 'chat' : 'overview' }));
+  };
   window.__islandSetEdge = e => {
     if (e === 'top' || e === 'bottom') { edge = e; render(); }
   };
@@ -196,7 +246,9 @@
     if (e.button !== 0 || !e.isPrimary) return;
     // Interactive elements own their clicks: a press on the dismiss button
     // must not drag or toggle the island (Rust still owns every decision).
-    if (e.target && e.target.closest && e.target.closest('button')) return;
+    // U1: so do the composer, the transcript (text selection) and links of
+    // the chat — drag never attaches to text or composer controls.
+    if (e.target && e.target.closest && e.target.closest('button, textarea, input, #chat-log, #chat-composer')) return;
     pressed = true;
     lastPoint = { x: e.clientX, y: e.clientY };
     document.body.classList.add('is-dragging');
@@ -296,7 +348,8 @@
     if (cardFlight) return 'Decisión en curso.';
     if (cardFailure && cardFailure.key === cardKey(card) && current.revision <= cardFailure.revision)
       return 'No se pudo confirmar la decisión. Esperá una actualización.';
-    if (current.state !== 'expanded' || capsule.dataset.phase !== 'expanded') return 'Abrí la tarjeta para decidir.';
+    if (current.state !== 'expanded' || capsule.dataset.phase !== 'expanded' ||
+      capsule.dataset.view !== 'overview') return 'Abrí la tarjeta para decidir.';
     return null;
   }
   function renderCard() {
@@ -349,6 +402,9 @@
   const denyButton = $('deny');
   if (allowButton) allowButton.addEventListener('click', event => { void decideCard('allow', event); });
   if (denyButton) denyButton.addEventListener('click', event => { void decideCard('deny', event); });
+
+  // U1: the card's actionability depends on the visible view too.
+  document.addEventListener('island:view', () => { if (current) renderCard(); });
 
   // ---- boot ---------------------------------------------------------------
   render();

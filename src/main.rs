@@ -18,6 +18,7 @@
 //!   `notices`/`connections`/`unavailable` into the snapshot, wires the
 //!   `dismiss` verb, and is cleaned up on quit and on SIGINT/SIGTERM.
 
+mod chathost;
 mod probe;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -28,6 +29,8 @@ use abito_island::bridge::{self, Action, BridgeError};
 use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
 use abito_island::desktop::{self, IslandState};
 use abito_island::geometry::{self, Edge, Rect};
+use abito_island::chat::ChatError;
+use abito_island::chatlane::{self, Target};
 use abito_island::{approval, fakebridge, protocol, transport, workarea};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -255,6 +258,24 @@ struct AppState {
     /// its approval read-back. `None` in production and whenever
     /// `ABITO_BRIDGE_BASE` was already set from outside.
     probe_fake: Mutex<Option<Arc<fakebridge::FakeBackend>>>,
+    /// U1: the island conversation (process memory only, never on disk).
+    chat: chatlane::SharedLane,
+    /// U1: the selected LOCAL target (U2 picker writes it; `None` = no
+    /// verified local model selected → Send refuses with `profile_missing`).
+    chat_target: Mutex<Option<Target>>,
+    /// U1: `chat_action` rate gate (same 30/s rule, its own budget).
+    chat_rate: Mutex<bridge::RateLimiter>,
+    /// U1: per-turn deadlines (the probe shortens them for its fake).
+    chat_deadlines: Mutex<abito_island::localmodel::Deadlines>,
+    /// U1 probe only: evidence lines the webview reports for the chat step.
+    chat_probe: Mutex<Vec<Value>>,
+}
+
+/// U2 resource gate hook: decides whether a send may be dispatched to the
+/// target. U1 has no picker yet: the per-turn preflight in `chatlane`
+/// (asleep → no load, busy → visible queue, unknown → refuse) is the gate.
+fn model_gate(_state: &AppState, _target: &Target) -> Result<(), ChatError> {
+    Ok(())
 }
 
 /// Adapter: the pure core handlers see the real window through this.
@@ -409,6 +430,9 @@ fn apply_plan(app: &AppHandle, state: &AppState, plan: TogglePlan) {
             TauriIo(&win).set_outer_position(r.x, r.y);
         });
     }
+    // U1: a collapse always leaves the chat view (core resets it); tell the
+    // chat surface which view is current.
+    chathost::publish_chat(app);
 }
 
 // --- M1b snapshots/events ---------------------------------------------------
@@ -892,6 +916,16 @@ fn record_facade_evidence(state: State<AppState>, evidence: Value) {
     *state.facade.lock().expect("facade lock") = Some(evidence);
 }
 
+/// U1 probe-only channel: the webview reports what the chat surface
+/// observed (DOM sizes, IPC answers). Not rate limited, stores at most 8.
+#[tauri::command]
+fn record_chat_evidence(state: State<AppState>, evidence: Value) {
+    let mut lines = state.chat_probe.lock().expect("chat probe lock");
+    if lines.len() < 8 {
+        lines.push(evidence);
+    }
+}
+
 /// Frontend evidence for the probe: SVG element count rendered by clay-engine
 /// and canvas count (must be 0 — R6 is SVG-DOM, not Canvas/WebGL).
 ///
@@ -1084,6 +1118,11 @@ fn main() {
         approval: Arc::new(Mutex::new(approval_lane)),
         hooks: Mutex::new(None),
         probe_fake: Mutex::new(probe_fake),
+        chat: chatlane::Lane::new("c-island"),
+        chat_target: Mutex::new(Some(chatlane::default_target())),
+        chat_rate: Mutex::new(bridge::RateLimiter::new()),
+        chat_deadlines: Mutex::new(chathost::default_deadlines()),
+        chat_probe: Mutex::new(Vec::new()),
     };
 
     tauri::Builder::default()
@@ -1099,7 +1138,9 @@ fn main() {
             drag_move,
             drag_release,
             desktop_action,
+            chathost::chat_action,
             record_facade_evidence,
+            record_chat_evidence,
             record_frontend_evidence
         ])
         // Electron `win.webContents.on('did-finish-load', publish)`.

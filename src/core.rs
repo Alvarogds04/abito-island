@@ -83,11 +83,23 @@ impl TogglePlan {
     }
 }
 
+/// Unit U1: overview <-> chat resize inside the SAME expanded island.
+#[derive(Debug, PartialEq)]
+pub struct ViewPlan {
+    /// `true` = the chat view (LOGICAL_CHAT), `false` = the overview.
+    pub chat: bool,
+    pub size: (i32, i32),
+    pub rect: Rect,
+    pub edge: Edge,
+}
+
 /// Session state of the island: docked edge, open state, live pointer press.
 #[derive(Debug, Default)]
 pub struct Core {
     pub edge: Edge,
     pub expanded: bool,
+    /// U1: the expanded island shows the chat view (only while expanded).
+    pub chat: bool,
     press: Option<Press>,
 }
 
@@ -195,6 +207,9 @@ impl Core {
         };
         let rect = geometry::anchor_toggle(self.edge, current, size, area);
         self.expanded = !self.expanded;
+        // Collapsing always forgets the chat view: the next short click
+        // opens the overview (M1 contract), never the chat directly.
+        self.chat = false;
         if self.expanded {
             TogglePlan::Expand {
                 size,
@@ -209,12 +224,37 @@ impl Core {
             }
         }
     }
+
+    /// U1: switch the expanded island between overview and chat. Only from
+    /// the expanded island (never opens from compact), anchored to the
+    /// docked edge like every other resize. `None` = no change.
+    pub fn plan_view(&mut self, io: &dyn WindowIo, area: Rect, chat: bool) -> Option<ViewPlan> {
+        if !self.expanded || self.chat == chat {
+            return None;
+        }
+        let logical = if chat {
+            geometry::LOGICAL_CHAT
+        } else {
+            geometry::LOGICAL_OVERVIEW
+        };
+        let size = geometry::scaled_size(logical, io.scale());
+        let (x, y) = io.outer_position();
+        let (w, h) = io.size();
+        let rect = geometry::anchor_toggle(self.edge, Rect { x, y, w, h }, size, area);
+        self.chat = chat;
+        Some(ViewPlan {
+            chat,
+            size,
+            rect,
+            edge: self.edge,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{LOGICAL_COMPACT, LOGICAL_OVERVIEW};
+    use crate::geometry::{LOGICAL_CHAT, LOGICAL_COMPACT, LOGICAL_OVERVIEW};
     use std::cell::Cell;
 
     fn area() -> Rect {
@@ -378,5 +418,72 @@ mod tests {
         let moved = core.drag(&io, area(), (50.0, 60.0));
         assert_eq!(moved, Some((808, 72))); // X untouched, Y followed 40px
         assert!(!core.expanded);
+    }
+
+    // --- unit U1: overview <-> chat inside the same expanded island -------
+
+    fn expanded_top() -> (Core, FakeIo) {
+        let io = FakeIo::compact_top();
+        let mut core = Core::new();
+        let plan = core.toggle(&io, area());
+        io.apply(&plan);
+        (core, io)
+    }
+
+    #[test]
+    fn chat_view_needs_the_overview_first() {
+        let io = FakeIo::compact_top();
+        let mut core = Core::new();
+        assert_eq!(core.plan_view(&io, area(), true), None);
+        assert!(!core.chat);
+    }
+
+    #[test]
+    fn overview_to_chat_grows_to_the_chat_constant_and_back() {
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).expect("open chat");
+        assert!(open.chat);
+        assert_eq!(open.size, LOGICAL_CHAT);
+        assert_eq!(open.rect.y, 32, "top-docked: grows downward");
+        assert_eq!(open.rect.w, 672);
+        assert!(core.chat && core.expanded);
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        // repeating is a no-op, never a second resize
+        assert_eq!(core.plan_view(&io, area(), true), None);
+        let back = core.plan_view(&io, area(), false).expect("back");
+        assert!(!back.chat);
+        assert_eq!(back.size, LOGICAL_OVERVIEW);
+        assert!(!core.chat && core.expanded);
+    }
+
+    #[test]
+    fn chat_at_the_bottom_grows_upward() {
+        let io = FakeIo::compact_top();
+        let mut core = Core::new();
+        core.press(&io, (50.0, 20.0));
+        core.drag(&io, area(), (152.0, 1008.0));
+        core.release(&io, area(), (50.0, 20.0), false);
+        let plan = core.toggle(&io, area());
+        io.apply(&plan);
+        let chat = core.plan_view(&io, area(), true).unwrap();
+        assert_eq!(chat.rect.bottom(), area().bottom());
+        assert_eq!(chat.rect.h, 256);
+    }
+
+    #[test]
+    fn collapsing_from_chat_lands_compact_and_forgets_the_chat_view() {
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).unwrap();
+        io.size.set(open.size);
+        let collapse = core.toggle(&io, area());
+        assert!(!collapse.is_expand());
+        assert_eq!(collapse.size(), LOGICAL_COMPACT);
+        assert!(!core.chat && !core.expanded);
+        // the next short click opens the OVERVIEW (M1 contract), not the chat
+        io.apply(&collapse);
+        let again = core.toggle(&io, area());
+        assert_eq!(again.size(), LOGICAL_OVERVIEW);
+        assert!(!core.chat);
     }
 }

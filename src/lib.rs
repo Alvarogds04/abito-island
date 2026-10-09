@@ -16,11 +16,15 @@
 pub mod approval;
 pub mod bridge;
 pub mod card;
+pub mod chat;
+pub mod chatlane;
 pub mod core;
 pub mod desktop;
 pub mod fakebridge;
+pub mod fakemodel;
 pub mod geometry;
 pub mod http;
+pub mod localmodel;
 pub mod protocol;
 pub mod requests;
 pub mod retry;

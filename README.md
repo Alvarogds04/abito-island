@@ -378,6 +378,94 @@ by the tests or the probe.
   from the state root with the legacy descriptor discipline. It is never
   printed and never committed (`.runtime*/` is gitignored).
 
+## What U1 proves — chat inside the island, answered by the LOCAL model
+
+**Same island, one named height.** A short click on the compact island still
+opens the approved **640×160 overview** (M1 contract, untouched). Its most
+prominent control, **Conversar** (≥44 px, also `Enter` in the overview),
+switches the SAME window to the **chat view: visible 640×240, native
+672×256, r22**. That height lives in ONE constant,
+`geometry::CHAT_VISIBLE` (`LOGICAL_CHAT` is derived from it), guarded by the
+test `chat_view_is_640x240_visible_672x256_native`; Rust pushes it to the
+page (`__islandSetView`), the frontend never owns the number. Switching to
+the design's 160 alternative is that one line. `Volver` returns to the
+overview (the draft stays in page memory, never on disk); `Escape` leaves
+the composer, a second `Escape` collapses the island; a collapse always
+forgets the chat view so the next click opens the overview again.
+
+**Local model only — never a silent fallback.** The chat lane
+(`chatlane.rs`) talks to the selected local target, today
+`http://127.0.0.1:11002` alias `Abito-gpt`, through `localmodel.rs`:
+
+- `LocalEndpoint` accepts only literal loopback (`127.0.0.1` / `[::1]`), plain
+  HTTP, origin only — `localhost`, LAN, tailnet, TLS and cloud hosts are
+  refused by construction (no DNS lookup can redirect the request),
+- per turn: a metadata preflight (`/health`, `/props`, `/slots`,
+  `/v1/models` — no inference), then **exactly one** streamed
+  `POST /v1/chat/completions` naming only the alias; no tools, no key, no
+  retry, redirects never followed,
+- router down → `local_model_unavailable`: *“El modelo local no responde: el
+  chat no está disponible. No se usó ningún otro modelo.”* Opening the chat
+  runs the same metadata check, so the chat says it before anyone types and
+  `Enviar` stays disabled,
+- model asleep (`/props is_sleeping`) → `resource_authorization_required`:
+  sending would make the router load ~18 GB, so nothing is sent and nothing is
+  loaded; another alias loaded → unavailable, never substituted; slot busy →
+  visible “espera en su cola”, one request,
+- history trimmed against the model's REAL context (`/slots n_ctx`) and shown
+  (“se dejaron afuera N mensajes”), never a bigger context; the 32,000-scalar
+  response cap ends with an explicit limit note; cancel is terminal and
+  shuts the socket down.
+
+**Contract (`chat.rs`, pure, RED → GREEN):** the `abito.chat.v1` subset a
+local model can honestly produce — native ids, duplicate client id → same
+turn, one running turn (`queue_full`), monotonic `seq` (gap/regression/
+after-terminal rejected), states `queued|thinking|streaming|waiting_approval|
+completed|cancelled|error`, safe typed errors, draft ≤8,000 scalars, cache
+≤100 turns / 256 KiB. `waiting_approval` exists in the machine but nothing
+can enter it: **there is no Pi chat producer on the desktop yet**; the view
+says so (`producer.pi: "not_connected"`). That adapter is a marked future
+dependency, not simulated.
+
+**IPC:** one new command, `chat_action`, behind the same sender gate as
+`desktop_action`, its own 30/s rate budget, a 33 KiB payload cap and the
+closed set `view|open|back|check|submit|cancel` with exact keys — a page
+cannot name an endpoint, model, key or approval (the probe proves a
+smuggled `model` field is rejected). Events: `chat:state`. The
+`desktop:state` 13-key snapshot is unchanged; no new capability or CSP
+origin was added (the WebView never talks HTTP; Rust does).
+
+**Accessibility/motion/silence:** named controls ≥44 px (probe-measured),
+text status independent of R6, polite live region once per state change or
+finished answer (never per token), plain text via `textContent`, IME-safe
+Enter, focus moves to the composer only on a deliberate keyboard open or a
+click; overview↔chat uses the contract spring/340 ms curve and snaps under
+`prefers-reduced-motion`; no audio elements, no sound. Drag never attaches
+to the transcript or composer. R6 is only scaled/positioned (sha256
+unchanged).
+
+### Verifying U1
+
+```sh
+cargo test --manifest-path apps/desktop-tauri/Cargo.toml
+#   lib 147 (+chat 30, localmodel 13, chatlane 9, geometry 3, core 4)
+#   chat_local_model 14 (in-process fake router; 1 opt-in real smoke)
+#   frontend_chat_view 1 (runs test-node/chat-view-check.cjs, 8 checks)
+node apps/desktop-tauri/test-node/chat-view-check.cjs
+
+# opt-in: one short real turn against 127.0.0.1:11002 (local, free)
+ABITO_REAL_LOCAL_MODEL=1 cargo test --manifest-path apps/desktop-tauri/Cargo.toml \
+  --test chat_local_model real_local -- --nocapture
+
+# probe: adds chat_open (672x256 from the X server), chat_evidence (one turn
+# via the REAL chat_action IPC against an in-process FAKE router, then an
+# unreachable target), chat_back_to_overview (672x176), chat_collapse
+cd apps/desktop-tauri
+DISPLAY=:0 XAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.UV9RW3 \
+  GDK_BACKEND=x11 ABITO_PROBE=1 ABITO_SOCKET_DIR="$PWD/.runtime-probe" \
+  timeout 200 cargo run
+```
+
 ## Configuration: pointing at the real backend later
 
 Nothing to do for the shipped default: the lane targets
@@ -544,12 +632,19 @@ apps/desktop-tauri/
 │   ├── fakebridge.rs     # M3: in-process fake api.py backend (tests + probe only)
 │   ├── transport.rs      # M2: UDS receiver (perms, owner, quotas, cleanup) (+policy tests)
 │   ├── workarea.rs       # X11 _NET_WORKAREA ∩ monitor, fallbacks
-│   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade + transport + approval)
+│   ├── chat.rs           # PURE U1: abito.chat.v1 turn machine, limits, prompt budget, IPC commands (+tests)
+│   ├── localmodel.rs     # U1: loopback-only endpoint, SSE/chunked decoders, one-request streaming client
+│   ├── chatlane.rs       # U1: preflight (no-load/no-substitute), one turn, cancel, availability
+│   ├── chathost.rs       # U1: chat_action command, chat:state, overview<->chat resize
+│   ├── fakemodel.rs      # U1: in-process fake llama.cpp router (tests + probe only)
+│   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade + transport + approval + chat)
 │   └── main.rs           # wiring, commands, publish, lifecycle, transport/signal, approval, placement
 └── frontend/
     ├── index.html        # island markup + M3 approval card (display-only)
     ├── style.css         # reused island tokens
     ├── desktop.js        # window.desktop facade over invoke/events (M1b)
-    ├── island.js         # motion, pointer forwarding, notices + approval card (M2/M3)
+    ├── island.js         # motion, pointer forwarding, notices + approval card (M2/M3), chat view motion (U1)
+    ├── chat-view.js      # PURE U1 helpers (labels, send gate, announcements) — node-tested
+    ├── chat.js           # U1 chat surface (composer, transcript, live region)
     └── clay-engine.js    # frozen R6, byte-for-byte, DO NOT EDIT
 ```
