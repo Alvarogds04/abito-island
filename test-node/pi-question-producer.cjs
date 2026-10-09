@@ -60,7 +60,7 @@ const events = new Map();
 const pi = { on(name, callback) { assert(!events.has(name)); events.set(name, callback); } };
 const ctx = { cwd, sessionManager: { getSessionId: () => sessionId } };
 const adapter = registerAdapter(pi, { endpoint, runtime, retryMs: 10000, heartbeatMs: 200,
-  ...(enabled ? { questionsEnabled: true } : {}),
+  ...(enabled ? { questionLevel: 1 } : {}),
   onDiagnostic: d => diagnostics.push(d), onTransportError: error => { transportError = error; } });
 const watchdog = setTimeout(() => { process.stderr.write('pi-question-producer: deadline\n'); process.exit(2); }, 8000);
 const control = readline.createInterface({ input: process.stdin });

@@ -20,6 +20,8 @@
 
 mod chathost;
 mod modelshost;
+mod nativeaudit;
+mod nativewindow;
 mod probe;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -216,7 +218,7 @@ struct AppState {
     requested: Mutex<Requested>,
     evidence: Mutex<Option<Evidence>>,
     /// One-shot: spawn the settle-and-retry geometry pin the first time the
-    /// frontend reports ready (WebKitGTK inflates the very first allocation).
+    /// frontend reports ready, preserving the no-user-interference guard.
     initial_pin: AtomicBool,
     /// Set on the first real pointer press: the pin loop must never fight a
     /// user drag, so it aborts once the human touches the island.
@@ -303,10 +305,7 @@ struct TauriIo<'a>(&'a WebviewWindow);
 
 impl TauriIo<'_> {
     fn set_size(&self, w: i32, h: i32) {
-        if let Err(e) = self
-            .0
-            .set_size(tauri::PhysicalSize::new(w as u32, h as u32))
-        {
+        if let Err(e) = nativewindow::set_size(self.0, w, h) {
             eprintln!("set_size({w},{h}) failed: {e}");
         }
     }
@@ -961,10 +960,9 @@ fn record_chat_evidence(state: State<AppState>, evidence: Value) {
 /// Frontend evidence for the probe: SVG element count rendered by clay-engine
 /// and canvas count (must be 0 — R6 is SVG-DOM, not Canvas/WebGL).
 ///
-/// Side effect on first report: spawn the geometry pin. WebKitGTK inflates
-/// the very first allocation (observed 304x81 instead of 304x44) and the
-/// resize only sticks once the webview has settled, so the pin re-asserts the
-/// contract geometry a few times after page load. It aborts as soon as the
+/// Side effect on first report: spawn the bounded geometry pin after page
+/// load. GTK's empty-child natural fallback is handled by nativewindow;
+/// this pin only reasserts the contract. It aborts as soon as the
 /// user touches the island or any toggle happens (generation > 0).
 #[tauri::command]
 fn record_frontend_evidence(
@@ -983,26 +981,25 @@ fn record_frontend_evidence(
         .initial_pin
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok();
+    nativeaudit::sample(&app, "frontend-ready", 0, None);
     if !first {
         return;
     }
     std::thread::spawn(move || {
-        // WebKitGTK's very first allocation inflates the window (304x81) and a
-        // plain set_size(304,44) is refused until the widget has been grown at
-        // least once (the expand/collapse cycle proves the same transition).
-        // A height-only grow is visually silent: the island is top-anchored and
-        // the width does not change, so nothing moves on screen.
-        let bump_h = |scale: f64| geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale).1;
+        // Re-pin after page load without fighting newer plans or user input.
+        // Explicit GTK widget requests remove the empty-child natural fallback;
+        // a grow/shrink cycle is neither required nor a sizing authority.
         let aborted = |state: &AppState| {
-            state.generation.load(Ordering::SeqCst) != 0
-                || state.user_touch.load(Ordering::SeqCst)
+            state.generation.load(Ordering::SeqCst) != 0 || state.user_touch.load(Ordering::SeqCst)
         };
-        for _ in 0..4 {
+        for attempt in 1..=4 {
             std::thread::sleep(Duration::from_millis(600));
             let state = app.state::<AppState>();
             if aborted(&state) {
+                nativeaudit::sample(&app, "pin-aborted", attempt, None);
                 return;
             }
+            nativeaudit::sample(&app, "pin-before", attempt, None);
             let win = main_window(&app);
             let scale = win.scale_factor().unwrap_or(1.0);
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
@@ -1020,13 +1017,13 @@ fn record_frontend_evidence(
                 store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
                 return;
             }
-            io.set_size(w, bump_h(scale)); // grow (silent) so the shrink sticks
-            std::thread::sleep(Duration::from_millis(250));
             io.set_size(w, h);
+            nativeaudit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
             io.set_outer_position(rect.x, rect.y);
             *state.work_area.lock().expect("work area lock") = wa.rect;
             store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
             std::thread::sleep(Duration::from_millis(200));
+            nativeaudit::sample(&app, "pin-settled", attempt, Some((w, h)));
             let settled = win
                 .inner_size()
                 .map(|s| (s.width as i32, s.height as i32))
@@ -1197,6 +1194,16 @@ fn main() {
         // Electron `win.on('close', preventDefault + quit)`: closing the
         // window quits cleanly instead of tearing the app down ad hoc.
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Resized(size) = event {
+                    nativeaudit::sample(
+                        window.app_handle(),
+                        "resized",
+                        0,
+                        Some((size.width as i32, size.height as i32)),
+                    );
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if QUITTING.load(Ordering::SeqCst) {
                     return; // the exit path is already closing windows
@@ -1226,6 +1233,20 @@ fn main() {
             let state = app.state::<AppState>();
             *state.work_area.lock().expect("work area lock") = wa.rect;
             store_requested(&state, "initial", Some((rect.x, rect.y)), Some((w, h)));
+            nativeaudit::sample(&handle, "setup", 0, Some((w, h)));
+            // Read-only sampling stops with this process. No probe or UI actions.
+            if nativeaudit::enabled() {
+                let audit_handle = handle.clone();
+                std::thread::spawn(move || {
+                    for second in 1..=16 {
+                        std::thread::sleep(Duration::from_secs(1));
+                        if QUITTING.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        nativeaudit::sample(&audit_handle, "timer", second, None);
+                    }
+                });
+            }
             // M1b: motion override fails closed from user config.
             state
                 .motion_override
@@ -1245,6 +1266,8 @@ fn main() {
             // U2: the saved model selection (absent → the approved initial
             // local profile; corrupt/unknown → none, nothing substituted).
             modelshost::load_selection(&handle, &state);
+            #[cfg(debug_assertions)]
+            nativewindow::start_view_test(&win);
             let hooks = build_hooks(handle.clone());
             *state.hooks.lock().expect("hooks lock") = Some(hooks.clone());
             approval::spawn_bridge(Arc::clone(&state.approval), hooks);
