@@ -13,8 +13,13 @@ const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop
 const FRONTEND_FILES = ['chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'icons.js', 'index.html',
   'island.js', 'models.js', 'overview-view.js', 'style.css'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
-const FORBIDDEN_ENV = ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'GDK_DEBUG', 'GTK_DEBUG', 'GTK_MODULES',
-  'WEBKIT_INSPECTOR_SERVER', 'WEBKIT_INSPECTOR_HTTP_SERVER', 'ABITO_PROBE', 'ABITO_PROBE_VISUAL'];
+// Whole families are refused (not a hand-picked list): every LD_* loader
+// variable, GTK/GDK/WebKit debug+inspector variables, and EVERY ABITO_* knob
+// except the one the installed app is meant to receive (ABITO_PROJECT_ROOT).
+const FORBIDDEN_ENV_PATTERN = '^(LD_[A-Za-z0-9_]*|GDK_DEBUG|GTK_DEBUG|GTK_MODULES|GTK_PATH|WEBKIT_INSPECTOR_[A-Za-z_]*|ABITO_(BRIDGE_BASE|DESKTOP_SOCKET|MODELS_CONFIG_DIR|NATIVE_[A-Z_]*|PROBE[A-Z_]*|SOCKET_DIR))=';
+const FORBIDDEN_ENV = ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'LD_DEBUG', 'GDK_DEBUG', 'GTK_DEBUG', 'GTK_MODULES',
+  'WEBKIT_INSPECTOR_SERVER', 'ABITO_PROBE', 'ABITO_PROBE_VISUAL', 'ABITO_SOCKET_DIR', 'ABITO_BRIDGE_BASE',
+  'ABITO_MODELS_CONFIG_DIR', 'ABITO_DESKTOP_SOCKET', 'ABITO_NATIVE_AUDIT'];
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const sha256File = file => sha256(fs.readFileSync(file));
@@ -54,14 +59,16 @@ function checkConfig(crate) {
 
 // ---- launcher / desktop entry (content is closed and hashed) -------------
 function launcherText() {
-  const refuse = FORBIDDEN_ENV.map(name => `[ -z "\${${name}+x}" ] || { echo "abito: refusing ${name}" >&2; exit 64; }`).join('\n');
   return `#!/bin/sh
-# Abito (Tauri) launcher — M4 format A. Accepts no arguments, refuses
-# loader/debug overrides, forces X11/XWayland (the island needs absolute
-# positioning and always-on-top). Never touches the Preview's roots.
+# Abito (Tauri) launcher — M4 format A. Accepts no arguments, refuses the
+# whole LD_* family, GTK/GDK/WebKit debug and inspector variables and every
+# ABITO_* test/probe/override knob (only ABITO_PROJECT_ROOT passes), forces
+# X11/XWayland (absolute positioning and always-on-top). Never touches the
+# Preview's roots.
 set -eu
 [ "$#" -eq 0 ] || { echo "abito: no arguments accepted" >&2; exit 64; }
-${refuse}
+bad="$(env | grep -E '${FORBIDDEN_ENV_PATTERN}' | cut -d= -f1 | head -n 1 || true)"
+[ -z "$bad" ] || { echo "abito: refusing $bad" >&2; exit 64; }
 here="$(cd "$(dirname "$0")" && pwd)"
 export GDK_BACKEND=x11
 exec "$here/abito-island"
@@ -88,6 +95,9 @@ function verifyStage(dir, { sourceCrate } = {}) {
   const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
   if (receipt.identifier !== IDENTIFIER) problems.push('receipt identifier mismatch');
   if (!String(receipt.r6_sha256 || '').startsWith(R6_PREFIX)) problems.push('receipt R6 pin mismatch');
+  const prov = receipt.provenance || {};
+  if (!/^[0-9a-f]{40}$/.test(prov.head || '')) problems.push('receipt has no git HEAD');
+  if (prov.clean !== true) problems.push('receipt does not attest a clean tree');
   const entries = fs.readdirSync(dir).filter(f => f !== 'receipt.json').sort();
   if (JSON.stringify(entries) !== JSON.stringify([...STAGED].sort())) problems.push(`unexpected stage entries: ${entries}`);
   for (const name of STAGED) {
@@ -111,5 +121,24 @@ function verifyStage(dir, { sourceCrate } = {}) {
   return problems;
 }
 
-module.exports = { R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, FORBIDDEN_ENV, STAGED, sha256, sha256File,
+// ---- provenance ------------------------------------------------------------
+const cp = require('node:child_process');
+function git(crate, args) {
+  const r = cp.spawnSync('git', args, { cwd: crate, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+  return r.stdout;
+}
+/** The build must come from committed bytes: any tracked change OR untracked
+ *  (non-ignored) file under the crate fails the gate. */
+function provenance(crate) {
+  const dirty = git(crate, ['status', '--porcelain', '--untracked-files=all', '--', '.']).split('\n').filter(Boolean);
+  return { head: git(crate, ['rev-parse', 'HEAD']).trim(), clean: dirty.length === 0, dirty };
+}
+function requireClean(crate) {
+  const p = provenance(crate);
+  if (!p.clean) throw new Error(`working tree is not clean under the product paths (${p.dirty.length} entries); build from a clean checkout:\n  ${p.dirty.slice(0, 8).join('\n  ')}`);
+  return p;
+}
+
+module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, FORBIDDEN_ENV, STAGED, sha256, sha256File,
   checkR6, checkFrontend, checkConfig, launcherText, desktopText, verifyStage };

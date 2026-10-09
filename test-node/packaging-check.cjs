@@ -49,7 +49,7 @@ function fakeStage({ crateDir = crate } = {}) {
   fs.writeFileSync(path.join(dir, `${L.IDENTIFIER}.desktop`), L.desktopText(), { mode: 0o644 });
   const files = {};
   for (const n of L.STAGED) files[n] = L.sha256File(path.join(dir, n));
-  fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, r6_sha256: L.checkR6(crate), files }));
+  fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, r6_sha256: L.checkR6(crate), provenance: { head: 'a'.repeat(40), clean: true }, files }));
   return dir;
 }
 test('verify: a pristine stage passes; tampering is caught without launching anything', () => {
@@ -78,21 +78,43 @@ test('verify: devtools markers and an embedded source-tree path fail the stage',
     fs.rmSync(d, { recursive: true });
   }
 });
-test('launcher: no args, refuses loader/debug overrides and probe flags, forces X11, execs only its sibling binary', () => {
+test('launcher: no args, refuses whole env families, forces X11, execs only its sibling binary', () => {
   const t = L.launcherText();
   assert.match(t, /\[ "\$#" -eq 0 \]/);
-  for (const name of ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'GDK_DEBUG', 'ABITO_PROBE', 'WEBKIT_INSPECTOR_SERVER']) assert.match(t, new RegExp(`refusing ${name}`));
   assert.match(t, /export GDK_BACKEND=x11/);
   assert.match(t, /exec "\$here\/abito-island"$/m);
-  // behaviour: actually run the launcher's guards (the sibling binary is a stub that must NOT start)
+  // behaviour: run the launcher's guards (the sibling binary is a stub that must NOT start when refused)
   const cp = require('node:child_process');
   const d = fakeStage(); fs.writeFileSync(path.join(d, 'abito-island'), '#!/bin/sh\necho STARTED\n', { mode: 0o755 });
   const run = (extra, env) => cp.spawnSync(path.join(d, 'abito-island-launcher'), extra, { env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
   assert.equal(run(['--devtools'], {}).status, 64);
-  assert.equal(run([], { LD_PRELOAD: '/x.so' }).status, 64);
-  assert.equal(run([], { ABITO_PROBE: '1' }).status, 64);
-  const ok = run([], {}); assert.equal(ok.status, 0); assert.match(ok.stdout, /STARTED/);
+  for (const name of ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'LD_DEBUG', 'LD_BIND_NOW', 'LD_ANYTHING_ELSE', 'GDK_DEBUG', 'GTK_MODULES',
+    'WEBKIT_INSPECTOR_SERVER', 'ABITO_PROBE', 'ABITO_PROBE_VISUAL_DIR', 'ABITO_SOCKET_DIR', 'ABITO_BRIDGE_BASE', 'ABITO_MODELS_CONFIG_DIR',
+    'ABITO_DESKTOP_SOCKET', 'ABITO_NATIVE_AUDIT', 'ABITO_NATIVE_VIEW_TEST']) {
+    const r = run([], { [name]: '1' });
+    assert.equal(r.status, 64, name);
+    assert.doesNotMatch(r.stdout, /STARTED/, name);
+    assert.match(r.stderr, new RegExp(`refusing ${name}`), name);
+  }
+  assert.equal(run([], { LDXYZ_NOT_LD: '1', LANG: 'C', HOME: '/x' }).status, 0, 'unrelated variables pass');
+  const ok = run([], { ABITO_PROJECT_ROOT: '/somewhere' }); assert.equal(ok.status, 0, 'ABITO_PROJECT_ROOT is the one allowed knob'); assert.match(ok.stdout, /STARTED/);
   fs.rmSync(d, { recursive: true });
+});
+test('provenance gate: a dirty or untracked product file fails; a clean tree passes (real git repo)', () => {
+  const cp = require('node:child_process');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'abito-git-'));
+  const git = (...a) => cp.spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: repo, encoding: 'utf8' });
+  git('init', '-q'); fs.writeFileSync(path.join(repo, 'a.txt'), '1'); git('add', '.'); git('commit', '-qm', 'x');
+  const clean = L.requireClean(repo); assert.match(clean.head, /^[0-9a-f]{40}$/); assert.equal(clean.clean, true);
+  fs.writeFileSync(path.join(repo, 'a.txt'), '2'); assert.throws(() => L.requireClean(repo), /not clean/);
+  git('checkout', '--', 'a.txt'); assert.equal(L.requireClean(repo).clean, true);
+  fs.writeFileSync(path.join(repo, 'new.rs'), 'x'); assert.throws(() => L.requireClean(repo), /not clean/);
+  fs.rmSync(repo, { recursive: true });
+});
+test('verify: a receipt without HEAD / clean attestation fails', () => {
+  const d = fakeStage(); const r = JSON.parse(fs.readFileSync(path.join(d, 'receipt.json'), 'utf8'));
+  delete r.provenance; fs.writeFileSync(path.join(d, 'receipt.json'), JSON.stringify(r));
+  assert.match(L.verifyStage(d).join(), /no git HEAD/); fs.rmSync(d, { recursive: true });
 });
 test('identity never collides with the installed apps', () => {
   assert.match(L.desktopText(), /Exec=@INSTALL_DIR@\/abito-island-launcher/);

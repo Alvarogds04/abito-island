@@ -749,9 +749,12 @@ node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no
   (`e2dc5db3…`), curated `frontend/` list, CSP without remote/unsafe sources,
   capabilities = listen/unlisten only, no `devtools`/shell/fs/http features.
 - Stage: `abito-island` (release binary), `abito-island-launcher` (no args;
-  refuses `LD_*`, `GDK_DEBUG`, `ABITO_PROBE*`, inspector vars; forces X11),
+  refuses the whole `LD_*` family, `GDK_DEBUG`/`GTK_*` debug, WebKit inspector vars and every `ABITO_*` knob except `ABITO_PROJECT_ROOT`; forces X11),
   `com.abitog.AbitoTauri.desktop` (template, `@INSTALL_DIR@`), `receipt.json`
-  (sha256 of every file, `Cargo.lock`, config, frontend, rustc).
+  (sha256 of every file, `Cargo.lock`, config, frontend, rustc, git HEAD and a
+  clean-tree attestation). `build.cjs` REFUSES to build when the product paths
+  have uncommitted or untracked changes: build from a clean checkout
+  (`git worktree add ../abito-m4-clean <commit>`).
 - Identity: `com.abitog.AbitoTauri`; installed runtime root
   `$XDG_RUNTIME_DIR/abito-island` (never `abito-desktop*`); the project root of
   an installed build comes only from `ABITO_PROJECT_ROOT` (absolute,
@@ -761,6 +764,9 @@ node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no
 - Verified here: release build offline; identical binary hash on a rebuild at
   the same path; the verifier rejects a binary that embeds the source-tree
   path or devtools markers; a smoke run of the release binary (probe, private
-  roots) reached `ready_ok: true`, 18 SVG R6 elements, exit 0.
+  roots) reached `ready_ok: true`, 18 SVG R6 elements, exit 0. Smoke script
+  (`packaging/smoke.sh <stage-dir>`) is versioned: it runs the binary with
+  `ABITO_PROBE=1 ABITO_PROJECT_ROOT=<private dir> ABITO_SOCKET_DIR=<private dir>/sock`
+  directly (not through the launcher, which refuses those knobs).
 - NOT verified: reproducibility across different checkout paths; behaviour
   of an actually installed copy; Pi session against the new root.

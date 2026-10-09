@@ -14,6 +14,7 @@ const args = process.argv.slice(2);
 const outIdx = args.indexOf('--out');
 const outRoot = path.resolve(outIdx >= 0 ? args[outIdx + 1] : path.join(crate, 'dist'));
 
+const prov = L.requireClean(crate); // fail BEFORE building when the tree has uncommitted product changes
 const r6 = L.checkR6(crate);
 L.checkFrontend(crate);
 const cfg = L.checkConfig(crate);
@@ -37,7 +38,7 @@ const files = {};
 for (const name of L.STAGED) files[name] = L.sha256File(path.join(stage, name));
 const receipt = {
   identifier: L.IDENTIFIER, version: cfg.version, format: 'A user-local', rustc,
-  r6_sha256: r6, files,
+  r6_sha256: r6, provenance: { head: prov.head, clean: prov.clean, dirty_entries: 0 }, files,
   inputs: {
     'Cargo.lock': L.sha256File(path.join(crate, 'Cargo.lock')),
     'tauri.conf.json': L.sha256File(path.join(crate, 'tauri.conf.json')),
