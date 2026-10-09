@@ -13,20 +13,25 @@ for (const name of ['adapter.cjs', 'questions.cjs']) {
   const file = fs.lstatSync(path.join(source, name));
   assert(file.isFile() && !file.isSymbolicLink(), 'real producer source required');
 }
-const [endpoint, runtime, cwd, mode] = process.argv.slice(2);
-assert(['questions', 'legacy', 'native-busy', 'native-degraded'].includes(mode));
+const [endpoint, runtime, cwd, mode, requestedSession = 'qp-real-session'] = process.argv.slice(2);
+assert(['questions', 'questions-level2', 'legacy', 'native-busy', 'native-degraded',
+  'native-busy-level1', 'native-degraded-level1', 'cross-project'].includes(mode));
 assert.equal(fs.realpathSync(cwd), cwd);
 const nativeBusy = mode.startsWith('native-');
-const questionLevel = mode === 'legacy' ? 0 : nativeBusy ? 2 : 1;
-process.env.ABITO_QUESTIONS = String(questionLevel); // explicit real source level, no second flag
+const questionLevel = mode === 'legacy' ? 0 :
+  mode === 'questions-level2' || (nativeBusy && !mode.endsWith('-level1')) ? 2 : 1;
 const enabled = questionLevel > 0;
-const sessionId = 'qp-real-session';
+const sessionId = requestedSession;
 const diagnostics = [];
 const legacy = {};
 const received = [];
 const types = [];
-let question, ack, transportError, questionsHello;
+let question, ack, transportError, questionsHello, closedReply, peerClosed = false;
 let incoming = Buffer.alloc(0);
+function observedFrame(raw) {
+  try { return JSON.parse(raw); }
+  catch { throw new Error('invalid_wire_observation'); } // Never echo a private payload in an error.
+}
 
 // Observe the real socket returned by the original factory. No fabricated
 // server messages, retries, timestamps, UUIDs, tokens or default answers.
@@ -36,7 +41,7 @@ net.createConnection = function (...args) {
   const write = socket.write;
   socket.write = function (chunk, ...rest) {
     const raw = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-    const frame = JSON.parse(raw);
+    const frame = observedFrame(raw);
     if (types.length < 16) types.push(frame.type);
     if (['hello', 'heartbeat', 'settled'].includes(frame.type) && !legacy[frame.type]) legacy[frame.type] = raw;
     if (frame.type === 'questions_hello') questionsHello = raw;
@@ -51,11 +56,13 @@ net.createConnection = function (...args) {
     while ((end = incoming.indexOf(10)) >= 0) {
       const raw = incoming.subarray(0, end + 1).toString('utf8');
       incoming = incoming.subarray(end + 1);
-      const type = JSON.parse(raw).type;
+      const type = observedFrame(raw).type;
       // Never retain the answer payload in the trace.
       if (['ready', 'questions_ready'].includes(type)) received.push(raw);
+      if (type === 'question_closed') closedReply = raw;
     }
   });
+  socket.on('close', () => { peerClosed = true; });
   return socket;
 };
 const { registerAdapter, projectId } = require(path.join(source, 'adapter.cjs'));
@@ -63,8 +70,11 @@ assert(require.cache[path.join(source, 'questions.cjs')], 'adapter must load the
 const events = new Map();
 const pi = { on(name, callback) { assert(!events.has(name)); events.set(name, callback); } };
 const ctx = { cwd, sessionManager: { getSessionId: () => sessionId } };
-const adapter = registerAdapter(pi, { endpoint, runtime, retryMs: 10000, heartbeatMs: 200,
-  questionLevel,
+const config = require(path.join(source, 'config.cjs'));
+const options = { ...config.resolveConfig({ ABITO_DESKTOP_SOCKET: endpoint, ABITO_SOCKET_DIR: runtime }, process.getuid()),
+  ...config.resolveQuestionConfig({ ...(enabled ? { ABITO_QUESTIONS: String(questionLevel) } : {}),
+    ABITO_QUESTION_TIMEOUT_MS: '30000' }) };
+const adapter = registerAdapter(pi, { ...options, retryMs: 10000, heartbeatMs: 200,
   onDiagnostic: d => diagnostics.push(d), onTransportError: error => { transportError = error; } });
 const watchdog = setTimeout(() => { process.stderr.write('pi-question-producer: deadline\n'); process.exit(2); }, 8000);
 const control = readline.createInterface({ input: process.stdin });
@@ -79,8 +89,14 @@ async function main() {
   events.get('session_start')({}, ctx);
   const ready = questionLevel === 2 ? '{"v":1,"type":"questions_ready","questionVersion":1,"busyReason":1}\n' :
     enabled ? '{"v":1,"type":"questions_ready","questionVersion":1}\n' : '{"v":1,"type":"ready"}\n';
-  await wait(() => received.includes(ready) || transportError);
-  if (transportError) {
+  await wait(() => received.includes(ready) || transportError || (mode === 'cross-project' && peerClosed));
+  if (mode === 'cross-project') {
+    assert(peerClosed && received.length === 0, 'foreign project must fail before ready');
+    const result = await adapter.ask(request, ctx);
+    assert.deepEqual(result, { status: 'unavailable' });
+    assert.deepEqual(types, ['hello']);
+    emit({ phase: 'scope_rejected', result, legacy, received, project: projectId(cwd), sessionId });
+  } else if (transportError) {
     assert.equal(transportError.status, 'unsupported_receiver');
     assert.equal(transportError.runtime, runtime);
     emit({ phase: 'result', status: transportError.status, runtimeMatches: true });
@@ -95,7 +111,7 @@ async function main() {
     clearTimeout(timeout);
     for (const d of diagnostics) assert.deepEqual(Object.keys(d).sort(), ['id', 'reason']);
     const copy = nativeBusy ? require(path.join(source, 'questions.cjs')).formatResult(result) : undefined;
-    emit({ phase: 'result', result, ack, diagnostics, types, copy });
+    emit({ phase: 'result', result, ack, diagnostics, types, copy, closedReply });
   } else {
     await wait(() => legacy.heartbeat);
     events.get('agent_settled')({}, ctx);
