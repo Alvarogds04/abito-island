@@ -116,6 +116,31 @@
   };
   const port = origin => String(origin || '').replace(/^http:\/\//, '');
 
+  // Visual model row (docs/desktop-visual-language.md §2.4): chips carry the
+  // numbers, the gate gets ONE word only when it is not «ready» (§3: never
+  // hide a problem), and the full sentence stays in `aria`/`facts`.
+  const GATE_WORDS = Object.freeze({
+    queue: { word: 'En cola', icon: 'clock', tone: 'live' },
+    needs_load: { word: 'Sin cargar', icon: 'load-off', tone: 'faint' },
+    unknown: { word: 'Desconocido', icon: 'info', tone: 'faint' },
+    unavailable: { word: 'No disponible', icon: 'triangle', tone: 'red' },
+  });
+  const oneDecimal = n => {
+    const tenths = Math.round(n * 10);
+    return tenths % 10 === 0 ? String(tenths / 10) : `${Math.floor(tenths / 10)},${tenths % 10}`;
+  };
+  const kTokens = n => (n >= 1024 ? `${Math.round(n / 1024)}k` : String(n));
+
+  function modelChips(p) {
+    const chips = [{ icon: 'lock', text: 'local', label: 'Sólo local' }];
+    if (Number.isFinite(p.context_tokens)) chips.push({ icon: '', text: kTokens(p.context_tokens), label: `Contexto ${thousands(p.context_tokens)} tokens` });
+    if (Number.isFinite(p.size_bytes)) chips.push({ icon: '', text: `${oneDecimal(p.size_bytes / 1e9)} GB`, label: `${decimal(p.size_bytes / 1e9, 'GB')} en memoria` });
+    if (Number.isFinite(p.params)) chips.push({ icon: '', text: `${oneDecimal(p.params / 1e9)}B`, label: `${decimal(p.params / 1e9, 'mil millones')} de parámetros` });
+    if (p.vision === false) chips.push({ icon: 'eye-off', text: '', label: 'Sin visión' });
+    if (p.vision === true) chips.push({ icon: 'eye', text: '', label: 'Con visión' });
+    return chips;
+  }
+
   function modelRows(listing) {
     const profiles = listing && Array.isArray(listing.profiles) ? listing.profiles : [];
     return profiles.map(p => {
@@ -127,19 +152,59 @@
       if (p.quantization) facts.push(p.quantization);
       if (p.vision === false) facts.push('sin visión');
       if (p.vision === true) facts.push('con visión');
-      const title = p.alias || `Puerto ${port(p.origin).split(':').pop()} (sin identificar)`;
+      const title = p.alias || `Puerto ${port(p.origin).split(':').pop()}`;
+      const gateState = p.gate && p.gate.state;
+      const selectable = p.selectable === true && !!p.profile_id;
+      let gate = GATE_WORDS[gateState] || (gateState === 'ready' ? null : GATE_WORDS.unknown);
+      if (!gate && !selectable) gate = { word: 'Sin verificar', icon: 'lock', tone: 'faint' };
+      const message = (p.gate && p.gate.message) || '';
+      const note = p.note || '';
       return {
         id: p.profile_id || null,
         title,
         facts: facts.join(' · '),
-        state: gateLabel(p.gate && p.gate.state),
-        message: (p.gate && p.gate.message) || '',
-        note: p.note || '',
-        selectable: p.selectable === true && !!p.profile_id,
+        state: gateLabel(gateState),
+        message,
+        note,
+        chips: modelChips(p),
+        word: gate ? gate.word : '',
+        wordIcon: gate ? gate.icon : '',
+        tone: gate ? gate.tone : 'go',
+        aria: `${title}: ${gateLabel(gateState)}. ${facts.join(', ')}. ${message} ${note}`.replace(/\s+/g, ' ').trim(),
+        selectable,
         selected: !!p.profile_id && listing.selected === p.profile_id,
       };
     });
   }
+
+  // Three meters (RAM, VRAM, GTT): fill = USED share; the numbers live in aria.
+  const gb = bytes => decimal(bytes / 1e9, 'GB');
+  function modelMeters(listing) {
+    const r = (listing && listing.resources) || {};
+    const gpu = r.gpu || null;
+    const make = (key, label, used, total, unknownText) => {
+      const known = Number.isFinite(used) && Number.isFinite(total) && total > 0;
+      return {
+        key, label, known,
+        fraction: known ? Math.max(0, Math.min(1, used / total)) : 0,
+        aria: known ? `${label}: ${gb(used)} en uso de ${gb(total)}` : `${label}: ${unknownText}`,
+      };
+    };
+    const ramUsed = Number.isFinite(r.mem_total) && Number.isFinite(r.mem_available) ? r.mem_total - r.mem_available : NaN;
+    return [
+      make('ram', 'RAM', ramUsed, r.mem_total, 'desconocida'),
+      make('vram', 'VRAM', gpu && gpu.vram_used, gpu && gpu.vram_total, 'desconocida'),
+      make('gtt', 'GTT', gpu && gpu.gtt_used, gpu && gpu.gtt_total, 'desconocida'),
+    ];
+  }
+
+  // «i» sentence for the panel: the paragraph that used to be on screen.
+  function modelsInfo(listing) {
+    if (!listing) return 'Leyendo modelos locales.';
+    const kept = listing.persisted === false && listing.selected ? ' Elección sólo en memoria: se pierde al cerrar Abito.' : '';
+    return `${listing.choice_note || ''} ${listing.remote || ''}${kept}`.replace(/\s+/g, ' ').trim();
+  }
+  const modelsCount = listing => (listing && Array.isArray(listing.profiles) ? listing.profiles.filter(p => p.selectable === true && p.profile_id).length : 0);
 
   // ---- Q1: notices + compact activation ----------------------------------
   // Announce a notice once, when a NEW first notice appears (never on
@@ -152,5 +217,5 @@
   }
   const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
 
-  return { noticeAnnouncement, activates, gateLabel, modelRows, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  return { noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });

@@ -322,32 +322,53 @@ body.probe-capture-bg { background: #d8c9a3; }
 }
 #chat-models[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
 #capsule[data-models="open"] #chat-body { display: none; }
-#models {
-  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px;
-  font-size: 12px; color: var(--island-muted);
-}
+/* UI.2 — visual model view (docs/desktop-visual-language.md §2.4). Panel =
+   one 44px bar (count chip, «i», three meters, refresh, done) + a scrolling
+   list of 44px rows. Rows are never clipped by a fixed height: the list
+   scrolls and every row keeps its full height (BLOCKER 2 of the review). */
+#models { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; gap: 4px; color: var(--island-muted); }
 #models[hidden] { display: none; }
-#models-note { margin: 0; color: var(--island-ink); font-size: 12px; }
-#models-list { flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
-#models-list li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-#models-list li .model-text { flex: 1; min-width: 0; }
-#models-list li .model-title { color: var(--island-ink); font-weight: 600; font-size: 12.5px; }
-#models-list li .model-facts, #models-list li .model-state { display: block; overflow-wrap: anywhere; }
-#models-list li.disabled { opacity: .6; }
-#models-list button {
-  min-width: 44px; min-height: 44px; padding: 0 14px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
-  background: transparent; color: var(--island-ink); font: 600 12.5px/1 var(--font-ui); cursor: pointer;
+#models-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+#models-bar .icon-btn:first-of-type { margin-left: 0; }
+#models-meters { display: flex; gap: 14px; margin: 0 auto; padding: 0; list-style: none; }
+.meter { display: inline-flex; align-items: center; gap: 6px; color: var(--island-muted); }
+.meter-label { font: 600 11px/1 var(--font-ui); color: var(--island-ink); }
+.meter-bar { display: inline-flex; }
+.meter[data-known="false"] { color: var(--faint); }
+#models-note:not(.sr-only) {
+  position: absolute; left: 0; right: 0; top: 48px; z-index: 2; margin: 0; padding: 8px 10px;
+  background: #18181b; border-radius: var(--radius-xl); color: var(--island-ink); font-size: 12px; line-height: 1.35;
 }
-#models-list button[aria-pressed="true"] { background: var(--go); border-color: var(--go); color: #000; }
-#models-list button:disabled { opacity: .45; cursor: default; }
-#models-resources { margin: 0; font-size: 11px; }
-#models-actions { display: flex; gap: 8px; justify-content: flex-end; }
-#models-actions button {
-  min-width: 44px; min-height: 44px; padding: 0 16px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
-  background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
+#models-list { flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y proximity; }
+#models-list li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 0 0 2px; scroll-snap-align: start; }
+#models-list li[aria-label] { cursor: default; }
+.model-title { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); }
+.model-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; overflow: hidden; }
+.model-chips .chip { min-height: 24px; font-size: 12px; }
+.model-chips .chip .ico svg { width: 16px; height: 16px; }
+.model-word { flex: none; }
+.model-word .word { color: var(--island-ink); }
+.model-ok { flex: none; width: 10px; height: 10px; margin: 0 5px; border-radius: 50%; background: var(--go); }
+#models-list li.disabled .model-title, #models-list li.disabled .model-chips { opacity: .6; }
+#models-list .choose {
+  flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border-radius: var(--radius-full); border: 0; background: transparent; color: #000; cursor: pointer; position: relative;
 }
+/* the circle itself is the control's shape: hollow ring = pick it, lime check = chosen */
+#models-list .choose::before {
+  content: ""; position: absolute; width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .45); box-sizing: border-box;
+}
+#models-list .choose[aria-pressed="true"]::before { background: var(--go); border-color: var(--go); }
+#models-list .choose:hover:not(:disabled)::before { border-color: var(--island-ink); }
+#models-list .choose:disabled:not([aria-pressed="true"]) { cursor: default; }
+#models-list .choose:disabled:not([aria-pressed="true"])::before { border-color: var(--faint); }
+#models-list .choose .ico { position: relative; }
+#models-list .choose .ico svg { width: 18px; height: 18px; }
+#models-list .skeleton { height: 44px; margin: 0 0 4px; border-radius: var(--radius-xl); background: rgba(99, 179, 255, .16); }
+@keyframes pulse { 50% { opacity: .45; } }
+#models-list .skeleton { animation: pulse 1200ms ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #models-list .skeleton { animation: none; } }
 
 /* ---- Q1: keyboard focus of the island itself -------------------------- */
 #capsule:has(#island-toggle:focus-visible) #island { outline: 2px solid var(--go); outline-offset: 2px; }

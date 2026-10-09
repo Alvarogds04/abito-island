@@ -121,8 +121,33 @@ test('model rows are visible metadata, never "listed" mistaken for "ready"', () 
   assert.match(rows[0].facts, /sin visión/);
   assert.equal(rows[0].state, 'Listo');
   assert.equal(rows[1].selectable, false);
-  assert.equal(rows[1].title, 'Puerto 11014 (sin identificar)');
+  assert.equal(rows[1].title, 'Puerto 11014');
   assert.equal(rows[1].state, 'Desconocido');
+});
+
+test('UI.2 model rows: chips carry numbers, one word only for non-ready gates, full sentence in aria', () => {
+  const ready = { profile_id: 'local-abito-gpt', origin: 'http://127.0.0.1:11002', alias: 'Abito-gpt', selectable: true,
+    gate: { state: 'ready', message: 'Cargado y libre.' }, context_tokens: 65536, size_bytes: 18198045184,
+    params: 35505251456, vision: false };
+  const [r, n, d] = V.modelRows({ selected: 'local-abito-gpt', profiles: [ready,
+    { ...ready, profile_id: 'x', alias: 'Otro', gate: { state: 'needs_load', message: 'm' } },
+    { profile_id: null, origin: 'http://127.0.0.1:11014', alias: null, selectable: false, gate: { state: 'unavailable', message: 'caído' } }] });
+  assert.deepEqual(r.chips.map(c => c.text), ['local', '64k', '18,2 GB', '35,5B', '']);
+  assert.equal(r.chips[4].icon, 'eye-off');
+  assert.equal(r.word, ''); assert.equal(r.tone, 'go');
+  assert.match(r.aria, /127\.0\.0\.1:11002/);
+  assert.equal(n.word, 'Sin cargar'); assert.equal(n.wordIcon, 'load-off');
+  assert.equal(d.word, 'No disponible'); assert.equal(d.tone, 'red'); assert.equal(d.title, 'Puerto 11014');
+});
+
+test('UI.2 meters: used share, numbers only in aria, unknown stays honest', () => {
+  const m = V.modelMeters({ resources: { mem_total: 100e9, mem_available: 25e9, gpu: { vram_total: 10e9, vram_used: 5e9, gtt_total: 20e9, gtt_used: 0 } } });
+  assert.deepEqual(m.map(x => x.key), ['ram', 'vram', 'gtt']);
+  assert.equal(m[0].fraction, 0.75);
+  assert.match(m[0].aria, /RAM: 75,0 GB en uso de 100,0 GB/);
+  const u = V.modelMeters({ resources: { mem_total: null, mem_available: null, gpu: null } });
+  assert.ok(u.every(x => !x.known && /desconocida/.test(x.aria)));
+  assert.equal(V.modelsCount({ profiles: [{ selectable: true, profile_id: 'a' }, { selectable: false }] }), 1);
 });
 
 test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {

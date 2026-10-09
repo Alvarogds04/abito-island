@@ -99,13 +99,16 @@
              island (replaces the transcript while open). Local only, no
              keys; listed is never shown as ready. -->
         <div id="models" hidden aria-label="Modelo local">
-          <p id="models-note"></p>
-          <ul id="models-list"></ul>
-          <p id="models-resources"></p>
-          <div id="models-actions">
-            <button id="models-refresh" type="button">Actualizar</button>
-            <button id="models-close" type="button">Listo</button>
+          <div id="models-bar">
+            <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
+            <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>
+            <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
+            <button id="models-refresh" class="icon-btn" type="button" aria-label="Actualizar modelos locales"><span class="ico" data-icon="refresh"></span></button>
+            <button id="models-close" class="icon-btn" type="button" aria-label="Listo, volver a la conversación"><span class="ico" data-icon="check"></span></button>
           </div>
+          <p id="models-note" class="sr-only"></p>
+          <ul id="models-list" aria-label="Modelos locales"></ul>
+          <p id="models-resources" class="sr-only"></p>
         </div>
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
       </section>

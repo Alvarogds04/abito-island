@@ -346,12 +346,20 @@ pub fn run(app: AppHandle) {
     //     in-process fake backend (env override set at startup), so this
     //     performs the human's explicit choice and reads card/bridgeStatus
     //     back through the REAL snapshot path before and after.
-    approval_evidence(&app);
+    //     With ABITO_PROBE_VISUAL=1 the visual scenes already consumed the
+    //     (sticky) card, so approval/a11y are skipped there: they have their
+    //     own non-visual run, and this keeps the visual run reaching chat/models.
+    let visual_run = std::env::var("ABITO_PROBE_VISUAL").as_deref() == Ok("1");
+    if !visual_run {
+        approval_evidence(&app);
+    }
 
     // 10b. accessibility (Q1): the overview's controls measured in the
     //      webview, the notice live region, and keyboard focus: the window
     //      must NOT be focused by start or restore (no focus stealing).
-    a11y_evidence(&app);
+    if !visual_run {
+        a11y_evidence(&app);
+    }
 
     // 11. chat (U1): overview -> chat in the SAME window (672x256 read back
     //     from the X server), one turn through the REAL `chat_action` IPC
@@ -997,6 +1005,10 @@ fn chat_evidence(app: &AppHandle) {
             abito_island::models::Entry { origin: fake_origin, ..*e }
         } else { *e })
         .collect();
+    // One source of truth for the port: the target (header/aria) follows the
+    // registry the listing is built from again, so both show the SAME origin
+    // (the old PNG mixed the dead `down` port with the live fake).
+    *state.chat_target.lock().expect("chat target lock") = Some(fake_target(fake_origin));
     let models_seen_before = fake.seen().len();
     // 12. models (U2): the picker panel of the same chat view, driven by the
     //     webview through the REAL models_action IPC. `refresh` reads only
@@ -1004,8 +1016,16 @@ fn chat_evidence(app: &AppHandle) {
     //     selectable LOCAL router — never inference, never a diagnostic port.
     //     The probe keeps the selection in memory (no config file written).
     state.chat_probe.lock().expect("chat probe lock").clear();
+    let visual = std::env::var("ABITO_PROBE_VISUAL").as_deref() == Ok("1");
+    if visual {
+        let _ = win.eval("window.__abitoProbeHold = 3500");
+    }
     if let Err(e) = win.eval(MODELS_JS) {
         emit(&json!({"step": "models_evidence", "eval_failed": e.to_string()}));
+    }
+    if visual {
+        sleep(Duration::from_millis(2200)); // panel open + listing rendered, before JS closes it
+        capture_visual(app, "modelos-elegido");
     }
     let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
     emit(&json!({
@@ -1132,6 +1152,8 @@ const MODELS_JS: &str = r#"(async () => {
       if (listing.revision > 0) break;
     }
     await new Promise(r => setTimeout(r, 200));
+    // Visual evidence only (opt-in): hold the panel open while Rust grabs it.
+    if (window.__abitoProbeHold) await new Promise(r => setTimeout(r, window.__abitoProbeHold));
     ev.panel_visible = !document.getElementById('models').hidden;
     ev.transcript_hidden = getComputedStyle(document.getElementById('chat-body')).display === 'none';
     ev.choice_note = listing.choice_note;
