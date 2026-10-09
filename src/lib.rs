@@ -28,6 +28,7 @@ pub mod localmodel;
 pub mod models;
 pub mod protocol;
 pub mod question;
+pub mod questioncmd;
 pub mod requests;
 pub mod retry;
 pub mod transport;
