@@ -58,6 +58,11 @@ body.probe-capture-bg { background: #d8c9a3; }
   background: var(--island);
   will-change: width, height;
 }
+#compact-flag { position: absolute; right: 12px; top: 6px; width: 20px; height: 20px; display: none; place-items: center; pointer-events: none; }
+#compact-flag .ico svg { width: 16px; height: 16px; }
+#compact-flag[data-tone="sun"] { color: var(--sun); }
+#compact-flag[data-tone="red"] { color: var(--red-11); }
+#capsule[data-phase="compact"] #compact-flag:not([hidden]) { display: grid; }
 #clay {
   position: absolute;
   left: 50%;
@@ -80,6 +85,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 [data-tone="live"] .ico { color: var(--island-live); }
 [data-tone="faint"] .ico { color: var(--faint); }
 .dot { width: 10px; height: 10px; margin: 5px; border-radius: 50%; background: var(--sun); }
+.ico .dot { background: currentColor; }
 @keyframes spin { to { transform: rotate(360deg); } }
 [data-kind="busy"] .ico svg { animation: spin 900ms linear infinite; } /* in-flight ring; still under reduced motion (see @media below): the blue open arc is the cue */
 .icon-btn {
@@ -228,27 +234,12 @@ body.probe-capture-bg { background: #d8c9a3; }
   transition: opacity var(--dur-state) var(--ease-out);
 }
 #capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; }
-#chat-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
-}
-#chat-heading { display: flex; flex-direction: column; min-width: 0; }
-#chat-heading strong { font-size: 13.5px; line-height: 1.2; }
-#chat-target { font-size: 11px; color: var(--island-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#chat-status {
-  flex: 1;
-  margin: 0;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--island-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#capsule[data-chat-availability="unavailable"] #chat-status,
-#capsule[data-chat-availability="blocked"] #chat-status { color: #fca5a5; }
+#chat-header { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+#chat-header .icon-btn:first-of-type { margin-left: auto; }
+#chat-target-chip .ico { color: var(--island-muted); }
+#capsule[data-chat-availability="unavailable"] #chat-state .word,
+#capsule[data-chat-availability="blocked"] #chat-state .word { color: var(--red-11); }
+#chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg { animation: spin 900ms linear infinite; }
 #chat-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #chat-log {
   flex: 1;
@@ -256,6 +247,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   margin: 0;
   padding: 2px 4px 2px 0;
   list-style: none;
+  display: flex; flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-user-select: text;
@@ -265,12 +257,16 @@ body.probe-capture-bg { background: #d8c9a3; }
   line-height: 1.4;
 }
 #chat-log li { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-#chat-log li.user { color: var(--island-muted); }
-#chat-log li.user::before { content: "Vos: "; font-weight: 600; }
-#chat-log li.assistant::before { content: "Abito: "; font-weight: 600; color: var(--go); }
-#chat-log li.note { font-size: 11.5px; color: var(--island-muted); font-style: italic; }
-#chat-log li.error { color: #fca5a5; }
-#chat-log li.empty { color: var(--island-muted); }
+/* UI.2: «Vos»/«Abito» labels are gone: you sit on the right (tinted bubble),
+   Abito on the left (plain). Notes/errors are icon + one word. */
+#chat-log li.user { margin-left: 18%; padding: 6px 12px; border-radius: 14px 14px 4px 14px; background: rgba(255, 255, 255, .1); color: var(--island-ink); width: fit-content; max-width: 82%; align-self: flex-end; }
+#chat-log li.assistant { max-width: 90%; color: var(--island-ink); }
+#chat-log li.note, #chat-log li.error { display: flex; align-items: center; gap: 6px; font: 600 12px/1.2 var(--font-ui); color: var(--island-muted); white-space: normal; }
+#chat-log li.note .ico svg, #chat-log li.error .ico svg { width: 16px; height: 16px; }
+#chat-log li.error { color: var(--red-11); }
+#chat-log li.error .ico { color: var(--red-11); }
+#chat-log li.empty { display: flex; justify-content: center; align-items: center; gap: 18px; height: 100%; min-height: 80px; color: var(--island-muted); }
+#chat-log li.empty .ico svg { width: 28px; height: 28px; }
 #chat-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 6px; }
 #chat-input {
   flex: 1;
@@ -288,7 +284,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   cursor: text;
 }
 #chat-input::placeholder { color: var(--island-muted); }
-#chat-back, #chat-send, #chat-cancel, #chat-new {
+#chat-new {
   min-width: 44px;
   min-height: 44px;
   padding: 0 16px;
@@ -299,9 +295,16 @@ body.probe-capture-bg { background: #d8c9a3; }
   font: 600 13px/1 var(--font-ui);
   cursor: pointer;
 }
-#chat-send { background: var(--go); border-color: var(--go); color: #000; }
+#chat-composer .round {
+  display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; padding: 0;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); cursor: pointer;
+}
+#chat-send { background: var(--go) !important; border-color: var(--go) !important; color: #000 !important; }
 #chat-send:disabled { opacity: .4; cursor: default; }
+#chat-input[data-invalid="true"] { border-color: var(--red-11); }
+#chat-draft-word { position: absolute; right: 108px; bottom: 56px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
 #chat-new {
+  display: inline-flex; align-items: center; gap: 2px;
   position: absolute;
   left: 50%;
   bottom: 56px;
@@ -363,7 +366,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #models-list .choose:hover:not(:disabled)::before { border-color: var(--island-ink); }
 #models-list .choose:disabled:not([aria-pressed="true"]) { cursor: default; }
 #models-list .choose:disabled:not([aria-pressed="true"])::before { border-color: var(--faint); }
-#models-list .choose .ico { position: relative; }
+#models-list .choose .ico { position: relative; z-index: 1; }
 #models-list .choose .ico svg { width: 18px; height: 18px; }
 #models-list .skeleton { height: 44px; margin: 0 0 4px; border-radius: var(--radius-xl); background: rgba(99, 179, 255, .16); }
 @keyframes pulse { 50% { opacity: .45; } }

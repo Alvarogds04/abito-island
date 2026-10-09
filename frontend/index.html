@@ -27,6 +27,9 @@
            its focus ring is drawn on #island). Enter/Space opens the
            overview from compact; in the overview it closes it. -->
       <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
+      <!-- UI.2: compact indicator (§6): sun dot = something waits for your yes,
+           red triangle = channel down. Shape + colour; never text. -->
+      <span id="compact-flag" role="img" hidden><span class="ico" id="compact-flag-icon"></span></span>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <!-- UI.1: visual overview (docs/desktop-visual-language.md). Icons come
            from icons.js (own inline SVG); every icon-only control has an
@@ -74,24 +77,24 @@
            Every text below is written with textContent: plain text only. -->
       <section id="chat" hidden aria-label="Conversación con Abito">
         <header id="chat-header">
-          <div id="chat-heading">
-            <strong>Abito</strong>
-            <span id="chat-target"></span>
-          </div>
-          <p id="chat-status"></p>
-          <button id="chat-models" type="button" aria-expanded="false" aria-controls="models">Modelo</button>
-          <button id="chat-back" type="button">Volver</button>
+          <span id="chat-target-chip" class="chip" role="img"><span class="ico" data-icon="lock"></span><span class="word">local</span></span>
+          <span id="chat-state" class="chip" role="img"><span class="ico" id="chat-state-icon"></span><span class="word" id="chat-state-word"></span></span>
+          <span id="chat-target" class="sr-only"></span>
+          <p id="chat-status" class="sr-only"></p>
+          <button id="chat-models" class="icon-btn" type="button" aria-label="Modelo local" aria-expanded="false" aria-controls="models"><span class="ico" data-icon="chip"></span></button>
+          <button id="chat-back" class="icon-btn" type="button" aria-label="Volver"><span class="ico" data-icon="arrow-left"></span></button>
         </header>
         <div id="chat-body">
           <ol id="chat-log" tabindex="0" aria-label="Historial de la conversación"></ol>
-          <button id="chat-new" type="button" hidden>Respuesta nueva</button>
+          <button id="chat-new" type="button" hidden aria-label="Respuesta nueva"><span class="ico" data-icon="arrow-down"></span><span class="dot"></span></button>
           <form id="chat-composer" novalidate>
             <label for="chat-input" class="sr-only">Mensaje para Abito</label>
             <textarea id="chat-input" rows="1" maxlength="8000" spellcheck="true"
-              aria-describedby="chat-help chat-problem" placeholder="Escribile a Abito…"></textarea>
+              aria-describedby="chat-help chat-problem" placeholder="Escribí…"></textarea>
+            <span id="chat-draft-word" class="chip" data-tone="red" hidden></span>
             <span id="chat-help" class="sr-only">Enter envía. Mayúsculas más Enter agrega una línea. Escape sale del campo; otro Escape cierra la isla.</span>
-            <button id="chat-cancel" type="button" hidden>Cancelar</button>
-            <button id="chat-send" type="submit" disabled>Enviar</button>
+            <button id="chat-cancel" class="round" type="button" hidden aria-label="Cancelar"><span class="ico" data-icon="square"></span></button>
+            <button id="chat-send" class="round" type="submit" disabled aria-label="Enviar"><span class="ico" data-icon="arrow-up"></span></button>
           </form>
           <p id="chat-problem" class="sr-only" aria-live="polite"></p>
         </div>

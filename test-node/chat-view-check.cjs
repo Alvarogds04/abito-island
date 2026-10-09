@@ -2,6 +2,7 @@
 /* U1 — pure checks for frontend/chat-view.js (no DOM, no network).
    Run: node apps/desktop-tauri/test-node/chat-view-check.cjs
    Also run by `cargo test` (tests/frontend_chat_view.rs). */
+const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const V = require(path.join(__dirname, '..', 'frontend', 'chat-view.js'));
@@ -148,6 +149,53 @@ test('UI.2 meters: used share, numbers only in aria, unknown stays honest', () =
   const u = V.modelMeters({ resources: { mem_total: null, mem_available: null, gpu: null } });
   assert.ok(u.every(x => !x.known && /desconocida/.test(x.aria)));
   assert.equal(V.modelsCount({ profiles: [{ selectable: true, profile_id: 'a' }, { selectable: false }] }), 1);
+});
+
+test('UI.2 chat status: a word only for problems; shapes carry the rest', () => {
+  const base = { turns: [], active_turn: null, queue_note: null };
+  const v = (state, msg) => V.statusView({ ...base, availability: { state, message: msg || '' } });
+  assert.deepEqual([v('ready').kind, v('ready').word, v('ready').tone], ['ready', '', 'go']);
+  assert.equal(v('unavailable', 'El modelo local no responde').word, 'Modelo caído');
+  assert.equal(v('unavailable', 'x').tone, 'red');
+  assert.equal(v('blocked').word, 'Bloqueado');
+  assert.equal(v('busy').word, 'Ocupado');
+  assert.equal(v('unchecked').icon, 'ring');
+  assert.match(v('unavailable', 'El modelo local no responde').aria, /no responde/);
+  const turn = state => ({ turn_id: 't', state, user_text: 'x', reply: '', trimmed_turns: 0 });
+  const act = state => V.statusView({ turns: [turn(state)], active_turn: 't', availability: { state: 'ready', message: '' } });
+  assert.equal(act('thinking').icon, 'ring');
+  assert.equal(act('streaming').tone, 'live');
+  assert.equal(act('waiting_approval').tone, 'sun');
+  assert.equal(act('queued').icon, 'clock');
+  assert.equal(V.statusView(null).word, 'Modelo caído');
+});
+
+test('UI.2 composer: one visible word for draft problems, none for empty', () => {
+  assert.equal(V.draftWord('a'.repeat(8001)), 'Muy largo');
+  assert.equal(V.draftWord('hola\u0001'), 'Caracteres no válidos');
+  assert.equal(V.draftWord(''), '');
+  assert.equal(V.draftWord('   '), '');
+});
+
+test('UI.2 rows: short word + icon, full text kept for aria', () => {
+  const rows = V.turnRows({ turn_id: 't', state: 'cancelled', user_text: 'x', reply: 'me', trimmed_turns: 2, finish_reason: 'limit' });
+  assert.equal(rows.find(r => r.short === 'Recortado').icon, 'info');
+  const cut = V.turnRows({ turn_id: 't', state: 'completed', user_text: 'x', reply: 'r', trimmed_turns: 0, finish_reason: 'limit' });
+  assert.equal(cut[cut.length - 1].short, 'Cortado por largo');
+  const can = V.turnRows({ turn_id: 't', state: 'cancelled', user_text: 'x', reply: 'r', trimmed_turns: 0 });
+  assert.equal(can[can.length - 1].short, 'Cancelado');
+  const err = V.turnRows({ turn_id: 't', state: 'error', user_text: 'x', reply: '', error: { safe_message: 'Sin modelo.' }, trimmed_turns: 0 });
+  assert.equal(err[err.length - 1].icon, 'triangle');
+});
+
+test('UI.2 chat markup: icon-only controls are named, copy is voseo, labels Vos/Abito gone', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+  for (const id of ['chat-models', 'chat-back', 'chat-send', 'chat-cancel', 'chat-new']) {
+    assert.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html)[0], /aria-label="[^"]{3,}"/, id);
+  }
+  assert.match(html, /placeholder="Escribí…"/);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+  assert.doesNotMatch(css, /content: "(Vos|Abito): "/);
 });
 
 test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {

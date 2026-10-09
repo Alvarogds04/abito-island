@@ -34,6 +34,7 @@
     'plane': '<path d="M18 2L9 11M18 2l-6 16-3-7-7-3z"/>', // paper plane: sent, result not confirmed
     'load-off': `<path d="M10 3v8M6.5 8L10 11.5 13.5 8M3 13v3h14v-3"/><path d="${SLASH}"/>`, // loading needed (Abito never loads)
     'eye': EYE,
+    'arrow-down': '<path d="M10 4v12M5 11l5 5 5-5"/>',
     'ring': '<path d="M10 2a8 8 0 1 0 8 8"/>', // open arc; the page spins it
   });
   const NAMES = Object.freeze(Object.keys(PATHS));

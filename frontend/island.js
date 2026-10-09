@@ -37,7 +37,7 @@
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
-  const CHAT = { w: 640, h: 240, r: 22, clay: 36, clayLeft: 34, clayTop: 8 };
+  const CHAT = { w: 640, h: 240, r: 22, clay: 40, clayLeft: 34, clayTop: 8 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -424,7 +424,23 @@
     expiry.setAttribute('datetime', card.expires_at);
     $('card-expiry').setAttribute('aria-label', O.expiryAria(card.expires_at, now));
   }
+  // UI.2 §6 compact indicator: waiting card -> sun dot, channel down -> red
+  // triangle. Pure shape+colour; the accessible name says what it means.
+  function paintCompactFlag() {
+    const flag = $('compact-flag');
+    if (!flag) return;
+    const card = current && current.card;
+    const waiting = validCard(card) && Date.now() < Date.parse(card.expires_at) &&
+      (card.state === 'pending' || card.reason === 'Abrí la tarjeta para decidir.'); // covered = still waiting for you
+    const down = !!(current && current.unavailable === true);
+    flag.hidden = !(waiting || down);
+    if (flag.hidden) return;
+    flag.dataset.tone = waiting ? 'sun' : 'red';
+    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : 'Avisos caídos');
+    $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
+  }
   function renderCard() {
+    paintCompactFlag();
     const card = current && current.card;
     const valid = validCard(card);
     const permission = $('permission');

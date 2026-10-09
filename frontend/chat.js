@@ -28,6 +28,11 @@
   const problem = $('chat-problem');
   const live = $('chat-live');
   const newer = $('chat-new');
+  const stateChip = $('chat-state');
+  const draftWord = $('chat-draft-word');
+  const ICONS = window.AbitoIcons;
+  const icon = name => (ICONS ? ICONS.svg(name) : '');
+  for (const el of chat.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
   if (!V || !chat || !input) return;
 
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -50,7 +55,8 @@
 
   function renderTarget() {
     const t = view && view.target;
-    targetEl.textContent = t ? `${t.alias} · local ${t.origin.replace('http://', '')}` : 'Sin modelo local elegido';
+    targetEl.textContent = V.targetAria(t);
+    $('chat-target-chip').setAttribute('aria-label', V.targetAria(t));
   }
 
   function renderLog() {
@@ -61,14 +67,25 @@
     if (!turns.length) {
       const li = document.createElement('li');
       li.className = 'empty';
-      li.textContent = 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.';
+      // §2.3: lock «local» + eye-off, centred; the whole sentence is aria.
+      li.setAttribute('role', 'img');
+      li.setAttribute('aria-label', 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.');
+      li.innerHTML = `<span class="ico">${icon('lock')}</span><span class="ico">${icon('eye-off')}</span>`;
       log.appendChild(li);
     }
     for (const turn of turns) {
       for (const row of V.turnRows(turn)) {
         const li = document.createElement('li');
         li.className = row.kind;
-        li.textContent = row.text;
+        if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
+          li.setAttribute('aria-label', row.text);
+          const i = document.createElement('span');
+          i.className = 'ico'; i.innerHTML = icon(row.icon);
+          const w = document.createElement('span');
+          w.className = 'word'; w.textContent = row.kind === 'error' ? row.text : row.short;
+          li.append(i, w);
+          if (row.kind === 'error') li.dataset.tone = 'red';
+        } else li.textContent = row.text;
         log.appendChild(li);
       }
     }
@@ -89,6 +106,16 @@
     const availability = view && view.availability ? view.availability.state : 'unchecked';
     capsule.dataset.chatAvailability = availability;
     status.textContent = localProblem || V.statusLine(view);
+    const sv = V.statusView(view);
+    stateChip.dataset.tone = sv.tone;
+    stateChip.dataset.kind = sv.kind;
+    stateChip.setAttribute('aria-label', localProblem || sv.aria);
+    $('chat-state-icon').innerHTML = sv.icon ? icon(sv.icon) : '<span class="dot ' + (sv.kind === 'ready' ? 'go' : '') + '"></span>';
+    $('chat-state-word').textContent = sv.word;
+    const dw = input.value ? V.draftWord(input.value) : '';
+    draftWord.hidden = !dw;
+    draftWord.textContent = dw;
+    input.dataset.invalid = dw ? 'true' : 'false';
   }
 
   function apply(next) {

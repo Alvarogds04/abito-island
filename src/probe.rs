@@ -685,6 +685,18 @@ fn overview_visual_evidence(app: &AppHandle) {
         }
         sleep(Duration::from_millis(200));
         capture_visual(app, "overview-tarjeta-pendiente");
+        // compacta-espera: same pending card, island collapsed -> sun dot.
+        if !sent_run && pending_ok {
+            let plan = state.core.lock().expect("core lock").toggle(&io, area);
+            apply_plan(app, state.inner(), plan);
+            wait_for_size(app, compact, Duration::from_secs(3));
+            sleep(Duration::from_millis(700));
+            capture_visual(app, "compacta-espera");
+            let plan = state.core.lock().expect("core lock").toggle(&io, area);
+            apply_plan(app, state.inner(), plan);
+            wait_for_size(app, overview, Duration::from_secs(3));
+            sleep(Duration::from_millis(900));
+        }
         line["states"].as_array_mut().expect("states array").push(json!({
             "name": "tarjeta-pendiente",
             "ok": pending_ok,
@@ -963,10 +975,13 @@ fn chat_evidence(app: &AppHandle) {
         emit(&json!({"step": "chat_open", "warning": "window did not reach the chat size within 3s"}));
     }
 
+    capture_visual(app, "chat-vacio");
     if let Err(e) = win.eval(CHAT_JS_SEND) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
     }
     let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
+    sleep(Duration::from_millis(300));
+    capture_visual(app, "chat-respondio");
     // now an unreachable local target: honest unavailable, no fallback
     let completions_before = fake.completions();
     // the registered local route goes down (registry + target follow it)
@@ -983,6 +998,8 @@ fn chat_evidence(app: &AppHandle) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
     }
     let lines = if !lines.is_empty() { wait_chat_lines(app, 2, Duration::from_secs(20)) } else { lines };
+    sleep(Duration::from_millis(300));
+    capture_visual(app, "chat-modelo-caido");
     let seen: Vec<_> = fake.seen().iter().map(|s| json!({"method": s.method, "path": s.path})).collect();
     emit(&json!({
         "step": "chat_evidence",
@@ -1016,6 +1033,10 @@ fn chat_evidence(app: &AppHandle) {
     //     selectable LOCAL router — never inference, never a diagnostic port.
     //     The probe keeps the selection in memory (no config file written).
     state.chat_probe.lock().expect("chat probe lock").clear();
+    // Re-check availability against the repointed (live fake) target so the
+    // chat state is fresh, not the stale answer from the closed port.
+    let _ = win.eval("(window.__TAURI__.core.invoke)('chat_action', { payload: { action: 'check' } })");
+    sleep(Duration::from_millis(600));
     let visual = std::env::var("ABITO_PROBE_VISUAL").as_deref() == Ok("1");
     if visual {
         let _ = win.eval("window.__abitoProbeHold = 3500");
@@ -1052,6 +1073,7 @@ fn chat_evidence(app: &AppHandle) {
     wait_for_size(app, compact, Duration::from_secs(3));
     sleep(Duration::from_millis(200));
     readback(app, "chat_collapse");
+    capture_visual(app, "compacta-calma");
     // restore the production target for the (exiting) process
     *state.models_registry.lock().expect("models registry lock") = original_registry;
     *state.chat_target.lock().expect("chat target lock") = Some(chatlane::default_target());

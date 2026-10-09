@@ -77,7 +77,6 @@
     }
     for (const row of V.modelRows(listing)) {
       const li = el('li', row.selectable ? '' : 'disabled');
-      li.dataset.tone = row.tone;
       li.setAttribute('aria-label', row.aria);
       li.append(el('span', 'model-title', row.title));
       const chips = el('span', 'model-chips');
@@ -96,7 +95,7 @@
       }
       const choose = el('button', 'choose');
       choose.type = 'button';
-      choose.innerHTML = row.selected ? icon('check') : '';
+      choose.innerHTML = row.selected ? `<span class="ico">${icon('check')}</span>` : '';
       choose.setAttribute('aria-pressed', row.selected ? 'true' : 'false');
       choose.setAttribute('aria-label', `${row.selected ? 'Elegido' : 'Elegir'} ${row.title}`);
       choose.disabled = !row.selectable || row.selected || busy;

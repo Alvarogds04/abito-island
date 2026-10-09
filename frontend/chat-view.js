@@ -55,6 +55,35 @@
     return (view.availability && view.availability.message) || 'Chat no disponible.';
   }
 
+  // UI.2 chat (docs/desktop-visual-language.md §2.3/§3): the header state as
+  // {tone, icon, word, kind, aria}. A word stays ONLY for problems
+  // («Modelo caído», «Error», «Bloqueado», «Ocupado»); the full sentence is aria.
+  function statusView(view) {
+    const aria = statusLine(view);
+    const mk = (kind, tone, icon, word) => ({ kind, tone, icon, word, aria });
+    if (!view) return mk('down', 'red', 'triangle', 'Modelo caído');
+    const active = activeTurn(view);
+    if (active) {
+      if (active.state === 'waiting_approval') return mk('waiting', 'sun', '', '');
+      if (active.state === 'queued') return mk('queued', 'live', 'clock', '');
+      return mk('busy', 'live', 'ring', ''); // thinking / streaming: blue open arc, spun by the page
+    }
+    const state = view.availability && view.availability.state;
+    if (state === 'ready') return mk('ready', 'go', '', '');
+    if (state === 'busy') return mk('occupied', 'live', 'clock', 'Ocupado');
+    if (state === 'blocked') return mk('blocked', 'red', 'triangle', 'Bloqueado');
+    if (state === 'unavailable') return mk('down', 'red', 'triangle', 'Modelo caído');
+    return mk('checking', 'live', 'ring', '');
+  }
+  // Draft problem as one visible word; empty draft shows nothing.
+  function draftWord(text) {
+    const normalized = String(text).replace(/\r\n?/g, '\n');
+    if (scalarCount(normalized) > DRAFT_MAX) return 'Muy largo';
+    if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(normalized)) return 'Caracteres no válidos';
+    return '';
+  }
+  const targetAria = t => (t ? `${t.alias}, sólo local, ${String(t.origin || '').replace(/^http:\/\//, '')}` : 'Sin modelo local elegido');
+
   const lastTurn = view => (view && Array.isArray(view.turns) && view.turns.length)
     ? view.turns[view.turns.length - 1] : null;
 
@@ -85,17 +114,17 @@
     const rows = [{ kind: 'user', text: turn.user_text }];
     if (turn.trimmed_turns > 0) {
       rows.push({
-        kind: 'note',
+        kind: 'note', short: 'Recortado', icon: 'info',
         text: `Para entrar en el contexto del modelo se dejaron afuera ${turn.trimmed_turns} mensajes anteriores.`,
       });
     }
     if (turn.reply) rows.push({ kind: 'assistant', text: turn.reply });
     if (turn.state === 'error') {
-      rows.push({ kind: 'error', text: (turn.error && turn.error.safe_message) || 'Error.' });
+      rows.push({ kind: 'error', short: 'Error', icon: 'triangle', text: (turn.error && turn.error.safe_message) || 'Error.' });
     } else if (turn.finish_reason === 'limit') {
-      rows.push({ kind: 'note', text: 'La respuesta llegó al límite de largo y se cortó.' });
+      rows.push({ kind: 'note', short: 'Cortado por largo', icon: 'info', text: 'La respuesta llegó al límite de largo y se cortó.' });
     } else if (turn.state === 'cancelled') {
-      rows.push({ kind: 'note', text: 'Cancelado. Lo que el modelo ya procesó no se puede recuperar.' });
+      rows.push({ kind: 'note', short: 'Cancelado', icon: 'cross', text: 'Cancelado. Lo que el modelo ya procesó no se puede recuperar.' });
     }
     return rows;
   }
@@ -217,5 +246,5 @@
   }
   const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
 
-  return { noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  return { statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });
