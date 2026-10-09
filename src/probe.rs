@@ -149,7 +149,7 @@ pub fn run(app: AppHandle) {
     emit(&json!({
         "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
-        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence", "a11y_evidence", "chat_open", "chat_evidence", "models_evidence", "chat_back_to_overview", "chat_collapse"],
+        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "overview_visual_evidence", "approval_evidence", "a11y_evidence", "chat_open", "chat_evidence", "models_evidence", "chat_back_to_overview", "chat_collapse"],
         "gdk_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "unset".into()),
     }));
 
@@ -337,6 +337,11 @@ pub fn run(app: AppHandle) {
     //    never connected, never unlinked.
     transport_evidence(&app);
 
+    // 9b. overview visual evidence (UI.1): PNGs of the overview scenes on a
+    //     known background (opt-in: ABITO_PROBE_VISUAL=1). Driven through the
+    //     same host paths the real lanes use; nothing here approves by itself.
+    overview_visual_evidence(&app);
+
     // 10. approval evidence (M3): the lane already runs against the
     //     in-process fake backend (env override set at startup), so this
     //     performs the human's explicit choice and reads card/bridgeStatus
@@ -500,6 +505,233 @@ fn transport_evidence(app: &AppHandle) {
     } else {
         line["dismiss"] = json!({ "skipped": "no notice to dismiss" });
     }
+    emit(&line);
+}
+
+/// UI.1 visual read-back: the five OVERVIEW scenes on a known background.
+/// State is driven through the REAL host paths (transport receiver, fake
+/// backend + dispatch funnel the webview's `allow` verb reaches) — never
+/// synthesised frontend text. Sequence:
+///   sinpi               connections 0, notices 0, no card
+///   conectado           one live producer connection (hello → ready)
+///   aviso               ONE settled notice from that connection
+///   tarjeta-pendiente   healthy bridge + pending card (fresh proposal)
+///   tarjeta-resuelta    the human's explicit Allow through dispatch_verb
+/// A fresh pending proposal is left served so the later approval_evidence
+/// step still exercises its own decision.
+fn overview_visual_evidence(app: &AppHandle) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return; // opt-in: the default probe flow is unchanged
+    }
+    let state = app.state::<AppState>();
+    let card_state = |snapshot: &serde_json::Value| -> String {
+        snapshot
+            .get("card")
+            .and_then(|card| card.get("state"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("none")
+            .to_string()
+    };
+
+    let mut line = json!({
+        "step": "overview_visual_evidence",
+        "pointer_input": NO_POINTER,
+        "mode": serde_json::Value::Null,
+        "states": [],
+        "error": serde_json::Value::Null,
+    });
+    let fake = state.probe_fake.lock().expect("probe fake").clone();
+    // Two complementary runs (the lane's selected candidate is STICKY — a
+    // served proposal can never legally un-serve, so a clean no-card overview
+    // is only reachable when the bridge never became healthy):
+    //   no fake  (ABITO_BRIDGE_BASE set from outside → dead origin):
+    //             sinpi / conectado / aviso, card is null all run.
+    //   fake     (default probe backend): tarjeta-pendiente / -resuelta.
+    let card_scenes = fake.is_some();
+    line["mode"] = json!(if card_scenes { "card" } else { "sin-tarjeta" });
+
+    let win = main_window(app);
+    let area = refresh_work_area(app, state.inner());
+    let io = TauriIo(&win);
+    let scale = io.scale();
+    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
+    let compact = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
+
+    // Expand (same core toggle the pointer uses) and let the spring settle.
+    let plan = {
+        let mut core = state.core.lock().expect("core lock");
+        core.toggle(&io, area)
+    };
+    apply_plan(app, state.inner(), plan);
+    wait_for_size(app, overview, Duration::from_secs(3));
+    sleep(Duration::from_millis(900));
+
+    if !card_scenes {
+        // sin Pi: no connections, no notices, and (this run) no card.
+        let snapshot = crate::build_snapshot(app, state.inner());
+        if card_state(&snapshot) != "none" {
+            line["error"] = json!("expected no card without a reachable bridge");
+        }
+        sleep(Duration::from_millis(200));
+        capture_visual(app, "overview-sinpi");
+        // i-abierto: the «i» detail open (a real click on the real button).
+        let _ = main_window(app).eval("document.getElementById('notice-info').click()");
+        sleep(Duration::from_millis(300));
+        capture_visual(app, "overview-i-abierto");
+        let _ = main_window(app).eval("document.getElementById('notice-info').click()");
+        sleep(Duration::from_millis(300));
+        line["states"].as_array_mut().expect("states array").push(json!({
+            "name": "sinpi",
+            "connections": state.connections.load(std::sync::atomic::Ordering::SeqCst),
+            "card": card_state(&snapshot),
+        }));
+
+        // conectado: a REAL hello → ready round trip against OUR receiver; the
+        // connection count stays 1 while the stream stays open.
+        let connected = (|| -> Result<bool, String> {
+            use std::io::{Read, Write};
+            use std::os::unix::net::UnixStream;
+            let endpoint = state
+                .transport
+                .lock()
+                .expect("transport lock")
+                .as_ref()
+                .map(|transport| transport.endpoint().to_path_buf())
+                .ok_or("receiver unavailable")?;
+            let mut stream =
+                UnixStream::connect(&endpoint).map_err(|error| format!("connect: {error}"))?;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .map_err(|error| format!("read timeout: {error}"))?;
+            let project = state.project.clone();
+            let hello = json!({"v":1, "type":"hello", "project":project,
+                               "sessionId":"probe-visual", "at": crate::now_ms() as u64});
+            stream
+                .write_all(format!("{hello}\n").as_bytes())
+                .map_err(|error| format!("write hello: {error}"))?;
+            let mut buffer = [0u8; 128];
+            let count = stream
+                .read(&mut buffer)
+                .map_err(|error| format!("read ready: {error}"))?;
+            if &buffer[..count] != abito_island::protocol::READY_LINE {
+                return Ok(false);
+            }
+            // Keep the stream open across BOTH captures: connected first, then
+            // the settled frame for the notice scene.
+            sleep(Duration::from_millis(400));
+            capture_visual(app, "overview-conectado");
+            let settled = json!({"v":1, "type":"settled", "project":project,
+                                 "sessionId":"probe-visual", "at": crate::now_ms() as u64,
+                                 "id":"probe-visual-1"});
+            stream
+                .write_all(format!("{settled}\n").as_bytes())
+                .map_err(|error| format!("write settled: {error}"))?;
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let snapshot = crate::build_snapshot(app, state.inner());
+                if snapshot["notices"].as_array().map(|n| n.len()).unwrap_or(0) >= 1 {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    return Err("notice did not arrive within 3s".into());
+                }
+                sleep(Duration::from_millis(50));
+            }
+            sleep(Duration::from_millis(300));
+            capture_visual(app, "overview-aviso");
+            drop(stream);
+            Ok(true)
+        })();
+        line["states"].as_array_mut().expect("states array").push(json!({
+            "name": "conectado+aviso",
+            "ok": connected,
+        }));
+    } else {
+        // tarjeta-pendiente: serve a FRESH pending proposal (same payload_hash
+        // the fake accepts), wait for the REAL snapshot to project it.
+        // ABITO_PROBE_VISUAL_DECISION=sent: keep serving the SAME proposal id
+        // the lane already selected (sticky), so the fake answers the
+        // decision with a real 2xx → the lane's own `Decisión enviada.`
+        // (tarjeta-enviada). Default: a different id → 404 → `Sin confirmar`.
+        let sent_run = std::env::var("ABITO_PROBE_VISUAL_DECISION").as_deref() == Ok("sent");
+        let pending = serde_json::json!({
+            "id": format!("proposal_{}", if sent_run { "a" } else { "c" }.repeat(32)),
+            "payload_hash": "b".repeat(64),
+            "operation": "Prueba M3: propuesta servida por el backend falso",
+            "status": "pending",
+            "expires_at": "2999-12-31T23:59:59Z",
+            "principal": "probe",
+            "payload": { "probe": true },
+        });
+        fake.as_ref().expect("fake").set_proposals(vec![pending]);
+        let mut pending_ok = false;
+        {
+            let deadline = Instant::now() + Duration::from_secs(14);
+            while Instant::now() < deadline {
+                if card_state(&crate::build_snapshot(app, state.inner())) == "pending" {
+                    pending_ok = true;
+                    break;
+                }
+                sleep(Duration::from_millis(100));
+            }
+        }
+        sleep(Duration::from_millis(200));
+        capture_visual(app, "overview-tarjeta-pendiente");
+        line["states"].as_array_mut().expect("states array").push(json!({
+            "name": "tarjeta-pendiente",
+            "ok": pending_ok,
+        }));
+
+        // tarjeta-resuelta: the human's explicit choice through the SAME
+        // dispatch funnel the webview's `allow` verb reaches.
+        let outcome =
+            crate::dispatch_verb(app, state.inner(), abito_island::bridge::Action::Allow, None);
+        let resolved_ok = outcome.is_ok();
+        {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                let snapshot = crate::build_snapshot(app, state.inner());
+                if snapshot["card"]["reason"] == "Decisión enviada." {
+                    break;
+                }
+                sleep(Duration::from_millis(100));
+            }
+        }
+        sleep(Duration::from_millis(200));
+        capture_visual(
+            app,
+            if sent_run {
+                "overview-tarjeta-enviada"
+            } else {
+                "overview-tarjeta-resuelta"
+            },
+        );
+        line["states"].as_array_mut().expect("states array").push(json!({
+            "name": if sent_run { "tarjeta-enviada" } else { "tarjeta-resuelta" },
+            "dispatched_ok": resolved_ok,
+            "error": outcome.as_ref().err().map(|error| serde_json::to_value(error).unwrap_or_default()),
+        }));
+
+        // Leave a FRESH pending proposal served so the later
+        // approval_evidence step still finds healthy+pending.
+        let next = serde_json::json!({
+            "id": format!("proposal_{}", "d".repeat(32)),
+            "payload_hash": "b".repeat(64),
+            "operation": "Prueba M3: propuesta servida por el backend falso",
+            "status": "pending",
+            "expires_at": "2999-12-31T23:59:59Z",
+            "principal": "probe",
+            "payload": { "probe": true },
+        });
+        fake.as_ref().expect("fake").set_proposals(vec![next]);
+    }
+    let plan = {
+        let mut core = state.core.lock().expect("core lock");
+        core.toggle(&io, area)
+    };
+    apply_plan(app, state.inner(), plan);
+    wait_for_size(app, compact, Duration::from_secs(3));
+    sleep(Duration::from_millis(300));
     emit(&line);
 }
 
@@ -1000,3 +1232,111 @@ const A11Y_JS: &str = r#"(async () => {
   } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
   await invoke('record_chat_evidence', { evidence: ev });
 })();"#;
+
+/// `YYYYMMDD-HHMMSS` stamp (UTC) for visual filenames — no chrono
+/// dependency: civil-from-days (Howard Hinnant's algorithm) on top of
+/// `SystemTime`.
+fn visual_stamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as i64;
+    let days = secs.div_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let (y, m) = if m <= 2 { (y + 1, m) } else { (y, m) };
+    let sod = secs.rem_euclid(86_400);
+    let (h, rem) = (sod / 3600, sod % 3600);
+    let (mnt, sec) = (rem / 60, rem % 60);
+    format!("{y:04}{m:02}{d:02}-{h:02}{mnt:02}{sec:02}")
+}
+
+/// Opt-in visual evidence (`ABITO_PROBE_VISUAL=1` + `ABITO_SOCKET_DIR`):
+/// one PNG of OUR window only. ffmpeg `x11grab -window_id <wid>` reads the
+/// island window's own drawable (found by `_NET_WM_PID`, FIX-B) — never the
+/// root window, the desktop or another client; no pointer drawn; one frame.
+/// Files: `<ABITO_SOCKET_DIR>/visual/<name>-<YYYYMMDD-HHMMSS>.png`
+/// (gitignored `.runtime*`).
+///
+/// Known-background contract (UI.1 review): during the grab ONLY, the body
+/// gets a solid sand class (`probe-capture-bg`, declared in style.css) so
+/// radius, margins and the island contour are visible in the PNG; the class
+/// is removed right after and production rendering never carries it.
+fn capture_visual(app: &AppHandle, name: &str) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let Some(root) = std::env::var_os("ABITO_SOCKET_DIR") else {
+        emit(
+            &json!({"step": "visual", "name": name, "error": "ABITO_SOCKET_DIR unset: nowhere private to write"}),
+        );
+        return;
+    };
+    let _ = app;
+    let page = main_window(app); // WebviewWindow, for the body class only
+    let win = match abito_island::workarea::x11_find_own_window("Abito") {
+        Ok(w) => w,
+        Err(e) => {
+            emit(&json!({"step": "visual", "name": name, "error": e.as_str()}));
+            return;
+        }
+    };
+    // Optional private output dir (UI.1 evidence); default stays `<root>/visual`.
+    let dir = match std::env::var_os("ABITO_PROBE_VISUAL_DIR") {
+        Some(custom) => std::path::PathBuf::from(custom),
+        None => std::path::Path::new(&root).join("visual"),
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        emit(&json!({"step": "visual", "name": name, "error": e.to_string()}));
+        return;
+    }
+    let out = dir.join(format!("{name}-{}.png", visual_stamp()));
+    // Known background behind the island for THIS frame only: probe-only
+    // body class (declared in style.css), never present in production.
+    let _ = page.eval("document.body.classList.add('probe-capture-bg')");
+    sleep(Duration::from_millis(250)); // repaint before the grab
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "x11grab",
+            "-draw_mouse",
+            "0",
+        ])
+        .args(["-window_id", &win.id.to_string()])
+        .args(["-i", &display, "-frames:v", "1"])
+        .arg(&out)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .output();
+    let (ok, stderr) = match status {
+        Ok(o) => (
+            o.status.success(),
+            String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        ),
+        Err(e) => (false, e.to_string()),
+    };
+    let _ = page.eval("document.body.classList.remove('probe-capture-bg')");
+    sleep(Duration::from_millis(150)); // repaint back to production look
+    emit(&json!({
+        "step": "visual",
+        "name": name,
+        "ok": ok,
+        "path": out.display().to_string(),
+        "window_id": format!("0x{:x}", win.id),
+        "window_geometry": [win.x, win.y, win.w, win.h],
+        "source": "x11grab -window_id (own window drawable only, matched by _NET_WM_PID)",
+        "error": (!stderr.is_empty()).then_some(stderr),
+    }));
+}

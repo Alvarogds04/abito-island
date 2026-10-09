@@ -18,13 +18,22 @@
   const capsule = $('capsule');
   const island = $('island');
   const clayEl = $('clay');
-  const label = $('label');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
   // Visible island geometry per state. Native windows: 304x44 compact and
   // 672x176 overview (set by Rust); margins are the difference.
   const COMPACT = { w: 288, h: 32, r: 14, gap: 6, clay: 44, drop: 0 };
-  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 104, drop: 16 };
+  // UI.1: R6 is 128px at the left of the plain overview and 72px while the
+  // approval card is shown (only scale/position; the engine is frozen).
+  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 136, drop: 0, clayX: 80 };
+  const OVERVIEW_CARD = { clay: 77, clayX: 56 };
+  // The engine draws its body ~112 viewBox units wide inside its 200x160
+  // canvas (measured from the captures), so a box of 128px shows a ~70px
+  // character. In the overview the SVG viewBox is tightened (attribute only,
+  // engine bytes untouched) so box 136 shows ~127px and box 77 shows ~72px.
+  const R6_VISIBLE_UNITS = 112;
+  const BASE_VB = [0, 20, 200, 160];
+  const OVERVIEW_VB = [40, 46, 120, 120];
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
@@ -47,6 +56,7 @@
   const SHRINK_MS = 340;         // shrink duration: 340 ms
   const easeShrink = cubicBezier(0.45, 0, 0.2, 1);
 
+  let cardShown = false; // UI.1: a valid approval card is on screen
   let p = 0;            // progress 0 = compact, 1 = overview
   let v = 0;            // spring velocity
   let target = 0;
@@ -91,7 +101,8 @@
     const h = lerp(COMPACT.h, lerp(OVERVIEW.h, CHAT.h, q.x), p);
     const r = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
-    const cs = lerp(COMPACT.clay, OVERVIEW.clay, p);
+    const ov = cardShown ? OVERVIEW_CARD : OVERVIEW;
+    const cs = lerp(COMPACT.clay, ov.clay, p);
     const drop = lerp(COMPACT.drop, OVERVIEW.drop, p);
     island.style.width = w + 'px';
     island.style.height = h + 'px';
@@ -109,11 +120,12 @@
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
     const overviewTop = lerp(COMPACT.h, OVERVIEW.h, p) / 2 - drop - cs / 2;
+    const z = Math.max(0, Math.min(1, p)) * (1 - q.x);
+    clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';
-    clayEl.style.left = lerp(w / 2, CHAT.clayLeft, q.x) + 'px';
+    clayEl.style.left = lerp(lerp(w / 2, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
     clayEl.style.top = lerp(overviewTop, CHAT.clayTop, q.x) + 'px';
-    label.style.opacity = String(Math.max(0, Math.min(1, (p - 0.7) / 0.3)) * (1 - q.x));
     capsule.dataset.edge = edge;
     capsule.dataset.view = q.target === 1 ? 'chat' : 'overview';
     // M1 semantics unchanged: expanded as soon as the island reached it
@@ -282,6 +294,23 @@
   const noticeDetail = $('notice-detail');
   const noticeCount = $('notice-count');
   const noticeDismiss = $('notice-dismiss');
+  const noticePill = $('notice-pill');
+  const noticeInfo = $('notice-info');
+  const O = window.AbitoOverview;
+  const ICONS = window.AbitoIcons;
+  const icon = name => (ICONS ? ICONS.svg(name) : '');
+  // Static own icons: closed registry, never data.
+  for (const el of document.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
+
+  // «i» buttons reveal the long sentence that used to be on screen (§2.1);
+  // the same text is also the aria name/description of the chip.
+  function toggleInfo(button, panel, force) {
+    const open = force === undefined ? button.getAttribute('aria-expanded') !== 'true' : force;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.hidden = !open;
+    return open;
+  }
+  if (noticeInfo) noticeInfo.addEventListener('click', () => toggleInfo(noticeInfo, noticeDetail));
 
   // Q1: polite announcement of a NEW notice (once), plain text.
   const noticeLive = $('notice-live');
@@ -297,29 +326,46 @@
     }
   }
 
+  function paintRing(notices) {
+    const view = O && O.noticeView(notices, Date.now());
+    if (view) $('notice-ring').innerHTML = ICONS.ring(view.fraction);
+    return view;
+  }
   function renderNotices(snapshot) {
-    if (!snapshot || !noticesEl) return;
+    if (!snapshot || !noticesEl || !O) return;
     const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
     announceNotice(notices);
+    const conn = O.connectionView(snapshot);
+    connectionEl.dataset.tone = conn.tone;
+    connectionEl.setAttribute('aria-label', conn.aria);
+    $('connection-icon').innerHTML = icon(conn.icon);
+    $('connection-word').textContent = conn.word;
     const first = notices[0] || null;
-    const unavailable = snapshot.unavailable === true;
-    const connections = typeof snapshot.connections === 'number' ? snapshot.connections : 0;
-    connectionEl.textContent = unavailable ? 'Avisos locales no disponibles.'
-      : connections > 0 ? 'Conexión local activa · identidad declarada como Pi.'
-      : 'Sin conexión con Pi.';
-    noticeTitle.textContent = first ? first.title
-      : unavailable ? 'Avisos locales no disponibles'
-      : connections > 0 ? 'Sin avisos nuevos' : 'Sin conexión con Pi.';
-    noticeDetail.textContent = first ? (first.detail || '')
-      : unavailable ? 'El canal local de avisos no pudo iniciarse. No se hizo ninguna conexión con Pi.'
-      : connections > 0
-        ? 'La conexión está activa. Esto no confirma que Pi esté trabajando ni que una tarea haya terminado.'
-        : 'Los avisos están disponibles solo si conectas una sesión de Pi de forma explícita.';
-    noticeCount.textContent = first
-      ? `${notices.length} aviso${notices.length === 1 ? '' : 's'} reciente${notices.length === 1 ? '' : 's'} · se descartan al minuto`
-      : '';
+    const view = paintRing(notices);
+    noticePill.hidden = !view;
+    if (view) {
+      noticePill.setAttribute('aria-label', view.aria);
+      noticeTitle.textContent = view.text;
+      noticeCount.textContent = String(view.badge);
+    }
+    noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : conn.detail;
+    noticeInfo.setAttribute('aria-label', O.infoLabel(first ? 'Ver detalle del aviso' : 'Ver detalle de la conexión', first ? view.aria : conn.aria));
     noticeDismiss.hidden = !first;
     noticesEl.hidden = false;
+    paintCardConn(conn);
+  }
+  // §3: the card hides the notices strip, so a missing Pi / downed channel
+  // stays visible beside it (icon + word; nothing when healthy).
+  function paintCardConn(conn) {
+    const chip = $('card-conn');
+    if (!chip) return;
+    const shown = O.cardConnection(conn);
+    chip.hidden = !shown;
+    if (!shown) return;
+    chip.dataset.tone = shown.tone;
+    chip.setAttribute('aria-label', shown.aria);
+    $('card-conn-icon').innerHTML = icon(shown.icon);
+    $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
     try { window.desktop.onState(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
@@ -371,28 +417,60 @@
       capsule.dataset.view !== 'overview') return 'Abrí la tarjeta para decidir.';
     return null;
   }
+  function paintExpiry(card) {
+    const now = Date.now();
+    const expiry = $('expiry');
+    expiry.textContent = O.expiryLabel(card.expires_at, now);
+    expiry.setAttribute('datetime', card.expires_at);
+    $('card-expiry').setAttribute('aria-label', O.expiryAria(card.expires_at, now));
+  }
   function renderCard() {
     const card = current && current.card;
     const valid = validCard(card);
     const permission = $('permission');
-    if (!permission) return;
+    if (!permission || !O) return;
     permission.hidden = !valid;
-    for (const id of ['operation', 'expiry', 'card-state', 'card-reason']) { const el = $(id); if (el) el.textContent = ''; }
-    const expiry = $('expiry');
-    if (expiry) expiry.removeAttribute('datetime');
+    for (const id of ['operation', 'expiry', 'card-status-word', 'card-reason']) { const el = $(id); if (el) el.textContent = ''; }
+    $('expiry').removeAttribute('datetime');
     const allow = $('allow'), deny = $('deny');
-    if (allow) allow.disabled = true;
-    if (deny) deny.disabled = true;
-    if (!valid) return;
-    $('operation').textContent = card.operation;
-    expiry.textContent = card.expires_at;
-    expiry.setAttribute('datetime', card.expires_at);
+    allow.disabled = true;
+    deny.disabled = true;
+    if (cardShown !== valid) { cardShown = valid; render(); }
+    if (!valid) { delete capsule.dataset.card; delete capsule.dataset.cardTone; return; }
     const reason = cardFeedback(card);
-    $('card-state').textContent = reason ? 'No disponible' : 'Pendiente';
-    $('card-reason').textContent = reason || '';
-    $('card-reason').hidden = !reason;
+    const view = O.cardView(reason);
+    $('operation').textContent = card.operation;
+    paintExpiry(card);
+    $('card-expiry').hidden = view.kind === 'expired' || view.kind === 'sent';
+    const status = $('card-status');
+    status.dataset.tone = view.tone;
+    status.dataset.kind = view.kind;
+    status.setAttribute('aria-label', view.aria);
+    $('card-status-icon').innerHTML = view.icon ? icon(view.icon) : '<span class="dot"></span>';
+    $('card-status-word').textContent = view.word;
+    capsule.dataset.card = view.kind;
+    capsule.dataset.cardTone = view.tone;
+    const detail = $('card-reason');
+    detail.textContent = reason || '';
+    detail.hidden = !reason;
+    detail.classList.toggle('sr-only', $('card-info').getAttribute('aria-expanded') !== 'true');
+    $('card-info').hidden = !reason;
+    $('card-info').setAttribute('aria-label', O.infoLabel('Ver detalle de la decisión', view.aria));
     allow.disabled = deny.disabled = Boolean(reason || cardFlight);
   }
+  const cardInfo = $('card-info');
+  if (cardInfo) cardInfo.addEventListener('click', () => {
+    const open = cardInfo.getAttribute('aria-expanded') !== 'true';
+    cardInfo.setAttribute('aria-expanded', open ? 'true' : 'false');
+    $('card-reason').classList.toggle('sr-only', !open);
+  });
+  // The countdown texts (expiry label, 60 s ring) follow the clock without
+  // touching the live regions.
+  setInterval(() => {
+    if (!current || !O) return;
+    if (validCard(current.card)) paintExpiry(current.card);
+    paintRing(Array.isArray(current.notices) ? current.notices : []);
+  }, 5000);
   async function decideCard(verb, event) {
     renderCard(); // Recheck expiry/phase even without a newer snapshot.
     const card = current && current.card;

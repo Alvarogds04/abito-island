@@ -11,6 +11,9 @@
   <script defer src="clay-engine.js"></script>
   <!-- window.desktop facade must exist before the island boots. -->
   <script defer src="desktop.js"></script>
+  <!-- UI.1: own icons + pure overview view-model, before the island boots. -->
+  <script defer src="icons.js"></script>
+  <script defer src="overview-view.js"></script>
   <script defer src="island.js"></script>
   <!-- U1: pure chat view helpers + the chat surface (same island). -->
   <script defer src="chat-view.js"></script>
@@ -25,19 +28,27 @@
            overview from compact; in the overview it closes it. -->
       <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
-      <div id="label"><strong>Compañero</strong><span>Vista general</span></div>
+      <!-- UI.1: visual overview (docs/desktop-visual-language.md). Icons come
+           from icons.js (own inline SVG); every icon-only control has an
+           aria-label; long sentences live behind the «i» buttons. -->
       <!-- U1: the overview's primary control. Opens the chat view of THIS
            island (no other window). Enter in the overview does the same. -->
-      <button id="open-chat" type="button" aria-describedby="open-chat-hint">Conversar</button>
+      <button id="open-chat" type="button" aria-label="Conversar con Abito" aria-describedby="open-chat-hint"><span class="ico" data-icon="bubble"></span></button>
       <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
-      <!-- M2: Sileo-style notice text, display only (own code, silence).
+      <!-- M2: Sileo-style notice, display only (own code, silence).
            A notice never decides or approves anything. -->
       <div id="notices" hidden>
-        <span id="connection"></span>
-        <strong id="notice-title"></strong>
-        <span id="notice-detail"></span>
-        <span id="notice-count"></span>
-        <button id="notice-dismiss" type="button" hidden>Descartar aviso</button>
+        <div id="notice-row">
+          <span id="connection" class="chip" role="img"><span class="ico" id="connection-icon"></span><span class="word" id="connection-word"></span></span>
+          <button id="notice-info" class="icon-btn" type="button" aria-label="Ver detalle de la conexión" aria-expanded="false" aria-controls="notice-detail"><span class="ico" data-icon="info"></span></button>
+        </div>
+        <div id="notice-pill" role="group" hidden>
+          <span id="notice-ring"></span>
+          <strong id="notice-title"></strong>
+          <span id="notice-count"></span>
+          <button id="notice-dismiss" class="icon-btn" type="button" aria-label="Descartar aviso"><span class="ico" data-icon="cross"></span></button>
+        </div>
+        <p id="notice-detail" hidden></p>
       </div>
       <!-- Q1: notices are announced once to screen readers (polite). -->
       <p id="notice-live" class="sr-only" role="status" aria-live="polite"></p>
@@ -46,13 +57,17 @@
            re-validates card id, expiry and payload_hash before any
            /execute. An untrusted or stale click can never approve. -->
       <div id="permission" hidden aria-label="Decisión pendiente">
+        <div id="card-head">
+          <span id="card-status" class="chip" role="img"><span class="ico" id="card-status-icon"></span><span class="word" id="card-status-word"></span></span>
+          <span id="card-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="expiry"></time></span>
+          <span id="card-conn" class="chip" role="img" hidden><span class="ico" id="card-conn-icon"></span><span class="word" id="card-conn-word"></span></span>
+          <button id="card-info" class="icon-btn" type="button" aria-label="Ver detalle de la decisión" aria-expanded="false" aria-controls="card-reason"><span class="ico" data-icon="info"></span></button>
+        </div>
         <p id="operation"></p>
-        <p class="muted">Vence: <time id="expiry"></time></p>
-        <p id="card-state" class="muted"></p>
         <p id="card-reason" role="status" hidden></p>
         <div id="card-actions">
-          <button id="allow" type="button" disabled aria-describedby="card-reason">Permitir</button>
-          <button id="deny" type="button" disabled aria-describedby="card-reason">Denegar</button>
+          <button id="allow" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="check"></span><span class="btn-word">Permitir</span></button>
+          <button id="deny" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="cross"></span><span class="btn-word">Denegar</span></button>
         </div>
       </div>
       <!-- U1: chat view — same island, 640x240 (geometry::CHAT_VISIBLE).
