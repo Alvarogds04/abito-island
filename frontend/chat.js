@@ -196,6 +196,14 @@
     }
   });
 
+  // Q1: the deliberate "Open Abito chat and type" activation (second launch
+  // with --chat) ends here: Rust already opened the chat and focused the
+  // window; put the caret in the composer.
+  window.__islandFocusComposer = () => {
+    openedByKeyboard = false;
+    requestAnimationFrame(() => input.focus());
+  };
+
   // ---- state stream -------------------------------------------------------------
   if (listen) {
     listen('chat:state', event => apply(event && event.payload)).catch(() => {});

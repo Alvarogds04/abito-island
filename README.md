@@ -523,6 +523,30 @@ cargo test --manifest-path apps/desktop-tauri/Cargo.toml
 #   smuggled origin refused, selection effective, fake router saw only GETs
 ```
 
+## Q1 — island accessibility (observed)
+
+- **No focus stealing:** `tauri.conf.json` window `focus: false`; `restore()`
+  (second launch) shows the island without `set_focus`. Probe
+  `a11y_evidence`: `window_focused_at_start/after_restore/after_expand:
+  false`, `document_has_focus: false`. The ONLY focusing path is the
+  deliberate second launch `abito-island --chat` (exact argv, pure
+  `desktop::launch_intent`, tested): opens the chat and puts the caret in the
+  composer — bind it to a GNOME shortcut yourself; Abito installs no global
+  hook.
+- **Keyboard:** once the human focuses the island, Tab reaches
+  `#island-toggle` (“Abrir/Cerrar Abito”, `aria-expanded`, focus ring drawn
+  on the island); Enter/Space opens the overview and focus moves to
+  **Conversar**; Escape steps out of the composer, then collapses and
+  returns focus to the island control.
+- **44 px:** every visible control measured in the probe ≥44×44
+  (`all_visible_at_least_44: true`: Conversar 132×44, Permitir 82×44,
+  Denegar 83×44; Descartar aviso, chat and model controls likewise). The
+  overview columns were narrowed (notices 236 px, card 228 px, both
+  scrollable) so nothing overlaps the bottom-centre Conversar slot.
+- **Screen readers:** notices are announced once per NEW notice in a polite
+  `role=status` region (`Aviso: <title>. <detail>`), never on dismissal;
+  the chat has its own polite region (per state change, not per token).
+
 ## Configuration: pointing at the real backend later
 
 Nothing to do for the shipped default: the lane targets

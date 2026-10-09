@@ -116,9 +116,13 @@
     label.style.opacity = String(Math.max(0, Math.min(1, (p - 0.7) / 0.3)) * (1 - q.x));
     capsule.dataset.edge = edge;
     capsule.dataset.view = q.target === 1 ? 'chat' : 'overview';
-    capsule.dataset.phase = p <= 0 && mode === 'idle' ? 'compact'
-      : p >= 1 && mode === 'idle' && q.mode === 'idle' ? 'expanded'
-      : (target > p || q.target > q.x ? 'expanding' : 'collapsing');
+    // M1 semantics unchanged: expanded as soon as the island reached it
+    // (spring overshoot included); the chat is a VIEW of the expanded phase.
+    let phase = 'collapsing';
+    if (p >= 1) phase = 'expanded';
+    else if (p <= 0) phase = 'compact';
+    else if (target > p) phase = 'expanding';
+    capsule.dataset.phase = phase;
   }
 
   function tick(now) {
@@ -279,9 +283,24 @@
   const noticeCount = $('notice-count');
   const noticeDismiss = $('notice-dismiss');
 
+  // Q1: polite announcement of a NEW notice (once), plain text.
+  const noticeLive = $('notice-live');
+  let lastNoticeId = null;
+  function announceNotice(notices) {
+    const V = window.AbitoChatView;
+    if (!V || !noticeLive) return;
+    const text = V.noticeAnnouncement(lastNoticeId, notices);
+    lastNoticeId = notices.length ? notices[0].id : null;
+    if (text) {
+      noticeLive.textContent = '';
+      requestAnimationFrame(() => { noticeLive.textContent = text; });
+    }
+  }
+
   function renderNotices(snapshot) {
     if (!snapshot || !noticesEl) return;
     const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
+    announceNotice(notices);
     const first = notices[0] || null;
     const unavailable = snapshot.unavailable === true;
     const connections = typeof snapshot.connections === 'number' ? snapshot.connections : 0;
@@ -405,6 +424,48 @@
 
   // U1: the card's actionability depends on the visible view too.
   document.addEventListener('island:view', () => { if (current) renderCard(); });
+
+  // ---- Q1: keyboard control of the island itself -------------------------
+  // The island never takes focus by itself (tauri.conf focus:false, no
+  // set_focus on restore). Once the human has focused it (click), Tab
+  // reaches #island-toggle: Enter/Space opens the overview and moves focus
+  // to its primary control; in the overview it closes. Escape (chat.js)
+  // steps out of the composer, then closes.
+  const toggleButton = $('island-toggle');
+  let focusAfterPhase = null;
+  function syncToggle(state) {
+    if (!toggleButton) return;
+    const open = state === 'expanded';
+    toggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggleButton.textContent = open ? 'Cerrar Abito' : 'Abrir Abito';
+  }
+  if (toggleButton) {
+    toggleButton.addEventListener('click', () => {
+      if (!window.desktop) return;
+      const open = current && current.state === 'expanded';
+      focusAfterPhase = open ? 'island-toggle' : 'open-chat';
+      (open ? window.desktop.close() : window.desktop.expand()).then(snap => {
+        if (snap) { current = snap; syncToggle(snap.state); }
+      }, () => {});
+    });
+  }
+  // Move focus only after the visible phase settled (a hidden control
+  // cannot take focus) and only after a keyboard request.
+  new MutationObserver(() => {
+    const phase = capsule.dataset.phase;
+    if (!focusAfterPhase || (phase !== 'expanded' && phase !== 'compact')) return;
+    const target = $(focusAfterPhase);
+    focusAfterPhase = null;
+    if (target) target.focus();
+  }).observe(capsule, { attributes: true, attributeFilter: ['data-phase'] });
+  if (window.desktop) {
+    try { window.desktop.onState(s => syncToggle(s && s.state)); } catch { /* facade optional */ }
+  }
+  document.addEventListener('keydown', event => {
+    // Escape that collapses the island returns focus to the island control.
+    if (event.key === 'Escape' && capsule.dataset.phase === 'expanded' &&
+      document.activeElement !== $('chat-input')) focusAfterPhase = 'island-toggle';
+  }, true);
 
   // ---- boot ---------------------------------------------------------------
   render();

@@ -133,4 +133,23 @@ test('gate state labels distinguish ready, queue, needs_load, unknown, unavailab
   assert.equal(V.gateLabel('unavailable'), 'No disponible');
 });
 
+// ---- Q1: notices live region -----------------------------------------------
+test('a notice is announced once, when a NEW one arrives, as text only', () => {
+  const n = (id, title, detail) => ({ id, sessionId: 's', title, detail });
+  assert.equal(V.noticeAnnouncement(null, [n('e1', 'Pi terminó su turno', 'Detalle')]),
+    'Aviso: Pi terminó su turno. Detalle');
+  assert.equal(V.noticeAnnouncement('e1', [n('e1', 'Pi terminó su turno', 'Detalle')]), null);
+  assert.equal(V.noticeAnnouncement('e1', [n('e2', 'Otro', '')]), 'Aviso: Otro.');
+  assert.equal(V.noticeAnnouncement('e1', []), null); // dismissal is not announced
+  assert.equal(V.noticeAnnouncement(null, null), null);
+});
+
+test('compact island keyboard activation: Enter and Space only', () => {
+  assert.equal(V.activates({ key: 'Enter' }), true);
+  assert.equal(V.activates({ key: ' ' }), true);
+  assert.equal(V.activates({ key: 'Enter', isComposing: true }), false);
+  assert.equal(V.activates({ key: 'a' }), false);
+  assert.equal(V.activates({ key: 'Enter', repeat: true }), false);
+});
+
 console.log(`chat-view-check: ${passed} passed`);

@@ -591,7 +591,7 @@ fn persist_motion_override(app: &AppHandle, value: bool) {
 /// compact, keep/clamp the position in the current work area, show, focus.
 /// Called by the single-instance plugin in the FIRST instance; the second
 /// process exits before reaching `Builder::run`.
-fn restore(app: &AppHandle) {
+pub(crate) fn restore(app: &AppHandle) {
     let state = app.state::<AppState>();
     // transition(state, 'restore') -> compact, always.
     *state.phase.lock().expect("phase lock") = IslandState::Compact;
@@ -620,9 +620,22 @@ fn restore(app: &AppHandle) {
         store_requested(&state, "restore", Some((safe.x, safe.y)), Some((w, h)));
     }
     let _ = win.unminimize();
+    // Q1: show, never focus — the island must not take the keyboard from
+    // the app the human is working in (legacy `restore()` focused it).
     let _ = win.show();
-    let _ = win.set_focus();
     publish(app, &state);
+}
+
+/// Q1: the deliberate "Open Abito chat and type" activation (second launch
+/// with `--chat`): expand, switch to the chat view, take focus, and put the
+/// caret in the composer. The ONLY path that calls `set_focus`.
+fn open_chat_and_type(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let _ = dispatch_verb(app, &state, Action::Expand, None);
+    chathost::switch_view(app, &state, true);
+    let win = main_window(app);
+    let _ = win.set_focus();
+    let _ = win.eval("window.__islandFocusComposer && window.__islandFocusComposer();");
 }
 
 /// Monitor/work-area re-clamp. Electron had `display-metrics-changed` /
@@ -1152,8 +1165,16 @@ fn main() {
     tauri::Builder::default()
         // M1b lifecycle: a second launch hands its argv to the first instance
         // (which restores/shows/focuses the island) and exits before run().
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            restore(app);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // Q1: a plain second launch restores WITHOUT stealing focus; only
+            // the exact `--chat` flag is a deliberate request to type.
+            match desktop::launch_intent(&argv) {
+                desktop::LaunchIntent::Restore => restore(app),
+                desktop::LaunchIntent::Chat => {
+                    restore(app);
+                    open_chat_and_type(app);
+                }
+            }
         }))
         .plugin(navigation_lock())
         .manage(state)

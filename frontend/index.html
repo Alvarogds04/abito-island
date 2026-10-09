@@ -20,6 +20,10 @@
 <body>
   <main id="capsule" data-phase="compact" data-edge="top">
     <div id="island">
+      <!-- Q1: the island's own keyboard control (visually it IS the island:
+           its focus ring is drawn on #island). Enter/Space opens the
+           overview from compact; in the overview it closes it. -->
+      <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <div id="label"><strong>Compañero</strong><span>Vista general</span></div>
       <!-- U1: the overview's primary control. Opens the chat view of THIS
@@ -35,6 +39,8 @@
         <span id="notice-count"></span>
         <button id="notice-dismiss" type="button" hidden>Descartar aviso</button>
       </div>
+      <!-- Q1: notices are announced once to screen readers (polite). -->
+      <p id="notice-live" class="sr-only" role="status" aria-live="polite"></p>
       <!-- M3: approval card — DISPLAY only. The renderer sends nothing but
            the human's click (`allow`/`deny`, zero arguments); Rust
            re-validates card id, expiry and payload_hash before any

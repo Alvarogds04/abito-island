@@ -149,7 +149,7 @@ pub fn run(app: AppHandle) {
     emit(&json!({
         "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
-        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence", "chat_open", "chat_evidence", "models_evidence", "chat_back_to_overview", "chat_collapse"],
+        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence", "a11y_evidence", "chat_open", "chat_evidence", "models_evidence", "chat_back_to_overview", "chat_collapse"],
         "gdk_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "unset".into()),
     }));
 
@@ -342,6 +342,11 @@ pub fn run(app: AppHandle) {
     //     performs the human's explicit choice and reads card/bridgeStatus
     //     back through the REAL snapshot path before and after.
     approval_evidence(&app);
+
+    // 10b. accessibility (Q1): the overview's controls measured in the
+    //      webview, the notice live region, and keyboard focus: the window
+    //      must NOT be focused by start or restore (no focus stealing).
+    a11y_evidence(&app);
 
     // 11. chat (U1): overview -> chat in the SAME window (672x256 read back
     //     from the X server), one turn through the REAL `chat_action` IPC
@@ -921,6 +926,77 @@ const MODELS_JS: &str = r#"(async () => {
     ev.chat_target_after = chat.target;
     document.getElementById('models-close').click();
     ev.panel_closed = document.getElementById('models').hidden;
+  } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
+  await invoke('record_chat_evidence', { evidence: ev });
+})();"#;
+
+fn a11y_evidence(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let focused_at_start = win.is_focused().ok();
+    crate::restore(app); // the second-instance path, minus the process
+    sleep(Duration::from_millis(400));
+    let focused_after_restore = win.is_focused().ok();
+    let io = TauriIo(&win);
+    let area = refresh_work_area(app, &state);
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    let scale = io.scale();
+    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale), Duration::from_secs(3));
+    sleep(Duration::from_millis(900));
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    if let Err(e) = win.eval(A11Y_JS) {
+        emit(&json!({"step": "a11y_evidence", "eval_failed": e.to_string()}));
+    }
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(10));
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let focused_after_expand = win.is_focused().ok();
+    emit(&json!({
+        "step": "a11y_evidence",
+        "window_focused_at_start": focused_at_start,
+        "window_focused_after_restore": focused_after_restore,
+        "window_focused_after_expand": focused_after_expand,
+        "focus_note": "tauri.conf focus:false; restore() shows without set_focus; only `--chat` focuses",
+        "webview": lines,
+        "timed_out": lines.is_empty(),
+    }));
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
+    sleep(Duration::from_millis(200));
+}
+
+const A11Y_JS: &str = r#"(async () => {
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+  const size = el => { const r = el.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; };
+  const rect = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)]; };
+  const ev = { phase: 'a11y' };
+  for (let i = 0; i < 40 && document.getElementById('capsule').dataset.phase !== 'expanded'; i++)
+    await new Promise(r => setTimeout(r, 50));
+  await new Promise(r => setTimeout(r, 250)); // opacity transition
+  try {
+    ev.view = document.getElementById('capsule').dataset.view;
+    ev.phase_attr = document.getElementById('capsule').dataset.phase;
+    const visible = Array.from(document.querySelectorAll('button')).filter(b => {
+      const cs = getComputedStyle(b); const r = b.getBoundingClientRect();
+      return !b.hidden && cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 1 && r.height > 1 &&
+        !b.closest('[hidden]') && getComputedStyle(b.closest('section, div, main')).visibility !== 'hidden';
+    });
+    ev.visible_buttons = visible.map(b => ({ id: b.id, text: b.textContent, size: size(b) }));
+    ev.all_visible_at_least_44 = visible.every(b => { const [w, h] = size(b); return w >= 44 && h >= 44; });
+    ev.open_chat = { size: size(document.getElementById('open-chat')), rect: rect(document.getElementById('open-chat')) };
+    ev.notices_rect = rect(document.getElementById('notices'));
+    ev.permission_rect = rect(document.getElementById('permission'));
+    ev.dismiss_size = size(document.getElementById('notice-dismiss'));
+    ev.notice_live = { role: document.getElementById('notice-live').getAttribute('role'),
+      aria_live: document.getElementById('notice-live').getAttribute('aria-live'),
+      text: document.getElementById('notice-live').textContent };
+    ev.island_toggle = { text: document.getElementById('island-toggle').textContent,
+      aria_expanded: document.getElementById('island-toggle').getAttribute('aria-expanded') };
+    ev.active_element = document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : null;
+    ev.document_has_focus = document.hasFocus();
+    ev.audio_elements = document.querySelectorAll('audio, video').length;
   } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
   await invoke('record_chat_evidence', { evidence: ev });
 })();"#;

@@ -141,5 +141,16 @@
     });
   }
 
-  return { gateLabel, modelRows, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  // ---- Q1: notices + compact activation ----------------------------------
+  // Announce a notice once, when a NEW first notice appears (never on
+  // dismissal, never twice). Plain text.
+  function noticeAnnouncement(lastId, notices) {
+    const first = Array.isArray(notices) && notices.length ? notices[0] : null;
+    if (!first || first.id === lastId) return null;
+    const detail = first.detail ? ` ${first.detail}` : '';
+    return `Aviso: ${first.title}.${detail}`;
+  }
+  const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
+
+  return { noticeAnnouncement, activates, gateLabel, modelRows, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });

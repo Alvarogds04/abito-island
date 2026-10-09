@@ -142,6 +142,31 @@ impl Snapshot {
     }
 }
 
+/// Q1 — what a second launch (single-instance argv) asks for.
+/// `Restore` (default): bring the island back compact and visible WITHOUT
+/// taking keyboard focus from the app the human is in. `Chat`: the exact
+/// argv `<exe> --chat` is the deliberate "Open Abito chat and type" request
+/// (e.g. a shortcut the human binds in GNOME settings — no global hook of
+/// ours): open the chat and focus the composer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchIntent {
+    Restore,
+    Chat,
+}
+
+impl LaunchIntent {
+    pub fn takes_focus(self) -> bool {
+        self == LaunchIntent::Chat
+    }
+}
+
+pub fn launch_intent(argv: &[String]) -> LaunchIntent {
+    match argv {
+        [_, flag] if flag == "--chat" => LaunchIntent::Chat,
+        _ => LaunchIntent::Restore,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +349,33 @@ mod tests {
         assert!(value["request"].is_null());
         // and the M1b shape is still exactly the legacy key set (12 keys)
         assert_eq!(value.as_object().expect("object").len(), 12);
+    }
+
+    // --- Q1: second launch = explicit activation, never an implicit focus --
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn plain_second_launch_restores_without_focus() {
+        assert_eq!(launch_intent(&args(&["abito-island"])), LaunchIntent::Restore);
+        assert_eq!(launch_intent(&args(&[])), LaunchIntent::Restore);
+        assert!(!LaunchIntent::Restore.takes_focus());
+    }
+
+    #[test]
+    fn only_the_exact_chat_flag_is_a_deliberate_typing_request() {
+        assert_eq!(launch_intent(&args(&["abito-island", "--chat"])), LaunchIntent::Chat);
+        assert!(LaunchIntent::Chat.takes_focus());
+        for other in [
+            vec!["abito-island", "--chat=1"],
+            vec!["abito-island", "--CHAT"],
+            vec!["abito-island", "chat"],
+            vec!["abito-island", "--chat", "--probe"],
+            vec!["abito-island", "--focus"],
+        ] {
+            assert_eq!(launch_intent(&args(&other)), LaunchIntent::Restore, "{other:?}");
+        }
     }
 }
