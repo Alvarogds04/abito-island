@@ -15,6 +15,7 @@
   <!-- U1: pure chat view helpers + the chat surface (same island). -->
   <script defer src="chat-view.js"></script>
   <script defer src="chat.js"></script>
+  <script defer src="models.js"></script>
 </head>
 <body>
   <main id="capsule" data-phase="compact" data-edge="top">
@@ -57,6 +58,7 @@
             <span id="chat-target"></span>
           </div>
           <p id="chat-status"></p>
+          <button id="chat-models" type="button" aria-expanded="false" aria-controls="models">Modelo</button>
           <button id="chat-back" type="button">Volver</button>
         </header>
         <div id="chat-body">
@@ -71,6 +73,18 @@
             <button id="chat-send" type="submit" disabled>Enviar</button>
           </form>
           <p id="chat-problem" class="sr-only" aria-live="polite"></p>
+        </div>
+        <!-- U2: self-hosted model choice — an internal panel of the same
+             island (replaces the transcript while open). Local only, no
+             keys; listed is never shown as ready. -->
+        <div id="models" hidden aria-label="Modelo local">
+          <p id="models-note"></p>
+          <ul id="models-list"></ul>
+          <p id="models-resources"></p>
+          <div id="models-actions">
+            <button id="models-refresh" type="button">Actualizar</button>
+            <button id="models-close" type="button">Listo</button>
+          </div>
         </div>
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
       </section>

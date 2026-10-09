@@ -19,6 +19,7 @@
 //!   `dismiss` verb, and is cleaned up on quit and on SIGINT/SIGTERM.
 
 mod chathost;
+mod modelshost;
 mod probe;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -269,12 +270,31 @@ struct AppState {
     chat_deadlines: Mutex<abito_island::localmodel::Deadlines>,
     /// U1 probe only: evidence lines the webview reports for the chat step.
     chat_probe: Mutex<Vec<Value>>,
+    /// U2: the verified local registry in force. Production: exactly
+    /// `models::REGISTRY`. Only the probe replaces it (its fake router) —
+    /// there is no IPC or env path that can add an entry.
+    models_registry: Mutex<Vec<abito_island::models::Entry>>,
+    /// U2: last redacted model listing and its revision.
+    models_last: Mutex<Value>,
+    models_revision: AtomicU64,
+    /// U2: whether the last explicit selection reached the 0600 file.
+    models_persisted: AtomicBool,
 }
 
-/// U2 resource gate hook: decides whether a send may be dispatched to the
-/// target. U1 has no picker yet: the per-turn preflight in `chatlane`
-/// (asleep → no load, busy → visible queue, unknown → refuse) is the gate.
-fn model_gate(_state: &AppState, _target: &Target) -> Result<(), ChatError> {
+/// U2 gate before dispatch: the target must still be a registered,
+/// selectable local profile at the same revision. The resource half of the
+/// gate (asleep → no load, other alias → no substitute, busy → visible
+/// queue, unknown → refuse, context budget) runs per turn in the
+/// `chatlane` preflight right before the single request.
+fn model_gate(state: &AppState, target: &Target) -> Result<(), ChatError> {
+    let registry = state.models_registry.lock().expect("models registry lock").clone();
+    let entry = abito_island::models::select(&registry, &target.profile.profile_id)?;
+    if entry.revision != target.profile.revision
+        || Some(target.alias.as_str()) != entry.alias
+        || target.endpoint.origin() != entry.origin
+    {
+        return Err(ChatError::profile_missing());
+    }
     Ok(())
 }
 
@@ -1006,7 +1026,7 @@ fn record_frontend_evidence(
     });
 }
 
-fn probe_requested() -> bool {
+pub(crate) fn probe_requested() -> bool {
     let env = std::env::var("ABITO_PROBE")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
@@ -1118,10 +1138,15 @@ fn main() {
         hooks: Mutex::new(None),
         probe_fake: Mutex::new(probe_fake),
         chat: chatlane::Lane::new("c-island"),
-        chat_target: Mutex::new(Some(chatlane::default_target())),
+        // U2: resolved from the saved selection in `setup` (fail closed).
+        chat_target: Mutex::new(None),
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
         chat_deadlines: Mutex::new(chathost::default_deadlines()),
         chat_probe: Mutex::new(Vec::new()),
+        models_registry: Mutex::new(abito_island::models::REGISTRY.to_vec()),
+        models_last: Mutex::new(Value::Null),
+        models_revision: AtomicU64::new(0),
+        models_persisted: AtomicBool::new(false),
     };
 
     tauri::Builder::default()
@@ -1138,6 +1163,7 @@ fn main() {
             drag_release,
             desktop_action,
             chathost::chat_action,
+            modelshost::models_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence
@@ -1195,6 +1221,9 @@ fn main() {
             // then start the bridge (mode 'jar', mint, first poll, 10 s
             // cadence) exactly where main.cjs `startBridge` runs: after the
             // transport, before the first publish tick.
+            // U2: the saved model selection (absent → the approved initial
+            // local profile; corrupt/unknown → none, nothing substituted).
+            modelshost::load_selection(&handle, &state);
             let hooks = build_hooks(handle.clone());
             *state.hooks.lock().expect("hooks lock") = Some(hooks.clone());
             approval::spawn_bridge(Arc::clone(&state.approval), hooks);

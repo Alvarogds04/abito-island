@@ -25,6 +25,7 @@ pub mod fakemodel;
 pub mod geometry;
 pub mod http;
 pub mod localmodel;
+pub mod models;
 pub mod protocol;
 pub mod requests;
 pub mod retry;

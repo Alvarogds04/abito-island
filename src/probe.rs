@@ -149,7 +149,7 @@ pub fn run(app: AppHandle) {
     emit(&json!({
         "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
-        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence", "chat_open", "chat_evidence", "chat_back_to_overview", "chat_collapse"],
+        "sequence": ["start", "simulated_drag_near_bottom", "release_snap_bottom", "expand", "collapse", "drag_to_top_snap", "facade_evidence", "frontend_evidence", "transport_evidence", "approval_evidence", "chat_open", "chat_evidence", "models_evidence", "chat_back_to_overview", "chat_collapse"],
         "gdk_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "unset".into()),
     }));
 
@@ -684,6 +684,17 @@ fn chat_evidence(app: &AppHandle) {
         profile: chatlane::default_target().profile,
         max_output: 128,
     };
+    // Probe-only registry: the verified local route is replaced by the
+    // in-process fake (same profile id/alias), so the U2 gate admits it and
+    // the real router is never contacted by the probe.
+    let fake_origin: &'static str = Box::leak(fake.origin().into_boxed_str());
+    let original_registry = state.models_registry.lock().expect("models registry lock").clone();
+    *state.models_registry.lock().expect("models registry lock") = original_registry
+        .iter()
+        .map(|e| if e.profile_id == "local-abito-gpt" {
+            abito_island::models::Entry { origin: fake_origin, ..*e }
+        } else { *e })
+        .collect();
     *state.chat_target.lock().expect("chat target lock") = Some(fake_target(&fake.origin()));
 
     let win = main_window(app);
@@ -713,8 +724,16 @@ fn chat_evidence(app: &AppHandle) {
     let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
     // now an unreachable local target: honest unavailable, no fallback
     let completions_before = fake.completions();
-    *state.chat_target.lock().expect("chat target lock") =
-        Some(fake_target(&format!("http://127.0.0.1:{}", closed_port())));
+    // the registered local route goes down (registry + target follow it)
+    let down_origin: &'static str =
+        Box::leak(format!("http://127.0.0.1:{}", closed_port()).into_boxed_str());
+    *state.models_registry.lock().expect("models registry lock") = original_registry
+        .iter()
+        .map(|e| if e.profile_id == "local-abito-gpt" {
+            abito_island::models::Entry { origin: down_origin, ..*e }
+        } else { *e })
+        .collect();
+    *state.chat_target.lock().expect("chat target lock") = Some(fake_target(down_origin));
     if let Err(e) = win.eval(CHAT_JS_DOWN) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
     }
@@ -727,10 +746,40 @@ fn chat_evidence(app: &AppHandle) {
         "chat_native_constant": [geometry::LOGICAL_CHAT.0, geometry::LOGICAL_CHAT.1],
         "fake_local_router": fake.origin(),
         "fake_requests": seen,
+        "fake_requests_detail": "the GETs before the POST are the open-chat availability check and the turn preflight; no inference besides the one POST",
         "fake_completions_total": fake.completions(),
         "fake_completions_while_target_down": fake.completions() - completions_before,
         "webview": lines,
         "timed_out": lines.len() < 2,
+    }));
+
+    // models step reads the fake router again (registry points at it)
+    *state.models_registry.lock().expect("models registry lock") = original_registry
+        .iter()
+        .map(|e| if e.profile_id == "local-abito-gpt" {
+            abito_island::models::Entry { origin: fake_origin, ..*e }
+        } else { *e })
+        .collect();
+    let models_seen_before = fake.seen().len();
+    // 12. models (U2): the picker panel of the same chat view, driven by the
+    //     webview through the REAL models_action IPC. `refresh` reads only
+    //     metadata (/health, /v1/models, /props, /slots) from the registry's
+    //     selectable LOCAL router — never inference, never a diagnostic port.
+    //     The probe keeps the selection in memory (no config file written).
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    if let Err(e) = win.eval(MODELS_JS) {
+        emit(&json!({"step": "models_evidence", "eval_failed": e.to_string()}));
+    }
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
+    emit(&json!({
+        "step": "models_evidence",
+        "pointer_input": "the webview drives the REAL models_action IPC itself; no pointer events",
+        "persisted_config_dir": crate::modelshost::config_dir(app).map(|d| d.display().to_string()),
+        "fake_requests_during_models": fake.seen()[models_seen_before..]
+            .iter().map(|s| format!("{} {}", s.method, s.path)).collect::<Vec<_>>(),
+        "fake_completions_total": fake.completions(),
+        "webview": lines,
+        "timed_out": lines.is_empty(),
     }));
 
     // back to the overview (same window shrinks to 672x176), then collapse
@@ -747,6 +796,7 @@ fn chat_evidence(app: &AppHandle) {
     sleep(Duration::from_millis(200));
     readback(app, "chat_collapse");
     // restore the production target for the (exiting) process
+    *state.models_registry.lock().expect("models registry lock") = original_registry;
     *state.chat_target.lock().expect("chat target lock") = Some(chatlane::default_target());
     fake.shutdown();
 }
@@ -825,6 +875,52 @@ const CHAT_JS_DOWN: &str = r#"(async () => {
     ev.final = { state: t.state, reply: t.reply, error: t.error };
     input.value = '';
     input.dispatchEvent(new Event('input'));
+  } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
+  await invoke('record_chat_evidence', { evidence: ev });
+})();"#;
+
+/// Webview side of the models step.
+const MODELS_JS: &str = r#"(async () => {
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+  const ev = { phase: 'models' };
+  const code = async payload => { try { await invoke('models_action', { payload }); return 'accepted'; }
+    catch (e) { return e && e.code; } };
+  try {
+    document.getElementById('chat-models').click();
+    let listing = null;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      listing = await invoke('models_action', { payload: { action: 'list' } });
+      if (listing.revision > 0) break;
+    }
+    await new Promise(r => setTimeout(r, 200));
+    ev.panel_visible = !document.getElementById('models').hidden;
+    ev.transcript_hidden = getComputedStyle(document.getElementById('chat-body')).display === 'none';
+    ev.choice_note = listing.choice_note;
+    ev.remote = listing.remote;
+    ev.resources_text = listing.resources_text;
+    ev.selected = listing.selected;
+    ev.profiles = listing.profiles.map(p => ({ profile_id: p.profile_id, origin: p.origin, alias: p.alias,
+      selectable: p.selectable, gate: p.gate, context_tokens: p.context_tokens,
+      max_output_tokens: p.max_output_tokens, size_bytes: p.size_bytes, vision: p.vision }));
+    ev.rendered_rows = Array.from(document.querySelectorAll('#models-list li')).map(li => ({
+      text: li.querySelector('.model-text').textContent,
+      button: li.querySelector('button').textContent,
+      disabled: li.querySelector('button').disabled,
+      size: [Math.round(li.querySelector('button').getBoundingClientRect().width),
+             Math.round(li.querySelector('button').getBoundingClientRect().height)] }));
+    ev.select_diagnostic = await code({ action: 'select', profile_id: 'diag-11014' });
+    ev.select_unknown = await code({ action: 'select', profile_id: 'cloud-gpt' });
+    ev.smuggled_origin = await code({ action: 'select', profile_id: 'local-abito-gpt', origin: 'http://api.openai.com:80' });
+    ev.set_key = await code({ action: 'set_key', key: 'sk-test' });
+    const chosen = await invoke('models_action', { payload: { action: 'select', profile_id: 'local-abito-gpt' } });
+    ev.selected_after = chosen.selected;
+    ev.persisted_after = chosen.persisted;
+    const chat = await invoke('chat_action', { payload: { action: 'view' } });
+    ev.chat_target_after = chat.target;
+    document.getElementById('models-close').click();
+    ev.panel_closed = document.getElementById('models').hidden;
   } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
   await invoke('record_chat_evidence', { evidence: ev });
 })();"#;

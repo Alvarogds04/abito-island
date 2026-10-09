@@ -134,6 +134,13 @@ pub fn switch_view(app: &AppHandle, state: &AppState, chat: bool) {
     }
     publish_chat(app);
     if opened {
+        if current_target(state).is_none() {
+            state.chat.lock().expect("chat lane lock").availability = chatlane::Availability {
+                state: "blocked",
+                message: "No hay un modelo local elegido. Elegilo en «Modelo».".to_string(),
+            };
+            publish_chat(app);
+        }
         // Say "unavailable" before anyone types: metadata only, no prompt.
         if let Some(target) = current_target(state) {
             let lane = Arc::clone(&state.chat);

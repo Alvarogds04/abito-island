@@ -281,3 +281,38 @@ body.is-dragging { cursor: grabbing; }
   #open-chat, #chat { transition: none; }
   #chat-log { scroll-behavior: auto; }
 }
+
+/* ---- U2: model picker (internal panel of the chat view) --------------- */
+#chat-models {
+  min-width: 44px; min-height: 44px; padding: 0 14px;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
+}
+#chat-models[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
+#capsule[data-models="open"] #chat-body { display: none; }
+#models {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--island-muted);
+}
+#models[hidden] { display: none; }
+#models-note { margin: 0; color: var(--island-ink); font-size: 12px; }
+#models-list { flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
+#models-list li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+#models-list li .model-text { flex: 1; min-width: 0; }
+#models-list li .model-title { color: var(--island-ink); font-weight: 600; font-size: 12.5px; }
+#models-list li .model-facts, #models-list li .model-state { display: block; overflow-wrap: anywhere; }
+#models-list li.disabled { opacity: .6; }
+#models-list button {
+  min-width: 44px; min-height: 44px; padding: 0 14px;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent; color: var(--island-ink); font: 600 12.5px/1 var(--font-ui); cursor: pointer;
+}
+#models-list button[aria-pressed="true"] { background: var(--go); border-color: var(--go); color: #000; }
+#models-list button:disabled { opacity: .45; cursor: default; }
+#models-resources { margin: 0; font-size: 11px; }
+#models-actions { display: flex; gap: 8px; justify-content: flex-end; }
+#models-actions button {
+  min-width: 44px; min-height: 44px; padding: 0 16px;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
+  background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
+}

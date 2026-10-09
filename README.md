@@ -466,6 +466,63 @@ DISPLAY=:0 XAUTHORITY=/run/user/1000/.mutter-Xwaylandauth.UV9RW3 \
   timeout 200 cargo run
 ```
 
+## What U2 proves — choosing a self-hosted model (local only, no keys)
+
+The chat header's **Modelo** button opens an internal panel of the SAME chat
+view (the transcript is replaced while it is open). It lists the verified
+local inventory (`models::REGISTRY`, a reviewed code constant):
+
+| entry | state | selectable |
+|---|---|---|
+| `http://127.0.0.1:11002` · `Abito-gpt` | live metadata + gate | yes (the only one) |
+| `127.0.0.1:11014` | `unknown` — 404 at root, identity unverified (inventory 2026-10-08) | no, never contacted |
+| `127.0.0.1:11017` | `unavailable` — did not answer (inventory) | no, never contacted |
+| any other alias the router lists | shown “no verificado” | no |
+
+Visible metadata per row: endpoint, alias, context (`/slots n_ctx`), output
+cap (1,024), size in memory, parameters, quantization, vision yes/no — read
+by four bounded GETs (`/health`, `/v1/models`, `/props`, `/slots`) on
+**Actualizar** or on opening the panel; never an inference to fill a picker.
+The UI says plainly: *“Hoy hay un solo modelo local verificado: una sola
+opción no es una elección.”* and *“Sin nube y sin claves.”*
+
+**Resource gate, not cost:** `models::gate` separates `ready` (loaded,
+awake, idle), `queue` (slot busy — a send waits, shown), `needs_load`
+(asleep, or listed but not the loaded alias — shows the size to load and the
+available RAM; **Abito never loads, downloads or evicts**), `unknown`
+(state unreadable — nothing is sent) and `unavailable` (router down / alias
+gone — never substituted). The resource line shows RAM
+(`/proc/meminfo`) and GPU VRAM/GTT (amdgpu sysfs counters), read-only, no
+privileges. Before every dispatch `main.rs model_gate` requires the frozen
+target to still be a registered selectable profile at the same revision,
+origin and alias; the per-turn preflight then applies the resource half.
+
+**Selection:** IPC `models_action` with the closed set
+`list|refresh|select{profile_id}` (same sender gate + rate limit). There is
+no add-endpoint, no key entry and no origin field (the probe proves
+`set_key`/smuggled `origin` → `invalid_input`, a diagnostic or unknown id →
+`profile_missing`). A selection applies from the next message; a running
+turn keeps its frozen target. It is persisted as
+`<app config dir>/models-selection.json` = `{"v":1,"selected":"…"}` (dir
+0700, file 0600, atomic temp+rename, read with `O_NOFOLLOW` + owner/mode
+checks). Absent → the approved initial `local-abito-gpt`; corrupt, foreign
+or unknown → **no model selected** (the chat says so, nothing substituted).
+The probe never writes it (`persisted_config_dir: null`); tests use a temp
+dir; `ABITO_MODELS_CONFIG_DIR=<abs dir>` overrides.
+
+### Verifying U2
+
+```sh
+cargo test --manifest-path apps/desktop-tauri/Cargo.toml
+#   lib models 19 (registry, parsing, gate, listing, IPC, saved file)
+#   models_selection 5 (fake routers: metadata only, diagnostics never
+#   contacted, sleeping = needs_load with 0 completions, 0600/0700, symlink
+#   and world-writable dir refused)
+# probe: models_evidence — rows rendered with 44 px buttons, gates
+#   ready/unknown/unavailable, select diag/unknown refused, set_key and
+#   smuggled origin refused, selection effective, fake router saw only GETs
+```
+
 ## Configuration: pointing at the real backend later
 
 Nothing to do for the shipped default: the lane targets
@@ -637,6 +694,8 @@ apps/desktop-tauri/
 │   ├── chatlane.rs       # U1: preflight (no-load/no-substitute), one turn, cancel, availability
 │   ├── chathost.rs       # U1: chat_action command, chat:state, overview<->chat resize
 │   ├── fakemodel.rs      # U1: in-process fake llama.cpp router (tests + probe only)
+│   ├── models.rs         # PURE U2: verified local registry, metadata, resource gate, listing, saved selection
+│   ├── modelshost.rs     # U2: models_action command, models:state, selection → chat target
 │   ├── probe.rs          # ABITO_PROBE read-back script (geometry + facade + transport + approval + chat)
 │   └── main.rs           # wiring, commands, publish, lifecycle, transport/signal, approval, placement
 └── frontend/
@@ -646,5 +705,6 @@ apps/desktop-tauri/
     ├── island.js         # motion, pointer forwarding, notices + approval card (M2/M3), chat view motion (U1)
     ├── chat-view.js      # PURE U1 helpers (labels, send gate, announcements) — node-tested
     ├── chat.js           # U1 chat surface (composer, transcript, live region)
+    ├── models.js         # U2 model picker panel (inside the chat view)
     └── clay-engine.js    # frozen R6, byte-for-byte, DO NOT EDIT
 ```

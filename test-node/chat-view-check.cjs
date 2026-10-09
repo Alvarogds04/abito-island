@@ -95,4 +95,42 @@ test('turn rows render plain text roles and truncation/trim notes', () => {
   assert.match(cancelled[cancelled.length - 1].text, /Cancelado/);
 });
 
+
+// ---- U2: model picker helpers ---------------------------------------------
+test('model rows are visible metadata, never "listed" mistaken for "ready"', () => {
+  const rows = V.modelRows({
+    selected: 'local-abito-gpt',
+    profiles: [
+      { profile_id: 'local-abito-gpt', origin: 'http://127.0.0.1:11002', alias: 'Abito-gpt', selectable: true,
+        gate: { state: 'ready', message: 'Cargado y libre · contexto 65536 tokens.' },
+        context_tokens: 65536, max_output_tokens: 1024, size_bytes: 18198045184, params: 35505251456,
+        quantization: 'IQ4_XS - 4.25 bpw', vision: false },
+      { profile_id: 'diag-11014', origin: 'http://127.0.0.1:11014', alias: null, selectable: false,
+        gate: { state: 'unknown', message: 'Responde 404…' } },
+    ],
+  });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].selected, true);
+  assert.equal(rows[0].selectable, true);
+  assert.equal(rows[0].title, 'Abito-gpt');
+  assert.match(rows[0].facts, /127\.0\.0\.1:11002/);
+  assert.match(rows[0].facts, /contexto 65\.536/);
+  assert.match(rows[0].facts, /salida ≤1\.024/);
+  assert.match(rows[0].facts, /18,2 GB/);
+  assert.match(rows[0].facts, /35,5 mil millones/);
+  assert.match(rows[0].facts, /sin visión/);
+  assert.equal(rows[0].state, 'Listo');
+  assert.equal(rows[1].selectable, false);
+  assert.equal(rows[1].title, 'Puerto 11014 (sin identificar)');
+  assert.equal(rows[1].state, 'Desconocido');
+});
+
+test('gate state labels distinguish ready, queue, needs_load, unknown, unavailable', () => {
+  assert.equal(V.gateLabel('ready'), 'Listo');
+  assert.equal(V.gateLabel('queue'), 'En cola');
+  assert.equal(V.gateLabel('needs_load'), 'Requiere cargarlo (Abito no lo hace)');
+  assert.equal(V.gateLabel('unknown'), 'Desconocido');
+  assert.equal(V.gateLabel('unavailable'), 'No disponible');
+});
+
 console.log(`chat-view-check: ${passed} passed`);

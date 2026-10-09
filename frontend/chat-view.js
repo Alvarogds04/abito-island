@@ -100,5 +100,46 @@
     return rows;
   }
 
-  return { DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  // ---- U2: model picker (plain-text rows) ---------------------------------
+  const GATES = Object.freeze({
+    ready: 'Listo',
+    queue: 'En cola',
+    needs_load: 'Requiere cargarlo (Abito no lo hace)',
+    unknown: 'Desconocido',
+    unavailable: 'No disponible',
+  });
+  const gateLabel = state => GATES[state] || 'Desconocido';
+  const thousands = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const decimal = (value, unit) => {
+    const tenths = Math.round(value * 10);
+    return `${Math.floor(tenths / 10)},${tenths % 10} ${unit}`;
+  };
+  const port = origin => String(origin || '').replace(/^http:\/\//, '');
+
+  function modelRows(listing) {
+    const profiles = listing && Array.isArray(listing.profiles) ? listing.profiles : [];
+    return profiles.map(p => {
+      const facts = [`local ${port(p.origin)}`];
+      if (Number.isFinite(p.context_tokens)) facts.push(`contexto ${thousands(p.context_tokens)} tokens`);
+      if (Number.isFinite(p.max_output_tokens)) facts.push(`salida ≤${thousands(p.max_output_tokens)}`);
+      if (Number.isFinite(p.size_bytes)) facts.push(`${decimal(p.size_bytes / 1e9, 'GB')} en memoria`);
+      if (Number.isFinite(p.params)) facts.push(`${decimal(p.params / 1e9, 'mil millones')} de parámetros`);
+      if (p.quantization) facts.push(p.quantization);
+      if (p.vision === false) facts.push('sin visión');
+      if (p.vision === true) facts.push('con visión');
+      const title = p.alias || `Puerto ${port(p.origin).split(':').pop()} (sin identificar)`;
+      return {
+        id: p.profile_id || null,
+        title,
+        facts: facts.join(' · '),
+        state: gateLabel(p.gate && p.gate.state),
+        message: (p.gate && p.gate.message) || '',
+        note: p.note || '',
+        selectable: p.selectable === true && !!p.profile_id,
+        selected: !!p.profile_id && listing.selected === p.profile_id,
+      };
+    });
+  }
+
+  return { gateLabel, modelRows, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });
