@@ -22,6 +22,7 @@ mod chathost;
 mod modelshost;
 mod nativeaudit;
 mod nativewindow;
+#[cfg(any(debug_assertions, feature = "probe"))]
 mod probe;
 mod questionhost;
 
@@ -35,7 +36,9 @@ use abito_island::chatlane::{self, Target};
 use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
 use abito_island::desktop::{self, IslandState};
 use abito_island::geometry::{self, Edge, Rect};
-use abito_island::{approval, fakebridge, protocol, transport, workarea};
+#[cfg(any(debug_assertions, feature = "probe"))]
+use abito_island::fakebridge;
+use abito_island::{approval, protocol, transport, workarea};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
@@ -206,6 +209,7 @@ struct Requested {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(not(any(debug_assertions, feature = "probe")), allow(dead_code))]
 struct Evidence {
     svgs: usize,
     canvases: usize,
@@ -260,6 +264,7 @@ struct AppState {
     /// M3 probe only: the in-process fake backend THIS process started for
     /// its approval read-back. `None` in production and whenever
     /// `ABITO_BRIDGE_BASE` was already set from outside.
+    #[cfg(any(debug_assertions, feature = "probe"))]
     probe_fake: Mutex<Option<Arc<fakebridge::FakeBackend>>>,
     /// U1: the island conversation (process memory only, never on disk).
     chat: chatlane::SharedLane,
@@ -1114,6 +1119,13 @@ fn record_frontend_evidence(
     });
 }
 
+/// The read-back probe exists only in debug builds or with `--features probe`;
+/// a packaged release ignores `ABITO_PROBE`/`--probe` entirely.
+#[cfg(not(any(debug_assertions, feature = "probe")))]
+pub(crate) fn probe_requested() -> bool {
+    false
+}
+#[cfg(any(debug_assertions, feature = "probe"))]
 pub(crate) fn probe_requested() -> bool {
     let env = std::env::var("ABITO_PROBE")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -1166,6 +1178,7 @@ fn main() {
     let login = transport::resolve_runtime()
         .ok()
         .and_then(|root| approval::read_bridge_login(&root));
+    #[cfg(any(debug_assertions, feature = "probe"))]
     let mut probe_fake = None;
     // In probe mode the lane gets the SAME credential plumbing as
     // production: the `bridge.json` login when it exists, otherwise a
@@ -1173,6 +1186,7 @@ fn main() {
     // lane sends and never logs it). The lane is then constructed with that
     // effective login, so the approval read-back exercises the real start
     // path — mint, poll, healthy — against the fake.
+    #[cfg(any(debug_assertions, feature = "probe"))]
     let login = if probe_requested() && std::env::var(approval::BASE_ENV).is_err() {
         let effective = login.unwrap_or_else(|| "probe@local.test".to_string());
         let fake = fakebridge::FakeBackend::start(fakebridge::FakeConfig {
@@ -1223,6 +1237,7 @@ fn main() {
         project,
         approval: Arc::new(Mutex::new(approval_lane)),
         hooks: Mutex::new(None),
+        #[cfg(any(debug_assertions, feature = "probe"))]
         probe_fake: Mutex::new(probe_fake),
         chat: chatlane::Lane::new("c-island"),
         // U2: resolved from the saved selection in `setup` (fail closed).
@@ -1350,6 +1365,7 @@ fn main() {
             let hooks = build_hooks(handle.clone());
             *state.hooks.lock().expect("hooks lock") = Some(hooks.clone());
             approval::spawn_bridge(Arc::clone(&state.approval), hooks);
+            #[cfg(any(debug_assertions, feature = "probe"))]
             if probe_requested() {
                 std::thread::spawn(move || probe::run(handle));
             }

@@ -5,6 +5,11 @@ edition = "2021"
 description = "Abito island — Electron to Rust+Tauri migration, unit M2 (host/bridge + Pi transport receiver)"
 publish = false
 
+[features]
+# Test/probe scaffolding (fake backend/model, read-back probe). Always on in debug
+# builds; OFF in the packaged release so `--probe`/ABITO_PROBE cannot do anything.
+probe = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
