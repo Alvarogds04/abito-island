@@ -14,11 +14,14 @@
   <!-- UI.1: own icons + pure overview view-model, before the island boots. -->
   <script defer src="icons.js"></script>
   <script defer src="overview-view.js"></script>
+  <!-- N6: notification with 1..N reply options (Pi questions QP/1 are one case). -->
+  <script defer src="notify-view.js"></script>
   <script defer src="island.js"></script>
   <!-- U1: pure chat view helpers + the chat surface (same island). -->
   <script defer src="chat-view.js"></script>
   <script defer src="chat.js"></script>
   <script defer src="models.js"></script>
+  <script defer src="notify.js"></script>
 </head>
 <body>
   <main id="capsule" data-phase="compact" data-edge="top">
@@ -74,6 +77,27 @@
           <button id="allow" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="check"></span><span class="btn-word">Permitir</span></button>
           <button id="deny" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="cross"></span><span class="btn-word">Denegar</span></button>
         </div>
+      </div>
+      <!-- N6: Pi question / notification with 1..N reply options. DISPLAY only:
+           the renderer sends nothing but the human's trusted click or key
+           (index, text or decline); Rust validates id, scope, expiry and size.
+           It is NOT an Abito approval: it authorizes nothing in the backend.
+           All text is written with textContent. -->
+      <div id="question" inert aria-label="Pi pregunta">
+        <div id="question-head">
+          <span id="question-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="question-expiry-word"></time></span>
+          <span id="question-state" class="chip" role="img" hidden><span class="ico" id="question-state-icon"></span><span class="word" id="question-state-word"></span></span>
+          <p id="question-body"></p>
+          <button id="question-skip" type="button"><span class="ico" data-icon="cross"></span><span class="btn-word">Omitir</span></button>
+        </div>
+        <div id="question-options" role="group" aria-label="Opciones de respuesta"></div>
+        <form id="question-freeform" hidden novalidate>
+          <label for="question-text" class="sr-only">Tu respuesta</label>
+          <textarea id="question-text" rows="1" maxlength="2000" spellcheck="true" placeholder="Escribí…" aria-describedby="question-word"></textarea>
+          <span id="question-word" class="chip" data-tone="red" hidden></span>
+          <button id="question-send" type="submit" disabled aria-label="Enviar respuesta"><span class="ico" data-icon="arrow-up"></span></button>
+        </form>
+        <p id="question-live" class="sr-only" role="status" aria-live="polite"></p>
       </div>
       <!-- U1: chat view — same island, 640x240 (geometry::CHAT_VISIBLE).
            Every text below is written with textContent: plain text only. -->

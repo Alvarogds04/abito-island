@@ -367,7 +367,7 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   assert.match(css, /:where\(button, textarea\) \{[^}]*outline: 2px solid transparent[^}]*var\(--dur-focus\)/);
   assert.match(css, /#models-list \.choose\[aria-pressed="true"\] \.ico \{ animation: control-pop var\(--dur-control\) var\(--spring\)/);
   const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
-  assert.match(reduced, /#notices, #permission, #open-chat, #chat, #models, #chat-body \{ transition: none !important; transform: none !important/);
+  assert.match(reduced, /#notices, #permission, #open-chat, #chat, #models, #chat-body, #question \{ transition: none !important; transform: none !important/);
   assert.match(reduced, /#clay \{ transition: none !important/);
 });
 

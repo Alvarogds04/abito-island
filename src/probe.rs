@@ -367,6 +367,9 @@ pub fn run(app: AppHandle) {
     //     provider are never contacted by the probe), then an unreachable
     //     target to prove the honest "unavailable" with no fallback, then
     //     back to the overview and collapse.
+    if visual_run {
+        notification_scenes(&app);
+    }
     chat_evidence(&app);
 
     // Close the receiver before the hard exit: identity-checked unlink of the
@@ -894,6 +897,170 @@ fn capture_sequence(app: &AppHandle, name: &str, fps: u32, millis: u64, action: 
     emit(&json!({"step": "visual_sequence", "name": name, "fps": fps, "millis": millis, "pattern": pattern.display().to_string()}));
 }
 
+/// N6 evidence (opt-in `ABITO_PROBE_VISUAL=1`): REAL QP/1 frames over a real
+/// socket to OUR receiver, with the island showing the notification. One
+/// connection plays the Pi producer; the human's gesture is the only thing
+/// that answers. PNGs on the sand background, one per state.
+fn notification_scenes(app: &AppHandle) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::os::unix::net::UnixStream;
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let Some(endpoint) = state
+        .transport
+        .lock()
+        .expect("transport lock")
+        .as_ref()
+        .map(|t| t.endpoint().to_path_buf())
+    else {
+        emit(&json!({"step": "notification_scenes", "error": "receiver unavailable"}));
+        return;
+    };
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    let scale = io.scale();
+    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, overview, Duration::from_secs(3));
+    sleep(Duration::from_millis(900));
+
+    let project = state.project.clone();
+    let session = "probe-n6";
+    let outcome = (|| -> Result<serde_json::Value, String> {
+        let mut stream = UnixStream::connect(&endpoint).map_err(|e| format!("connect: {e}"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(3))).ok();
+        let send = |stream: &mut UnixStream, v: serde_json::Value| -> Result<(), String> {
+            stream.write_all(format!("{v}\n").as_bytes()).map_err(|e| format!("write: {e}"))
+        };
+        let now = || crate::now_ms() as u64;
+        send(&mut stream, json!({"v":1,"type":"hello","project":project,"sessionId":session,"at":now()}))?;
+        let mut buf = [0u8; 128];
+        let n = stream.read(&mut buf).map_err(|e| format!("ready: {e}"))?;
+        if &buf[..n] != abito_island::protocol::READY_LINE {
+            return Err("no ready".into());
+        }
+        send(&mut stream, json!({"v":1,"type":"questions_hello","questionVersion":1,"project":project,"sessionId":session,"at":now()}))?;
+        let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+        let mut line = String::new();
+        reader.read_line(&mut line).map_err(|e| format!("questions_ready: {e}"))?;
+        if !line.contains("questions_ready") {
+            return Err(format!("unexpected: {line}"));
+        }
+        let uuid = |n: u8| format!("3f2b8a4{n}-1c2d-4e5f-8a6b-7c8d9e0f1a2b");
+        let question = |id: String, kind: &str, text: &str, options: Vec<(&str, &str, &str)>, free: bool, ttl_ms: u64| {
+            json!({"v":1,"type":"question","questionVersion":1,"project":project,"sessionId":session,"at":now(),
+                   "id":id,"kind":kind,"text":text,
+                   "options":options.iter().map(|(v,l,d)| json!({"value":v,"label":l,"description":d})).collect::<Vec<_>>(),
+                   "allowFreeText":free,"expiresAt":now()+ttl_ms})
+        };
+        let wait_pending = |want: bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                let snapshot = crate::questionhost::question_view(&state);
+                if snapshot["pending"].is_object() == want { return true; }
+                sleep(Duration::from_millis(50));
+            }
+            false
+        };
+        let mut seen = serde_json::Map::new();
+        // 3 options (keyboard 1..3)
+        send(&mut stream, question(uuid(1), "question", "¿Qué rama uso para el cambio?",
+            vec![("opt-1","main",""),("opt-2","develop",""),("opt-3","hotfix","")], false, 300_000))?;
+        seen.insert("pending_3".into(), json!(wait_pending(true)));
+        sleep(Duration::from_millis(900));
+        capture_visual(app, "pregunta-3-opciones");
+        // A script click is NOT isTrusted and must never answer (checked here),
+        // so the human's choice goes through the host handler directly, like the
+        // approval card's `dispatch_verb`: index 1 = the second option.
+        let _ = win.eval("document.querySelectorAll('#question-options .q-option')[1].click()");
+        sleep(Duration::from_millis(400));
+        seen.insert("untrusted_click_answered".into(), json!(!crate::questionhost::question_view(&state)["pending"].is_object()));
+        {
+            let guard = state.transport.lock().expect("transport lock");
+            if let Some(t) = guard.as_ref() {
+                let _ = t.answer(&uuid(1), 1);
+            }
+        }
+        sleep(Duration::from_millis(500));
+        // the producer answers nothing yet: we capture «Enviada» (neutral)
+        capture_visual(app, "pregunta-enviada");
+        // producer consumes the answer line
+        line.clear();
+        reader.read_line(&mut line).map_err(|e| format!("answer: {e}"))?;
+        seen.insert("answer_frame_type".into(), json!(serde_json::from_str::<serde_json::Value>(&line).ok().and_then(|v| v["type"].as_str().map(str::to_owned))));
+        seen.insert("answer_value".into(), json!(serde_json::from_str::<serde_json::Value>(&line).ok().and_then(|v| v["answer"]["value"].as_str().map(str::to_owned))));
+        send(&mut stream, json!({"v":1,"type":"question_resolved","questionVersion":1,"project":project,"sessionId":session,"at":now(),"id":uuid(1),"status":"answered"}))?;
+        sleep(Duration::from_millis(700));
+        capture_visual(app, "pregunta-recibida");
+        // 4 options with descriptions + long label
+        send(&mut stream, question(uuid(2), "question", "Elegí cómo seguimos con el despliegue de esta noche",
+            vec![("a","Desplegar ahora","sin esperar"),("b","Esperar al lunes",""),("c","Pedir revisión",""),("d","Cancelar todo","")], false, 240_000))?;
+        wait_pending(true);
+        sleep(Duration::from_millis(900));
+        capture_visual(app, "pregunta-4-opciones");
+        // Sí / No (approval)
+        {
+            let guard = state.transport.lock().expect("transport lock");
+            if let Some(t) = guard.as_ref() {
+                let _ = t.decline(&uuid(2));
+            }
+        }
+        sleep(Duration::from_millis(600));
+        line.clear();
+        reader.read_line(&mut line).ok();
+        send(&mut stream, question(uuid(3), "approval", "¿Borro la rama vieja?", vec![("yes","Sí",""),("no","No","")], false, 180_000))?;
+        wait_pending(true);
+        sleep(Duration::from_millis(900));
+        capture_visual(app, "pregunta-si-no");
+        {
+            let guard = state.transport.lock().expect("transport lock");
+            if let Some(t) = guard.as_ref() {
+                let _ = t.decline(&uuid(3));
+            }
+        }
+        sleep(Duration::from_millis(500));
+        line.clear();
+        reader.read_line(&mut line).ok();
+        seen.insert("skip_frame".into(), json!(line.trim().chars().take(160).collect::<String>()));
+        capture_visual(app, "pregunta-omitida-enviada"); // the host says «Enviada» until the producer acks
+        send(&mut stream, json!({"v":1,"type":"question_resolved","questionVersion":1,"project":project,"sessionId":session,"at":now(),"id":uuid(3),"status":"human_cancelled"}))?;
+        sleep(Duration::from_millis(700));
+        capture_visual(app, "pregunta-omitida");
+        // (a 1-option acknowledgement is NOT expressible in QP/1: 2-4 options or free text only;
+        // the wire is the producer lane's, so it is not exercised here)
+        // free text only
+        send(&mut stream, question(uuid(5), "question", "¿Cómo llamo al nuevo módulo?", vec![], true, 120_000))?;
+        wait_pending(true);
+        sleep(Duration::from_millis(900));
+        let _ = win.eval("(()=>{const t=document.getElementById('question-text'); t.value='registro'; t.dispatchEvent(new Event('input'));})()");
+        sleep(Duration::from_millis(700));
+        capture_visual(app, "pregunta-texto-libre");
+        let _ = win.eval("(()=>{const t=document.getElementById('question-text'); t.value='ñ🙂'.repeat(900); t.dispatchEvent(new Event('input'));})()");
+        sleep(Duration::from_millis(800));
+        capture_visual(app, "pregunta-texto-muy-largo");
+        {
+            let guard = state.transport.lock().expect("transport lock");
+            if let Some(t) = guard.as_ref() {
+                let _ = t.decline(&uuid(5));
+            }
+        }
+        sleep(Duration::from_millis(500));
+        line.clear();
+        reader.read_line(&mut line).ok();
+        // (expiry and a Pi-side cancel are covered by pure behaviour tests: phase=expired and the
+        // `cancelled` outcome; waiting 30 s here would only repeat them)
+        Ok(serde_json::Value::Object(seen))
+    })();
+    emit(&json!({"step": "notification_scenes", "result": outcome.clone().unwrap_or_else(|e| json!({"error": e})), "error": outcome.err()}));
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
+}
+
 /// UI contract §9.1/§9.5 «Abito alive by default»: the R6 in `idle` must be
 /// animating on its own (no button), judged with MOVEMENT: engine status +
 /// growing frame counter + the body path changing between samples, and six
@@ -1224,7 +1391,17 @@ fn chat_evidence(app: &AppHandle) {
     });
     emit(&json!({"step": "motion_sample", "scene": "vista-salida-solo-pagina", "webview": lines}));
     let _ = page.eval("window.__islandSetView('chat', 640, 240)");
-    sleep(Duration::from_millis(500));
+    sleep(Duration::from_millis(700));
+    // DIAGNOSTIC 2: native exit AGAIN, now that page-driven ones already ran
+    // (is the snap a first-use artefact or the native route itself?).
+    let lines = sample_motion(app, "vista-salida-nativa-2", 1200, || {
+        crate::chathost::switch_view(app, &state, false);
+        wait_for_size(app, overview, Duration::from_secs(3));
+    });
+    emit(&json!({"step": "motion_sample", "scene": "vista-salida-nativa-2", "webview": lines}));
+    crate::chathost::switch_view(app, &state, true);
+    wait_for_size(app, chat_size, Duration::from_secs(3));
+    sleep(Duration::from_millis(700));
     sleep(Duration::from_millis(400));
     if let Err(e) = win.eval(CHAT_JS_SEND) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
