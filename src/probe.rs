@@ -594,6 +594,23 @@ fn overview_visual_evidence(app: &AppHandle) {
         capture_visual(app, "overview-i-abierto");
         let _ = main_window(app).eval("document.getElementById('notice-info').click()");
         sleep(Duration::from_millis(300));
+        // compacta-sin-puente: no-card run = the approval bridge never became healthy
+        // (ABITO_BRIDGE_BASE dead) -> the compact dot carries the RED triangle badge.
+        {
+            let plan = state.core.lock().expect("core lock").toggle(&io, area);
+            apply_plan(app, state.inner(), plan);
+            wait_for_size(app, compact, Duration::from_secs(3));
+            sleep(Duration::from_millis(500));
+            state.chat_probe.lock().expect("chat probe lock").clear();
+            let _ = main_window(app).eval("(async()=>{const f=document.getElementById('compact-flag'); const snap=await window.desktop.snapshot(); await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'compact_red_badge',bridge:snap.bridgeStatus,unavailable:snap.unavailable,flag_hidden:f.hidden,flag_tone:f.dataset.tone||null,flag_label:f.getAttribute('aria-label'),flag_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(f.getBoundingClientRect())}}); })()");
+            let lines = wait_chat_lines(app, 1, Duration::from_secs(4));
+            emit(&json!({"step": "compact_red_badge", "webview": lines}));
+            capture_visual(app, "compacta-sin-puente");
+            let plan = state.core.lock().expect("core lock").toggle(&io, area);
+            apply_plan(app, state.inner(), plan);
+            wait_for_size(app, overview, Duration::from_secs(3));
+            sleep(Duration::from_millis(700));
+        }
         line["states"].as_array_mut().expect("states array").push(json!({
             "name": "sinpi",
             "connections": state.connections.load(std::sync::atomic::Ordering::SeqCst),
