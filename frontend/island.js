@@ -37,7 +37,9 @@
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
-  const CHAT = { w: 640, h: 240, r: 22, clay: 40, clayLeft: 34, clayTop: 8 };
+  // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
+  // (128 units show ~112) a 46px box shows ~40px.
+  const CHAT = { w: 640, h: 240, r: 22, clay: 46, clayLeft: 34, clayTop: 3 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -141,7 +143,7 @@
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
     const overviewTop = lerp(COMPACT.h, OVERVIEW.h, p) / 2 - drop - cs / 2;
-    const z = Math.max(0, Math.min(1, p)) * (1 - q.x);
+    const z = Math.max(0, Math.min(1, p)); // tight framing in overview AND chat
     clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';

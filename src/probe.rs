@@ -1430,6 +1430,48 @@ fn chat_state_scenes(app: &AppHandle) {
             ("(()=>{const i=document.getElementById('chat-input'); i.value=''; i.dispatchEvent(new Event('input'));})()".into(), 200, ""),
         ],
     );
+    // «Ocupado» (router attending another request) and «Bloqueado» (model asleep:
+    // sending would load it, so Abito refuses): availability states, no turn.
+    scene(
+        FakeModelConfig { busy: true, ..Default::default() },
+        vec![(String::new(), 400, "chat-ocupado")],
+    );
+    scene(
+        FakeModelConfig { sleeping: true, ..Default::default() },
+        vec![(String::new(), 400, "chat-bloqueado")],
+    );
+    // models list with MORE than 3 rows (extra inventory-only diagnostics, never
+    // contacted): the list scrolls, every row keeps its 44px.
+    {
+        let base = state.models_registry.lock().expect("models registry lock").clone();
+        let mut many = base.clone();
+        for (n, port) in [11020u16, 11021, 11022, 11023].into_iter().enumerate() {
+            let id: &'static str = Box::leak(format!("diag-{port}").into_boxed_str());
+            let origin: &'static str = Box::leak(format!("http://127.0.0.1:{port}").into_boxed_str());
+            many.push(abito_island::models::Entry {
+                profile_id: id,
+                revision: 1,
+                origin,
+                alias: None,
+                role: "diagnostic",
+                lane_id: "none",
+                kind: abito_island::models::Kind::Diagnostic {
+                    state: if n % 2 == 0 { "unknown" } else { "unavailable" },
+                    note: "Inventario de prueba del probe; no se consulta.",
+                },
+            });
+        }
+        *state.models_registry.lock().expect("models registry lock") = many;
+        let _ = win.eval("(()=>{ if (document.getElementById('models').hidden) document.getElementById('chat-models').click(); })()");
+        sleep(Duration::from_millis(1600));
+        capture_visual(app, "modelos-lista-larga");
+        let _ = win.eval("document.getElementById('models-list').scrollTop = 9999");
+        sleep(Duration::from_millis(400));
+        capture_visual(app, "modelos-lista-larga-final");
+        let _ = win.eval("document.getElementById('models-close').click()");
+        sleep(Duration::from_millis(300));
+        *state.models_registry.lock().expect("models registry lock") = base;
+    }
     // «i» open on the models panel
     scene(
         FakeModelConfig::default(),

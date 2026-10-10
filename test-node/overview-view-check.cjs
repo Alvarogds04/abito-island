@@ -367,4 +367,13 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   assert.match(reduced, /#clay \{ transition: none !important/);
 });
 
+test('§5 chat header: R6 ~40px VISIBLE (box x 112/128 within 4px) and inside the header', () => {
+  const [box, left, top] = /CHAT = \{[^}]*clay: (\d+), clayLeft: (\d+), clayTop: (\d+)/.exec(islandSrc).slice(1).map(Number);
+  const vb = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
+  const visible = box * 112 / vb[2];
+  assert.ok(Math.abs(visible - 40) <= 4, `visible ${visible}`);
+  assert.ok(left - box / 2 >= 4 && top >= 2 && top + box <= 56, 'box inside the 48-56px header band');
+  assert.match(islandSrc, /const z = Math\.max\(0, Math\.min\(1, p\)\); \/\/ tight framing in overview AND chat/);
+});
+
 console.log(`overview-view-check: ${passed} passed`);
