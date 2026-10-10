@@ -155,6 +155,27 @@
   // snapshot.motionOverride === true (the new default) = do NOT honor the system.
   const honorSystemMotion = snapshot => !!snapshot && snapshot.motionOverride === false;
 
+  // ---- #305 global shortcut feedback ------------------------------------------------------
+  // A working shortcut is silent. A problem is NEVER hidden (§3): icon + one word.
+  const HOTKEY_PROBLEMS = Object.freeze({
+    taken: ['Atajo ocupado', 'triangle', 'red', 'está en uso por otra aplicación; elegí otra combinación'],
+    unsupported: ['Atajo sin soporte', 'triangle', 'red', 'no se pudo registrar: no hay un servidor X11 accesible'],
+    invalid: ['Atajo inválido', 'triangle', 'red', 'no es una combinación válida: necesita Ctrl, Alt o Súper'],
+  });
+  function hotkeyView(view) {
+    if (!view || typeof view !== 'object' || view.enabled === false) return null;
+    const combo = String(view.combo || '');
+    const problem = Object.prototype.hasOwnProperty.call(HOTKEY_PROBLEMS, view.status) ? HOTKEY_PROBLEMS[view.status] : null;
+    if (problem) {
+      return { kind: view.status, word: problem[0], icon: problem[1], tone: problem[2], aria: `${problem[0]}: ${combo} ${problem[3]}` };
+    }
+    if (view.status === 'active' && view.limited === true) {
+      return { kind: 'limited', word: 'Atajo limitado', icon: 'info', tone: 'faint',
+        aria: `Atajo limitado: ${combo} solo funciona mientras una ventana de X11 tiene el foco (sesión Wayland)` };
+    }
+    return null;
+  }
+
   // §9.2: R6 hover scale. Pure: 1.06 only while the pointer is inside the
   // character's box and the system does NOT ask for reduced motion; never
   // while dragging. It carries no meaning and never touches the pose.
@@ -174,5 +195,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

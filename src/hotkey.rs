@@ -1,0 +1,336 @@
+//! #305 — configurable GLOBAL hotkey (show/hide the island) on X11.
+//!
+//! Layers:
+//! - this file, PURE: the combination model, its closed key set, the X11
+//!   modifier masks and keysyms, the persisted config (fail closed to the
+//!   default) and the toggle decision;
+//! - [`x11`]: the real `XGrabKey` grabber on its own connection (tested on a
+//!   PRIVATE Xvfb with XTest, never on the human's display);
+//! - `hotkeyhost.rs` (binary): wiring to the island's own `Hide`/`restore`.
+//!
+//! Honest limit: on a Wayland session the island runs under XWayland and an
+//! X11 grab only receives the key while an X11 window has the keyboard focus.
+//! [`Session::limited`] says so; the UI shows «Atajo limitado». The proper
+//! Wayland route is the XDG GlobalShortcuts portal (a separate dependency
+//! decision, not made here).
+use serde::Serialize;
+use std::fmt;
+
+#[cfg(test)]
+#[path = "hotkey_tests.rs"]
+mod tests;
+
+pub mod x11;
+
+const MAX_INPUT: usize = 64;
+const SHIFT: u8 = 1;
+const CTRL: u8 = 2;
+const ALT: u8 = 4;
+const SUPER: u8 = 8;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Letter(u8), // b'A'..=b'Z'
+    Digit(u8),  // b'0'..=b'9'
+    F(u8),      // 1..=12
+    Space,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComboError {
+    Empty,
+    TooLong,
+    UnknownToken,
+    NoKey,
+    TwoKeys,
+    DuplicateModifier,
+    NeedsModifier,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Combo {
+    mods: u8,
+    key: Key,
+}
+
+impl Combo {
+    pub fn default_combo() -> Combo {
+        Combo { mods: CTRL | ALT, key: Key::Letter(b'A') }
+    }
+
+    /// Parse `Ctrl+Alt+A` style text: case-insensitive, any order, closed key
+    /// set (A–Z, 0–9, F1–F12, Space). Anything else is refused.
+    pub fn parse(text: &str) -> Result<Combo, ComboError> {
+        if text.len() > MAX_INPUT {
+            return Err(ComboError::TooLong);
+        }
+        if text.trim().is_empty() {
+            return Err(ComboError::Empty);
+        }
+        // only printable ASCII and plain spaces: a newline, tab or control byte is junk
+        if !text.bytes().all(|b| b == b' ' || (0x21..=0x7e).contains(&b)) {
+            return Err(ComboError::UnknownToken);
+        }
+        let (mut mods, mut key) = (0u8, None);
+        for raw in text.split('+') {
+            let token = raw.trim_matches(' ');
+            if token.is_empty() {
+                return Err(ComboError::UnknownToken);
+            }
+            let lower = token.to_ascii_lowercase();
+            let modifier = match lower.as_str() {
+                "ctrl" | "control" => Some(CTRL),
+                "alt" | "option" => Some(ALT),
+                "shift" => Some(SHIFT),
+                "super" | "meta" | "win" | "cmd" | "command" => Some(SUPER),
+                _ => None,
+            };
+            if let Some(bit) = modifier {
+                if mods & bit != 0 {
+                    return Err(ComboError::DuplicateModifier);
+                }
+                mods |= bit;
+                continue;
+            }
+            let parsed = match lower.as_bytes() {
+                [c @ b'a'..=b'z'] => Key::Letter(c.to_ascii_uppercase()),
+                [c @ b'0'..=b'9'] => Key::Digit(*c),
+                _ if lower == "space" => Key::Space,
+                [b'f', rest @ ..] if !rest.is_empty() && rest.iter().all(u8::is_ascii_digit) => {
+                    let n: u8 = lower[1..].parse().map_err(|_| ComboError::UnknownToken)?;
+                    if !(1..=12).contains(&n) || (rest.len() > 1 && rest[0] == b'0') {
+                        return Err(ComboError::UnknownToken);
+                    }
+                    Key::F(n)
+                }
+                _ => return Err(ComboError::UnknownToken),
+            };
+            if key.replace(parsed).is_some() {
+                return Err(ComboError::TwoKeys);
+            }
+        }
+        Ok(Combo { mods, key: key.ok_or(ComboError::NoKey)? })
+    }
+
+    /// A GLOBAL grab must carry a real modifier, or it would steal plain
+    /// typing from every application. Shift alone does not count.
+    pub fn validate(&self) -> Result<(), ComboError> {
+        if self.mods & (CTRL | ALT | SUPER) == 0 {
+            return Err(ComboError::NeedsModifier);
+        }
+        Ok(())
+    }
+
+    /// X11 modifier mask: Shift 1, Control 4, Mod1 (Alt) 8, Mod4 (Super) 0x40.
+    pub fn x11_modifiers(&self) -> u16 {
+        let mut m = 0u16;
+        if self.mods & SHIFT != 0 { m |= 0x01; }
+        if self.mods & CTRL != 0 { m |= 0x04; }
+        if self.mods & ALT != 0 { m |= 0x08; }
+        if self.mods & SUPER != 0 { m |= 0x40; }
+        m
+    }
+
+    pub fn keysym(&self) -> u32 {
+        match self.key {
+            Key::Letter(c) => u32::from(c.to_ascii_lowercase()),
+            Key::Digit(c) => u32::from(c),
+            Key::Space => 0x20,
+            Key::F(n) => 0xffbe + u32::from(n) - 1,
+        }
+    }
+
+    /// An event state matches when the real modifiers are exactly ours; lock
+    /// bits (Caps/Num) are ignored, any other modifier makes it another shortcut.
+    pub fn matches_state(&self, state: u16) -> bool {
+        (state & !LOCK_BITS) & 0x00ff == self.x11_modifiers() && (state & !LOCK_BITS) & !0x00ff & 0x1f00 == 0
+    }
+}
+
+impl fmt::Display for Combo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (bit, name) in [(CTRL, "Ctrl"), (ALT, "Alt"), (SHIFT, "Shift"), (SUPER, "Super")] {
+            if self.mods & bit != 0 {
+                write!(f, "{name}+")?;
+            }
+        }
+        match self.key {
+            Key::Letter(c) | Key::Digit(c) => write!(f, "{}", c as char),
+            Key::F(n) => write!(f, "F{n}"),
+            Key::Space => f.write_str("Space"),
+        }
+    }
+}
+
+const LOCK_BITS: u16 = 0x02 | 0x10; // LockMask (Caps) + Mod2 (Num)
+
+/// Every Caps/Num combination must be grabbed: a grab is per exact modifier state.
+pub fn lock_variants() -> [u16; 4] {
+    [0, 0x02, 0x10, 0x12]
+}
+
+// ---- persisted config ------------------------------------------------------------
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotkeyConfig {
+    pub combo: Combo,
+    pub enabled: bool,
+}
+
+impl Default for HotkeyConfig {
+    fn default() -> Self {
+        HotkeyConfig { combo: Combo::default_combo(), enabled: true }
+    }
+}
+
+impl HotkeyConfig {
+    /// `hotkey.json` = `{"v":1,"combo":"Ctrl+Alt+A","enabled":true}`. Absent,
+    /// unreadable, corrupt, wrong version or an invalid combo = the default.
+    pub fn from_text(text: Option<&str>) -> HotkeyConfig {
+        let parsed = text
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+            .and_then(|v| {
+                if v.get("v").and_then(serde_json::Value::as_u64) != Some(1) {
+                    return None;
+                }
+                let combo = Combo::parse(v.get("combo")?.as_str()?).ok()?;
+                combo.validate().ok()?;
+                let enabled = v.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true);
+                Some(HotkeyConfig { combo, enabled })
+            });
+        parsed.unwrap_or_default()
+    }
+
+    pub fn to_text(&self) -> String {
+        serde_json::json!({ "v": 1, "combo": self.combo.to_string(), "enabled": self.enabled }).to_string()
+    }
+}
+
+// ---- status shown to the human --------------------------------------------------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Disabled,
+    Active,
+    Taken,
+    Invalid,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Session {
+    Wayland,
+    X11,
+    Unknown,
+}
+
+impl Session {
+    /// XWayland only delivers a global X11 grab while an X11 window is focused.
+    pub fn limited(self) -> bool {
+        self == Session::Wayland
+    }
+}
+
+pub fn session_kind(xdg_session_type: Option<&str>, wayland_display: Option<&str>) -> Session {
+    match xdg_session_type.map(str::to_ascii_lowercase).as_deref() {
+        Some("wayland") => Session::Wayland,
+        Some("x11") => Session::X11,
+        Some(_) => Session::Unknown,
+        None if wayland_display.is_some_and(|d| !d.is_empty()) => Session::Wayland,
+        None => Session::Unknown,
+    }
+}
+
+// ---- what the hotkey does ------------------------------------------------------------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToggleDecision {
+    Show,
+    Hide,
+    Ignore,
+}
+
+/// Hidden → show (a pending question is preserved by `restore`). Visible →
+/// hide, unless a question is waiting for the human: that keeps the island open.
+pub fn toggle_decision(hidden: bool, question_pending: bool) -> ToggleDecision {
+    match (hidden, question_pending) {
+        (true, _) => ToggleDecision::Show,
+        (false, true) => ToggleDecision::Ignore,
+        (false, false) => ToggleDecision::Hide,
+    }
+}
+
+// ---- the closed IPC the settings UI (#308) will call ---------------------------------------
+/// `hotkey_action` payload: exactly `{action:"view"}`, `{action:"enable"}`,
+/// `{action:"disable"}`, `{action:"reset"}` or `{action:"set",combo:"<text>"}`.
+/// Nothing else, no extra keys, no oversize input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    View,
+    Enable,
+    Disable,
+    Reset,
+    Set(Combo),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandError {
+    InvalidSchema,
+    InvalidCombo,
+    NeedsModifier,
+}
+
+impl CommandError {
+    pub fn code(self) -> &'static str {
+        match self {
+            CommandError::InvalidSchema => "invalid_schema",
+            CommandError::InvalidCombo => "invalid_combo",
+            CommandError::NeedsModifier => "needs_modifier",
+        }
+    }
+}
+
+pub fn parse_command(payload: &serde_json::Value) -> Result<Command, CommandError> {
+    let map = payload.as_object().ok_or(CommandError::InvalidSchema)?;
+    let action = map.get("action").and_then(serde_json::Value::as_str).ok_or(CommandError::InvalidSchema)?;
+    let exact = |n: usize| if map.len() == n { Ok(()) } else { Err(CommandError::InvalidSchema) };
+    match action {
+        "view" => exact(1).map(|_| Command::View),
+        "enable" => exact(1).map(|_| Command::Enable),
+        "disable" => exact(1).map(|_| Command::Disable),
+        "reset" => exact(1).map(|_| Command::Reset),
+        "set" => {
+            exact(2)?;
+            let text = map.get("combo").and_then(serde_json::Value::as_str).ok_or(CommandError::InvalidSchema)?;
+            let combo = Combo::parse(text).map_err(|_| CommandError::InvalidCombo)?;
+            combo.validate().map_err(|_| CommandError::NeedsModifier)?;
+            Ok(Command::Set(combo))
+        }
+        _ => Err(CommandError::InvalidSchema),
+    }
+}
+
+/// What the island shows about the shortcut (never a secret, never a path).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct View {
+    pub combo: String,
+    pub enabled: bool,
+    pub status: Status,
+    /// True on Wayland: XWayland delivers the grab only while an X11 window is focused.
+    pub limited: bool,
+}
+
+/// The status a configuration implies before any grab happened.
+pub fn idle_status(cfg: &HotkeyConfig) -> Status {
+    if cfg.enabled { Status::Unsupported } else { Status::Disabled }
+}
+
+/// After the island is shown by the hotkey: did the window manager hand it the
+/// keyboard although nobody asked for it? (`deliberate` = an explicit typing intent.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusAction {
+    Leave,
+    GiveBack,
+}
+
+pub fn focus_after_show(focused: bool, deliberate: bool) -> FocusAction {
+    if focused && !deliberate { FocusAction::GiveBack } else { FocusAction::Leave }
+}

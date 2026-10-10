@@ -103,7 +103,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 .ico svg { width: 20px; height: 20px; display: block; }
 .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; font: 600 13px/1 var(--font-ui); color: var(--island-ink); }
 .chip .ico { color: var(--island-muted); }
-#bridge, #card-bridge { margin-left: 4px; }
+#bridge, #card-bridge, #hotkey { margin-left: 4px; }
 [data-tone="go"] .ico { color: var(--go); }
 [data-tone="sun"] .ico { color: var(--sun); }
 [data-tone="red"] .ico { color: var(--red-11); }

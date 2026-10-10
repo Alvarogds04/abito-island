@@ -452,6 +452,22 @@
     try { window.desktop.onState(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
     try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
   }
+  // #305: the global shortcut status (READ only: changing it is the settings panel's job, #308).
+  function paintHotkey(view) {
+    const chip = $('hotkey');
+    const h = O && O.hotkeyView(view);
+    chip.hidden = !h;
+    if (!h) return;
+    chip.dataset.tone = h.tone;
+    chip.setAttribute('aria-label', h.aria);
+    $('hotkey-icon').innerHTML = icon(h.icon);
+    $('hotkey-word').textContent = h.word;
+  }
+  if (invoke) {
+    invoke('hotkey_action', { payload: { action: 'view' } }).then(paintHotkey, () => {});
+    const listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+    if (listen) listen('hotkey:state', event => paintHotkey(event && event.payload)).catch(() => {});
+  }
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {
       event.preventDefault();

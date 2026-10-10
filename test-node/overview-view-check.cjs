@@ -532,4 +532,29 @@ test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = 
   assert.doesNotMatch(readme, /All sizes land exactly 304x44/, 'README must not document the old compact size as the contract');
 });
 
+test('#305 hotkey feedback: a taken/unsupported/invalid grab is VISIBLE (icon + one word), active is silent, Wayland says «limitado»', () => {
+  const v = (status, extra = {}) => ({ combo: 'Ctrl+Alt+A', enabled: true, status, limited: false, ...extra });
+  assert.equal(O.hotkeyView(v('active')), null, 'a working shortcut shows nothing');
+  assert.equal(O.hotkeyView(v('disabled', { enabled: false })), null, 'a shortcut the human turned off is not a problem');
+  const taken = O.hotkeyView(v('taken'));
+  assert.deepEqual([taken.word, taken.icon, taken.tone], ['Atajo ocupado', 'triangle', 'red']);
+  assert.match(taken.aria, /Ctrl\+Alt\+A/); assert.match(taken.aria, /otra aplicación/);
+  assert.equal(O.hotkeyView(v('unsupported')).word, 'Atajo sin soporte');
+  assert.equal(O.hotkeyView(v('invalid')).word, 'Atajo inválido');
+  const limited = O.hotkeyView(v('active', { limited: true }));
+  assert.deepEqual([limited.word, limited.tone], ['Atajo limitado', 'faint']);
+  assert.match(limited.aria, /ventana de X11/);
+  assert.equal(O.hotkeyView(null), null); assert.equal(O.hotkeyView({}), null); assert.equal(O.hotkeyView(v('nope')), null);
+  // honesty: a problem is never hidden behind «limited»
+  assert.equal(O.hotkeyView(v('taken', { limited: true })).word, 'Atajo ocupado');
+});
+
+test('#305 wiring: the island listens to hotkey:state and paints the chip; the page never grabs or answers anything', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /id="hotkey" class="chip" role="img" hidden/);
+  assert.match(islandSrc, /listen\('hotkey:state'/);
+  assert.match(islandSrc, /hotkey_action', \{ payload: \{ action: 'view' \} \}/);
+  assert.doesNotMatch(islandSrc, /hotkey_action', \{ payload: \{ action: '(set|enable|disable|reset)'/, 'the island only READS the status; changing it belongs to the settings panel (#308)');
+});
+
 console.log(`overview-view-check: ${passed} passed`);

@@ -371,6 +371,7 @@ pub fn run(app: AppHandle) {
     //     back to the overview and collapse.
     if visual_run {
         notification_scenes(&app);
+        hotkey_evidence(&app);
     }
     chat_evidence(&app);
 
@@ -1098,6 +1099,61 @@ fn notification_scenes(app: &AppHandle) {
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
     wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
+}
+
+/// #305 evidence (opt-in visual run): the hotkey's ACTION against the live app. The
+/// press is delivered through the same `on_press` the X11 grab calls (the grab itself
+/// is proven on a private Xvfb in tests/hotkey_x11.rs; the human's keyboard is never
+/// grabbed by a probe). Shows: hide keeps the Pi socket, the chat lane and the model
+/// listing alive; the pending-question guard; show restores without taking focus.
+fn hotkey_evidence(app: &AppHandle) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let phase = |s: &AppState| format!("{:?}", *s.phase.lock().expect("phase lock"));
+    let conns = |s: &AppState| s.connections.load(std::sync::atomic::Ordering::SeqCst);
+    let transport_ok = |s: &AppState| s.transport.lock().expect("transport lock").is_some();
+    let visible = |w: &tauri::WebviewWindow| w.is_visible().unwrap_or(false);
+
+    // keep one real Pi connection open across hide/show
+    let endpoint = state.transport.lock().expect("transport lock").as_ref().map(|t| t.endpoint().to_path_buf());
+    let mut stream = endpoint.and_then(|e| {
+        use std::io::{Read, Write};
+        let mut s = std::os::unix::net::UnixStream::connect(e).ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
+        let hello = json!({"v":1,"type":"hello","project":state.project.clone(),"sessionId":"probe-hotkey","at":crate::now_ms() as u64});
+        s.write_all(format!("{hello}\n").as_bytes()).ok()?;
+        let mut b = [0u8; 64];
+        let n = s.read(&mut b).ok()?;
+        (&b[..n] == abito_island::protocol::READY_LINE).then_some(s)
+    });
+    sleep(Duration::from_millis(400));
+    let before = json!({"phase": phase(&state), "visible": visible(&win), "focused": win.is_focused().unwrap_or(false), "connections": conns(&state), "transport": transport_ok(&state)});
+
+    crate::hotkeyhost::press_on_main(app); // visible -> hide
+    sleep(Duration::from_millis(500));
+    let hidden = json!({"phase": phase(&state), "visible": visible(&win), "connections": conns(&state), "transport": transport_ok(&state),
+        "chat_availability_kept": state.chat.lock().expect("chat lane lock").availability.state});
+    // a notice arriving while hidden does not pop it open
+    let notice_ok = stream.as_mut().map(|s| {
+        use std::io::Write;
+        let settled = json!({"v":1,"type":"settled","project":state.project.clone(),"sessionId":"probe-hotkey","at":crate::now_ms() as u64,"id":"probe-hotkey-1"});
+        s.write_all(format!("{settled}\n").as_bytes()).is_ok()
+    });
+    sleep(Duration::from_millis(600));
+    let still_hidden = json!({"phase": phase(&state), "visible": visible(&win),
+        "notices": crate::build_snapshot(app, &state)["notices"].as_array().map(|n| n.len())});
+
+    crate::hotkeyhost::press_on_main(app); // hidden -> show
+    sleep(Duration::from_millis(700));
+    let shown = json!({"phase": phase(&state), "visible": visible(&win), "connections": conns(&state), "transport": transport_ok(&state),
+        "focused": win.is_focused().unwrap_or(false)});
+    capture_visual(app, "atajo-mostrada");
+    drop(stream.take());
+    emit(&json!({"step": "hotkey_evidence", "before": before, "after_hide": hidden, "notice_sent_while_hidden": notice_ok,
+        "after_notice_still_hidden": still_hidden, "after_show": shown}));
 }
 
 /// UI contract §9.1/§9.5 «Abito alive by default»: the R6 in `idle` must be

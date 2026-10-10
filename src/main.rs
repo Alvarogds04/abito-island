@@ -19,6 +19,7 @@
 //!   `dismiss` verb, and is cleaned up on quit and on SIGINT/SIGTERM.
 
 mod chathost;
+mod hotkeyhost;
 mod modelshost;
 mod nativeaudit;
 mod nativewindow;
@@ -66,6 +67,7 @@ fn quit_clean(app: &AppHandle) {
     // in-flight /execute fails at once instead of holding the lane open
     // (the card stays inert through the quitting rule).
     approval::abort_lane(&app.state::<AppState>().approval);
+    hotkeyhost::stop(app); // release the X11 grab before leaving
     close_transport(app);
     app.exit(0);
 }
@@ -273,6 +275,8 @@ struct AppState {
     chat_target: Mutex<Option<Target>>,
     /// U1: `chat_action` rate gate (same 30/s rule, its own budget).
     chat_rate: Mutex<bridge::RateLimiter>,
+    /// #305: the global show/hide shortcut (config + X11 grab).
+    hotkey: hotkeyhost::HotkeyHost,
     /// U1: per-turn deadlines (the probe shortens them for its fake).
     chat_deadlines: Mutex<abito_island::localmodel::Deadlines>,
     /// U1 probe only: evidence lines the webview reports for the chat step.
@@ -1241,6 +1245,7 @@ fn main() {
         // U2: resolved from the saved selection in `setup` (fail closed).
         chat_target: Mutex::new(None),
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
+        hotkey: hotkeyhost::HotkeyHost::default(),
         chat_deadlines: Mutex::new(chathost::default_deadlines()),
         chat_probe: Mutex::new(Vec::new()),
         models_registry: Mutex::new(abito_island::models::REGISTRY.to_vec()),
@@ -1273,6 +1278,7 @@ fn main() {
             chathost::chat_action,
             modelshost::models_action,
             questionhost::question_action,
+            hotkeyhost::hotkey_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence
@@ -1345,6 +1351,7 @@ fn main() {
                 .store(load_motion_override(&handle), Ordering::SeqCst);
             spawn_workarea_watcher(handle.clone());
             spawn_publish_ticker(handle.clone());
+            hotkeyhost::start(&handle); // #305: global show/hide shortcut (config + X11 grab)
             // M2: local notice transport + SIGINT/SIGTERM socket cleanup
             // (main.cjs creates the transport after the window loads; here it
             // starts before the probe so the probe can use its endpoint).
