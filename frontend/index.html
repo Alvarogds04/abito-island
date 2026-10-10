@@ -43,6 +43,7 @@
       <div id="notices" hidden>
         <div id="notice-row">
           <span id="connection" class="chip" role="img"><span class="ico" id="connection-icon"></span><span class="word" id="connection-word"></span></span>
+          <span id="bridge" class="chip" role="img" hidden><span class="ico" id="bridge-icon"></span><span class="word" id="bridge-word"></span></span>
           <button id="notice-info" class="icon-btn" type="button" aria-label="Ver detalle de la conexión" aria-expanded="false" aria-controls="notice-detail"><span class="ico" data-icon="info"></span></button>
         </div>
         <div id="notice-pill" role="group" hidden>
@@ -64,6 +65,7 @@
           <span id="card-status" class="chip" role="img"><span class="ico" id="card-status-icon"></span><span class="word" id="card-status-word"></span></span>
           <span id="card-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="expiry"></time></span>
           <span id="card-conn" class="chip" role="img" hidden><span class="ico" id="card-conn-icon"></span><span class="word" id="card-conn-word"></span></span>
+          <span id="card-bridge" class="chip" role="img" hidden><span class="ico" id="card-bridge-icon"></span><span class="word" id="card-bridge-word"></span></span>
           <button id="card-info" class="icon-btn" type="button" aria-label="Ver detalle de la decisión" aria-expanded="false" aria-controls="card-reason"><span class="ico" data-icon="info"></span></button>
         </div>
         <p id="operation"></p>
@@ -75,7 +77,7 @@
       </div>
       <!-- U1: chat view — same island, 640x240 (geometry::CHAT_VISIBLE).
            Every text below is written with textContent: plain text only. -->
-      <section id="chat" hidden aria-label="Conversación con Abito">
+      <section id="chat" inert aria-label="Conversación con Abito">
         <header id="chat-header">
           <span id="chat-target-chip" class="chip" role="img"><span class="ico" data-icon="lock"></span><span class="word">local</span></span>
           <span id="chat-state" class="chip" role="img"><span class="ico" id="chat-state-icon"></span><span class="word" id="chat-state-word"></span></span>
@@ -101,7 +103,7 @@
         <!-- U2: self-hosted model choice — an internal panel of the same
              island (replaces the transcript while open). Local only, no
              keys; listed is never shown as ready. -->
-        <div id="models" hidden aria-label="Modelo local">
+        <div id="models" inert aria-label="Modelo local">
           <div id="models-bar">
             <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
             <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>

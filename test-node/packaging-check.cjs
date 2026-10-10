@@ -47,6 +47,7 @@ function fakeStage({ crateDir = crate } = {}) {
   fs.writeFileSync(path.join(dir, 'abito-island'), '#!/bin/true\nfake binary\n', { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'abito-island-launcher'), L.launcherText(), { mode: 0o755 });
   fs.writeFileSync(path.join(dir, `${L.IDENTIFIER}.desktop`), L.desktopText(), { mode: 0o644 });
+  fs.writeFileSync(path.join(dir, 'abito-island.png'), 'png', { mode: 0o644 });
   const files = {};
   for (const n of L.STAGED) files[n] = L.sha256File(path.join(dir, n));
   fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, r6_sha256: L.checkR6(crate), provenance: { head: 'a'.repeat(40), clean: true }, files }));
@@ -90,7 +91,7 @@ test('launcher: no args, refuses whole env families, forces X11, execs only its 
   assert.equal(run(['--devtools'], {}).status, 64);
   for (const name of ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'LD_DEBUG', 'LD_BIND_NOW', 'LD_ANYTHING_ELSE', 'GDK_DEBUG', 'GTK_MODULES',
     'WEBKIT_INSPECTOR_SERVER', 'ABITO_PROBE', 'ABITO_PROBE_VISUAL_DIR', 'ABITO_SOCKET_DIR', 'ABITO_BRIDGE_BASE', 'ABITO_MODELS_CONFIG_DIR',
-    'ABITO_DESKTOP_SOCKET', 'ABITO_NATIVE_AUDIT', 'ABITO_NATIVE_VIEW_TEST']) {
+    'ABITO_DESKTOP_SOCKET', 'ABITO_NATIVE_AUDIT', 'ABITO_NATIVE_VIEW_TEST', 'ABITO_FUTURE_KNOB_NOBODY_LISTED', 'GDK_SYNCHRONIZE', 'GTK_PATH']) {
     const r = run([], { [name]: '1' });
     assert.equal(r.status, 64, name);
     assert.doesNotMatch(r.stdout, /STARTED/, name);
@@ -116,8 +117,48 @@ test('verify: a receipt without HEAD / clean attestation fails', () => {
   delete r.provenance; fs.writeFileSync(path.join(d, 'receipt.json'), JSON.stringify(r));
   assert.match(L.verifyStage(d).join(), /no git HEAD/); fs.rmSync(d, { recursive: true });
 });
+test('CSP: connect-src is EXACTLY self + ipc (no ipc.localhost.evil.com), object/frame/base none', () => {
+  const d = copyCrate();
+  const p = path.join(d, 'tauri.conf.json');
+  const base = fs.readFileSync(p, 'utf8');
+  for (const bad of ['http://ipc.localhost.evil.com', 'http://ipc.localhostx', 'https://ipc.localhost']) {
+    fs.writeFileSync(p, base.replace('http://ipc.localhost;', `http://ipc.localhost ${bad};`));
+    assert.throws(() => L.checkConfig(d), /connect-src must be exactly/, bad);
+  }
+  fs.writeFileSync(p, base.replace("object-src 'none'; ", ''));
+  assert.throws(() => L.checkConfig(d), /object-src/);
+  fs.writeFileSync(p, base.replace("'self' ipc: http://ipc.localhost", "'self' ipc: http://ipc.localhost.evil.com"));
+  assert.throws(() => L.checkConfig(d), /connect-src must be exactly/);
+  fs.writeFileSync(p, base.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"));
+  assert.throws(() => L.checkConfig(d), /CSP allows unsafe/);
+  fs.rmSync(d, { recursive: true });
+});
+test('gates: missing frontend file, extra plugin dependency, missing capability file all fail', () => {
+  let d = copyCrate(); fs.rmSync(path.join(d, 'frontend', 'models.js'));
+  assert.throws(() => L.checkFrontend(d), /missing=\[models\.js\]/); fs.rmSync(d, { recursive: true });
+  d = copyCrate(); fs.appendFileSync(path.join(d, 'Cargo.toml'), '\ntauri-plugin-shell = "2"\n');
+  assert.throws(() => L.checkConfig(d), /forbidden plugin/); fs.rmSync(d, { recursive: true });
+  d = copyCrate(); fs.rmSync(path.join(d, 'capabilities', 'main.json'));
+  assert.throws(() => L.checkConfig(d)); fs.rmSync(d, { recursive: true });
+});
+test('verify: the shipped binary must not carry the probe or the fake backend strings', () => {
+  for (const marker of ['ABITO_PROBE', 'Prueba M3: propuesta servida por el backend falso']) {
+    const d = fakeStage();
+    fs.writeFileSync(path.join(d, 'abito-island'), `#!/bin/true\n${marker}\n`, { mode: 0o755 });
+    const r = JSON.parse(fs.readFileSync(path.join(d, 'receipt.json'), 'utf8')); r.files['abito-island'] = L.sha256File(path.join(d, 'abito-island'));
+    fs.writeFileSync(path.join(d, 'receipt.json'), JSON.stringify(r));
+    assert.match(L.verifyStage(d).join(), /probe\/fake/, marker);
+    fs.rmSync(d, { recursive: true });
+  }
+});
+test('desktop entry: quoted Exec, Icon, observed StartupWMClass; no unquoted path with spaces', () => {
+  const t = L.desktopText();
+  assert.match(t, /^Exec="@INSTALL_DIR@\/abito-island-launcher"$/m);
+  assert.match(t, /^Icon=@INSTALL_DIR@\/abito-island\.png$/m);
+  assert.match(t, /^StartupWMClass=Abito-island$/m);
+});
 test('identity never collides with the installed apps', () => {
-  assert.match(L.desktopText(), /Exec=@INSTALL_DIR@\/abito-island-launcher/);
+  assert.match(L.desktopText(), /Exec="@INSTALL_DIR@\/abito-island-launcher"/);
   assert.doesNotMatch(L.desktopText() + L.launcherText(), /abito-desktop|com\.abitog\.Abito\b(?!Tauri)/);
 });
 console.log(`packaging-check: ${passed} passed`);

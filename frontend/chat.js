@@ -153,8 +153,14 @@
       if (byKeyboard) openButton.focus(); // keep keyboard users oriented
     }, () => {});
   });
+  let inertTimer = 0;
   document.addEventListener('island:view', event => {
-    chat.hidden = event.detail !== 'chat';
+    // NOT `hidden` (display:none would kill the enter/exit transition): the
+    // view is hidden by CSS (visibility/opacity, with the §9.2 motion) and
+    // `inert` takes it out of focus order and accessibility.
+    clearTimeout(inertTimer);
+    if (event.detail === 'chat') chat.inert = false;
+    else inertTimer = setTimeout(() => { if (capsule.dataset.view !== 'chat') chat.inert = true; }, 220); // after the 160ms exit
     if (event.detail === 'chat') {
       renderLog();
       renderControls();

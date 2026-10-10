@@ -37,7 +37,9 @@
   // U1: chat view of the SAME expanded island. Its height arrives from Rust
   // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
   // pre-first-push default and must match that constant.
-  const CHAT = { w: 640, h: 240, r: 22, clay: 40, clayLeft: 34, clayTop: 8 };
+  // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
+  // (128 units show ~112) a 46px box shows ~40px.
+  const CHAT = { w: 640, h: 240, r: 22, clay: 46, clayLeft: 34, clayTop: 3 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -57,9 +59,23 @@
   // A SENT decision keeps the character at rest (O.gestureFor): confirm/reject
   // wait for a real host confirmation.
   let chatPose = null;
+  let hostPose = null; // host failures (bridge/transport) — time-boxed by O.hostPoseView
+  let hostTracker = { failing: false, since: 0 };
+  let hostTimer = 0;
+  function refreshHost(snapshot) {
+    if (!O) return;
+    const r = O.hostPoseView(snapshot, hostTracker, Date.now());
+    hostTracker = r.tracker;
+    hostPose = r.pose;
+    clearTimeout(hostTimer);
+    if (r.pose && r.expiresAt) hostTimer = setTimeout(() => refreshHost(current), Math.max(50, r.expiresAt - Date.now() + 50));
+    applyPose();
+  }
   const POSES = new Set(['think', 'speak', 'error']);
   function applyPose() {
-    const next = chatPose || 'idle';
+    // Priority (night review): active chat turn > time-boxed host error > the
+    // chat's own error > rest (see O.choosePose).
+    const next = O ? O.choosePose(chatPose, hostPose) : (chatPose || 'idle');
     if (clay && clay.state !== next) clay.setState(next);
   }
   document.addEventListener('abito:pose', event => {
@@ -138,7 +154,7 @@
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
     const overviewTop = lerp(COMPACT.h, OVERVIEW.h, p) / 2 - drop - cs / 2;
-    const z = Math.max(0, Math.min(1, p)) * (1 - q.x);
+    const z = Math.max(0, Math.min(1, p)); // tight framing in overview AND chat
     clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';
@@ -208,6 +224,9 @@
   let forceMotion = false;
   const applyMotionPref = snap => {
     forceMotion = !!(snap && snap.motionOverride === true);
+    // The human's explicit «animate anyway» must reach the character too (the
+    // engine honours the OS preference unless forced); never forced otherwise.
+    if (typeof AbitoClay !== 'undefined' && AbitoClay.forced !== forceMotion) AbitoClay.setForced(forceMotion);
   };
   if (window.desktop) {
     try { window.desktop.onState(applyMotionPref); } catch { /* facade optional */ }
@@ -290,11 +309,24 @@
     catch { /* pointer capture is best-effort; X11 has an implicit grab */ }
     send('drag_press', { x: e.clientX, y: e.clientY });
   });
+  // §9.2 hover on the character: scale only (pure O.hoverScale), no state.
+  function updateHover(point) {
+    if (!O) return;
+    const r = clayEl.getBoundingClientRect();
+    // the box is already scaled by --hover: test against the unscaled centre box
+    const scale = parseFloat(clayEl.style.getPropertyValue('--hover')) || 1;
+    const w = r.width / scale, h = r.height / scale;
+    const box = { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
+    const next = O.hoverScale(point, box, { reduced: reduced.matches, dragging: pressed });
+    if (next !== scale) clayEl.style.setProperty('--hover', String(next));
+  }
   window.addEventListener('pointermove', e => {
-    if (!pressed) return;
+    if (!pressed) { updateHover({ x: e.clientX, y: e.clientY }); return; }
+    updateHover(null);
     lastPoint = { x: e.clientX, y: e.clientY };
     send('drag_move', { x: e.clientX, y: e.clientY });
   });
+  document.addEventListener('pointerleave', () => updateHover(null));
   window.addEventListener('pointerup', e => release({ x: e.clientX, y: e.clientY }, false));
   window.addEventListener('pointercancel', e => release({ x: e.clientX, y: e.clientY }, true));
   // Focus loss mid-drag (e.g. alt-tab): reconcile without toggling.
@@ -358,6 +390,15 @@
     connectionEl.setAttribute('aria-label', conn.aria);
     $('connection-icon').innerHTML = icon(conn.icon);
     $('connection-word').textContent = conn.word;
+    const bridge = O.bridgeView(snapshot);
+    const bridgeChip = $('bridge');
+    bridgeChip.hidden = !bridge;
+    if (bridge) {
+      bridgeChip.dataset.tone = bridge.tone;
+      bridgeChip.setAttribute('aria-label', bridge.aria);
+      $('bridge-icon').innerHTML = icon(bridge.icon);
+      $('bridge-word').textContent = bridge.word;
+    }
     const first = notices[0] || null;
     const view = paintRing(notices);
     noticePill.hidden = !view;
@@ -366,15 +407,25 @@
       noticeTitle.textContent = view.text;
       noticeCount.textContent = String(view.badge);
     }
-    noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : conn.detail;
+    noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : (bridge ? `${conn.detail} ${bridge.detail}` : conn.detail);
     noticeInfo.setAttribute('aria-label', O.infoLabel(first ? 'Ver detalle del aviso' : 'Ver detalle de la conexión', first ? view.aria : conn.aria));
     noticeDismiss.hidden = !first;
     noticesEl.hidden = false;
-    paintCardConn(conn);
+    paintCardConn(conn, bridge);
   }
   // §3: the card hides the notices strip, so a missing Pi / downed channel
   // stays visible beside it (icon + word; nothing when healthy).
-  function paintCardConn(conn) {
+  function paintCardConn(conn, bridge) {
+    const bchip = $('card-bridge');
+    if (bchip) {
+      bchip.hidden = !bridge;
+      if (bridge) {
+        bchip.dataset.tone = bridge.tone;
+        bchip.setAttribute('aria-label', bridge.aria);
+        $('card-bridge-icon').innerHTML = icon(bridge.icon);
+        $('card-bridge-word').textContent = bridge.word;
+      }
+    }
     const chip = $('card-conn');
     if (!chip) return;
     const shown = O.cardConnection(conn);
@@ -386,8 +437,8 @@
     $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
-    try { window.desktop.onState(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
-    try { window.desktop.snapshot().then(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
+    try { window.desktop.onState(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
   }
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {
@@ -450,11 +501,12 @@
     const card = current && current.card;
     const waiting = validCard(card) && Date.now() < Date.parse(card.expires_at) &&
       (card.state === 'pending' || card.reason === 'Abrí la tarjeta para decidir.'); // covered = still waiting for you
-    const down = !!(current && current.unavailable === true);
+    const bridgeDown = !!(O && O.bridgeView(current));
+    const down = !!(current && current.unavailable === true) || bridgeDown;
     flag.hidden = !(waiting || down);
     if (flag.hidden) return;
     flag.dataset.tone = waiting ? 'sun' : 'red';
-    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : 'Avisos caídos');
+    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : (bridgeDown ? 'Sin puente' : 'Avisos caídos'));
     $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
   }
   function renderCard() {
@@ -505,6 +557,7 @@
     if (validCard(current.card)) paintExpiry(current.card);
     paintRing(Array.isArray(current.notices) ? current.notices : []);
     paintCompactFlag(); // an expired card must stop saying «waiting»
+    refreshHost(current);
   }, 5000);
   async function decideCard(verb, event) {
     renderCard(); // Recheck expiry/phase even without a newer snapshot.

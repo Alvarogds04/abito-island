@@ -2,9 +2,11 @@
 # Versioned smoke run of a STAGED binary (never an installed one). Own window
 # only, private short roots under $HOME/.m4s-smoke, removed afterwards. The
 # probe flags are deliberately set here, NOT through the launcher (it refuses
-# them). Usage: packaging/smoke.sh <stage-dir>   (needs DISPLAY/XAUTHORITY)
+# them). The SHIPPED binary has no probe: smoke the `--smoke-variant` build
+# (same commit + `probe` feature). Usage: packaging/smoke.sh <smoke-dir>
+# (needs DISPLAY/XAUTHORITY)
 set -eu
-stage="${1:?usage: smoke.sh <stage-dir>}"
+stage="${1:?usage: smoke.sh <smoke-variant dir>}"
 root="$HOME/.m4s-smoke"
 mkdir -m 700 "$root" "$root/project"
 # A run killed by the timeout leaves our own `p-XXXXXX/s` socket behind: remove

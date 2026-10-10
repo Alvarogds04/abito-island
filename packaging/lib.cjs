@@ -13,13 +13,11 @@ const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop
 const FRONTEND_FILES = ['chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'icons.js', 'index.html',
   'island.js', 'models.js', 'overview-view.js', 'style.css'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
-// Whole families are refused (not a hand-picked list): every LD_* loader
-// variable, GTK/GDK/WebKit debug+inspector variables, and EVERY ABITO_* knob
-// except the one the installed app is meant to receive (ABITO_PROJECT_ROOT).
-const FORBIDDEN_ENV_PATTERN = '^(LD_[A-Za-z0-9_]*|GDK_DEBUG|GTK_DEBUG|GTK_MODULES|GTK_PATH|WEBKIT_INSPECTOR_[A-Za-z_]*|ABITO_(BRIDGE_BASE|DESKTOP_SOCKET|MODELS_CONFIG_DIR|NATIVE_[A-Z_]*|PROBE[A-Z_]*|SOCKET_DIR))=';
-const FORBIDDEN_ENV = ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'LD_DEBUG', 'GDK_DEBUG', 'GTK_DEBUG', 'GTK_MODULES',
-  'WEBKIT_INSPECTOR_SERVER', 'ABITO_PROBE', 'ABITO_PROBE_VISUAL', 'ABITO_SOCKET_DIR', 'ABITO_BRIDGE_BASE',
-  'ABITO_MODELS_CONFIG_DIR', 'ABITO_DESKTOP_SOCKET', 'ABITO_NATIVE_AUDIT'];
+// Inverted logic: EVERY ABITO_* variable is refused except the one the
+// installed app is meant to receive (ABITO_PROJECT_ROOT); plus the whole LD_*
+// loader family and the GTK/GDK/WebKit debug + inspector variables.
+const FORBIDDEN_ENV_PATTERN = '^(LD_[A-Za-z0-9_]*|GDK_(DEBUG|SYNCHRONIZE|RENDERING)|GTK_(DEBUG|MODULES|PATH|EXE_PREFIX|DATA_PREFIX)|WEBKIT_INSPECTOR_[A-Za-z_]*|ABITO_[A-Za-z0-9_]*)=';
+const ALLOWED_ABITO = 'ABITO_PROJECT_ROOT';
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const sha256File = file => sha256(fs.readFileSync(file));
@@ -44,6 +42,9 @@ function checkConfig(crate) {
   const csp = (conf.app && conf.app.security && conf.app.security.csp) || '';
   if (!/default-src 'self'/.test(csp)) throw new Error("CSP must start from default-src 'self'");
   if (/unsafe-(eval|inline)|https?:\/\/(?!ipc\.localhost)|\*/.test(csp)) throw new Error('CSP allows unsafe or remote sources');
+  const connect = (/connect-src ([^;]*)/.exec(csp) || [])[1];
+  if (connect !== "'self' ipc: http://ipc.localhost") throw new Error(`connect-src must be exactly 'self' ipc: http://ipc.localhost, got: ${connect}`);
+  if (!/(^|;)\s*object-src 'none'/.test(csp) || !/frame-src 'none'/.test(csp) || !/base-uri 'none'/.test(csp)) throw new Error('CSP must keep object-src/frame-src/base-uri none');
   if (conf.app.withGlobalTauri !== true) throw new Error('withGlobalTauri expected (the page uses window.__TAURI__)');
   const cap = JSON.parse(fs.readFileSync(path.join(crate, 'capabilities', 'main.json'), 'utf8'));
   const perms = [...cap.permissions].sort();
@@ -67,7 +68,7 @@ function launcherText() {
 # Preview's roots.
 set -eu
 [ "$#" -eq 0 ] || { echo "abito: no arguments accepted" >&2; exit 64; }
-bad="$(env | grep -E '${FORBIDDEN_ENV_PATTERN}' | cut -d= -f1 | head -n 1 || true)"
+bad="$(env | grep -E '${FORBIDDEN_ENV_PATTERN}' | grep -v '^${ALLOWED_ABITO}=' | cut -d= -f1 | head -n 1 || true)"
 [ -z "$bad" ] || { echo "abito: refusing $bad" >&2; exit 64; }
 here="$(cd "$(dirname "$0")" && pwd)"
 export GDK_BACKEND=x11
@@ -79,15 +80,16 @@ function desktopText() {
 Type=Application
 Name=Abito (Tauri)
 Comment=Abito island (user-local build, side by side with the Preview)
-Exec=@INSTALL_DIR@/abito-island-launcher
+Exec="@INSTALL_DIR@/abito-island-launcher"
+Icon=@INSTALL_DIR@/abito-island.png
 Terminal=false
 Categories=Utility;
-StartupWMClass=${IDENTIFIER}
+StartupWMClass=Abito-island
 `;
 }
 
 // ---- receipt verification (no launch) -------------------------------------
-const STAGED = ['abito-island', 'abito-island-launcher', `${IDENTIFIER}.desktop`];
+const STAGED = ['abito-island', 'abito-island-launcher', 'abito-island.png', `${IDENTIFIER}.desktop`];
 function verifyStage(dir, { sourceCrate } = {}) {
   const problems = [];
   const receiptPath = path.join(dir, 'receipt.json');
@@ -115,7 +117,8 @@ function verifyStage(dir, { sourceCrate } = {}) {
   if (fs.existsSync(bin)) {
     const bytes = fs.readFileSync(bin);
     if (sourceCrate && bytes.includes(Buffer.from(sourceCrate))) problems.push('binary embeds the source-tree path');
-    for (const marker of ['--remote-debugging', 'devtools://']) if (bytes.includes(Buffer.from(marker))) problems.push(`binary contains «${marker}» (devtools)`);
+    for (const marker of ['--remote-debugging', 'devtools://', 'Prueba M3: propuesta servida por el backend falso', 'ABITO_PROBE']) if (bytes.includes(Buffer.from(marker))) problems.push(`binary contains «${marker}» (devtools/probe/fake)`);
+    for (const prefix of [process.env.HOME && `${process.env.HOME}/.cargo`, process.env.HOME && `${process.env.HOME}/Apps`].filter(Boolean)) if (bytes.includes(Buffer.from(prefix))) problems.push(`binary embeds the build machine path ${prefix}…`);
     if (!(fs.statSync(bin).mode & 0o100)) problems.push('binary is not executable');
   }
   return problems;
@@ -140,5 +143,5 @@ function requireClean(crate) {
   return p;
 }
 
-module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, FORBIDDEN_ENV, STAGED, sha256, sha256File,
+module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, ALLOWED_ABITO, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, STAGED, sha256, sha256File,
   checkR6, checkFrontend, checkConfig, launcherText, desktopText, verifyStage };
