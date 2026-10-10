@@ -57,9 +57,12 @@
   // A SENT decision keeps the character at rest (O.gestureFor): confirm/reject
   // wait for a real host confirmation.
   let chatPose = null;
+  let hostPose = null; // persistent host failures (bridge/transport), from the snapshot
   const POSES = new Set(['think', 'speak', 'error']);
   function applyPose() {
-    const next = chatPose || 'idle';
+    // Priority (r6-states-mapping §3.1): persistent error first, then the
+    // chat's think/speak/error, then rest.
+    const next = hostPose || chatPose || 'idle';
     if (clay && clay.state !== next) clay.setState(next);
   }
   document.addEventListener('abito:pose', event => {
@@ -386,8 +389,8 @@
     $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
-    try { window.desktop.onState(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
-    try { window.desktop.snapshot().then(snapshot => { current = snapshot; renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
+    try { window.desktop.onState(snapshot => { current = snapshot; hostPose = O ? O.snapshotPose(snapshot) : null; applyPose(); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(snapshot => { current = snapshot; hostPose = O ? O.snapshotPose(snapshot) : null; applyPose(); renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
   }
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {

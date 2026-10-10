@@ -309,4 +309,27 @@ test('UI.3: compact only carries the sun contour; Escape closes models first; ne
   assert.match(islandSrc, /paintCompactFlag\(\); \/\/ an expired card/);
 });
 
+test('R6 pose from the host snapshot: only REAL persistent failures give error; the rest never touches the pose', () => {
+  const bridge = state => ({ unavailable: false, bridgeStatus: { state } });
+  assert.equal(O.snapshotPose(bridge('unhealthy')), 'error');
+  assert.equal(O.snapshotPose(bridge('stopped')), 'error');
+  assert.equal(O.snapshotPose({ unavailable: true, bridgeStatus: { state: 'healthy' } }), 'error');
+  for (const ok of ['disabled', 'starting', 'healthy']) assert.equal(O.snapshotPose(bridge(ok)), null, ok);
+  assert.equal(O.snapshotPose(null), null);
+  assert.equal(O.snapshotPose({}), null);
+  // a sent/conflict card or a notice never changes the pose
+  assert.equal(O.snapshotPose({ ...bridge('healthy'), card: { state: 'inert', reason: 'Decisión enviada.' }, notices: [{}] }), null);
+  assert.equal(O.snapshotPose({ ...bridge('healthy'), card: { state: 'inert', reason: 'No se pudo confirmar la decisión.' } }), null);
+});
+
+test('R6 liveness: the island never forces/pauses the engine (idle is alive by default, the OS reduced-motion preference wins)', () => {
+  assert.doesNotMatch(islandSrc, /setForced|setPaused|setManual/);
+  assert.match(islandSrc, /AbitoClay\.create\(clayEl, \{ seed: 505/);
+  assert.doesNotMatch(islandSrc, /live: false/);
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.doesNotMatch(html, /animar|animate/i, 'no «animate» button in the UI');
+  // priority order: host error > chat pose > rest
+  assert.match(islandSrc, /hostPose \|\| chatPose \|\| 'idle'/);
+});
+
 console.log(`overview-view-check: ${passed} passed`);

@@ -663,6 +663,9 @@ fn overview_visual_evidence(app: &AppHandle) {
         // decision with a real 2xx → the lane's own `Decisión enviada.`
         // (tarjeta-enviada). Default: a different id → 404 → `Sin confirmar`.
         let sent_run = std::env::var("ABITO_PROBE_VISUAL_DECISION").as_deref() == Ok("sent");
+        if !sent_run {
+            r6_live_evidence(app, state.inner());
+        }
         let pending = serde_json::json!({
             "id": format!("proposal_{}", if sent_run { "a" } else { "c" }.repeat(32)),
             "payload_hash": "b".repeat(64),
@@ -768,6 +771,40 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// before and after. The fake's request log proves that NOTHING was
 /// written before that click (a notice can never approve) and that
 /// `/execute` carried exactly the card's `payload_hash`.
+/// UI contract §9.1/§9.5 «Abito alive by default»: the R6 in `idle` must be
+/// animating on its own (no button), judged with MOVEMENT: engine status +
+/// growing frame counter + the body path changing between samples, and six
+/// sequential PNGs of the same scene that must differ from each other.
+fn r6_live_evidence(app: &AppHandle, state: &AppState) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let win = main_window(app);
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let _ = win.eval(
+        "(async () => { const invoke = (window.__TAURI__.core.invoke);
+          const ev = { phase: 'r6_live' };
+          ev.reduced_os = matchMedia('(prefers-reduced-motion: reduce)').matches;
+          ev.status_before = AbitoClay.statusKind();
+          ev.frames_before = AbitoClay.frames;
+          const clay = document.getElementById('clay');
+          const paths = [];
+          for (let i = 0; i < 6; i++) { paths.push(clay.querySelector('path') ? clay.querySelector('path').getAttribute('d') : null); await new Promise(r => setTimeout(r, 350)); }
+          ev.frames_after = AbitoClay.frames;
+          ev.status_after = AbitoClay.statusKind();
+          ev.distinct_body_paths = new Set(paths).size;
+          ev.animate_buttons = document.querySelectorAll('[id*=animate], [aria-label*=nimar]').length;
+          await invoke('record_chat_evidence', { evidence: ev }); })()",
+    );
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(10));
+    emit(&json!({"step": "r6_live_evidence", "webview": lines}));
+    // six sequential frames of the same idle scene, fixed ~0.7 s apart
+    for i in 0..6 {
+        capture_visual(app, &format!("idle-vivo-{i}"));
+        sleep(Duration::from_millis(300));
+    }
+}
+
 /// Seven R6 poses at the overview framing (viewBox 36 32 128 128), one PNG
 /// each, BEFORE any setState is wired to real events. Probe-only: a second,
 /// non-live engine instance is mounted on a clone of #clay (same size,

@@ -99,6 +99,18 @@
   // host confirmation, which does not exist yet. Pure, so it is testable.
   const gestureFor = () => null;
 
+  // R6 pose from the host snapshot (docs/r6-states-mapping.md §2.4): a bridge
+  // that is not healthy (`unhealthy`/`stopped`) or a transport that could not
+  // start (`unavailable`) is a REAL persistent failure -> `error`. `disabled`
+  // (no configuration yet), `starting` and `healthy` are not errors. Anything
+  // else (a covering card, a conflict, a notice) leaves the pose alone.
+  function snapshotPose(snapshot) {
+    const s = snapshot || {};
+    if (s.unavailable === true) return 'error';
+    const bridge = s.bridgeStatus && s.bridgeStatus.state;
+    return bridge === 'unhealthy' || bridge === 'stopped' ? 'error' : null;
+  }
+
   // ---- «i» button name: announces the real state, then what it opens ---------
   const infoLabel = (base, stateAria) => (stateAria ? `${base}: ${stateAria}` : base);
 
@@ -107,5 +119,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose };
 });
