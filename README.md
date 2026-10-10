@@ -770,3 +770,21 @@ node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no
   directly (not through the launcher, which refuses those knobs).
 - NOT verified: reproducibility across different checkout paths; behaviour
   of an actually installed copy; Pi session against the new root.
+
+## N9 — one-command install (user-local)
+
+```sh
+sh packaging/install.sh artifacts/abito-island-0.1.0-<commit>   # or dist/abito-island/<version>
+sh packaging/install.sh --uninstall
+```
+
+Verifies EVERY file against `receipt.json` first (any mismatch, extra file, symlink,
+non-clean provenance or foreign identity aborts without touching anything), then
+installs binary + launcher + icon (+ template and receipt) into
+`~/.local/share/abito-island` (`--prefix` to override) via temp-file + rename (a
+running binary can be replaced), and writes
+`~/.local/share/applications/com.abitog.AbitoTauri.desktop` with
+`Exec=env ABITO_PROJECT_ROOT=<root> "<launcher>"`. Default project root:
+`$HOME/Apps/sb-second-brain` (`--project-root` to change). Idempotent; `--uninstall`
+removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
+(11, toy stage in temp dirs). Never touches `com.abitog.Abito*` roots.
