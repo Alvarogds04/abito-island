@@ -1224,7 +1224,17 @@ fn chat_evidence(app: &AppHandle) {
     });
     emit(&json!({"step": "motion_sample", "scene": "vista-salida-solo-pagina", "webview": lines}));
     let _ = page.eval("window.__islandSetView('chat', 640, 240)");
-    sleep(Duration::from_millis(500));
+    sleep(Duration::from_millis(700));
+    // DIAGNOSTIC 2: native exit AGAIN, now that page-driven ones already ran
+    // (is the snap a first-use artefact or the native route itself?).
+    let lines = sample_motion(app, "vista-salida-nativa-2", 1200, || {
+        crate::chathost::switch_view(app, &state, false);
+        wait_for_size(app, overview, Duration::from_secs(3));
+    });
+    emit(&json!({"step": "motion_sample", "scene": "vista-salida-nativa-2", "webview": lines}));
+    crate::chathost::switch_view(app, &state, true);
+    wait_for_size(app, chat_size, Duration::from_secs(3));
+    sleep(Duration::from_millis(700));
     sleep(Duration::from_millis(400));
     if let Err(e) = win.eval(CHAT_JS_SEND) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
