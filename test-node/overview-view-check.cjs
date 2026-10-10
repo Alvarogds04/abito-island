@@ -470,4 +470,22 @@ test('#304 wiring: the page decides motion itself (data-motion on <html>), start
   assert.match(islandSrc, /AbitoClay\.setForced\(!honorSystem\)/);
 });
 
+test('CSS structure: braces balance (no stray «}» swallowing the next rule) and every critical top-level rule exists', () => {
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  let depth = 0;
+  for (let i = 0; i < plain.length; i += 1) {
+    if (plain[i] === '{') depth += 1;
+    else if (plain[i] === '}') { depth -= 1; assert.ok(depth >= 0, `stray «}» near line ${plain.slice(0, i).split('\n').length} (comment-stripped)`); }
+  }
+  assert.equal(depth, 0, 'unclosed «{»');
+  // a real parse of the top-level rule list: the rule right after a stray brace is the one that dies
+  const top = []; let d = 0, start = 0;
+  for (let i = 0; i < plain.length; i += 1) {
+    if (plain[i] === '{') { if (d === 0) top.push(plain.slice(start, i).trim()); d += 1; }
+    else if (plain[i] === '}') { d -= 1; if (d === 0) start = i + 1; }
+  }
+  for (const sel of ['.sr-only', '#clay', '#island', '#compact-flag', '#open-chat', '#chat', '#models', '#question']) assert.ok(top.includes(sel), `top-level rule ${sel} must exist; got ${top.length} rules`);
+  assert.ok(top.some(t => t.startsWith('html[data-motion="reduce"] #notices')), 'the reduced-motion rules are top-level rules');
+});
+
 console.log(`overview-view-check: ${passed} passed`);

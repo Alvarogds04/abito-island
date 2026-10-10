@@ -214,7 +214,6 @@ html[data-motion="reduce"] #chat-state[data-kind="busy"] .ico svg, html[data-mot
 /* Contract §4: no meaning depends on animation. The in-flight ring stays
    still: the blue open arc (shape + --island-live) is the cue. */
 html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
-}
 
 /* ---- U1: chat in the island ------------------------------------------- */
 .sr-only {
