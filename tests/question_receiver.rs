@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex, Weak, Barrier};
 
 const ID: &str = "12345678-1234-4abc-8abc-123456789abc";
 const OTHER: &str = "12345678-1234-4abc-9abc-123456789abd";
-static NEXT: AtomicU64 = AtomicU64::new(1);
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 }
 struct Fixture { transport: Arc<Transport>, leaf: common::fixture_leaf::Leaf, root: PathBuf, project: String, changes: Arc<AtomicU64> }
 impl Fixture {
