@@ -59,12 +59,23 @@
   // A SENT decision keeps the character at rest (O.gestureFor): confirm/reject
   // wait for a real host confirmation.
   let chatPose = null;
-  let hostPose = null; // persistent host failures (bridge/transport), from the snapshot
+  let hostPose = null; // host failures (bridge/transport) — time-boxed by O.hostPoseView
+  let hostTracker = { failing: false, since: 0 };
+  let hostTimer = 0;
+  function refreshHost(snapshot) {
+    if (!O) return;
+    const r = O.hostPoseView(snapshot, hostTracker, Date.now());
+    hostTracker = r.tracker;
+    hostPose = r.pose;
+    clearTimeout(hostTimer);
+    if (r.pose && r.expiresAt) hostTimer = setTimeout(() => refreshHost(current), Math.max(50, r.expiresAt - Date.now() + 50));
+    applyPose();
+  }
   const POSES = new Set(['think', 'speak', 'error']);
   function applyPose() {
-    // Priority (r6-states-mapping §3.1): persistent error first, then the
-    // chat's think/speak/error, then rest.
-    const next = hostPose || chatPose || 'idle';
+    // Priority (night review): active chat turn > time-boxed host error > the
+    // chat's own error > rest (see O.choosePose).
+    const next = O ? O.choosePose(chatPose, hostPose) : (chatPose || 'idle');
     if (clay && clay.state !== next) clay.setState(next);
   }
   document.addEventListener('abito:pose', event => {
@@ -213,6 +224,9 @@
   let forceMotion = false;
   const applyMotionPref = snap => {
     forceMotion = !!(snap && snap.motionOverride === true);
+    // The human's explicit «animate anyway» must reach the character too (the
+    // engine honours the OS preference unless forced); never forced otherwise.
+    if (typeof AbitoClay !== 'undefined' && AbitoClay.forced !== forceMotion) AbitoClay.setForced(forceMotion);
   };
   if (window.desktop) {
     try { window.desktop.onState(applyMotionPref); } catch { /* facade optional */ }
@@ -376,6 +390,15 @@
     connectionEl.setAttribute('aria-label', conn.aria);
     $('connection-icon').innerHTML = icon(conn.icon);
     $('connection-word').textContent = conn.word;
+    const bridge = O.bridgeView(snapshot);
+    const bridgeChip = $('bridge');
+    bridgeChip.hidden = !bridge;
+    if (bridge) {
+      bridgeChip.dataset.tone = bridge.tone;
+      bridgeChip.setAttribute('aria-label', bridge.aria);
+      $('bridge-icon').innerHTML = icon(bridge.icon);
+      $('bridge-word').textContent = bridge.word;
+    }
     const first = notices[0] || null;
     const view = paintRing(notices);
     noticePill.hidden = !view;
@@ -384,15 +407,25 @@
       noticeTitle.textContent = view.text;
       noticeCount.textContent = String(view.badge);
     }
-    noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : conn.detail;
+    noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : (bridge ? `${conn.detail} ${bridge.detail}` : conn.detail);
     noticeInfo.setAttribute('aria-label', O.infoLabel(first ? 'Ver detalle del aviso' : 'Ver detalle de la conexión', first ? view.aria : conn.aria));
     noticeDismiss.hidden = !first;
     noticesEl.hidden = false;
-    paintCardConn(conn);
+    paintCardConn(conn, bridge);
   }
   // §3: the card hides the notices strip, so a missing Pi / downed channel
   // stays visible beside it (icon + word; nothing when healthy).
-  function paintCardConn(conn) {
+  function paintCardConn(conn, bridge) {
+    const bchip = $('card-bridge');
+    if (bchip) {
+      bchip.hidden = !bridge;
+      if (bridge) {
+        bchip.dataset.tone = bridge.tone;
+        bchip.setAttribute('aria-label', bridge.aria);
+        $('card-bridge-icon').innerHTML = icon(bridge.icon);
+        $('card-bridge-word').textContent = bridge.word;
+      }
+    }
     const chip = $('card-conn');
     if (!chip) return;
     const shown = O.cardConnection(conn);
@@ -404,8 +437,8 @@
     $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
-    try { window.desktop.onState(snapshot => { current = snapshot; hostPose = O ? O.snapshotPose(snapshot) : null; applyPose(); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
-    try { window.desktop.snapshot().then(snapshot => { current = snapshot; hostPose = O ? O.snapshotPose(snapshot) : null; applyPose(); renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
+    try { window.desktop.onState(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
   }
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {
@@ -468,11 +501,12 @@
     const card = current && current.card;
     const waiting = validCard(card) && Date.now() < Date.parse(card.expires_at) &&
       (card.state === 'pending' || card.reason === 'Abrí la tarjeta para decidir.'); // covered = still waiting for you
-    const down = !!(current && current.unavailable === true);
+    const bridgeDown = !!(O && O.bridgeView(current));
+    const down = !!(current && current.unavailable === true) || bridgeDown;
     flag.hidden = !(waiting || down);
     if (flag.hidden) return;
     flag.dataset.tone = waiting ? 'sun' : 'red';
-    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : 'Avisos caídos');
+    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : (bridgeDown ? 'Sin puente' : 'Avisos caídos'));
     $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
   }
   function renderCard() {
@@ -523,6 +557,7 @@
     if (validCard(current.card)) paintExpiry(current.card);
     paintRing(Array.isArray(current.notices) ? current.notices : []);
     paintCompactFlag(); // an expired card must stop saying «waiting»
+    refreshHost(current);
   }, 5000);
   async function decideCard(verb, event) {
     renderCard(); // Recheck expiry/phase even without a newer snapshot.

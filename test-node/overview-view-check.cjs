@@ -323,13 +323,17 @@ test('R6 pose from the host snapshot: only REAL persistent failures give error; 
 });
 
 test('R6 liveness: the island never forces/pauses the engine (idle is alive by default, the OS reduced-motion preference wins)', () => {
-  assert.doesNotMatch(islandSrc, /setForced|setPaused|setManual/);
+  assert.doesNotMatch(islandSrc, /setPaused|setManual/);
+  // setForced exists ONLY for the human's explicit «animate anyway» (motionOverride), never by default
+  const forced = islandSrc.match(/setForced\([^)]*\)/g) || [];
+  assert.deepEqual(forced, ['setForced(forceMotion)']);
+  assert.match(islandSrc, /forceMotion = !!\(snap && snap\.motionOverride === true\)/);
   assert.match(islandSrc, /AbitoClay\.create\(clayEl, \{ seed: 505/);
   assert.doesNotMatch(islandSrc, /live: false/);
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   assert.doesNotMatch(html, /animar|animate/i, 'no «animate» button in the UI');
   // priority order: host error > chat pose > rest
-  assert.match(islandSrc, /hostPose \|\| chatPose \|\| 'idle'/);
+  assert.match(islandSrc, /O\.choosePose\(chatPose, hostPose\)/);
 });
 
 test('§9.2 hover: ~1.06 only inside the R6 box, never reduced/dragging, no meaning', () => {
@@ -363,7 +367,7 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   assert.match(css, /:where\(button, textarea\) \{[^}]*outline: 2px solid transparent[^}]*var\(--dur-focus\)/);
   assert.match(css, /#models-list \.choose\[aria-pressed="true"\] \.ico \{ animation: control-pop var\(--dur-control\) var\(--spring\)/);
   const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
-  assert.match(reduced, /#notices, #permission, #open-chat, #chat \{ transition: none !important; transform: none !important/);
+  assert.match(reduced, /#notices, #permission, #open-chat, #chat, #models, #chat-body \{ transition: none !important; transform: none !important/);
   assert.match(reduced, /#clay \{ transition: none !important/);
 });
 
@@ -374,6 +378,45 @@ test('§5 chat header: R6 ~40px VISIBLE (box x 112/128 within 4px) and inside th
   assert.ok(Math.abs(visible - 40) <= 4, `visible ${visible}`);
   assert.ok(left - box / 2 >= 4 && top >= 2 && top + box <= 56, 'box inside the 48-56px header band');
   assert.match(islandSrc, /const z = Math\.max\(0, Math\.min\(1, p\)\); \/\/ tight framing in overview AND chat/);
+});
+
+test('night review: the bridge is shown (chip «Sin puente», compact triangle) and the host error face is time-boxed', () => {
+  const snap = (state, card) => ({ unavailable: false, bridgeStatus: { state }, card: card || null });
+  const view = O.bridgeView(snap('unhealthy'));
+  assert.equal(view.word, 'Sin puente'); assert.equal(view.icon, 'triangle'); assert.equal(view.tone, 'red');
+  assert.equal(O.bridgeView(snap('stopped')).word, 'Sin puente');
+  for (const ok of ['healthy', 'starting', 'disabled']) assert.equal(O.bridgeView(snap(ok)), null, ok);
+  assert.match(islandSrc, /bridge-word/); assert.match(islandSrc, /card-bridge/); assert.match(islandSrc, /bridgeDown/);
+  // time box: error face only ~7s after the failure BEGINS (or while a card depends on the bridge)
+  const T0 = 1000000;
+  let r = O.hostPoseView(snap('unhealthy'), null, T0);
+  assert.equal(r.pose, 'error');
+  r = O.hostPoseView(snap('unhealthy'), r.tracker, T0 + 6900); assert.equal(r.pose, 'error');
+  r = O.hostPoseView(snap('unhealthy'), r.tracker, T0 + 7100); assert.equal(r.pose, null, 'calms down after the box');
+  assert.equal(r.tracker.since, T0, 'the clock started at the first failure, not at every snapshot');
+  r = O.hostPoseView(snap('unhealthy', { state: 'pending' }), r.tracker, T0 + 60000); assert.equal(r.pose, 'error', 'a card that depends on the bridge keeps the face');
+  r = O.hostPoseView(snap('healthy'), r.tracker, T0 + 61000); assert.equal(r.pose, null); assert.equal(r.tracker.failing, false);
+  r = O.hostPoseView(snap('unhealthy'), r.tracker, T0 + 70000); assert.equal(r.pose, 'error', 'a NEW failure restarts the box');
+  // priority: the local chat wins over the bridge
+  assert.equal(O.choosePose('think', 'error'), 'think');
+  assert.equal(O.choosePose('speak', 'error'), 'speak');
+  assert.equal(O.choosePose('error', null), 'error');
+  assert.equal(O.choosePose(null, 'error'), 'error');
+  assert.equal(O.choosePose(null, null), 'idle');
+});
+
+test('night review: views are NOT display:none while animating (inert instead), so the §9.2 motion actually runs', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /<section id="chat" inert/); assert.doesNotMatch(html, /<section id="chat"[^>]*\shidden/);
+  assert.match(html, /<div id="models" inert/); assert.doesNotMatch(html, /<div id="models"[^>]*\shidden/);
+  const chatSrc = fs.readFileSync(path.join(frontend, 'chat.js'), 'utf8');
+  const modelsSrc = fs.readFileSync(path.join(frontend, 'models.js'), 'utf8');
+  assert.doesNotMatch(chatSrc, /\bchat\.hidden\s*=/);
+  assert.doesNotMatch(modelsSrc, /panel\.hidden\s*=/);
+  assert.match(chatSrc, /chat\.inert = false/); assert.match(chatSrc, /chat\.inert = true; \}, 220\)/);
+  assert.match(css, /#models\[data-open="true"\] \{[^}]*var\(--dur-view-delay\)/);
+  assert.doesNotMatch(css, /#models\[hidden\]/);
+  assert.doesNotMatch(css, /#capsule\[data-models="open"\] #chat-body \{ display: none/);
 });
 
 console.log(`overview-view-check: ${passed} passed`);

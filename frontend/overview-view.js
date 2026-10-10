@@ -111,6 +111,38 @@
     return bridge === 'unhealthy' || bridge === 'stopped' ? 'error' : null;
   }
 
+  // ---- bridge (approval) down: its own chip, §3 «never hide a problem» ------
+  function bridgeView(snapshot) {
+    const bridge = snapshot && snapshot.bridgeStatus && snapshot.bridgeStatus.state;
+    if (bridge !== 'unhealthy' && bridge !== 'stopped') return null;
+    return { kind: 'down', tone: 'red', icon: 'triangle', word: 'Sin puente',
+      aria: 'Sin puente: el puente de aprobación no responde; no se puede decidir hasta que vuelva',
+      detail: 'El puente que lleva tu decisión al backend no responde. Las decisiones quedan sin enviar.' };
+  }
+
+  // ---- R6 error face from the HOST: time-boxed, never a permanent mask ------
+  // docs/r6-states-mapping §2.4/§3.1 (night review): the host failure shows the
+  // `error` pose for HOST_ERROR_MS after it BEGINS, or for as long as a card /
+  // decision that depends on the bridge is on screen; afterwards the chip and
+  // the compact triangle keep carrying the fact, the character calms down.
+  const HOST_ERROR_MS = 7000;
+  function hostPoseView(snapshot, tracker, now) {
+    const t = tracker || { failing: false, since: 0 };
+    const failing = snapshotPose(snapshot) === 'error';
+    const next = { failing, since: failing ? (t.failing ? t.since : now) : 0 };
+    if (!failing) return { pose: null, tracker: next };
+    const bridgeDependent = bridgeView(snapshot) !== null && !!(snapshot && snapshot.card);
+    const fresh = now - next.since < HOST_ERROR_MS;
+    return { pose: fresh || bridgeDependent ? 'error' : null, tracker: next, expiresAt: next.since + HOST_ERROR_MS };
+  }
+  // Priority (night review): the chat is local and independent of the bridge, so
+  // an ACTIVE turn (think/speak) wins; then the host failure; then the chat's own
+  // persistent error; else rest.
+  function choosePose(chat, host) {
+    if (chat === 'think' || chat === 'speak') return chat;
+    return host || chat || 'idle';
+  }
+
   // §9.2: R6 hover scale. Pure: 1.06 only while the pointer is inside the
   // character's box and the system does NOT ask for reduced motion; never
   // while dragging. It carries no meaning and never touches the pose.
@@ -130,5 +162,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, bridgeView, hostPoseView, choosePose, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

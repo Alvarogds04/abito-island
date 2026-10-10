@@ -128,7 +128,8 @@
   }
   noteButton.addEventListener('click', () => setInfo(noteButton.getAttribute('aria-expanded') !== 'true'));
   function open(byKeyboard) {
-    panel.hidden = false;
+    panel.inert = false;
+    panel.dataset.open = 'true';
     setInfo(false);
     capsule.dataset.models = 'open';
     toggle.setAttribute('aria-expanded', 'true');
@@ -136,13 +137,14 @@
     if (byKeyboard) refreshButton.focus();
   }
   function close(byKeyboard) {
-    panel.hidden = true;
+    panel.inert = true;
+    delete panel.dataset.open;
     setInfo(false);
     delete capsule.dataset.models;
     toggle.setAttribute('aria-expanded', 'false');
     if (byKeyboard) toggle.focus();
   }
-  toggle.addEventListener('click', e => (panel.hidden ? open(e.detail === 0) : close(e.detail === 0)));
+  toggle.addEventListener('click', e => (panel.inert ? open(e.detail === 0) : close(e.detail === 0)));
   closeButton.addEventListener('click', e => close(e.detail === 0));
   refreshButton.addEventListener('click', refresh);
   document.addEventListener('island:view', e => { if (e.detail !== 'chat') close(false); });

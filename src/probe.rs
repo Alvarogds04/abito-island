@@ -771,6 +771,82 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// before and after. The fake's request log proves that NOTHING was
 /// written before that click (a notice can never approve) and that
 /// `/execute` carried exactly the card's `payload_hash`.
+/// §9.5 motion CERTIFICATION, sampled FROM THE PAGE (no screen capture): a
+/// requestAnimationFrame loop records `performance.now()` plus the computed
+/// opacity/transform/visibility/display of the animated views and the
+/// `document.getAnimations()` count while `action` changes the view.
+/// Evidence goes through `record_chat_evidence`; PNG clips are only a glance.
+fn sample_motion(app: &AppHandle, name: &str, millis: u64, action: impl FnOnce()) -> Vec<serde_json::Value> {
+    let state = app.state::<AppState>();
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let page = main_window(app);
+    // The webview derives prefers-reduced-motion from GtkSettings
+    // `gtk-enable-animations`. This session reported it OFF at night (while
+    // gsettings says true), which makes every transition correctly snap and
+    // hides the motion we are certifying. For THIS in-process measurement only,
+    // switch it on (nothing is written to the user's settings), and report the
+    // original value so the evidence says what was done.
+    {
+        use gtk::prelude::ObjectExt as _;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = app.run_on_main_thread(move || {
+            let original = gtk::Settings::default().map(|s| {
+                let was = s.property::<bool>("gtk-enable-animations");
+                if !was {
+                    s.set_property("gtk-enable-animations", true);
+                }
+                was
+            });
+            let _ = tx.send(original);
+        });
+        let original = rx.recv_timeout(Duration::from_secs(2)).ok().flatten();
+        emit(&json!({"step": "motion_prefs", "gtk_enable_animations_original": original, "forced_on_for_measurement": original == Some(false)}));
+        sleep(Duration::from_millis(1800)); // let the webview re-evaluate prefers-reduced-motion
+    }
+    let start = format!(
+        "(() => {{ const ids = ['chat', 'open-chat', 'notices', 'permission', 'clay', 'models', 'chat-body'];
+          const S = {{ name: '{name}', t0: performance.now(), rows: [], viewEvents: [], anims: [] }};
+          window.__motion = S; S.muts = [];
+          for (const t of ['transitionrun', 'transitionstart', 'transitioncancel', 'transitionend']) document.getElementById('chat').addEventListener(t, e => S.muts.push([Math.round(performance.now() - S.t0), t, e.propertyName]));
+          document.addEventListener('island:view', e => S.viewEvents.push([performance.now() - S.t0, e.detail]));
+          const tick = () => {{
+            const now = performance.now() - S.t0;
+            const row = {{ t: now }};
+            for (const id of ids) {{ const el = document.getElementById(id); if (!el) continue; const cs = getComputedStyle(el);
+              row[id] = [+cs.opacity, cs.transform === 'none' ? 'none' : cs.transform, cs.visibility, cs.display]; }}
+            row.r = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
+            row.v = document.getElementById('capsule').dataset.view + '/' + document.getElementById('capsule').dataset.phase + '/' + (document.getElementById('chat').inert ? 'inert' : 'live');
+            S.rows.push(row);
+            S.anims.push(document.getAnimations().length);
+            if (now < {millis}) requestAnimationFrame(tick); else S.done = true;
+          }};
+          requestAnimationFrame(tick); }})()"
+    );
+    let _ = page.eval(start);
+    sleep(Duration::from_millis(250)); // a few idle frames before the change
+    action();
+    sleep(Duration::from_millis(millis + 200));
+    let finish = "(async () => { const S = window.__motion; const invoke = (window.__TAURI__.core.invoke);
+      const series = id => S.rows.filter(r => r[id]).map(r => [Math.round(r.t), r[id][0], r[id][2], r[id][3], r[id][1], r.v + '/r' + r.r]);
+      const out = { phase: 'motion', name: S.name, frames: S.rows.length, view_events: S.viewEvents,
+        mean_dt_ms: +(S.rows[S.rows.length - 1].t / S.rows.length).toFixed(1),
+        reduced_os: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        chat_transition: [getComputedStyle(document.getElementById('chat')).transitionDuration, getComputedStyle(document.getElementById('chat')).transitionDelay, getComputedStyle(document.getElementById('chat')).transitionProperty],
+        capsule_view: document.getElementById('capsule').dataset.view, capsule_phase: document.getElementById('capsule').dataset.phase,
+        max_animations: Math.max(...S.anims), muts: S.muts.filter(m => m[0] > 200 && m[0] < 520 && !/^clay|^island$/.test(m[1])).slice(0, 40) };
+      for (const id of ['chat', 'models', 'chat-body']) {
+        const s = series(id);
+        out[id + '_distinct_opacities'] = new Set(s.map(r => r[1])).size;
+        out[id + '_display_none_frames'] = s.filter(r => r[3] === 'none').length;
+        out[id + '_first_fraction_between_0_and_1'] = (s.find(r => r[1] > 0.03 && r[1] < 0.97) || [null])[0];
+        const ev0 = S.viewEvents.length ? S.viewEvents[0][0] : 0;
+        out[id + '_series'] = s.filter(r => r[0] >= ev0 - 40 && r[0] <= ev0 + 700).slice(0, 60);
+      }
+      await invoke('record_chat_evidence', { evidence: out }); })()";
+    let _ = page.eval(finish);
+    wait_chat_lines(app, 1, Duration::from_secs(8))
+}
+
 /// §9.5 motion evidence: a short x11grab of OUR window only (matched by
 /// `_NET_WM_PID`), written as numbered PNGs `<name>-NN-<stamp>.png`, started
 /// BEFORE `action` runs so the transition is inside the clip. Same sand
@@ -1121,6 +1197,35 @@ fn chat_evidence(app: &AppHandle) {
         wait_for_size(app, chat_size, Duration::from_secs(3));
     });
     sleep(Duration::from_millis(600));
+    // CERTIFICATION: the same two view changes sampled from the page itself.
+    // Warm-up (probe-only): after flipping gtk-enable-animations the first style
+    // change of the session can still snap; run one page-driven round trip first.
+    {
+        let page = main_window(app);
+        let _ = page.eval("window.__islandSetView('overview', 640, 240)");
+        sleep(Duration::from_millis(500));
+        let _ = page.eval("window.__islandSetView('chat', 640, 240)");
+        sleep(Duration::from_millis(700));
+    }
+    let lines = sample_motion(app, "vista-salida", 1400, || {
+        crate::chathost::switch_view(app, &state, false);
+        wait_for_size(app, overview, Duration::from_secs(3));
+    });
+    emit(&json!({"step": "motion_sample", "scene": "vista-salida", "webview": lines}));
+    let lines = sample_motion(app, "vista-entrada", 1600, || {
+        crate::chathost::switch_view(app, &state, true);
+        wait_for_size(app, chat_size, Duration::from_secs(3));
+    });
+    emit(&json!({"step": "motion_sample", "scene": "vista-entrada", "webview": lines}));
+    // DIAGNOSTIC: the same view change driven only by the page (no native resize).
+    let page = main_window(app);
+    let lines = sample_motion(app, "vista-salida-solo-pagina", 1200, || {
+        let _ = page.eval("window.__islandSetView('overview', 640, 240)");
+    });
+    emit(&json!({"step": "motion_sample", "scene": "vista-salida-solo-pagina", "webview": lines}));
+    let _ = page.eval("window.__islandSetView('chat', 640, 240)");
+    sleep(Duration::from_millis(500));
+    sleep(Duration::from_millis(400));
     if let Err(e) = win.eval(CHAT_JS_SEND) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
     }
@@ -1240,7 +1345,7 @@ const CHAT_JS_SEND: &str = r#"(async () => {
     ev.island_visible = [Math.round(island.width), Math.round(island.height)];
     ev.island_radius = getComputedStyle(document.getElementById('island')).borderTopLeftRadius;
     ev.view_attr = document.getElementById('capsule').dataset.view;
-    ev.chat_hidden = document.getElementById('chat').hidden;
+    ev.chat_hidden = document.getElementById('chat').inert;
     ev.controls = { back: rect('chat-back'), send: rect('chat-send'), input: rect('chat-input') };
     ev.reduced_motion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     ev.audio_elements = document.querySelectorAll('audio, video').length;
@@ -1345,7 +1450,7 @@ fn chat_state_scenes(app: &AppHandle) {
             lane.queue_note = None;
         }
         // the models panel (opened by the models step) must not cover the chat
-        let _ = win.eval("(()=>{ if (!document.getElementById('models').hidden) document.getElementById('models-close').click(); })()");
+        let _ = win.eval("(()=>{ if (!document.getElementById('models').inert) document.getElementById('models-close').click(); })()");
         let _ = win.eval(format!("{invoke}('chat_action', {{ payload: {{ action: 'check' }} }})"));
         sleep(Duration::from_millis(900));
     };
@@ -1462,7 +1567,7 @@ fn chat_state_scenes(app: &AppHandle) {
             });
         }
         *state.models_registry.lock().expect("models registry lock") = many;
-        let _ = win.eval("(()=>{ if (document.getElementById('models').hidden) document.getElementById('chat-models').click(); })()");
+        let _ = win.eval("(()=>{ if (document.getElementById('models').inert) document.getElementById('chat-models').click(); })()");
         sleep(Duration::from_millis(1600));
         capture_visual(app, "modelos-lista-larga");
         let _ = win.eval("document.getElementById('models-list').scrollTop = 9999");
@@ -1476,7 +1581,7 @@ fn chat_state_scenes(app: &AppHandle) {
     scene(
         FakeModelConfig::default(),
         vec![
-            ("(()=>{ if (document.getElementById('models').hidden) document.getElementById('chat-models').click(); })()".into(), 1500, ""),
+            ("(()=>{ if (document.getElementById('models').inert) document.getElementById('chat-models').click(); })()".into(), 1500, ""),
             ("document.getElementById('models-info').click()".into(), 500, "modelos-i-abierto"),
             ("document.getElementById('models-close').click()".into(), 300, ""),
         ],
@@ -1503,7 +1608,7 @@ const MODELS_JS: &str = r#"(async () => {
     await new Promise(r => setTimeout(r, 200));
     // Visual evidence only (opt-in): hold the panel open while Rust grabs it.
     if (window.__abitoProbeHold) await new Promise(r => setTimeout(r, window.__abitoProbeHold));
-    ev.panel_visible = !document.getElementById('models').hidden;
+    ev.panel_visible = !document.getElementById('models').inert;
     ev.transcript_hidden = getComputedStyle(document.getElementById('chat-body')).display === 'none';
     ev.choice_note = listing.choice_note;
     ev.remote = listing.remote;
@@ -1528,7 +1633,7 @@ const MODELS_JS: &str = r#"(async () => {
     const chat = await invoke('chat_action', { payload: { action: 'view' } });
     ev.chat_target_after = chat.target;
     document.getElementById('models-close').click();
-    ev.panel_closed = document.getElementById('models').hidden;
+    ev.panel_closed = document.getElementById('models').inert;
   } catch (e) { ev.script_error = String(e && (e.message || e.code) || e); }
   await invoke('record_chat_evidence', { evidence: ev });
 })();"#;

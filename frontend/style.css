@@ -94,6 +94,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 .ico svg { width: 20px; height: 20px; display: block; }
 .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; font: 600 13px/1 var(--font-ui); color: var(--island-ink); }
 .chip .ico { color: var(--island-muted); }
+#bridge, #card-bridge { margin-left: 4px; }
 [data-tone="go"] .ico { color: var(--go); }
 [data-tone="sun"] .ico { color: var(--sun); }
 [data-tone="red"] .ico { color: var(--red-11); }
@@ -197,7 +198,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 @media (prefers-reduced-motion: reduce) {
   /* island.js already snaps geometry under reduced motion; this also kills any
      residual CSS transition so the OS preference really wins. */
-  #notices, #permission, #open-chat, #chat { transition: none !important; transform: none !important; }
+  #notices, #permission, #open-chat, #chat, #models, #chat-body { transition: none !important; transform: none !important; }
   #clay { transition: none !important; }
   #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg, [data-kind="checking"] .ico svg { animation: none; }
   /* Contract §4: no meaning depends on animation. The in-flight ring stays
@@ -353,13 +354,24 @@ body.probe-capture-bg { background: #d8c9a3; }
   background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
 }
 #chat-models[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
-#capsule[data-models="open"] #chat-body { display: none; }
+/* Panels swap with the §9.2 motion (no display:none): the chat body leaves in
+   160ms ease-in and the models panel enters after the 160ms delay. */
+#chat-body { transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), visibility 0s; }
+#capsule[data-models="open"] #chat-body { opacity: 0; visibility: hidden; transition: opacity var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out); }
 /* UI.2 — visual model view (docs/desktop-visual-language.md §2.4). Panel =
    one 44px bar (count chip, «i», three meters, refresh, done) + a scrolling
    list of 44px rows. Rows are never clipped by a fixed height: the list
    scrolls and every row keeps its full height (BLOCKER 2 of the review). */
-#models { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; gap: 4px; color: var(--island-muted); }
-#models[hidden] { display: none; }
+#models {
+  position: absolute; left: 60px; right: 12px; top: 52px; bottom: 8px;
+  display: flex; flex-direction: column; gap: 4px; color: var(--island-muted);
+  opacity: 0; visibility: hidden; transform: translateY(6px);
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
+}
+#models[data-open="true"] {
+  opacity: 1; visibility: visible; transform: none;
+  transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s;
+}
 #models-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 #models-bar .icon-btn:first-of-type { margin-left: 0; }
 #models-meters { display: flex; gap: 14px; margin: 0 auto; padding: 0; list-style: none; }
