@@ -256,18 +256,21 @@ function cascadeAnimation(css, chain, reduced) {
   return winners.length ? winners[winners.length - 1].value : null;
 }
 
-test('UI.2 reduced motion: the CASCADE (not a regex) leaves the chat ring still and spins it otherwise', () => {
+test('#304 motion: the CASCADE is keyed on Abito\'s OWN html[data-motion], never on the system media query (system reduced + Abito full → the ring spins)', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+  assert.doesNotMatch(css, /@media[^{]*prefers-reduced-motion/, 'the page must not inherit the system preference through CSS');
   for (const kind of ['busy', 'checking']) {
-    const chain = [{ tag: 'span', id: 'chat-state', attrs: { 'data-kind': kind }, classes: ['chip'] },
+    const under = mode => [{ tag: 'html', attrs: { 'data-motion': mode } }, { tag: 'span', id: 'chat-state', attrs: { 'data-kind': kind }, classes: ['chip'] },
       { tag: 'span', classes: ['ico'] }, { tag: 'svg' }];
-    const reduced = cascadeAnimation(css, chain, true);
-    assert.ok(reduced === null || reduced === 'none', `reduced: ${kind} resolves to ${reduced}`);
-    assert.match(cascadeAnimation(css, chain, false), /^spin /, `normal: ${kind} spins`);
+    // second arg = the SYSTEM media query: TRUE in both cases (the WebKit-inherited reduced of the human's session)
+    const reduce = cascadeAnimation(css, under('reduce'), true);
+    assert.ok(reduce === null || reduce === 'none', `Abito reduce: ${kind} resolves to ${reduce}`);
+    assert.match(cascadeAnimation(css, under('full'), true), /^spin /, `Abito full + system reduced: ${kind} still spins`);
+    assert.match(cascadeAnimation(css, under('full'), false), /^spin /);
   }
   // the harness itself must detect the old bug: a spinning rule AFTER the stop wins
-  const buggy = '@media (prefers-reduced-motion: reduce) { #a .b { animation: none; } }\n#a .b { animation: spin 1s; }';
-  assert.match(cascadeAnimation(buggy, [{ tag: 'p', id: 'a' }, { tag: 'i', classes: ['b'] }], true), /^spin/);
+  const buggy = 'html[data-motion="reduce"] #a .b { animation: none; }\nhtml[data-motion="reduce"] #a .b { animation: spin 1s; }';
+  assert.match(cascadeAnimation(buggy, [{ tag: 'html', attrs: { 'data-motion': 'reduce' } }, { tag: 'p', id: 'a' }, { tag: 'i', classes: ['b'] }], true), /^spin/);
 });
 
 test('Q2 poseFor: only real lane state maps to a pose; the rest is rest', () => {

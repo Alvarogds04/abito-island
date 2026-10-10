@@ -167,9 +167,31 @@ pub fn launch_intent(argv: &[String]) -> LaunchIntent {
     }
 }
 
+/// #304: Abito animates ALWAYS by default. `motion.json` is `{"v":1,"override":bool}`;
+/// `override: false` is the human's explicit choice to honor the SYSTEM reduced-motion
+/// preference (the `respectSystemMotion` setting). Absent, unreadable or corrupt
+/// config means the default: animate (the system value, which WebKit derives from
+/// GtkSettings, is never inherited unasked).
+pub fn motion_override_from_config(text: Option<&str>) -> bool {
+    text.and_then(|t| serde_json::from_str::<Value>(t).ok())
+        .and_then(|v| v.get("override").and_then(Value::as_bool))
+        .unwrap_or(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn motion_defaults_to_animate_and_only_an_explicit_false_honors_the_system() {
+        assert!(motion_override_from_config(None), "no config file: animate");
+        assert!(motion_override_from_config(Some("")), "empty: animate");
+        assert!(motion_override_from_config(Some("not json")), "corrupt: animate");
+        assert!(motion_override_from_config(Some("{}")), "no key: animate");
+        assert!(motion_override_from_config(Some(r#"{"v":1,"override":"no"}"#)), "wrong type: animate");
+        assert!(motion_override_from_config(Some(r#"{"v":1,"override":true}"#)));
+        assert!(!motion_override_from_config(Some(r#"{"v":1,"override":false}"#)), "the human's explicit opt-in to the system value");
+    }
 
     #[test]
     fn transition_matrix_is_the_electron_one() {

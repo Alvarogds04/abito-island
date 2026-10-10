@@ -586,16 +586,14 @@ fn publish(app: &AppHandle, state: &AppState) {
 
 // --- M1b motion override persistence (main.cjs motion.json) -----------------
 
-/// Fail closed (core.cjs `rememberedMotion`): only an exact `override: true`
-/// animates; absent, unreadable or corrupt config means respect accessibility.
+/// #304: Abito animates by default; see `desktop::motion_override_from_config`.
 fn load_motion_override(app: &AppHandle) -> bool {
-    app.path()
+    let text = app
+        .path()
         .app_config_dir()
         .ok()
-        .and_then(|dir| std::fs::read_to_string(dir.join("motion.json")).ok())
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .map(|v| v.get("override").and_then(Value::as_bool) == Some(true))
-        .unwrap_or(false)
+        .and_then(|dir| std::fs::read_to_string(dir.join("motion.json")).ok());
+    abito_island::desktop::motion_override_from_config(text.as_deref())
 }
 
 fn persist_motion_override(app: &AppHandle, value: bool) {
@@ -1225,7 +1223,7 @@ fn main() {
         user_touch: AtomicBool::new(false),
         generation: AtomicU64::new(0),
         phase: Mutex::new(IslandState::Compact),
-        motion_override: AtomicBool::new(false),
+        motion_override: AtomicBool::new(true), // #304: animate by default
         revision: AtomicU64::new(0),
         last_published: Mutex::new(String::new()),
         rate: Mutex::new(bridge::RateLimiter::new()),

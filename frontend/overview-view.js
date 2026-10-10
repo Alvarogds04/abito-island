@@ -143,6 +143,18 @@
     return host || chat || 'idle';
   }
 
+  // #304 — Abito's OWN motion state. WebKit derives prefers-reduced-motion from
+  // GtkSettings (gtk-enable-animations), which can be «off» in a session where the
+  // human never asked for it, leaving the island frozen. So the system value is
+  // IGNORED by default: motion is «full» unless the human opted to honor the system
+  // preference (`honorSystem`, the `respectSystemMotion` setting).
+  function motionState(input) {
+    const i = input || {};
+    return i.honorSystem === true && i.systemReduced === true ? 'reduce' : 'full';
+  }
+  // snapshot.motionOverride === true (the new default) = do NOT honor the system.
+  const honorSystemMotion = snapshot => !!snapshot && snapshot.motionOverride === false;
+
   // §9.2: R6 hover scale. Pure: 1.06 only while the pointer is inside the
   // character's box and the system does NOT ask for reduced motion; never
   // while dragging. It carries no meaning and never touches the pose.
@@ -162,5 +174,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, bridgeView, hostPoseView, choosePose, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

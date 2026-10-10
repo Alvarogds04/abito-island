@@ -18,7 +18,17 @@
   const capsule = $('capsule');
   const island = $('island');
   const clayEl = $('clay');
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)'); // the SYSTEM value: informative only (#304)
+  // #304: Abito's own motion state. Default «full»: the system preference is honored
+  // only when the human opted in (snapshot.motionOverride === false). Every snap /
+  // animate decision, the CSS (html[data-motion]) and the frozen engine follow it.
+  let honorSystem = false;
+  const motionReduced = () => window.AbitoOverview.motionState({ systemReduced: reduced.matches, honorSystem }) === 'reduce';
+  const applyMotion = () => {
+    document.documentElement.dataset.motion = motionReduced() ? 'reduce' : 'full';
+    if (typeof AbitoClay !== 'undefined' && AbitoClay.forced !== !honorSystem) AbitoClay.setForced(!honorSystem);
+  };
+  reduced.addEventListener('change', applyMotion);
 
   // Visible island geometry per state. Native windows: 304x44 compact and
   // 672x176 overview (set by Rust); margins are the difference.
@@ -51,6 +61,7 @@
   if (typeof AbitoClay !== 'undefined') {
     clay = AbitoClay.create(clayEl, { seed: 505, viewBox: '0 20 200 160' });
   }
+  applyMotion(); // from the first frame: Abito's own motion state, never the inherited one (#304)
 
   // ---- R6 pose (Q2): only REAL events drive it, through the engine's own
   // setState (no new poses, no redraw). Sources: the chat lane (chat.js
@@ -210,7 +221,7 @@
   // shrink = 340 ms curve, reduced motion snaps).
   function moveView(t) {
     q.target = t;
-    if ((reduced.matches && !forceMotion) || Math.abs(t - q.x) < 1e-9) {
+    if (motionReduced() || Math.abs(t - q.x) < 1e-9) {
       q.x = t; q.v = 0; q.mode = 'idle'; return;
     }
     if (t > q.x) { q.mode = 'spring'; q.last = 0; }
@@ -222,12 +233,9 @@
   // `animateAnyway` snapshot (motionOverride === true) may animate against
   // prefers-reduced-motion. A missing facade, a failed snapshot or
   // `respectSystemMotion` all leave this false — accessibility wins.
-  let forceMotion = false;
   const applyMotionPref = snap => {
-    forceMotion = !!(snap && snap.motionOverride === true);
-    // The human's explicit «animate anyway» must reach the character too (the
-    // engine honours the OS preference unless forced); never forced otherwise.
-    if (typeof AbitoClay !== 'undefined' && AbitoClay.forced !== forceMotion) AbitoClay.setForced(forceMotion);
+    honorSystem = window.AbitoOverview.honorSystemMotion(snap);
+    applyMotion(); // CSS state + the frozen engine (forced unless the human honors the system)
   };
   if (window.desktop) {
     try { window.desktop.onState(applyMotionPref); } catch { /* facade optional */ }
@@ -241,7 +249,7 @@
     target = t;
     // A collapse always leaves the chat view (Rust resets it too).
     if (t === 0) moveView(0);
-    if ((reduced.matches && !forceMotion) || Math.abs(t - p) < 1e-9) {
+    if (motionReduced() || Math.abs(t - p) < 1e-9) {
       p = t; v = 0; mode = 'idle'; render();
       if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
       return;
@@ -318,7 +326,7 @@
     const scale = parseFloat(clayEl.style.getPropertyValue('--hover')) || 1;
     const w = r.width / scale, h = r.height / scale;
     const box = { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
-    const next = O.hoverScale(point, box, { reduced: reduced.matches, dragging: pressed });
+    const next = O.hoverScale(point, box, { reduced: motionReduced(), dragging: pressed });
     if (next !== scale) clayEl.style.setProperty('--hover', String(next));
   }
   window.addEventListener('pointermove', e => {

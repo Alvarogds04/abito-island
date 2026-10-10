@@ -239,9 +239,8 @@ test('notices strip: its content never touches the chat bubble or the pill borde
 });
 
 test('reduced motion: the in-flight ring does not rotate (cue kept by blue ring shape)', () => {
-  const blocks = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{((?:[^{}]*\{[^{}]*\})*[^{}]*)\}/g)].map(m => m[1]);
-  assert.ok(blocks.length, 'reduced-motion block exists');
-  const joined = blocks.join('\n');
+  const joined = [...css.matchAll(/html\[data-motion="reduce"\][^{]*\{[^}]*\}/g)].map(m => m[0]).join('\n');
+  assert.ok(joined, 'reduced-motion rules exist, keyed on html[data-motion="reduce"]');
   assert.match(joined, /\[data-kind="busy"\] \.ico svg\s*\{[^}]*animation:\s*none/);
   assert.doesNotMatch(css, /even under reduced motion/);
 });
@@ -305,7 +304,7 @@ test('UI.3: compact only carries the sun contour; Escape closes models first; ne
   assert.ok(chatSrc.indexOf("dataset.models === 'open'") < chatSrc.indexOf('if (typing)'), 'models closes before leaving the composer');
   assert.match(css, /#chat-new \.dot \{ background: var\(--island-live\)/);
   assert.match(css, /#chat-log li\.enter \{ animation: row-in 160ms/);
-  assert.match(css, /prefers-reduced-motion: reduce\) \{ #chat-log li\.enter \{ animation: none/);
+  assert.match(css, /html\[data-motion="reduce"\] #chat-log li\.enter \{ animation: none/);
   assert.match(islandSrc, /paintCompactFlag\(\); \/\/ an expired card/);
 });
 
@@ -322,12 +321,12 @@ test('R6 pose from the host snapshot: only REAL persistent failures give error; 
   assert.equal(O.snapshotPose({ ...bridge('healthy'), card: { state: 'inert', reason: 'No se pudo confirmar la decisión.' } }), null);
 });
 
-test('R6 liveness: the island never forces/pauses the engine (idle is alive by default, the OS reduced-motion preference wins)', () => {
+test('R6 liveness (#304): the island never pauses the engine; idle is alive by default and the SYSTEM reduced-motion value no longer freezes it unless the human opted in', () => {
   assert.doesNotMatch(islandSrc, /setPaused|setManual/);
-  // setForced exists ONLY for the human's explicit «animate anyway» (motionOverride), never by default
+  // the engine is forced from ONE place: the motion state (forced unless the human honors the system)
   const forced = islandSrc.match(/setForced\([^)]*\)/g) || [];
-  assert.deepEqual(forced, ['setForced(forceMotion)']);
-  assert.match(islandSrc, /forceMotion = !!\(snap && snap\.motionOverride === true\)/);
+  assert.deepEqual(forced, ['setForced(!honorSystem)']);
+  assert.match(islandSrc, /honorSystem = window\.AbitoOverview\.honorSystemMotion\(snap\)/);
   assert.match(islandSrc, /AbitoClay\.create\(clayEl, \{ seed: 505/);
   assert.doesNotMatch(islandSrc, /live: false/);
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
@@ -366,9 +365,9 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   assert.match(css, /#clay \{[^}]*scale\(var\(--hover, 1\)\)[^}]*transition: transform var\(--dur-state\)/);
   assert.match(css, /:where\(button, textarea\) \{[^}]*outline: 2px solid transparent[^}]*var\(--dur-focus\)/);
   assert.match(css, /#models-list \.choose\[aria-pressed="true"\] \.ico \{ animation: control-pop var\(--dur-control\) var\(--spring\)/);
-  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
-  assert.match(reduced, /#notices, #permission, #open-chat, #chat, #models, #chat-body, #question \{ transition: none !important; transform: none !important/);
-  assert.match(reduced, /#clay \{ transition: none !important/);
+  const reduced = [...css.matchAll(/html\[data-motion="reduce"\][^{]*\{[^}]*\}/g)].map(m => m[0]).join('\n');
+  assert.match(reduced, /html\[data-motion="reduce"\] #notices, html\[data-motion="reduce"\] #permission, html\[data-motion="reduce"\] #open-chat, html\[data-motion="reduce"\] #chat, html\[data-motion="reduce"\] #models, html\[data-motion="reduce"\] #chat-body, html\[data-motion="reduce"\] #question \{ transition: none !important; transform: none !important/);
+  assert.match(reduced, /html\[data-motion="reduce"\] #clay \{ transition: none !important/);
 });
 
 test('§5 chat header: R6 ~40px VISIBLE (box x 112/128 within 4px) and inside the header', () => {
@@ -438,7 +437,37 @@ test('N8 vertical chat entrance: the chat (and its models panel) travel along th
   const chatRule = /\n#chat \{([^}]*)\}/.exec(css)[1];
   assert.doesNotMatch(chatRule, /translateY\(6px\)/);
   // reduced motion still jumps
-  assert.match(css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)')), /#chat, #models/);
+  assert.match(css, /html\[data-motion="reduce"\] #chat, html\[data-motion="reduce"\] #models/);
+});
+
+test('#304 motionState: Abito animates ALWAYS by default; the system preference counts only when the human opted to honor it', () => {
+  // the human's real session: the system (via GTK/WebKit) says «reduced», Abito must still move
+  assert.equal(O.motionState({ systemReduced: true, honorSystem: false }), 'full');
+  assert.equal(O.motionState({ systemReduced: false, honorSystem: false }), 'full');
+  assert.equal(O.motionState({ systemReduced: true, honorSystem: true }), 'reduce');
+  assert.equal(O.motionState({ systemReduced: false, honorSystem: true }), 'full');
+  // missing facade / snapshot / junk: the DEFAULT is full, never inherited
+  assert.equal(O.motionState({ systemReduced: true }), 'full');
+  assert.equal(O.motionState({}), 'full');
+  assert.equal(O.motionState(null), 'full');
+  // the snapshot field: motionOverride true (the new default) = do NOT honor the system
+  assert.equal(O.honorSystemMotion({ motionOverride: true }), false);
+  assert.equal(O.honorSystemMotion({ motionOverride: false }), true);
+  assert.equal(O.honorSystemMotion(null), false, 'no snapshot yet: animate');
+  assert.equal(O.honorSystemMotion({}), false);
+});
+
+test('#304 wiring: the page decides motion itself (data-motion on <html>), starts in «full», forces the engine, no inherited media query in JS decisions', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /<html lang="es" data-motion="full">/);
+  assert.match(islandSrc, /let honorSystem = false;/);
+  assert.match(islandSrc, /AbitoOverview\.motionState\(\{ systemReduced: reduced\.matches, honorSystem \}\)/);
+  assert.match(islandSrc, /document\.documentElement\.dataset\.motion = /);
+  // every snap/animate decision goes through the single motion state
+  assert.doesNotMatch(islandSrc, /reduced\.matches && !forceMotion/);
+  assert.match(islandSrc, /motionReduced\(\)/);
+  // the frozen engine is forced from the first frame unless the human honors the system
+  assert.match(islandSrc, /AbitoClay\.setForced\(!honorSystem\)/);
 });
 
 console.log(`overview-view-check: ${passed} passed`);

@@ -1,7 +1,7 @@
 /* M1a island styles. Tokens reused from the legacy Electron island contract
    (colors, radii, easing durations); geometry and motion are driven per-frame
    by island.js: grow = spring response 0.5s / damping 0.72, shrink = 340ms
-   cubic-bezier(.45,0,.2,1), prefers-reduced-motion snaps instantly. Fonts use
+   cubic-bezier(.45,0,.2,1), Abito's own reduced-motion state snaps instantly. Fonts use
    the system stack on purpose: the legacy woff2 files are not copied. */
 
 :root {
@@ -204,15 +204,16 @@ body.probe-capture-bg { background: #d8c9a3; }
 #capsule[data-phase="expanded"][data-card-tone="faint"] #island { box-shadow: inset 0 0 0 2px var(--faint); }
 #capsule[data-phase="expanded"][data-card-tone="live"] #island { box-shadow: inset 0 0 0 2px var(--island-live); }
 
-@media (prefers-reduced-motion: reduce) {
-  /* island.js already snaps geometry under reduced motion; this also kills any
-     residual CSS transition so the OS preference really wins. */
-  #notices, #permission, #open-chat, #chat, #models, #chat-body, #question { transition: none !important; transform: none !important; }
-  #clay { transition: none !important; }
-  #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg, [data-kind="checking"] .ico svg { animation: none; }
-  /* Contract §4: no meaning depends on animation. The in-flight ring stays
-     still: the blue open arc (shape + --island-live) is the cue. */
-  [data-kind="busy"] .ico svg { animation: none; }
+/* #304: Abito decides its own motion. island.js sets <html data-motion="full|reduce">
+   (default full: Abito always animates; the SYSTEM preference, which WebKit derives from
+   GtkSettings and which can be «off» in a session without the human asking for it, is
+   honored only when the human opts in). No rule below uses the system media query. */
+html[data-motion="reduce"] #notices, html[data-motion="reduce"] #permission, html[data-motion="reduce"] #open-chat, html[data-motion="reduce"] #chat, html[data-motion="reduce"] #models, html[data-motion="reduce"] #chat-body, html[data-motion="reduce"] #question { transition: none !important; transform: none !important; }
+html[data-motion="reduce"] #clay { transition: none !important; }
+html[data-motion="reduce"] #chat-state[data-kind="busy"] .ico svg, html[data-motion="reduce"] #chat-state[data-kind="checking"] .ico svg, html[data-motion="reduce"] [data-kind="checking"] .ico svg { animation: none; }
+/* Contract §4: no meaning depends on animation. The in-flight ring stays
+   still: the blue open arc (shape + --island-live) is the cue. */
+html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
 }
 
 /* ---- U1: chat in the island ------------------------------------------- */
@@ -271,11 +272,8 @@ body.probe-capture-bg { background: #d8c9a3; }
 #chat-target-chip .ico { color: var(--island-muted); }
 #capsule[data-chat-availability="unavailable"] #chat-state .word,
 #capsule[data-chat-availability="blocked"] #chat-state .word { color: var(--red-11); }
-/* Spins ONLY when the user has not asked for reduced motion: wrapped so no
-   source-order trick can make it win (the blue open arc is the still cue). */
-@media (prefers-reduced-motion: no-preference) {
-  #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg { animation: spin 900ms linear infinite; }
-}
+/* Spins ONLY while Abito's own motion state is «full» (the blue open arc is the still cue). */
+html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motion="full"] #chat-state[data-kind="checking"] .ico svg { animation: spin 900ms linear infinite; }
 #chat-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #chat-log {
   flex: 1;
@@ -342,7 +340,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #chat-new .dot { background: var(--island-live); }
 @keyframes row-in { from { opacity: 0; transform: translateY(4px); } }
 #chat-log li.enter { animation: row-in 160ms var(--ease-out); }
-@media (prefers-reduced-motion: reduce) { #chat-log li.enter { animation: none; } }
+html[data-motion="reduce"] #chat-log li.enter { animation: none; }
 #chat-new {
   display: inline-flex; align-items: center; gap: 2px;
   position: absolute;
@@ -352,9 +350,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   background: #18181b;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  #chat-log { scroll-behavior: auto; }
-}
+html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
 
 /* ---- U2: model picker (internal panel of the chat view) --------------- */
 #chat-models {
@@ -425,7 +421,8 @@ body.probe-capture-bg { background: #d8c9a3; }
 #models-list .skeleton { height: 44px; margin: 0 0 4px; border-radius: var(--radius-xl); background: rgba(99, 179, 255, .16); }
 @keyframes pulse { 50% { opacity: .45; } }
 #models-list .skeleton { animation: pulse 1200ms ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { #models-list .skeleton, #models-list .choose[aria-pressed="true"] .ico { animation: none; } #models-list .choose::before, .icon-btn, :where(button, textarea) { transition: none; } }
+html[data-motion="reduce"] #models-list .skeleton, html[data-motion="reduce"] #models-list .choose[aria-pressed="true"] .ico { animation: none; }
+html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduce"] .icon-btn, html[data-motion="reduce"] :where(button, textarea) { transition: none; }
 
 /* ---- Q1: keyboard focus of the island itself -------------------------- */
 #capsule:has(#island-toggle:focus-visible) #island { outline: 2px solid var(--go); outline-offset: 2px; }
@@ -485,4 +482,4 @@ body.probe-capture-bg { background: #d8c9a3; }
 #question-send:disabled { opacity: .4; cursor: default; }
 #question-word { position: absolute; right: 64px; bottom: 50px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
 #question-state[data-kind="sent"] .ico { color: var(--island-live); }
-@media (prefers-reduced-motion: reduce) { #question { transition: none !important; transform: none !important; } }
+

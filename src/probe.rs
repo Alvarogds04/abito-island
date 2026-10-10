@@ -154,6 +154,8 @@ pub fn run(app: AppHandle) {
     }));
 
     let state = app.state::<AppState>();
+    sleep(Duration::from_millis(1500));
+    motion_diag(&app, "start");
 
     // Wait for the webview's evidence command (clay-engine rendered, no canvas).
     let mut evidence = None;
@@ -774,6 +776,36 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// before and after. The fake's request log proves that NOTHING was
 /// written before that click (a notice can never approve) and that
 /// `/execute` carried exactly the card's `payload_hash`.
+/// #304 diagnosis (read-only): what the SYSTEM tells WebKit about motion, and
+/// what the page decides. Reads GtkSettings on the main thread; changes nothing.
+fn motion_diag(app: &AppHandle, tag: &str) {
+    use gtk::prelude::ObjectExt as _;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = app.run_on_main_thread(move || {
+        let gtk_value = gtk::Settings::default().map(|s| s.property::<bool>("gtk-enable-animations"));
+        let _ = tx.send(gtk_value);
+    });
+    let gtk_value = rx.recv_timeout(Duration::from_secs(2)).ok().flatten();
+    let state = app.state::<AppState>();
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let page = main_window(app);
+    let _ = page.eval(
+        "(async () => { const invoke = (window.__TAURI__.core.invoke);
+          const snap = await window.desktop.snapshot().catch(() => null);
+          const ev = { phase: 'motion_diag', media_reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+            data_motion: document.documentElement.dataset.motion || null,
+            motion_override: snap ? snap.motionOverride : null,
+            clay_status: AbitoClay.statusKind(), clay_osReduced: AbitoClay.osReduced, clay_forced: AbitoClay.forced, clay_frames: AbitoClay.frames,
+            chat_transition_duration: getComputedStyle(document.getElementById('chat')).transitionDuration,
+            open_chat_transition_duration: getComputedStyle(document.getElementById('open-chat')).transitionDuration };
+          await new Promise(r => setTimeout(r, 600)); ev.clay_frames_after = AbitoClay.frames;
+          await invoke('record_chat_evidence', { evidence: ev }); })()",
+    );
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(6));
+    emit(&json!({"step": "motion_diag", "tag": tag, "gtk_enable_animations": gtk_value,
+        "env_gtk_modules": std::env::var("GTK_MODULES").ok(), "webview": lines}));
+}
+
 /// §9.5 motion CERTIFICATION, sampled FROM THE PAGE (no screen capture): a
 /// requestAnimationFrame loop records `performance.now()` plus the computed
 /// opacity/transform/visibility/display of the animated views and the
@@ -783,29 +815,11 @@ fn sample_motion(app: &AppHandle, name: &str, millis: u64, action: impl FnOnce()
     let state = app.state::<AppState>();
     state.chat_probe.lock().expect("chat probe lock").clear();
     let page = main_window(app);
-    // The webview derives prefers-reduced-motion from GtkSettings
-    // `gtk-enable-animations`. This session reported it OFF at night (while
-    // gsettings says true), which makes every transition correctly snap and
-    // hides the motion we are certifying. For THIS in-process measurement only,
-    // switch it on (nothing is written to the user's settings), and report the
-    // original value so the evidence says what was done.
-    {
-        use gtk::prelude::ObjectExt as _;
-        let (tx, rx) = std::sync::mpsc::channel();
-        let _ = app.run_on_main_thread(move || {
-            let original = gtk::Settings::default().map(|s| {
-                let was = s.property::<bool>("gtk-enable-animations");
-                if !was {
-                    s.set_property("gtk-enable-animations", true);
-                }
-                was
-            });
-            let _ = tx.send(original);
-        });
-        let original = rx.recv_timeout(Duration::from_secs(2)).ok().flatten();
-        emit(&json!({"step": "motion_prefs", "gtk_enable_animations_original": original, "forced_on_for_measurement": original == Some(false)}));
-        sleep(Duration::from_millis(1800)); // let the webview re-evaluate prefers-reduced-motion
-    }
+    // #304: NO gtk-enable-animations toggling any more. Whatever the system tells
+    // WebKit (this session reports «reduced»), Abito must animate on its own: the
+    // measurement below is taken under the REAL system value, reported here.
+    motion_diag(app, name);
+    state.chat_probe.lock().expect("chat probe lock").clear();
     let start = format!(
         "(() => {{ const ids = ['chat', 'open-chat', 'notices', 'permission', 'clay', 'models', 'chat-body'];
           const S = {{ name: '{name}', t0: performance.now(), rows: [], viewEvents: [], anims: [] }};
