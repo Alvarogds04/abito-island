@@ -91,6 +91,7 @@
   const easeShrink = cubicBezier(0.45, 0, 0.2, 1);
 
   let cardShown = false; // UI.1: a valid approval card is on screen
+  let questionShown = false; // N6: a Pi question/notification is on screen (R6 shrinks like with a card)
   let p = 0;            // progress 0 = compact, 1 = overview
   let v = 0;            // spring velocity
   let target = 0;
@@ -135,7 +136,7 @@
     const h = lerp(COMPACT.h, lerp(OVERVIEW.h, CHAT.h, q.x), p);
     const r = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
-    const ov = cardShown ? OVERVIEW_CARD : OVERVIEW;
+    const ov = (cardShown || questionShown) ? OVERVIEW_CARD : OVERVIEW;
     const cs = lerp(COMPACT.clay, ov.clay, p);
     const drop = lerp(COMPACT.drop, OVERVIEW.drop, p);
     island.style.width = w + 'px';
@@ -501,13 +502,14 @@
     const card = current && current.card;
     const waiting = validCard(card) && Date.now() < Date.parse(card.expires_at) &&
       (card.state === 'pending' || card.reason === 'Abrí la tarjeta para decidir.'); // covered = still waiting for you
+    const questionWaiting = !!(capsule.dataset.question === 'pending');
     const bridgeDown = !!(O && O.bridgeView(current));
     const down = !!(current && current.unavailable === true) || bridgeDown;
-    flag.hidden = !(waiting || down);
+    flag.hidden = !(waiting || questionWaiting || down);
     if (flag.hidden) return;
-    flag.dataset.tone = waiting ? 'sun' : 'red';
-    flag.setAttribute('aria-label', waiting ? 'Algo espera tu decisión' : (bridgeDown ? 'Sin puente' : 'Avisos caídos'));
-    $('compact-flag-icon').innerHTML = waiting ? '<span class="dot"></span>' : icon('triangle');
+    flag.dataset.tone = (waiting || questionWaiting) ? 'sun' : 'red';
+    flag.setAttribute('aria-label', questionWaiting && !waiting ? 'Pi espera tu respuesta' : waiting ? 'Algo espera tu decisión' : (bridgeDown ? 'Sin puente' : 'Avisos caídos'));
+    $('compact-flag-icon').innerHTML = (waiting || questionWaiting) ? '<span class="dot"></span>' : icon('triangle');
   }
   function renderCard() {
     paintCompactFlag();
@@ -590,6 +592,11 @@
 
   // U1: the card's actionability depends on the visible view too.
   document.addEventListener('island:view', () => { if (current) renderCard(); });
+  document.addEventListener('abito:question', event => {
+    const show = !!(event.detail && event.detail.show);
+    if (show !== questionShown) { questionShown = show; render(); }
+    paintCompactFlag();
+  });
 
   // ---- Q1: keyboard control of the island itself -------------------------
   // The island never takes focus by itself (tauri.conf focus:false, no
