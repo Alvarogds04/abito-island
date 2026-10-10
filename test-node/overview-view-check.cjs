@@ -522,4 +522,14 @@ test('CSS structure: braces balance (no stray «}» swallowing the next rule) an
   assert.ok(top.some(t => t.startsWith('html[data-motion="reduce"] #notices')), 'the reduced-motion rules are top-level rules');
 });
 
+test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = geometry::LOGICAL_COMPACT), so there is no 304x44 transparent flash with the disc clipped', () => {
+  const conf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tauri.conf.json'), 'utf8')).app.windows[0];
+  const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
+  const dot = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
+  assert.deepEqual([conf.width, conf.height], [dot + 12, dot + 12]);
+  assert.deepEqual([conf.width, conf.height], [78, 78]);
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /All sizes land exactly 304x44/, 'README must not document the old compact size as the contract');
+});
+
 console.log(`overview-view-check: ${passed} passed`);

@@ -89,7 +89,7 @@ Wayland + XWayland, Tauri 2.12.1, GTK 3.24.52, WebKitGTK 2.52.6):
    and `match_x11.size` is `true` — start top-centre `[831,32]`, drag + snap
    bottom `[934,1036]` (chosen X kept), expand bottom-anchored `[750,904]`
    (904+176 = work-area bottom: grows upward), collapse back to `[934,1036]`,
-   drag + snap top `[934,32]`. All sizes land exactly 304x44 / 672x176.
+   drag + snap top `[934,32]`. All sizes land exactly 78x78 (the round dot, #302; it was 304x44) / 672x176.
 2. **Tauri's `outer_position` getter reports a constant Y offset of −37px**
    (X is correct, setters are correct). The drag math therefore reads the
    origin from the X server (`workarea::x11_window_origin`); the getter
@@ -98,8 +98,9 @@ Wayland + XWayland, Tauri 2.12.1, GTK 3.24.52, WebKitGTK 2.52.6):
 3. **`is_always_on_top()` returns `false` while X11 reports
    `_NET_WM_STATE_ABOVE` set** (`net_wm_state_above: true` at every step):
    the window really is above others; the getter does not reflect it.
-4. **WebKitGTK inflates the very first map** (304x81 instead of 304x44) and
-   a plain `set_size(304,44)` is refused until the widget has been grown
+4. **WebKitGTK inflates the very first map** (it was 304x81 instead of 304x44
+   for the old pill; the compact window is now 78x78) and
+   a plain `set_size(78,78)` is refused until the widget has been grown
    once. The app pins the contract geometry after page load with a silent
    height-only grow→shrink (the island is top-anchored and the width does not
    change, so nothing moves on screen); the probe waits for that settle
@@ -139,7 +140,7 @@ IPC path (observed 2026-10-09, this stack):
   without any inline script or style (index.html contains none; nothing to
   justify).
 - **No M1a regression**: every geometry step still reports
-  `match_x11.position/size: true` (304x44 / 672x176, snap keeps X, expand
+  `match_x11.position/size: true` (78x78 / 672x176; 304x44 before #302, snap keeps X, expand
   grows upward at the bottom) and `clay_revision: "R6"`, canvas 0,
   `clay-engine.js` sha256 unchanged.
 
