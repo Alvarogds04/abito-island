@@ -19,28 +19,44 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const FILE: &str = "hotkey.json";
 
-/// The live grab, whichever route holds it.
+/// The live grab(s). `Portal` carries the limited X11 grab IN PARALLEL while the OS
+/// dialog is open (an unanswered dialog must never leave the shortcut without a
+/// route); the watcher drops it once the portal really holds the shortcut, or
+/// promotes it when the human declines / the portal fails.
 enum Held {
-    X11(Grabber, Backend),
-    Portal(PortalGrabber),
+    X11 { grab: Grabber, backend: Backend, portal_note: Option<hotkey::Status> },
+    Portal { portal: PortalGrabber, x11: Option<Grabber> },
 }
 impl Held {
     fn status(&self) -> hotkey::Status {
         match self {
-            Held::X11(g, _) => g.status(),
-            Held::Portal(g) => g.status(),
+            Held::X11 { grab, .. } => grab.status(),
+            // while the dialog is pending, say so (the human has something to do): the
+            // parallel X11 grab already answers the shortcut meanwhile
+            Held::Portal { portal, .. } => portal.status(),
         }
     }
     fn backend(&self) -> Backend {
         match self {
-            Held::X11(_, b) => *b,
-            Held::Portal(_) => Backend::Portal,
+            Held::X11 { backend, .. } => *backend,
+            Held::Portal { .. } => Backend::Portal,
+        }
+    }
+    fn portal_note(&self) -> Option<hotkey::Status> {
+        match self {
+            Held::X11 { portal_note, .. } => *portal_note,
+            Held::Portal { .. } => None,
         }
     }
     fn stop(self) {
         match self {
-            Held::X11(g, _) => g.stop(),
-            Held::Portal(g) => g.stop(),
+            Held::X11 { grab, .. } => grab.stop(),
+            Held::Portal { portal, x11 } => {
+                portal.stop();
+                if let Some(g) = x11 {
+                    g.stop();
+                }
+            }
         }
     }
 }
@@ -135,11 +151,11 @@ fn session() -> hotkey::Session {
 fn view_of(host: &HotkeyHost) -> View {
     let cfg = host.config.lock().expect("hotkey config lock").clone();
     let held = host.grabber.lock().expect("hotkey grabber lock");
-    let (status, backend) = match held.as_ref() {
-        Some(h) => (h.status(), h.backend()),
-        None => (idle_status(&cfg), portal::choose_backend(session(), PortalState::Unavailable)),
+    let (status, backend, portal_note) = match held.as_ref() {
+        Some(h) => (h.status(), h.backend(), h.portal_note()),
+        None => (idle_status(&cfg), portal::choose_backend(session(), PortalState::Unavailable), None),
     };
-    View { combo: cfg.combo.to_string(), enabled: cfg.enabled, status, limited: backend_limited(backend), backend: backend_name(backend) }
+    View { combo: cfg.combo.to_string(), enabled: cfg.enabled, status, limited: backend_limited(backend), backend: backend_name(backend), portal_note }
 }
 
 fn publish(app: &AppHandle) {
@@ -151,17 +167,22 @@ fn publish(app: &AppHandle) {
 /// human once); when it is missing, unsupported by the compositor, or the human
 /// declines, the X11 grab takes over and the chip says «Atajo limitado».
 fn grab(app: &AppHandle, combo: hotkey::Combo) -> Held {
-    let press = |handle: AppHandle| move || press_on_main(&handle);
     let sess = session();
+    // The probe is time-boxed (a slow portal must not freeze startup) and runs off the
+    // caller's critical path: an `Unavailable` just means the X11 grab holds the shortcut.
     let portal_state = if sess == hotkey::Session::Wayland { portal::client::probe(None) } else { PortalState::Unavailable };
-    if portal::choose_backend(sess, portal_state) == Backend::Portal {
-        let g = PortalGrabber::start(None, combo, press(app.clone()));
-        watch_portal(app.clone());
-        return Held::Portal(g);
-    }
     let backend = portal::choose_backend(sess, portal_state);
-    let handle = app.clone();
-    Held::X11(Grabber::start(None, combo, move |GrabEvent::Pressed| press_on_main(&handle)), backend)
+    let x11_handle = app.clone();
+    let x11 = || Grabber::start(None, combo, move |GrabEvent::Pressed| press_on_main(&x11_handle));
+    if backend == Backend::Portal {
+        let handle = app.clone();
+        let portal = PortalGrabber::start(None, combo, move || press_on_main(&handle));
+        // the limited X11 grab runs meanwhile: no route is ever missing while the OS dialog is open
+        let held = Held::Portal { portal, x11: Some(x11()) };
+        watch_portal(app.clone());
+        return held;
+    }
+    Held::X11 { grab: x11(), backend, portal_note: None }
 }
 
 /// While the portal route is the holder, watch it: when the human declines the OS
@@ -175,24 +196,41 @@ fn watch_portal(app: AppHandle) {
             return;
         }
         let state = app.state::<AppState>();
-        let verdict = {
-            let held = state.hotkey.grabber.lock().expect("hotkey grabber lock");
-            match held.as_ref() {
-                Some(h @ Held::Portal(_)) => Some(portal::fallback_for(h.backend(), h.status())),
-                _ => None, // the holder changed (rebind/disable/quit): this watcher is done
-            }
+        let mut held = state.hotkey.grabber.lock().expect("hotkey grabber lock");
+        let plan = match held.as_ref() {
+            Some(Held::Portal { portal, .. }) => portal::plan_for(portal.status()),
+            _ => return, // the holder changed (rebind/disable/quit): this watcher is done
         };
-        match verdict {
-            None => return,
-            Some(portal::Fallback::Keep) => publish(&app), // status moves (pending → active) reach the chip
-            Some(portal::Fallback::ToX11 { .. }) => {
-                let combo = state.hotkey.config.lock().expect("hotkey config lock").combo;
-                let handle = app.clone();
-                let x11 = Grabber::start(None, combo, move |GrabEvent::Pressed| press_on_main(&handle));
-                let old = state.hotkey.grabber.lock().expect("hotkey grabber lock").replace(Held::X11(x11, Backend::X11 { limited: session() == hotkey::Session::Wayland }));
-                if let Some(old) = old {
-                    old.stop();
+        match plan {
+            portal::PortalPlan::KeepBoth => {
+                drop(held);
+                publish(&app);
+            }
+            portal::PortalPlan::DropX11 => {
+                // the portal holds the shortcut now: release the fallback so one press cannot toggle twice
+                if let Some(Held::Portal { x11, .. }) = held.as_mut() {
+                    if let Some(g) = x11.take() {
+                        g.stop();
+                    }
                 }
+                drop(held);
+                publish(&app);
+                return;
+            }
+            portal::PortalPlan::PromoteX11 { reason } => {
+                // the human declined / the portal failed: the parallel X11 grab becomes the route and
+                // the reason is KEPT so the chip can still explain it after this moment
+                let old = held.take();
+                if let Some(Held::Portal { portal, x11 }) = old {
+                    portal.stop();
+                    let grab = x11.unwrap_or_else(|| {
+                        let combo = state.hotkey.config.lock().expect("hotkey config lock").combo;
+                        let handle = app.clone();
+                        Grabber::start(None, combo, move |GrabEvent::Pressed| press_on_main(&handle))
+                    });
+                    *held = Some(Held::X11 { grab, backend: Backend::X11 { limited: session() == hotkey::Session::Wayland }, portal_note: Some(reason) });
+                }
+                drop(held);
                 publish(&app);
                 return;
             }

@@ -573,4 +573,16 @@ test('#305b hotkey feedback: the OS permission dialog is explained (accept once)
   assert.equal(O.hotkeyView(v('permission_pending', { enabled: false })), null);
 });
 
+test('#305b the reason the portal was dropped stays visible after the X11 fallback took over (not a 400 ms flash)', () => {
+  const v = (extra) => ({ combo: 'Ctrl+Alt+A', enabled: true, status: 'active', limited: true, backend: 'x11', portal_note: null, ...extra });
+  const declined = O.hotkeyView(v({ portal_note: 'permission_denied' }));
+  assert.equal(declined.word, 'Atajo limitado'); assert.equal(declined.tone, 'faint');
+  assert.match(declined.aria, /rechazaste el permiso/i); assert.match(declined.aria, /ventana de X11/);
+  const failed = O.hotkeyView(v({ portal_note: 'unsupported' }));
+  assert.match(failed.aria, /portal del sistema no respondió|no pudo/);
+  // no note = the plain limited message; a working X11 session with a note still explains it
+  assert.doesNotMatch(O.hotkeyView(v()).aria, /rechazaste/);
+  assert.equal(O.hotkeyView(v({ limited: false, portal_note: 'permission_denied' })).word, 'Atajo sin permiso', 'on a full X11 session the decline is the only thing worth saying');
+});
+
 console.log(`overview-view-check: ${passed} passed`);

@@ -89,6 +89,25 @@ pub fn is_our_activation(signal: &ShortcutSignal) -> bool {
     signal.activated && signal.shortcut_id == SHORTCUT_ID
 }
 
+/// While the OS dialog is open the limited X11 grab runs IN PARALLEL, so a dialog
+/// nobody answers can never leave the shortcut without a route. Once the portal
+/// really holds the shortcut the X11 grab is dropped (one press must not toggle
+/// twice); if the portal gives up or the human declines, the X11 grab is promoted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortalPlan {
+    KeepBoth,
+    DropX11,
+    PromoteX11 { reason: super::Status },
+}
+
+pub fn plan_for(portal_status: super::Status) -> PortalPlan {
+    match portal_status {
+        super::Status::Active => PortalPlan::DropX11,
+        super::Status::PermissionDenied | super::Status::Unsupported => PortalPlan::PromoteX11 { reason: portal_status },
+        _ => PortalPlan::KeepBoth,
+    }
+}
+
 /// What the host does when the portal route fails AFTER it was chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fallback {

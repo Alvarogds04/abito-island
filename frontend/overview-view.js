@@ -176,8 +176,13 @@
         aria: `Aceptá el permiso: el sistema te pregunta si Abito puede usar el atajo ${combo}; respondé una sola vez y queda guardado` };
     }
     if (view.status === 'active' && view.limited === true) {
+      const why = view.portal_note === 'permission_denied' ? ' Rechazaste el permiso del sistema, por eso no usa el atajo global.'
+        : view.portal_note === 'unsupported' ? ' El portal del sistema no respondió o no pudo registrarlo.' : '';
       return { kind: 'limited', word: 'Atajo limitado', icon: 'info', tone: 'faint',
-        aria: `Atajo limitado: ${combo} solo funciona mientras una ventana de X11 tiene el foco (sesión Wayland)` };
+        aria: `Atajo limitado: ${combo} solo funciona mientras una ventana de X11 tiene el foco (sesión Wayland).${why}` };
+    }
+    if (view.status === 'active' && view.portal_note === 'permission_denied') {
+      return { kind: 'permission_denied', word: 'Atajo sin permiso', icon: 'triangle', tone: 'red', aria: `Atajo sin permiso: ${combo} rechazaste el permiso del sistema` };
     }
     return null;
   }

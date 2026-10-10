@@ -31,14 +31,38 @@ pub struct PortalGrabber {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+/// How long startup may wait for the portal to say it exists.
+pub const PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
 /// Is the portal reachable and does it implement GlobalShortcuts? (No permission asked.)
 pub fn probe(bus_address: Option<&str>) -> PortalState {
-    let Ok(conn) = connect(bus_address) else { return PortalState::Unavailable };
-    let Ok(proxy) = Proxy::new(&conn, DEST, PATH, IFACE) else { return PortalState::Unavailable };
-    match proxy.get_property::<u32>("version") {
-        Ok(v) if v >= 1 => PortalState::Available,
-        _ => PortalState::Unavailable,
-    }
+    probe_with_timeout(bus_address, PROBE_TIMEOUT)
+}
+
+/// Same, with a hard cap: the D-Bus call runs on its own thread and the caller returns at
+/// the cap with `Unavailable` (a portal that answers `version` in 40 s must not freeze the
+/// island at startup; the X11 grab covers the shortcut meanwhile).
+pub fn probe_with_timeout(bus_address: Option<&str>, cap: Duration) -> PortalState {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let addr = bus_address.map(str::to_owned);
+    std::thread::spawn(move || {
+        let state = (|| {
+            let conn = connect(addr.as_deref()).ok()?;
+            let proxy = Proxy::new(&conn, DEST, PATH, IFACE).ok()?;
+            proxy.get_property::<u32>("version").ok().filter(|v| *v >= 1).map(|_| PortalState::Available)
+        })()
+        .unwrap_or(PortalState::Unavailable);
+        let _ = tx.send(state);
+    });
+    rx.recv_timeout(cap).unwrap_or(PortalState::Unavailable)
+}
+
+/// The unique name that currently owns `org.freedesktop.portal.Desktop`: the ONLY sender
+/// whose `Activated` signals we believe.
+fn portal_owner(conn: &Connection) -> Option<String> {
+    let dbus = zbus::blocking::fdo::DBusProxy::new(conn).ok()?;
+    let name = zbus::names::BusName::try_from(DEST).ok()?;
+    dbus.get_name_owner(name).ok().map(|o| o.to_string())
 }
 
 fn connect(bus_address: Option<&str>) -> zbus::Result<Connection> {
@@ -134,14 +158,21 @@ impl PortalGrabber {
                 Outcome::Failed => return fail(S_UNSUPPORTED),
             }
 
-            // 3) listen
+            // 3) listen. An activation counts only if it comes from the portal's own bus name
+            // AND names OUR session (another app's session, an impostor on the bus, or the
+            // session of a previous bind must never toggle the island).
+            let owner = portal_owner(&conn);
             for msg in activations {
                 if t_stop.load(Ordering::SeqCst) {
                     break;
                 }
                 let Ok(msg) = msg else { break };
-                if let Ok((_session, id, _ts, _opts)) = msg.body().deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>() {
-                    if is_our_activation(&ShortcutSignal { shortcut_id: id, activated: true }) {
+                let sender = msg.header().sender().map(|s| s.to_string());
+                if owner.is_none() || sender != owner {
+                    continue;
+                }
+                if let Ok((sig_session, id, _ts, _opts)) = msg.body().deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>() {
+                    if sig_session.as_str() == session_path.as_str() && is_our_activation(&ShortcutSignal { shortcut_id: id, activated: true }) {
                         on_press();
                     }
                 }

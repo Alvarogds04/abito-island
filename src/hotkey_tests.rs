@@ -295,3 +295,24 @@ fn the_permission_story_is_visible_in_the_chip_vocabulary() {
         assert!(!word.is_empty(), "{status:?}");
     }
 }
+
+#[test]
+fn portal_plan_keeps_a_parallel_x11_grab_until_the_portal_is_really_active() {
+    use portal::{plan_for, PortalPlan};
+    // the OS dialog is open (maybe forever): the limited X11 grab runs MEANWHILE, never "no route"
+    assert_eq!(plan_for(Status::PermissionPending), PortalPlan::KeepBoth);
+    // the portal took the shortcut: drop the X11 grab so one press cannot toggle twice
+    assert_eq!(plan_for(Status::Active), PortalPlan::DropX11);
+    // the portal gave up or the human declined: the already-running X11 grab becomes the route
+    assert_eq!(plan_for(Status::PermissionDenied), PortalPlan::PromoteX11 { reason: Status::PermissionDenied });
+    assert_eq!(plan_for(Status::Unsupported), PortalPlan::PromoteX11 { reason: Status::Unsupported });
+}
+
+#[test]
+fn the_view_remembers_why_the_portal_was_dropped() {
+    let v = View { combo: "Ctrl+Alt+A".into(), enabled: true, status: Status::Active, limited: true, backend: "x11", portal_note: Some(Status::PermissionDenied) };
+    let json = serde_json::to_value(&v).unwrap();
+    assert_eq!(json["portal_note"], serde_json::json!("permission_denied"));
+    let none = View { portal_note: None, ..v };
+    assert_eq!(serde_json::to_value(&none).unwrap()["portal_note"], serde_json::Value::Null);
+}

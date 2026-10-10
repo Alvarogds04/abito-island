@@ -343,6 +343,9 @@ pub struct View {
     pub limited: bool,
     /// Which route holds the shortcut: `portal` (XDG GlobalShortcuts) or `x11` (XGrabKey).
     pub backend: &'static str,
+    /// Why the portal route was dropped (the human declined the OS dialog, or the
+    /// portal failed), so the chip can keep saying it after the X11 fallback took over.
+    pub portal_note: Option<Status>,
 }
 
 /// The status a configuration implies before any grab happened.
