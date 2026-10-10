@@ -52,6 +52,11 @@
     return at < notification.options.length ? notification.options[at].index : -1;
   }
 
+  // The notification can be answered ONLY while it is actually on screen:
+  // expanded island, overview view, no approval card covering it. (A real key
+  // must never answer something nobody can see: chat open, compact island.)
+  const onScreen = d => !!d && d.phase === 'expanded' && d.view === 'overview' && !d.card;
+
   // ---- expiry (epoch milliseconds) --------------------------------------------------
   const expired = (expiresAt, now) => !Number.isFinite(expiresAt) || expiresAt <= now;
   function expiryWord(expiresAt, now) {
@@ -108,7 +113,9 @@
     if (!prev || !next) return null; // nothing sounds at start-up or without history
     const before = fromPending(prev.pending), after = fromPending(next.pending);
     if (after && (!before || before.id !== after.id)) return 'snd.attention';
-    if (!after && next.notice === 'expired' && prev.notice !== 'expired') return 'snd.expired';
+    // an expiry is an EVENT: the question that was pending last time is gone and the host says expired
+    // (a retained old notice must not swallow a second expiry, nor re-fire on an unrelated update)
+    if (!after && before && next.notice === 'expired') return 'snd.expired';
     if (next.notice && SILENT.has(next.notice)) return null; // «Enviada»/«Sin confirmar» NEVER sound
     return null;
   }
@@ -136,6 +143,6 @@
   // The host's byte budget is authoritative: no answer yet, or «not allowed», means no send.
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
-  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, trusted, optionForKey, expired, expiryWord, fraction,
+  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, trusted, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, utf8Bytes, textWord, canSendText };
 });

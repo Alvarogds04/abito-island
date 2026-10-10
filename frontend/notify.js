@@ -47,6 +47,9 @@
   const el = (tag, className, text) => { const n = document.createElement(tag); if (className) n.className = className; if (text) n.textContent = text; return n; };
 
   function current() { return N.phase(snapshot, { inFlight, now: Date.now() }); }
+  // Every answering path (click, key, text, skip) requires the notification to be
+  // visible: expanded + overview + no covering card. Hidden never answers.
+  const onScreen = () => N.onScreen({ phase: capsule.dataset.phase, view: capsule.dataset.view, card: capsule.dataset.card });
 
   function renderOptions(n, enabled) {
     optionsEl.textContent = '';
@@ -67,13 +70,14 @@
   function render() {
     const view = current();
     const n = view.notification || null;
-    const showing = !!n && !(capsule.dataset.card);
+    const showing = !!n && onScreen();
     const outcome = view.outcome || null;
     root.inert = !(showing || (outcome && capsule.dataset.view === 'overview'));
     capsule.dataset.question = n ? (view.kind === 'expired' ? 'expired' : 'pending') : (outcome ? 'outcome' : '');
     if (n) {
       if (renderedId !== n.id) { renderedId = n.id; textEl.value = ''; budget = null; renderOptions(n, view.controlsEnabled); say(`Pi pregunta: ${n.text}`); }
       body.textContent = n.text;
+      body.title = n.text; // the full text stays reachable when the view cuts it to two lines
       for (const b of optionsEl.querySelectorAll('button')) b.disabled = !view.controlsEnabled;
       freeform.hidden = !n.allowFreeText;
       skipEl.disabled = !view.controlsEnabled;
@@ -115,6 +119,7 @@
   }
   function choose(event, index) {
     if (!N.trusted(event)) return;
+    if (!onScreen()) return;
     const view = current();
     if (!view.notification || !view.controlsEnabled) return;
     inFlight = true; render();
@@ -122,6 +127,7 @@
   }
   function decline(event) {
     if (!N.trusted(event)) return;
+    if (!onScreen()) return;
     const view = current();
     if (!view.notification || !view.controlsEnabled) return;
     inFlight = true; render();
@@ -129,7 +135,7 @@
   }
   function submitText(event) {
     event.preventDefault();
-    if (!N.trusted(event)) return;
+    if (!N.trusted(event) || !onScreen()) return;
     const view = current();
     if (!view.notification || !view.controlsEnabled || !N.canSendText(budget, textEl.value)) return;
     const text = textEl.value;
@@ -157,7 +163,7 @@
   // Digits 1..N pick an option (never while typing, never with modifiers).
   document.addEventListener('keydown', event => {
     const view = current();
-    if (!view.notification || !view.controlsEnabled || root.inert) return;
+    if (!view.notification || !view.controlsEnabled || root.inert || !onScreen()) return;
     const index = N.optionForKey(view.notification, event, { typing: document.activeElement === textEl || /^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '') });
     if (index >= 0) { event.preventDefault(); choose(event, index); }
   });

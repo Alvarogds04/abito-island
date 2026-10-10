@@ -1026,6 +1026,9 @@ fn notification_scenes(app: &AppHandle) {
         line.clear();
         reader.read_line(&mut line).ok();
         seen.insert("skip_frame".into(), json!(line.trim().chars().take(160).collect::<String>()));
+        capture_visual(app, "pregunta-omitida-enviada"); // the host says «Enviada» until the producer acks
+        send(&mut stream, json!({"v":1,"type":"question_resolved","questionVersion":1,"project":project,"sessionId":session,"at":now(),"id":uuid(3),"status":"human_cancelled"}))?;
+        sleep(Duration::from_millis(700));
         capture_visual(app, "pregunta-omitida");
         // (a 1-option acknowledgement is NOT expressible in QP/1: 2-4 options or free text only;
         // the wire is the producer lane's, so it is not exercised here)

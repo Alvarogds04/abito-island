@@ -10,7 +10,8 @@ const path = require('node:path');
 const frontend = path.join(__dirname, '..', 'frontend');
 const N = require(path.join(frontend, 'notify-view.js'));
 let passed = 0;
-const test = (name, fn) => { fn(); passed += 1; };
+const pendingTests = [];
+const test = (name, fn) => { const r = fn(); if (r && typeof r.then === 'function') pendingTests.push(r.then(() => { passed += 1; })); else passed += 1; };
 
 const ID = '3f2b8a40-1c2d-4e5f-8a6b-7c8d9e0f1a2b';
 const pending = (extra = {}) => ({ id: ID, kind: 'question', text: '¿Qué rama uso?', allow_free_text: false, expires_at: 2000000,
@@ -200,4 +201,81 @@ test('layout: head row carries expiry + text + Omitir; Omitir exists only while 
   assert.match(fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8'), /skipEl\.hidden = !n;/);
 });
 
-console.log(`notify-view-check: ${passed} passed`);
+test('snd.expired: a SECOND expiry fires even when the old «expired» notice is retained; an unrelated update never re-fires', () => {
+  assert.equal(N.soundFor(snap(pending(), { notice: 'expired' }), snap(null, { notice: 'expired' })), 'snd.expired');
+  assert.equal(N.soundFor(snap(null, { notice: 'expired' }), snap(null, { notice: 'expired' })), null);
+});
+
+test('onScreen: only expanded + overview + no covering card', () => {
+  assert.equal(N.onScreen({ phase: 'expanded', view: 'overview', card: undefined }), true);
+  for (const d of [{ phase: 'compact', view: 'overview' }, { phase: 'expanding', view: 'overview' }, { phase: 'expanded', view: 'chat' },
+    { phase: 'expanded', view: 'overview', card: 'pending' }, {}, null]) assert.equal(N.onScreen(d), false, JSON.stringify(d));
+});
+
+// ---- BEHAVIOUR: run the real notify.js against a tiny fake DOM --------------------------------
+function harness(dataset) {
+  const vm = require('node:vm');
+  const calls = [];
+  const listeners = {};
+  const node = (id) => {
+    const n = { id, dataset: {}, hidden: false, inert: true, disabled: false, value: '', textContent: '', title: '', children: [],
+      listeners: {}, classList: { add() {}, remove() {}, toggle() {} },
+      setAttribute() {}, getAttribute() { return null; }, append(...k) { this.children.push(...k); }, appendChild(k) { this.children.push(k); },
+      addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
+      querySelectorAll() { return []; }, requestSubmit() {}, blur() {}, focus() {}, innerHTML: '' };
+    Object.defineProperty(n, 'textContent', { get() { return this._t || ''; }, set(v) { this._t = v; if (v === '') this.children = []; } });
+    return n;
+  };
+  const ids = ['question', 'capsule', 'question-body', 'question-options', 'question-freeform', 'question-text', 'question-word', 'question-send',
+    'question-skip', 'question-live', 'question-expiry', 'question-state', 'question-expiry-word', 'question-state-icon', 'question-state-word'];
+  const nodes = Object.fromEntries(ids.map(id => [id, node(id)]));
+  Object.assign(nodes.capsule.dataset, dataset);
+  const doc = { getElementById: id => nodes[id] || null, createElement: tag => node(tag), addEventListener(t, f) { (listeners[t] = listeners[t] || []).push(f); },
+    dispatchEvent() {}, activeElement: { tagName: 'OL' } };
+  const win = { AbitoNotify: N, AbitoIcons: { svg: () => '' }, __TAURI__: { core: { invoke: (name, args) => { calls.push(args.payload); return Promise.resolve(args.payload.action === 'view' ? view : {}); } } } };
+  const view = snap(pending({ expires_at: Date.now() + 120000 }));
+  const ctx = vm.createContext({ window: win, document: doc, setInterval: () => 0, requestAnimationFrame: f => f(), MutationObserver: class { observe() {} },
+    CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, Date });
+  vm.runInContext(fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8'), ctx);
+  return { calls, nodes, key: (k, extra) => { for (const f of listeners.keydown || []) f({ key: k, isTrusted: true, ctrlKey: false, altKey: false, metaKey: false, isComposing: false, repeat: false, preventDefault() {}, ...extra }); } };
+}
+const settle = () => new Promise(r => setImmediate(r));
+
+test('BEHAVIOUR: a real digit answers ONLY while the notification is on screen (chat open / compact / card covering / mid-transition → never)', async () => {
+  const cases = [
+    [{ phase: 'expanded', view: 'overview' }, true],
+    [{ phase: 'expanded', view: 'chat' }, false],
+    [{ phase: 'compact', view: 'overview' }, false],
+    [{ phase: 'expanding', view: 'overview' }, false],
+    [{ phase: 'expanded', view: 'overview', card: 'pending' }, false],
+  ];
+  const results = [];
+  for (const [dataset, expected] of cases) {
+    const h = harness(dataset);
+    await settle(); await settle();
+    h.nodes.question.inert = !expected ? h.nodes.question.inert : h.nodes.question.inert; // the guard must NOT rely on inert alone
+    h.nodes.question.inert = false; // worst case: inert says «live»
+    h.key('1');
+    await settle();
+    const answered = h.calls.some(c => c.action === 'answer');
+    results.push([JSON.stringify(dataset), answered]);
+    assert.equal(answered, expected, `${JSON.stringify(dataset)} -> answered=${answered}`);
+  }
+  // typing / modifiers / untrusted never answer even when visible
+  for (const extra of [{ isTrusted: false }, { ctrlKey: true }, { repeat: true }]) {
+    const h = harness({ phase: 'expanded', view: 'overview' }); await settle(); await settle(); h.nodes.question.inert = false;
+    h.key('1', extra); await settle();
+    assert.equal(h.calls.some(c => c.action === 'answer'), false, JSON.stringify(extra));
+  }
+});
+
+test('BEHAVIOUR: the visible-only rule is checked on EVERY answering path (source)', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  for (const fn of ['function choose', 'function decline', 'function submitText']) {
+    const body = src.slice(src.indexOf(fn), src.indexOf(fn) + 400);
+    assert.match(body, /onScreen\(\)/, fn);
+  }
+  assert.match(src, /root\.inert \|\| !onScreen\(\)/);
+});
+
+Promise.all(pendingTests).then(() => console.log(`notify-view-check: ${passed} passed`), e => { console.error(e); process.exit(1); });
