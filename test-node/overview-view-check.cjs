@@ -419,4 +419,26 @@ test('night review: views are NOT display:none while animating (inert instead), 
   assert.doesNotMatch(css, /#capsule\[data-models="open"\] #chat-body \{ display: none/);
 });
 
+test('N8 vertical chat entrance: the chat (and its models panel) travel along the docked edge, with the contract timing, no display:none', () => {
+  const root = css.slice(css.indexOf(':root'), css.indexOf('}', css.indexOf(':root')));
+  // a variable distance, a direction per docked edge
+  assert.match(root, /--view-shift:\s*16px/);
+  assert.match(css, /#capsule\[data-edge="top"\]\s*\{[^}]*--view-dir:\s*-1/);
+  assert.match(css, /#capsule\[data-edge="bottom"\]\s*\{[^}]*--view-dir:\s*1/);
+  for (const sel of ['#chat', '#models']) {
+    const rule = new RegExp(`\\n${sel} \\{([^}]*)\\}`).exec(css);
+    assert.ok(rule, sel);
+    assert.match(rule[1], /transform: translateY\(calc\(var\(--view-dir\) \* var\(--view-shift\)\)\)/, `${sel} starts displaced along the edge`);
+    assert.match(rule[1], /opacity: 0/); assert.match(rule[1], /visibility: hidden/);
+    assert.doesNotMatch(rule[1], /display:\s*none/);
+  }
+  // enter keeps the §9.2 timing: 160ms delay + 400ms spring on transform
+  assert.match(css, /data-view="chat"\] #chat \{[^}]*transform var\(--dur-view-in\) var\(--spring\) var\(--dur-view-delay\)/);
+  // the old 6px nudge no longer drives the chat/models
+  const chatRule = /\n#chat \{([^}]*)\}/.exec(css)[1];
+  assert.doesNotMatch(chatRule, /translateY\(6px\)/);
+  // reduced motion still jumps
+  assert.match(css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)')), /#chat, #models/);
+});
+
 console.log(`overview-view-check: ${passed} passed`);

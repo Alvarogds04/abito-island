@@ -31,7 +31,16 @@
   --dur-view-out: 160ms;
   --dur-control: 300ms;
   --dur-focus: 120ms;
+  /* N8: the chat (and its models panel) travel VERTICALLY along the docked edge:
+     they start --view-shift closer to the edge they grow from (above when docked
+     at the top, below when docked at the bottom) and settle with the view spring.
+     Reference (gentle-dot, MIT, read-only): --ease cubic-bezier(.2,.8,.2,1) and
+     180ms ease-out for expand/collapse; its panel is a native window, so only the
+     timing is taken. The R6 contract (160ms delay, 400ms spring, 160ms exit) rules. */
+  --view-shift: 16px;
 }
+#capsule[data-edge="top"] { --view-dir: -1; }
+#capsule[data-edge="bottom"] { --view-dir: 1; }
 
 * { box-sizing: border-box; }
 html {
@@ -253,7 +262,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   padding: 4px 12px 8px 60px; /* left: room for the scaled R6 in the header */
   opacity: 0;
   visibility: hidden;
-  transform: translateY(6px);
+  transform: translateY(calc(var(--view-dir) * var(--view-shift)));
   transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
 #capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
@@ -365,7 +374,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #models {
   position: absolute; left: 60px; right: 12px; top: 52px; bottom: 8px;
   display: flex; flex-direction: column; gap: 4px; color: var(--island-muted);
-  opacity: 0; visibility: hidden; transform: translateY(6px);
+  opacity: 0; visibility: hidden; transform: translateY(calc(var(--view-dir) * var(--view-shift)));
   transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
 #models[data-open="true"] {
