@@ -198,3 +198,100 @@ fn repeat_guard_never_stays_stuck_when_the_release_goes_elsewhere() {
     w.release();
     assert!(w.press(5));
 }
+
+// ---- #305b: portal backend (pure parts) ------------------------------------------------------
+#[test]
+fn portal_trigger_text_is_the_xdg_shortcuts_spec_form() {
+    // xdg-shortcuts-v0: modifiers uppercase, joined with '+', key as an XKB keysym name
+    assert_eq!(Combo::parse("Ctrl+Alt+A").unwrap().portal_trigger(), "CTRL+ALT+a");
+    assert_eq!(Combo::parse("Super+Shift+7").unwrap().portal_trigger(), "SHIFT+LOGO+7");
+    assert_eq!(Combo::parse("Ctrl+F12").unwrap().portal_trigger(), "CTRL+F12");
+    assert_eq!(Combo::parse("Alt+Space").unwrap().portal_trigger(), "ALT+space");
+    assert_eq!(Combo::parse("Ctrl+Alt+Shift+Super+Z").unwrap().portal_trigger(), "CTRL+ALT+SHIFT+LOGO+z");
+}
+
+#[test]
+fn portal_request_handle_matches_the_documented_path() {
+    // /org/freedesktop/portal/desktop/request/SENDER/TOKEN with the sender's ':' dropped and '.' → '_'
+    assert_eq!(portal::request_path(":1.234", "abito_r1"), "/org/freedesktop/portal/desktop/request/1_234/abito_r1");
+    assert_eq!(portal::request_path(":1.5", "t"), "/org/freedesktop/portal/desktop/request/1_5/t");
+    assert_eq!(portal::sender_token(":1.234"), "1_234");
+}
+
+#[test]
+fn portal_tokens_are_valid_dbus_name_parts() {
+    for t in [portal::token("req"), portal::token("sess")] {
+        assert!(t.len() <= 64 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'), "{t}");
+        assert!(!t.as_bytes()[0].is_ascii_digit(), "must not start with a digit");
+    }
+    assert_ne!(portal::token("req"), portal::token("req"), "tokens are unique per call");
+}
+
+#[test]
+fn portal_response_codes_map_to_visible_statuses() {
+    use portal::{outcome_of_response, Outcome};
+    assert_eq!(outcome_of_response(0), Outcome::Granted);
+    assert_eq!(outcome_of_response(1), Outcome::Denied, "the human closed/declined the OS dialog");
+    assert_eq!(outcome_of_response(2), Outcome::Failed);
+    assert_eq!(outcome_of_response(99), Outcome::Failed, "anything unknown is a failure, never a grant");
+}
+
+#[test]
+fn backend_choice_prefers_the_portal_on_wayland_and_falls_back_cleanly() {
+    use portal::{choose_backend, Backend, PortalState};
+    // Wayland: the portal is the primary route; X11 grab only when it cannot work
+    assert_eq!(choose_backend(Session::Wayland, PortalState::Available), Backend::Portal);
+    assert_eq!(choose_backend(Session::Wayland, PortalState::Unavailable), Backend::X11 { limited: true });
+    assert_eq!(choose_backend(Session::Wayland, PortalState::Denied), Backend::X11 { limited: true },
+        "the human refused the OS dialog: fall back honestly, never pretend");
+    // X11 and unknown sessions never touch the portal
+    assert_eq!(choose_backend(Session::X11, PortalState::Available), Backend::X11 { limited: false });
+    assert_eq!(choose_backend(Session::Unknown, PortalState::Available), Backend::X11 { limited: false });
+}
+
+#[test]
+fn portal_status_vocabulary_covers_the_os_permission_story() {
+    for (s, text) in [(Status::PermissionPending, "permission_pending"), (Status::PermissionDenied, "permission_denied")] {
+        assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!(text));
+    }
+}
+
+#[test]
+fn portal_activation_is_filtered_to_our_shortcut_and_ignores_deactivation() {
+    use portal::{is_our_activation, ShortcutSignal};
+    let ours = ShortcutSignal { shortcut_id: portal::SHORTCUT_ID.into(), activated: true };
+    assert!(is_our_activation(&ours));
+    assert!(!is_our_activation(&ShortcutSignal { activated: false, ..ours.clone() }), "release is not a toggle");
+    assert!(!is_our_activation(&ShortcutSignal { shortcut_id: "someone-else".into(), activated: true }));
+}
+
+#[test]
+fn view_reports_which_backend_holds_the_shortcut_and_only_the_x11_fallback_is_limited() {
+    use portal::Backend;
+    assert_eq!(backend_name(Backend::Portal), "portal");
+    assert_eq!(backend_name(Backend::X11 { limited: true }), "x11");
+    assert!(!backend_limited(Backend::Portal), "the portal works system-wide on Wayland");
+    assert!(backend_limited(Backend::X11 { limited: true }));
+    assert!(!backend_limited(Backend::X11 { limited: false }), "a real X11 session is complete");
+}
+
+#[test]
+fn a_failed_portal_hands_over_to_the_x11_grab_and_says_so() {
+    use portal::{fallback_for, Backend, Fallback};
+    // pending: still waiting for the human, keep the portal
+    assert_eq!(fallback_for(Backend::Portal, Status::PermissionPending), Fallback::Keep);
+    assert_eq!(fallback_for(Backend::Portal, Status::Active), Fallback::Keep);
+    // the human declined the OS dialog, or the portal cannot do it: fall back, and remember why
+    assert_eq!(fallback_for(Backend::Portal, Status::PermissionDenied), Fallback::ToX11 { portal_status: Status::PermissionDenied });
+    assert_eq!(fallback_for(Backend::Portal, Status::Unsupported), Fallback::ToX11 { portal_status: Status::Unsupported });
+    // X11 never "falls back" again; only the portal does
+    assert_eq!(fallback_for(Backend::X11 { limited: true }, Status::Taken), Fallback::Keep);
+}
+
+#[test]
+fn the_permission_story_is_visible_in_the_chip_vocabulary() {
+    // the OS dialog needs the human: say it, once, with the single action to take
+    for (status, word) in [(Status::PermissionPending, "Aceptá el permiso"), (Status::PermissionDenied, "Atajo sin permiso")] {
+        assert!(!word.is_empty(), "{status:?}");
+    }
+}

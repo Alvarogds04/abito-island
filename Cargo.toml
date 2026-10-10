@@ -21,6 +21,10 @@ serde_json = "1"
 # deliberately NOT here: it lives in [dev-dependencies] so the shipped binary never
 # compiles the input-injection module.
 x11rb = { version = "0.13", features = ["xkb"] }
+# #305b: the XDG GlobalShortcuts portal client. NOT ashpd (absent from the offline registry,
+# downloads are forbidden): zbus is ALREADY compiled in via tauri-plugin-single-instance, so
+# this declares the same crate/version/features and adds nothing to Cargo.lock.
+zbus = { version = "5.19", default-features = true }
 # Read-only native audit uses the exact GTK already resolved by Tauri.
 gtk = "=0.18.2"
 # M1b lifecycle: a second launch focuses/shows the running island and exits.

@@ -20,6 +20,7 @@ use std::fmt;
 #[path = "hotkey_tests.rs"]
 mod tests;
 
+pub mod portal;
 pub mod x11;
 
 const MAX_INPUT: usize = 64;
@@ -131,6 +132,25 @@ impl Combo {
         m
     }
 
+    /// The `xdg-shortcuts` trigger text the portal's `preferred_trigger` takes:
+    /// uppercase modifiers joined with `+`, then the XKB keysym name of the key.
+    pub fn portal_trigger(&self) -> String {
+        let mut out = String::new();
+        for (bit, name) in [(CTRL, "CTRL"), (ALT, "ALT"), (SHIFT, "SHIFT"), (SUPER, "LOGO")] {
+            if self.mods & bit != 0 {
+                out.push_str(name);
+                out.push('+');
+            }
+        }
+        match self.key {
+            Key::Letter(c) => out.push(c.to_ascii_lowercase() as char),
+            Key::Digit(c) => out.push(c as char),
+            Key::F(n) => out.push_str(&format!("F{n}")),
+            Key::Space => out.push_str("space"),
+        }
+        out
+    }
+
     pub fn keysym(&self) -> u32 {
         match self.key {
             Key::Letter(c) => u32::from(c.to_ascii_lowercase()),
@@ -214,6 +234,10 @@ pub enum Status {
     Taken,
     Invalid,
     Unsupported,
+    /// Portal backend: the OS permission dialog is open; the human must accept once.
+    PermissionPending,
+    /// Portal backend: the human declined the OS dialog.
+    PermissionDenied,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,8 +338,11 @@ pub struct View {
     pub combo: String,
     pub enabled: bool,
     pub status: Status,
-    /// True on Wayland: XWayland delivers the grab only while an X11 window is focused.
+    /// True when the X11 fallback runs on Wayland: XWayland delivers the grab only
+    /// while an X11 window is focused. The portal backend is never limited.
     pub limited: bool,
+    /// Which route holds the shortcut: `portal` (XDG GlobalShortcuts) or `x11` (XGrabKey).
+    pub backend: &'static str,
 }
 
 /// The status a configuration implies before any grab happened.
@@ -333,4 +360,15 @@ pub enum FocusAction {
 
 pub fn focus_after_show(focused: bool, deliberate: bool) -> FocusAction {
     if focused && !deliberate { FocusAction::GiveBack } else { FocusAction::Leave }
+}
+
+pub fn backend_name(b: portal::Backend) -> &'static str {
+    match b {
+        portal::Backend::Portal => "portal",
+        portal::Backend::X11 { .. } => "x11",
+    }
+}
+
+pub fn backend_limited(b: portal::Backend) -> bool {
+    matches!(b, portal::Backend::X11 { limited: true })
 }

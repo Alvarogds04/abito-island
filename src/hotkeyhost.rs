@@ -8,7 +8,8 @@
 use crate::{dispatch_verb, now_ms, questionhost, restore, AppState, QUITTING};
 use abito_island::bridge::{self, Action, BridgeError};
 use abito_island::desktop::IslandState;
-use abito_island::hotkey::{
+use abito_island::hotkey::portal::{self, client::PortalGrabber, Backend, PortalState};
+use abito_island::hotkey::{backend_limited, backend_name,
     self, idle_status, session_kind, toggle_decision, x11::GrabEvent, x11::Grabber, Command, HotkeyConfig, ToggleDecision, View,
 };
 use serde_json::{json, Value};
@@ -18,10 +19,36 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const FILE: &str = "hotkey.json";
 
+/// The live grab, whichever route holds it.
+enum Held {
+    X11(Grabber, Backend),
+    Portal(PortalGrabber),
+}
+impl Held {
+    fn status(&self) -> hotkey::Status {
+        match self {
+            Held::X11(g, _) => g.status(),
+            Held::Portal(g) => g.status(),
+        }
+    }
+    fn backend(&self) -> Backend {
+        match self {
+            Held::X11(_, b) => *b,
+            Held::Portal(_) => Backend::Portal,
+        }
+    }
+    fn stop(self) {
+        match self {
+            Held::X11(g, _) => g.stop(),
+            Held::Portal(g) => g.stop(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct HotkeyHost {
     config: Mutex<HotkeyConfig>,
-    grabber: Mutex<Option<Grabber>>,
+    grabber: Mutex<Option<Held>>,
 }
 
 fn config_path(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -101,19 +128,76 @@ fn on_press(app: &AppHandle) {
     }
 }
 
+fn session() -> hotkey::Session {
+    session_kind(std::env::var("XDG_SESSION_TYPE").ok().as_deref(), std::env::var("WAYLAND_DISPLAY").ok().as_deref())
+}
+
 fn view_of(host: &HotkeyHost) -> View {
     let cfg = host.config.lock().expect("hotkey config lock").clone();
-    let status = match host.grabber.lock().expect("hotkey grabber lock").as_ref() {
-        Some(g) => g.status(),
-        None => idle_status(&cfg),
+    let held = host.grabber.lock().expect("hotkey grabber lock");
+    let (status, backend) = match held.as_ref() {
+        Some(h) => (h.status(), h.backend()),
+        None => (idle_status(&cfg), portal::choose_backend(session(), PortalState::Unavailable)),
     };
-    let session = session_kind(std::env::var("XDG_SESSION_TYPE").ok().as_deref(), std::env::var("WAYLAND_DISPLAY").ok().as_deref());
-    View { combo: cfg.combo.to_string(), enabled: cfg.enabled, status, limited: session.limited() }
+    View { combo: cfg.combo.to_string(), enabled: cfg.enabled, status, limited: backend_limited(backend), backend: backend_name(backend) }
 }
 
 fn publish(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _ = app.emit("hotkey:state", view_of(&state.hotkey));
+}
+
+/// One decision, two backends. On Wayland the XDG portal is primary (the OS asks the
+/// human once); when it is missing, unsupported by the compositor, or the human
+/// declines, the X11 grab takes over and the chip says «Atajo limitado».
+fn grab(app: &AppHandle, combo: hotkey::Combo) -> Held {
+    let press = |handle: AppHandle| move || press_on_main(&handle);
+    let sess = session();
+    let portal_state = if sess == hotkey::Session::Wayland { portal::client::probe(None) } else { PortalState::Unavailable };
+    if portal::choose_backend(sess, portal_state) == Backend::Portal {
+        let g = PortalGrabber::start(None, combo, press(app.clone()));
+        watch_portal(app.clone());
+        return Held::Portal(g);
+    }
+    let backend = portal::choose_backend(sess, portal_state);
+    let handle = app.clone();
+    Held::X11(Grabber::start(None, combo, move |GrabEvent::Pressed| press_on_main(&handle)), backend)
+}
+
+/// While the portal route is the holder, watch it: when the human declines the OS
+/// dialog (or the portal gives up) the shortcut moves to the X11 grab so it is
+/// never left without any route, and the chip keeps saying why («Atajo limitado»
+/// / «Atajo sin permiso»). Ends as soon as the holder changes.
+fn watch_portal(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        if QUITTING.load(Ordering::SeqCst) {
+            return;
+        }
+        let state = app.state::<AppState>();
+        let verdict = {
+            let held = state.hotkey.grabber.lock().expect("hotkey grabber lock");
+            match held.as_ref() {
+                Some(h @ Held::Portal(_)) => Some(portal::fallback_for(h.backend(), h.status())),
+                _ => None, // the holder changed (rebind/disable/quit): this watcher is done
+            }
+        };
+        match verdict {
+            None => return,
+            Some(portal::Fallback::Keep) => publish(&app), // status moves (pending → active) reach the chip
+            Some(portal::Fallback::ToX11 { .. }) => {
+                let combo = state.hotkey.config.lock().expect("hotkey config lock").combo;
+                let handle = app.clone();
+                let x11 = Grabber::start(None, combo, move |GrabEvent::Pressed| press_on_main(&handle));
+                let old = state.hotkey.grabber.lock().expect("hotkey grabber lock").replace(Held::X11(x11, Backend::X11 { limited: session() == hotkey::Session::Wayland }));
+                if let Some(old) = old {
+                    old.stop();
+                }
+                publish(&app);
+                return;
+            }
+        }
+    });
 }
 
 /// (Re)grab according to the current config. The old grab is released first so
@@ -126,9 +210,7 @@ fn rebind(app: &AppHandle) {
     }
     let cfg = host.config.lock().expect("hotkey config lock").clone();
     if cfg.enabled {
-        let handle = app.clone();
-        let grabber = Grabber::start(None, cfg.combo, move |GrabEvent::Pressed| press_on_main(&handle));
-        *host.grabber.lock().expect("hotkey grabber lock") = Some(grabber);
+        *host.grabber.lock().expect("hotkey grabber lock") = Some(grab(app, cfg.combo));
     }
     publish(app);
 }

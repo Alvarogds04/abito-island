@@ -557,4 +557,20 @@ test('#305 wiring: the island listens to hotkey:state and paints the chip; the p
   assert.doesNotMatch(islandSrc, /hotkey_action', \{ payload: \{ action: '(set|enable|disable|reset)'/, 'the island only READS the status; changing it belongs to the settings panel (#308)');
 });
 
+test('#305b hotkey feedback: the OS permission dialog is explained (accept once), a decline is visible, and the portal route is never «limited»', () => {
+  const v = (status, extra = {}) => ({ combo: 'Ctrl+Alt+A', enabled: true, status, limited: false, backend: 'portal', ...extra });
+  const pending = O.hotkeyView(v('permission_pending'));
+  assert.deepEqual([pending.word, pending.icon, pending.tone], ['Aceptá el permiso', 'info', 'sun']);
+  assert.match(pending.aria, /sistema/); assert.match(pending.aria, /una sola vez/); assert.match(pending.aria, /Ctrl\+Alt\+A/);
+  const denied = O.hotkeyView(v('permission_denied'));
+  assert.deepEqual([denied.word, denied.icon, denied.tone], ['Atajo sin permiso', 'triangle', 'red']);
+  assert.match(denied.aria, /rechazaste|rechazó|no diste/i);
+  // the portal route working = silence (never «limitado»); the X11 fallback on Wayland = limited
+  assert.equal(O.hotkeyView(v('active', { backend: 'portal', limited: false })), null);
+  assert.equal(O.hotkeyView(v('active', { backend: 'x11', limited: true })).word, 'Atajo limitado');
+  assert.match(O.hotkeyView(v('active', { backend: 'x11', limited: true })).aria, /ventana de X11/);
+  // a permission prompt for a shortcut the human turned off is not shown
+  assert.equal(O.hotkeyView(v('permission_pending', { enabled: false })), null);
+});
+
 console.log(`overview-view-check: ${passed} passed`);

@@ -161,6 +161,8 @@
     taken: ['Atajo ocupado', 'triangle', 'red', 'está en uso por otra aplicación; elegí otra combinación'],
     unsupported: ['Atajo sin soporte', 'triangle', 'red', 'no se pudo registrar: no hay un servidor X11 accesible'],
     invalid: ['Atajo inválido', 'triangle', 'red', 'no es una combinación válida: necesita Ctrl, Alt o Súper'],
+    // portal route (#305b): the OS asks the human ONCE; a decline is visible and the X11 fallback takes over
+    permission_denied: ['Atajo sin permiso', 'triangle', 'red', 'no se activó porque rechazaste el permiso del sistema; usamos el atajo limitado de X11'],
   });
   function hotkeyView(view) {
     if (!view || typeof view !== 'object' || view.enabled === false) return null;
@@ -168,6 +170,10 @@
     const problem = Object.prototype.hasOwnProperty.call(HOTKEY_PROBLEMS, view.status) ? HOTKEY_PROBLEMS[view.status] : null;
     if (problem) {
       return { kind: view.status, word: problem[0], icon: problem[1], tone: problem[2], aria: `${problem[0]}: ${combo} ${problem[3]}` };
+    }
+    if (view.status === 'permission_pending') {
+      return { kind: 'permission_pending', word: 'Aceptá el permiso', icon: 'info', tone: 'sun',
+        aria: `Aceptá el permiso: el sistema te pregunta si Abito puede usar el atajo ${combo}; respondé una sola vez y queda guardado` };
     }
     if (view.status === 'active' && view.limited === true) {
       return { kind: 'limited', word: 'Atajo limitado', icon: 'info', tone: 'faint',

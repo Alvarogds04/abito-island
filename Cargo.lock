@@ -15,6 +15,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "x11rb",
+ "zbus",
 ]
 
 [[package]]

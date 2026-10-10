@@ -18,7 +18,7 @@ impl Xvfb {
         // unique per test AND per process: parallel tests never share a server
         let n = 200 + (std::process::id() % 100) * 64 + NEXT.fetch_add(1, Ordering::SeqCst) % 64;
         let display = format!(":{n}");
-        let child = Command::new("Xvfb").args([&display, "-screen", "0", "320x200x24", "-nolisten", "tcp"])
+        let child = Command::new("Xvfb").args([&display, "-screen", "0", "320x200x24", "-nolisten", "tcp", "-noreset"])
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
             .expect("Xvfb is required for the hotkey grabber test (no skip, no fake)");
         for _ in 0..100 {
