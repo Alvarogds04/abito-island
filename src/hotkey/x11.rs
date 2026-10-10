@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use x11rb::connection::Connection;
+use x11rb::protocol::xkb::ConnectionExt as _;
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask};
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
@@ -20,6 +21,37 @@ const S_ACTIVE: u8 = 1;
 const S_TAKEN: u8 = 2;
 const S_INVALID: u8 = 3;
 const S_UNSUPPORTED: u8 = 4;
+
+/// Tells a real key press from the auto-repeat of a HELD key. Holding Ctrl+Alt+A
+/// must toggle once, not once per repeat (22 flickers in 1.5 s, measured).
+///
+/// - a press while the key is already down is a repeat → ignored;
+/// - a release clears the state;
+/// - the grab only covers the full combo, so if Ctrl/Alt go up before the key its
+///   release goes to the focused window and never reaches us: a press after more
+///   than `STALE_MS` of silence counts as a new press (a held key repeats every
+///   ~33 ms after an initial delay of ≤ ~660 ms, so 1000 ms never splits a hold).
+#[derive(Default)]
+pub struct RepeatGuard {
+    down: bool,
+    last_press: u64,
+}
+
+pub const STALE_MS: u64 = 1000;
+
+impl RepeatGuard {
+    /// `time` = the X server timestamp (ms) of the KeyPress. True = a real press.
+    pub fn press(&mut self, time: u64) -> bool {
+        let stale = self.last_press != 0 && time.wrapping_sub(self.last_press) > STALE_MS;
+        let fresh = !self.down || stale;
+        self.down = true;
+        self.last_press = time;
+        fresh
+    }
+    pub fn release(&mut self) {
+        self.down = false;
+    }
+}
 
 pub struct Grabber {
     status: Arc<AtomicU8>,
@@ -86,13 +118,33 @@ impl Grabber {
             return Grabber { status, stop, thread: None };
         }
         status.store(S_ACTIVE, Ordering::SeqCst);
+        // With DETECTABLE auto-repeat the server reports a held key as repeated
+        // KeyPress WITHOUT a KeyRelease in between, so a repeat can be told from a
+        // real second press. Best effort: without XKB the stale window below still
+        // bounds the damage.
+        let _ = conn.xkb_use_extension(1, 0).ok().and_then(|c| c.reply().ok());
+        let _ = conn.xkb_per_client_flags(
+            x11rb::protocol::xkb::ID::USE_CORE_KBD.into(),
+            x11rb::protocol::xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT,
+            x11rb::protocol::xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT,
+            x11rb::protocol::xkb::BoolCtrl::from(0u32),
+            x11rb::protocol::xkb::BoolCtrl::from(0u32),
+            x11rb::protocol::xkb::BoolCtrl::from(0u32),
+        ).ok().and_then(|c| c.reply().ok());
         let (t_stop, t_status) = (stop.clone(), status.clone());
         let thread = std::thread::spawn(move || {
+            let mut repeat = RepeatGuard::default();
             while !t_stop.load(Ordering::SeqCst) {
+                // Sleep in the kernel until the X socket has data (or 250 ms passed, to
+                // notice `stop`): ~4 wake-ups/s idle instead of the old 15 ms poll loop.
+                wait_readable(&conn, 250);
                 match conn.poll_for_event() {
-                    Ok(Some(Event::KeyPress(e))) if e.detail == code && combo.matches_state(u16::from(e.state)) => on_event(GrabEvent::Pressed),
+                    Ok(Some(Event::KeyPress(e))) if e.detail == code && combo.matches_state(u16::from(e.state)) => {
+                        if repeat.press(u64::from(e.time)) { on_event(GrabEvent::Pressed); }
+                    }
+                    Ok(Some(Event::KeyRelease(e))) if e.detail == code => repeat.release(),
                     Ok(Some(_)) => {}
-                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(15)),
+                    Ok(None) => {}
                     Err(_) => {
                         t_status.store(S_UNSUPPORTED, Ordering::SeqCst); // the server went away
                         break;
@@ -133,6 +185,14 @@ impl Drop for Grabber {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// Block until the connection's socket is readable or `ms` elapsed. Never panics.
+fn wait_readable(conn: &RustConnection, ms: i32) {
+    use std::os::unix::io::AsRawFd;
+    let mut fd = libc::pollfd { fd: conn.stream().as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    // SAFETY: `fd` is one valid pollfd for a descriptor owned by `conn`, which outlives the call.
+    unsafe { libc::poll(&mut fd, 1, ms) };
 }
 
 /// The window that has the keyboard (EWMH `_NET_ACTIVE_WINDOW`), or None when the

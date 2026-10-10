@@ -55,6 +55,9 @@ function checkConfig(crate) {
   if (/devtools/.test(tauriLine[0]) || /devtools/.test(cargo)) throw new Error('the devtools feature must stay off');
   if (/shell|process|fs|http/.test(tauriLine[0])) throw new Error('no extra tauri features/plugins in the packaged app');
   if (/tauri-plugin-(shell|fs|http|process|opener)/.test(cargo)) throw new Error('forbidden plugin dependency');
+  // law: no synthetic input (XTest) in production. It may live ONLY under [dev-dependencies].
+  const prod = cargo.split(/^\[dev-dependencies\]/m)[0].split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+  if (/xtest/i.test(prod)) throw new Error('xtest (synthetic input) must not be a production dependency: keep it in [dev-dependencies]');
   return { version: conf.version, identifier: conf.identifier, csp };
 }
 
@@ -117,7 +120,7 @@ function verifyStage(dir, { sourceCrate } = {}) {
   if (fs.existsSync(bin)) {
     const bytes = fs.readFileSync(bin);
     if (sourceCrate && bytes.includes(Buffer.from(sourceCrate))) problems.push('binary embeds the source-tree path');
-    for (const marker of ['--remote-debugging', 'devtools://', 'Prueba M3: propuesta servida por el backend falso', 'ABITO_PROBE']) if (bytes.includes(Buffer.from(marker))) problems.push(`binary contains «${marker}» (devtools/probe/fake)`);
+    for (const marker of ['--remote-debugging', 'devtools://', 'Prueba M3: propuesta servida por el backend falso', 'ABITO_PROBE', 'XTEST']) if (bytes.includes(Buffer.from(marker))) problems.push(`binary contains «${marker}» (devtools/probe/fake)`);
     for (const prefix of [process.env.HOME && `${process.env.HOME}/.cargo`, process.env.HOME && `${process.env.HOME}/Apps`].filter(Boolean)) if (bytes.includes(Buffer.from(prefix))) problems.push(`binary embeds the build machine path ${prefix}…`);
     if (!(fs.statSync(bin).mode & 0o100)) problems.push('binary is not executable');
   }

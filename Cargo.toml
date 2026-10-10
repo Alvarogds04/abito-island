@@ -17,7 +17,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-x11rb = { version = "0.13", features = ["xtest"] }
+# `xkb`: detectable auto-repeat for the global hotkey. XTest (synthetic input) is
+# deliberately NOT here: it lives in [dev-dependencies] so the shipped binary never
+# compiles the input-injection module.
+x11rb = { version = "0.13", features = ["xkb"] }
 # Read-only native audit uses the exact GTK already resolved by Tauri.
 gtk = "=0.18.2"
 # M1b lifecycle: a second launch focuses/shows the running island and exits.
@@ -26,3 +29,7 @@ tauri-plugin-single-instance = "2"
 # sha256 project id — byte-identical to core.cjs projectId (sha2 hex).
 libc = "0.2"
 sha2 = "0.10"
+
+[dev-dependencies]
+# tests only: fake key presses on a PRIVATE Xvfb (tests/hotkey_x11.rs). Never shipped.
+x11rb = { version = "0.13", features = ["xtest"] }

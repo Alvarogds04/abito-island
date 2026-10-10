@@ -168,3 +168,33 @@ fn showing_via_the_hotkey_never_leaves_the_keyboard_with_the_island() {
     assert_eq!(focus_after_show(true, true), FocusAction::Leave, "a deliberate typing intent keeps the focus");
     assert_eq!(focus_after_show(false, true), FocusAction::Leave);
 }
+
+#[test]
+fn repeat_guard_tells_a_real_press_from_auto_repeat() {
+    use super::x11::{RepeatGuard, STALE_MS};
+    let mut g = RepeatGuard::default();
+    assert!(g.press(1_000), "first press fires");
+    // held: detectable auto-repeat = more presses without a release, after the initial delay
+    assert!(!g.press(1_660)); // first repeat after the ~660 ms delay
+    for t in (1_693..3_000).step_by(33) { assert!(!g.press(t), "repeat at {t}"); }
+    g.release();
+    assert!(g.press(3_100), "a press after the release is a new one");
+    assert!(!g.press(3_700), "…and its own repeats are ignored again");
+    g.release();
+    assert!(g.press(3_800) && { g.release(); g.press(3_900) }, "quick deliberate double press = two");
+}
+
+#[test]
+fn repeat_guard_never_stays_stuck_when_the_release_goes_elsewhere() {
+    use super::x11::{RepeatGuard, STALE_MS};
+    let mut g = RepeatGuard::default();
+    assert!(g.press(5_000));
+    // Ctrl/Alt were released first: the key release never reaches us (no release()).
+    assert!(!g.press(5_000 + STALE_MS), "exactly at the window it is still the same hold");
+    assert!(g.press(5_000 + STALE_MS + STALE_MS + 1), "after a long silence the next press is real");
+    // an X timestamp wrap never panics or sticks
+    let mut w = RepeatGuard::default();
+    assert!(w.press(u64::from(u32::MAX) - 10));
+    w.release();
+    assert!(w.press(5));
+}

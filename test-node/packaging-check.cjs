@@ -151,6 +151,16 @@ test('verify: the shipped binary must not carry the probe or the fake backend st
     fs.rmSync(d, { recursive: true });
   }
 });
+test('law: XTest (synthetic input) is never a production dependency, and the shipped binary must not contain it', () => {
+  assert.doesNotThrow(() => L.checkConfig(crate), 'the real Cargo.toml keeps xtest under [dev-dependencies]');
+  let d = copyCrate();
+  fs.writeFileSync(path.join(d, 'Cargo.toml'), fs.readFileSync(path.join(d, 'Cargo.toml'), 'utf8').replace('x11rb = { version = "0.13", features = ["xkb"] }', 'x11rb = { version = "0.13", features = ["xkb", "xtest"] }'));
+  assert.throws(() => L.checkConfig(d), /xtest/); fs.rmSync(d, { recursive: true });
+  const st = fakeStage(); fs.writeFileSync(path.join(st, 'abito-island'), '#!/bin/true\nXTEST\n', { mode: 0o755 });
+  const r = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); r.files['abito-island'] = L.sha256File(path.join(st, 'abito-island'));
+  fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r));
+  assert.match(L.verifyStage(st).join(), /XTEST/); fs.rmSync(st, { recursive: true });
+});
 test('desktop entry: quoted Exec, Icon, observed StartupWMClass; no unquoted path with spaces', () => {
   const t = L.desktopText();
   assert.match(t, /^Exec="@INSTALL_DIR@\/abito-island-launcher"$/m);

@@ -16,7 +16,7 @@ impl Xvfb {
     fn start() -> Xvfb {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         // unique per test AND per process: parallel tests never share a server
-        let n = 200 + (std::process::id() % 400) * 8 + NEXT.fetch_add(1, Ordering::SeqCst) % 8;
+        let n = 200 + (std::process::id() % 100) * 64 + NEXT.fetch_add(1, Ordering::SeqCst) % 64;
         let display = format!(":{n}");
         let child = Command::new("Xvfb").args([&display, "-screen", "0", "320x200x24", "-nolisten", "tcp"])
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
@@ -176,4 +176,65 @@ fn active_window_is_read_and_focus_can_be_handed_back() {
     let focus = conn.get_input_focus().unwrap().reply().unwrap().focus;
     assert_eq!(focus, win, "the keyboard went back to the window that had it");
     assert!(!give_focus_back(Some(":65530"), win), "an unreachable server is a quiet false");
+}
+
+fn hold(conn: &RustConnection, keys: &[u8], mods: &[u8], ms: u64) {
+    for m in mods { conn.xtest_fake_input(2, *m, 0, x11rb::NONE, 0, 0, 0).unwrap(); }
+    for k in keys { conn.xtest_fake_input(2, *k, 0, x11rb::NONE, 0, 0, 0).unwrap(); }
+    conn.flush().unwrap();
+    std::thread::sleep(Duration::from_millis(ms)); // the X server auto-repeats a held key
+    for k in keys { conn.xtest_fake_input(3, *k, 0, x11rb::NONE, 0, 0, 0).unwrap(); }
+    for m in mods.iter().rev() { conn.xtest_fake_input(3, *m, 0, x11rb::NONE, 0, 0, 0).unwrap(); }
+    conn.flush().unwrap();
+}
+
+#[test]
+fn a_held_key_is_exactly_one_event_not_one_per_auto_repeat() {
+    let x = Xvfb::start();
+    let (g, rx) = start(&x.display, "Ctrl+Alt+A");
+    let (conn, _) = x.conn();
+    // make the repeat fast and early so the test is short but still produces many repeats
+    let (a, ctrl, alt) = (keycode(&conn, 0x61), keycode(&conn, 0xffe3), keycode(&conn, 0xffe9));
+    hold(&conn, &[a], &[ctrl, alt], 1500);
+    let mut events = 0;
+    while rx.recv_timeout(Duration::from_millis(400)).is_ok() { events += 1; }
+    assert_eq!(events, 1, "holding the shortcut for 1.5 s must toggle ONCE (auto-repeat would flicker the island)");
+    // and a deliberate second press afterwards still works
+    press(&conn, &[a], &[ctrl, alt]);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(3)).expect("a fresh press after release fires again"), GrabEvent::Pressed);
+    assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+    g.stop();
+}
+
+#[test]
+fn quick_deliberate_double_press_gives_two_events() {
+    let x = Xvfb::start();
+    let (g, rx) = start(&x.display, "Ctrl+Alt+A");
+    let (conn, _) = x.conn();
+    let (a, ctrl, alt) = (keycode(&conn, 0x61), keycode(&conn, 0xffe3), keycode(&conn, 0xffe9));
+    press(&conn, &[a], &[ctrl, alt]);
+    std::thread::sleep(Duration::from_millis(120));
+    press(&conn, &[a], &[ctrl, alt]);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), GrabEvent::Pressed);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), GrabEvent::Pressed, "two real presses are two toggles");
+    assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+    g.stop();
+}
+
+#[test]
+fn releasing_the_modifiers_before_the_key_does_not_leave_the_shortcut_stuck() {
+    // the grab only covers Ctrl+Alt+A: once Ctrl/Alt go up, the key release goes to the
+    // focused window, never to us. The next real press must still fire.
+    let x = Xvfb::start();
+    let (g, rx) = start(&x.display, "Ctrl+Alt+A");
+    let (conn, _) = x.conn();
+    let (a, ctrl, alt) = (keycode(&conn, 0x61), keycode(&conn, 0xffe3), keycode(&conn, 0xffe9));
+    for k in [ctrl, alt, a] { conn.xtest_fake_input(2, k, 0, x11rb::NONE, 0, 0, 0).unwrap(); }
+    for k in [ctrl, alt, a] { conn.xtest_fake_input(3, k, 0, x11rb::NONE, 0, 0, 0).unwrap(); } // modifiers up FIRST
+    conn.flush().unwrap();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), GrabEvent::Pressed);
+    std::thread::sleep(Duration::from_millis(1300)); // past the stale window
+    press(&conn, &[a], &[ctrl, alt]);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(3)).expect("not stuck after an odd release order"), GrabEvent::Pressed);
+    g.stop();
 }
