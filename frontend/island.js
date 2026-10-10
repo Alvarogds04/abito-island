@@ -293,11 +293,24 @@
     catch { /* pointer capture is best-effort; X11 has an implicit grab */ }
     send('drag_press', { x: e.clientX, y: e.clientY });
   });
+  // §9.2 hover on the character: scale only (pure O.hoverScale), no state.
+  function updateHover(point) {
+    if (!O) return;
+    const r = clayEl.getBoundingClientRect();
+    // the box is already scaled by --hover: test against the unscaled centre box
+    const scale = parseFloat(clayEl.style.getPropertyValue('--hover')) || 1;
+    const w = r.width / scale, h = r.height / scale;
+    const box = { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
+    const next = O.hoverScale(point, box, { reduced: reduced.matches, dragging: pressed });
+    if (next !== scale) clayEl.style.setProperty('--hover', String(next));
+  }
   window.addEventListener('pointermove', e => {
-    if (!pressed) return;
+    if (!pressed) { updateHover({ x: e.clientX, y: e.clientY }); return; }
+    updateHover(null);
     lastPoint = { x: e.clientX, y: e.clientY };
     send('drag_move', { x: e.clientX, y: e.clientY });
   });
+  document.addEventListener('pointerleave', () => updateHover(null));
   window.addEventListener('pointerup', e => release({ x: e.clientX, y: e.clientY }, false));
   window.addEventListener('pointercancel', e => release({ x: e.clientX, y: e.clientY }, true));
   // Focus loss mid-drag (e.g. alt-tab): reconcile without toggling.

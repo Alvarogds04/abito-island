@@ -111,6 +111,17 @@
     return bridge === 'unhealthy' || bridge === 'stopped' ? 'error' : null;
   }
 
+  // §9.2: R6 hover scale. Pure: 1.06 only while the pointer is inside the
+  // character's box and the system does NOT ask for reduced motion; never
+  // while dragging. It carries no meaning and never touches the pose.
+  const HOVER_SCALE = 1.06;
+  function hoverScale(point, box, opts) {
+    const o = opts || {};
+    if (o.reduced || o.dragging || !point || !box) return 1;
+    const inside = point.x >= box.left && point.x <= box.left + box.width && point.y >= box.top && point.y <= box.top + box.height;
+    return inside ? HOVER_SCALE : 1;
+  }
+
   // ---- «i» button name: announces the real state, then what it opens ---------
   const infoLabel = (base, stateAria) => (stateAria ? `${base}: ${stateAria}` : base);
 
@@ -119,5 +130,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, hoverScale, HOVER_SCALE };
 });

@@ -20,6 +20,17 @@
   --ease-out: cubic-bezier(.23, 1, .32, 1);
   --dur-press: 120ms;
   --dur-state: 160ms;
+  /* §9.2 motion table. CSS has no spring: cubic-bezier(.25,.9,.35,1.03) is the
+     closest monotone-then-tiny-overshoot curve (damping 0.8 overshoots ~1.5%).
+     View enter = 400ms spring after a 160ms delay; view exit = 160ms ease-in;
+     control change = 300ms spring. Only opacity/transform (+ visibility timing). */
+  --spring: cubic-bezier(.25, .9, .35, 1.03);
+  --ease-in: cubic-bezier(.4, 0, 1, 1);
+  --dur-view-delay: 160ms;
+  --dur-view-in: 400ms;
+  --dur-view-out: 160ms;
+  --dur-control: 300ms;
+  --dur-focus: 120ms;
 }
 
 * { box-sizing: border-box; }
@@ -67,7 +78,11 @@ body.probe-capture-bg { background: #d8c9a3; }
   position: absolute;
   left: 50%;
   display: block;
-  transform: translateX(-50%);
+  /* §9.2 hover: ~1.06 in 160ms, back on leave; no meaning, no pose change.
+     --hover is set by island.js (1 unless the pointer is over the character
+     and the system does not ask for reduced motion). */
+  transform: translateX(-50%) scale(var(--hover, 1));
+  transition: transform var(--dur-state) var(--ease-out);
   pointer-events: none;
 }
 /* UI.1: visual overview. R6 (128px, left; 72px with a card) is placed by
@@ -104,10 +119,11 @@ body.probe-capture-bg { background: #d8c9a3; }
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--dur-state) var(--ease-out);
+  transform: translateY(6px);
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
 #notices > * { pointer-events: auto; }
-#capsule[data-phase="expanded"] #notices { opacity: 1; visibility: visible; }
+#capsule[data-phase="expanded"] #notices { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
 #notice-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 #notice-pill {
   display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 0 0 10px;
@@ -138,11 +154,12 @@ body.probe-capture-bg { background: #d8c9a3; }
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--dur-state) var(--ease-out);
+  transform: translateY(6px);
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
 #permission > * { pointer-events: auto; }
-#capsule[data-phase="expanded"] #permission { opacity: 1; visibility: visible; }
-#capsule[data-card][data-phase="expanded"] #notices { opacity: 0; visibility: hidden; }
+#capsule[data-phase="expanded"] #permission { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
+#capsule[data-card][data-phase="expanded"] #notices { opacity: 0; visibility: hidden; transform: translateY(6px); transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out); }
 #card-head { display: flex; align-items: center; gap: 12px; min-height: 28px; }
 #card-info { margin-left: auto; min-height: 44px; min-width: 44px; }
 #card-conn { margin-left: 4px; }
@@ -180,7 +197,8 @@ body.probe-capture-bg { background: #d8c9a3; }
 @media (prefers-reduced-motion: reduce) {
   /* island.js already snaps geometry under reduced motion; this also kills any
      residual CSS transition so the OS preference really wins. */
-  #notices, #permission { transition: none; }
+  #notices, #permission, #open-chat, #chat { transition: none !important; transform: none !important; }
+  #clay { transition: none !important; }
   #chat-state[data-kind="busy"] .ico svg, #chat-state[data-kind="checking"] .ico svg, [data-kind="checking"] .ico svg { animation: none; }
   /* Contract §4: no meaning depends on animation. The in-flight ring stays
      still: the blue open arc (shape + --island-live) is the cue. */
@@ -199,7 +217,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #capsule[data-view="chat"] #permission,
 #capsule[data-view="chat"] #island { box-shadow: none; }
 #capsule[data-view="chat"] #notices,
-#capsule[data-view="chat"] #permission { opacity: 0; visibility: hidden; }
+#capsule[data-view="chat"] #permission { opacity: 0; visibility: hidden; transform: translateY(6px); transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out); }
 
 /* Primary overview control: the «Conversar» bubble, --go, 48x48 (>=44),
    bottom-right of the island. Its name lives in aria-label. */
@@ -217,11 +235,13 @@ body.probe-capture-bg { background: #d8c9a3; }
   cursor: pointer;
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--dur-state) var(--ease-out);
+  transform: translateY(6px);
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
-#capsule[data-phase="expanded"][data-view="overview"] #open-chat { opacity: 1; visibility: visible; }
+#capsule[data-phase="expanded"][data-view="overview"] #open-chat { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
 #open-chat:hover { filter: brightness(1.08); }
 
+:where(button, textarea) { outline: 2px solid transparent; outline-offset: 2px; transition: outline-color var(--dur-focus) var(--ease-out); }
 :focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 
 #chat {
@@ -232,9 +252,10 @@ body.probe-capture-bg { background: #d8c9a3; }
   padding: 4px 12px 8px 60px; /* left: room for the scaled R6 in the header */
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--dur-state) var(--ease-out);
+  transform: translateY(6px);
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
-#capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; }
+#capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
 #chat-header { display: flex; align-items: center; gap: 12px; min-height: 48px; }
 #chat-header .icon-btn:first-of-type { margin-left: auto; }
 #chat-target-chip .ico { color: var(--island-muted); }
@@ -322,7 +343,6 @@ body.probe-capture-bg { background: #d8c9a3; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #open-chat, #chat { transition: none; }
   #chat-log { scroll-behavior: auto; }
 }
 
@@ -377,10 +397,14 @@ body.probe-capture-bg { background: #d8c9a3; }
 #models-list .choose:disabled:not([aria-pressed="true"])::before { border-color: var(--faint); }
 #models-list .choose .ico { position: relative; z-index: 1; }
 #models-list .choose .ico svg { width: 18px; height: 18px; }
+@keyframes control-pop { from { opacity: 0; transform: scale(.6); } }
+#models-list .choose[aria-pressed="true"] .ico { animation: control-pop var(--dur-control) var(--spring); }
+#models-list .choose::before { transition: background-color var(--dur-state) var(--ease-out), border-color var(--dur-state) var(--ease-out); }
+.icon-btn { transition: background-color var(--dur-press) var(--ease-out), border-color var(--dur-state) var(--ease-out); }
 #models-list .skeleton { height: 44px; margin: 0 0 4px; border-radius: var(--radius-xl); background: rgba(99, 179, 255, .16); }
 @keyframes pulse { 50% { opacity: .45; } }
 #models-list .skeleton { animation: pulse 1200ms ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { #models-list .skeleton { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #models-list .skeleton, #models-list .choose[aria-pressed="true"] .ico { animation: none; } #models-list .choose::before, .icon-btn, :where(button, textarea) { transition: none; } }
 
 /* ---- Q1: keyboard focus of the island itself -------------------------- */
 #capsule:has(#island-toggle:focus-visible) #island { outline: 2px solid var(--go); outline-offset: 2px; }

@@ -771,6 +771,53 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// before and after. The fake's request log proves that NOTHING was
 /// written before that click (a notice can never approve) and that
 /// `/execute` carried exactly the card's `payload_hash`.
+/// §9.5 motion evidence: a short x11grab of OUR window only (matched by
+/// `_NET_WM_PID`), written as numbered PNGs `<name>-NN-<stamp>.png`, started
+/// BEFORE `action` runs so the transition is inside the clip. Same sand
+/// background class as `capture_visual`; no pointer drawn; never the screen.
+fn capture_sequence(app: &AppHandle, name: &str, fps: u32, millis: u64, action: impl FnOnce()) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        action();
+        return;
+    }
+    let Some(root) = std::env::var_os("ABITO_SOCKET_DIR") else {
+        action();
+        return;
+    };
+    let page = main_window(app);
+    let Ok(win) = abito_island::workarea::x11_find_own_window("Abito") else {
+        action();
+        return;
+    };
+    let dir = match std::env::var_os("ABITO_PROBE_VISUAL_DIR") {
+        Some(custom) => std::path::PathBuf::from(custom),
+        None => std::path::Path::new(&root).join("visual"),
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let stamp = visual_stamp();
+    let pattern = dir.join(format!("{name}-%02d-{stamp}.png"));
+    let _ = page.eval("document.body.classList.add('probe-capture-bg')");
+    sleep(Duration::from_millis(250));
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+    let child = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "x11grab", "-draw_mouse", "0"])
+        .args(["-framerate", &fps.to_string(), "-window_id", &win.id.to_string()])
+        .args(["-i", &display, "-t", &format!("{:.2}", millis as f64 / 1000.0)])
+        .arg(&pattern)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    sleep(Duration::from_millis(120)); // ffmpeg is grabbing before the action
+    action();
+    if let Ok(mut child) = child {
+        let _ = child.wait();
+    }
+    let _ = page.eval("document.body.classList.remove('probe-capture-bg')");
+    sleep(Duration::from_millis(150));
+    emit(&json!({"step": "visual_sequence", "name": name, "fps": fps, "millis": millis, "pattern": pattern.display().to_string()}));
+}
+
 /// UI contract §9.1/§9.5 «Abito alive by default»: the R6 in `idle` must be
 /// animating on its own (no button), judged with MOVEMENT: engine status +
 /// growing frame counter + the body path changing between samples, and six
@@ -798,6 +845,16 @@ fn r6_live_evidence(app: &AppHandle, state: &AppState) {
     );
     let lines = wait_chat_lines(app, 1, Duration::from_secs(10));
     emit(&json!({"step": "r6_live_evidence", "webview": lines}));
+    // hover pair: the same scene without and with the pointer over the R6
+    // (a synthetic event for the page's own handler; no real pointer is used)
+    let _ = win.eval("(()=>{const r=document.getElementById('clay').getBoundingClientRect(); window.dispatchEvent(new PointerEvent('pointermove',{clientX:-5,clientY:-5,bubbles:true})); window.__hoverBox=[r.left+r.width/2, r.top+r.height/2];})()");
+    sleep(Duration::from_millis(400));
+    capture_visual(app, "hover-r6-sin");
+    let _ = win.eval("window.dispatchEvent(new PointerEvent('pointermove',{clientX:window.__hoverBox[0],clientY:window.__hoverBox[1],bubbles:true}))");
+    sleep(Duration::from_millis(400));
+    capture_visual(app, "hover-r6-con");
+    let _ = win.eval("window.dispatchEvent(new PointerEvent('pointermove',{clientX:-5,clientY:-5,bubbles:true}))");
+    sleep(Duration::from_millis(300));
     // six sequential frames of the same idle scene, fixed ~0.7 s apart
     for i in 0..6 {
         capture_visual(app, &format!("idle-vivo-{i}"));
@@ -1053,6 +1110,17 @@ fn chat_evidence(app: &AppHandle) {
     }
 
     capture_visual(app, "chat-vacio");
+    // §9.5 view change: overview -> chat -> overview, as clips (the view enters
+    // after a 160 ms delay with a short spring; it exits in 160 ms).
+    capture_sequence(app, "movimiento-vista-salida", 25, 1200, || {
+        crate::chathost::switch_view(app, &state, false);
+        wait_for_size(app, overview, Duration::from_secs(3));
+    });
+    capture_sequence(app, "movimiento-vista-entrada", 25, 1400, || {
+        crate::chathost::switch_view(app, &state, true);
+        wait_for_size(app, chat_size, Duration::from_secs(3));
+    });
+    sleep(Duration::from_millis(600));
     if let Err(e) = win.eval(CHAT_JS_SEND) {
         emit(&json!({"step": "chat_evidence", "eval_failed": e.to_string()}));
     }

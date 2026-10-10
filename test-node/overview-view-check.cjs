@@ -332,4 +332,39 @@ test('R6 liveness: the island never forces/pauses the engine (idle is alive by d
   assert.match(islandSrc, /hostPose \|\| chatPose \|\| 'idle'/);
 });
 
+test('§9.2 hover: ~1.06 only inside the R6 box, never reduced/dragging, no meaning', () => {
+  const box = { left: 20, top: 10, width: 100, height: 100 };
+  assert.equal(O.HOVER_SCALE, 1.06);
+  assert.equal(O.hoverScale({ x: 50, y: 50 }, box), 1.06);
+  assert.equal(O.hoverScale({ x: 5, y: 50 }, box), 1);
+  assert.equal(O.hoverScale({ x: 50, y: 50 }, box, { reduced: true }), 1);
+  assert.equal(O.hoverScale({ x: 50, y: 50 }, box, { dragging: true }), 1);
+  assert.equal(O.hoverScale(null, box), 1);
+  assert.doesNotMatch(islandSrc.slice(islandSrc.indexOf('function updateHover'), islandSrc.indexOf("window.addEventListener('pointermove'")), /setState|applyPose|dispatchEvent/);
+});
+
+test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms ease-in, control 300ms, focus 120ms; only transform/opacity; reduced jumps', () => {
+  const root = css.slice(css.indexOf(':root'), css.indexOf('}', css.indexOf(':root')));
+  for (const [name, value] of [['--dur-view-delay', '160ms'], ['--dur-view-in', '400ms'], ['--dur-view-out', '160ms'], ['--dur-control', '300ms'], ['--dur-focus', '120ms']]) {
+    assert.match(root, new RegExp(`${name}:\\s*${value}`), name);
+  }
+  assert.match(root, /--ease-in: cubic-bezier\(\.4, 0, 1, 1\)/);
+  for (const sel of ['#capsule[data-phase="expanded"][data-view="chat"] #chat', '#capsule[data-phase="expanded"][data-view="overview"] #open-chat', '#capsule[data-phase="expanded"] #permission', '#capsule[data-phase="expanded"] #notices']) {
+    const rule = new RegExp(sel.replace(/[[\]().*+?^${}|\\]/g, '\\$&') + ' \\{([^}]*)\\}').exec(css);
+    assert.ok(rule, sel);
+    assert.match(rule[1], /var\(--dur-view-delay\)/, `${sel} delays 160ms`);
+    assert.match(rule[1], /transform var\(--dur-view-in\) var\(--spring\)/, sel);
+  }
+  // exit: the hidden state of every view uses the 160ms ease-in (and keeps visibility until it ends)
+  assert.equal((css.match(/transition: opacity var\(--dur-view-out\) var\(--ease-in\), transform var\(--dur-view-out\) var\(--ease-in\), visibility 0s linear var\(--dur-view-out\)/g) || []).length >= 4, true);
+  // nothing animates width/height/left/top in these transitions
+  for (const m of css.matchAll(/transition:([^;]*);/g)) assert.doesNotMatch(m[1], /\b(width|height|left|top|right|bottom|margin|padding)\b/, m[1]);
+  assert.match(css, /#clay \{[^}]*scale\(var\(--hover, 1\)\)[^}]*transition: transform var\(--dur-state\)/);
+  assert.match(css, /:where\(button, textarea\) \{[^}]*outline: 2px solid transparent[^}]*var\(--dur-focus\)/);
+  assert.match(css, /#models-list \.choose\[aria-pressed="true"\] \.ico \{ animation: control-pop var\(--dur-control\) var\(--spring\)/);
+  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(reduced, /#notices, #permission, #open-chat, #chat \{ transition: none !important; transform: none !important/);
+  assert.match(reduced, /#clay \{ transition: none !important/);
+});
+
 console.log(`overview-view-check: ${passed} passed`);
