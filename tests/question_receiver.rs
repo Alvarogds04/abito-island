@@ -1,8 +1,9 @@
 //! QP.2: owner-only fake producers, real private UDS, no app or model.
+mod common;
 use abito_island::{protocol, question, transport::{self, Transport, TransportOptions}};
 use serde_json::{json, Value};
 use std::io::{Read, Write, ErrorKind};
-use std::os::unix::{fs::DirBuilderExt, net::UnixStream};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,25 +13,17 @@ const ID: &str = "12345678-1234-4abc-8abc-123456789abc";
 const OTHER: &str = "12345678-1234-4abc-9abc-123456789abd";
 static NEXT: AtomicU64 = AtomicU64::new(1);
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 }
-struct Fixture { transport: Arc<Transport>, root: PathBuf, project: String, changes: Arc<AtomicU64> }
+struct Fixture { transport: Arc<Transport>, leaf: common::fixture_leaf::Leaf, root: PathBuf, project: String, changes: Arc<AtomicU64> }
 impl Fixture {
     fn new() -> Self { Self::with_callback_close(false) }
     fn with_callback_close(close_from_callback: bool) -> Self { Self::with_options(close_from_callback, None) }
     fn with_native_clock(clock: Arc<AtomicU64>) -> Self { Self::with_options(false, Some(clock)) }
     fn with_options(close_from_callback: bool, clock: Option<Arc<AtomicU64>>) -> Self {
         // Three-byte leaves keep sockaddr_un within 107 bytes in this long
-        // worktree. Exclusive creation also isolates simultaneous test runs;
-        // existing fixtures are never reused or removed.
-        let seed = now().wrapping_add(u64::from(std::process::id()));
-        let root = (0..256).find_map(|_| {
-            let n = seed.wrapping_add(NEXT.fetch_add(1, Ordering::Relaxed)) % 256;
-            let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("q{n:02x}"));
-            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
-                Ok(()) => Some(path),
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => None,
-                Err(e) => panic!("private fixture: {e}"),
-            }
-        }).expect("free private fixture leaf");
+        // worktree. The leaf is exclusive, self-cleaning (drop, even while
+        // panicking) and abandoned leaves of dead runs are reclaimed (N7).
+        let leaf = common::fixture_leaf::Leaf::alloc(&PathBuf::from(env!("CARGO_TARGET_TMPDIR")), "q");
+        let root = leaf.path().to_path_buf();
         let project = protocol::project_id("question-receiver-test");
         let holder: Arc<Mutex<Option<Weak<Transport>>>> = Arc::new(Mutex::new(None));
         let changes = Arc::new(AtomicU64::new(0));
@@ -48,7 +41,7 @@ impl Fixture {
         let options = match clock { Some(clock) => options.native_resize_clock(move || clock.load(Ordering::SeqCst)), None => options };
         let transport = Arc::new(transport::create_transport(options).unwrap());
         *holder.lock().unwrap() = Some(Arc::downgrade(&transport));
-        Self { transport, root, project, changes }
+        Self { transport, leaf, root, project, changes }
     }
     fn base(&self, kind: &str, session: &str) -> Value {
         json!({"v":1,"type":kind,"project":self.project,"sessionId":session,"at":now()})
@@ -86,8 +79,11 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.transport.close().unwrap();
-        let result = std::fs::remove_dir(&self.root);
-        if !std::thread::panicking() { result.unwrap(); }
+        // Only socket fixtures were created: anything but the leaf's own owner
+        // marker left behind (a file, a transcript) fails the test, as before.
+        let leftovers: Vec<_> = std::fs::read_dir(&self.root).map(|d| d.flatten().map(|e| e.file_name()).filter(|n| n != ".owner").collect()).unwrap_or_default();
+        if !std::thread::panicking() { assert!(leftovers.is_empty(), "fixture leaf not clean after close: {leftovers:?}"); }
+        let _ = &self.leaf; // removed when the field drops, right after this body
     }
 }
 fn send(s: &mut UnixStream, v: &Value) { s.write_all(format!("{v}\n").as_bytes()).unwrap(); }

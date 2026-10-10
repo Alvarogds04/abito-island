@@ -1,19 +1,19 @@
 //! Opt-in integration with the external REAL Node producer, not a Pi/UI e2e.
 //! Default runs deliberately ignore these tests; --ignored requires the source
 //! directory and Node and fails loudly if either is unavailable (no fallback).
+mod common;
 use abito_island::{protocol, transport::{self, Transport, TransportOptions}};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 struct Fixture {
-    receiver: Transport, runtime: PathBuf, cwd: PathBuf, project: String,
+    receiver: Transport, leaf: common::fixture_leaf::Leaf, runtime: PathBuf, cwd: PathBuf, project: String,
     connections: Arc<AtomicU32>, notices: Arc<AtomicU32>,
 }
 impl Fixture {
@@ -23,16 +23,9 @@ impl Fixture {
             .expect("opt-in test requires ABITO_PI_PRODUCER_DIR; no fake producer fallback"));
         assert!(source.is_absolute() && source.is_dir(), "explicit producer directory required");
         for name in ["adapter.cjs", "questions.cjs"] { assert!(source.join(name).is_file(), "real producer source required"); }
-        let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-        let runtime = (0..256).find_map(|_| {
-            let n = seed.wrapping_add(NEXT.fetch_add(1, Ordering::Relaxed)) % 256;
-            let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("n{n:02x}"));
-            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
-                Ok(()) => Some(path),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => None,
-                Err(e) => panic!("private fixture: {e}"),
-            }
-        }).expect("free short UDS runtime leaf");
+        // Exclusive, self-cleaning short leaf (N7): removed on drop, reclaimed when abandoned.
+        let leaf = common::fixture_leaf::Leaf::alloc(&PathBuf::from(env!("CARGO_TARGET_TMPDIR")), "n");
+        let runtime = leaf.path().to_path_buf();
         let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
         let project = protocol::project_id(cwd.to_str().unwrap());
         let connections = Arc::new(AtomicU32::new(0)); let notices = Arc::new(AtomicU32::new(0));
@@ -42,7 +35,7 @@ impl Fixture {
             .on_notice(move |_| { n.fetch_add(1, Ordering::SeqCst); });
         let options = match clock { Some(clock) => options.native_resize_clock(move || clock.load(Ordering::SeqCst)), None => options };
         let receiver = transport::create_transport(options).unwrap();
-        Self { receiver, runtime, cwd, project, connections, notices }
+        Self { receiver, leaf, runtime, cwd, project, connections, notices }
     }
     fn start(&self, mode: &str) -> Harness {
         let child = Command::new("node")
@@ -56,10 +49,11 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.receiver.close().unwrap();
-        // Only socket fixtures were created. Any transcript/file would make
-        // this non-recursive removal fail rather than silently deleting it.
-        let result = std::fs::remove_dir(&self.runtime);
-        if !std::thread::panicking() { result.unwrap(); }
+        // Only socket fixtures were created: anything but the leaf's own owner
+        // marker left behind fails the test rather than being silently deleted.
+        let leftovers: Vec<_> = std::fs::read_dir(&self.runtime).map(|d| d.flatten().map(|e| e.file_name()).filter(|n| n != ".owner").collect()).unwrap_or_default();
+        if !std::thread::panicking() { assert!(leftovers.is_empty(), "fixture leaf not clean after close: {leftovers:?}"); }
+        let _ = &self.leaf; // removed when the field drops
     }
 }
 struct Harness { child: Child, lines: mpsc::Receiver<String> }
