@@ -279,7 +279,7 @@ mod tests {
         fn compact_top() -> Self {
             FakeIo {
                 pos: Cell::new((808, 32)),
-                size: Cell::new((304, 44)),
+                size: Cell::new(LOGICAL_COMPACT),
                 scale: 1.0,
             }
         }
@@ -334,7 +334,7 @@ mod tests {
         assert!(core.expanded);
         assert_eq!(core.edge, Edge::Top);
         // the 3px drift is the chosen X, centre-anchored: 811 -> 627
-        assert_eq!(r.x, 811 + (304 - 672) / 2);
+        assert_eq!(r.x, 811 + (LOGICAL_COMPACT.0 - 672) / 2);
     }
 
     #[test]
@@ -351,11 +351,11 @@ mod tests {
             other => panic!("expected Snapped, got {other:?}"),
         };
         assert_eq!(edge, Edge::Bottom);
-        assert_eq!(rect.y, 32 + 1048 - 44); // 1036, bottom-docked
+        assert_eq!(rect.y, 32 + 1048 - LOGICAL_COMPACT.1); // bottom-docked (the work area ends at 1080)
         assert_eq!(rect.x, 910); // chosen X kept (clamped only if outside)
         assert!(!core.expanded, "a drag release must NOT toggle");
         assert_eq!(core.edge, Edge::Bottom);
-        assert_eq!(io.outer_position(), (910, 1036));
+        assert_eq!(io.outer_position(), (910, 32 + 1048 - LOGICAL_COMPACT.1));
     }
 
     #[test]
@@ -367,6 +367,7 @@ mod tests {
         core.drag(&io, area(), (152.0, 1008.0));
         core.release(&io, area(), (50.0, 20.0), false);
 
+        let docked = io.outer_position();
         let expand = core.toggle(&io, area());
         assert!(expand.is_expand());
         assert_eq!(expand.size(), LOGICAL_OVERVIEW);
@@ -379,11 +380,11 @@ mod tests {
         assert!(!collapse.is_expand());
         assert_eq!(collapse.size(), LOGICAL_COMPACT);
         let r = collapse.rect();
-        assert_eq!(r.y, 1036); // still bottom-docked after collapsing
-        assert_eq!(r.x, 910); // X centre restored
+        assert_eq!(r.y, 32 + 1048 - LOGICAL_COMPACT.1); // still bottom-docked after collapsing
+        assert_eq!(r.x, docked.0, "X centre restored to where the dot was");
         io.apply(&collapse);
-        assert_eq!(io.outer_position(), (910, 1036));
-        assert_eq!(io.size(), (304, 44));
+        assert_eq!(io.outer_position(), (910, 32 + 1048 - LOGICAL_COMPACT.1));
+        assert_eq!(io.size(), LOGICAL_COMPACT);
     }
 
     #[test]

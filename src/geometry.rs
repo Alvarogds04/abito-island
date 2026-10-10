@@ -4,7 +4,7 @@
 //! and of Tauri's `outer_position`/`inner_size` getters). The logical contract
 //! sizes are converted with [`scaled_size`] at the boundary.
 //!
-//! Contract: compact native window 304x44 (visible island 288x32 r14),
+//! Contract: compact native window 78x78 (visible round dot, 66 px diameter),
 //! overview native window 672x176 (visible island 640x160 r22), origin at the
 //! top-center of the work area, clamp to the work area, drag release snaps to
 //! the nearest vertical edge keeping the chosen X (only clamped), expanding
@@ -43,8 +43,16 @@ pub enum Edge {
 }
 
 
-/// Native window size per state, in logical px (approved contract).
-pub const LOGICAL_COMPACT: (i32, i32) = (304, 44);
+/// #302: the resting island is a ROUND DOT. Diameter measured from gentle-dot
+/// (MIT, read-only reference): its Dot window is 72x72 pt holding a 66 pt black
+/// disc (`docs/design.md`, `DOT_SIZE` in `shell.rs`). Same visible size here.
+pub const DOT_DIAMETER: i32 = 66;
+
+/// Native window size per state, in logical px. Compact = the dot plus a 6 px
+/// transparent margin on every side (the same edge gap the pill had), so
+/// drag / snap / edge memory / centre-anchored growth keep working unchanged:
+/// they only ever see a rectangle.
+pub const LOGICAL_COMPACT: (i32, i32) = (DOT_DIAMETER + 12, DOT_DIAMETER + 12);
 pub const LOGICAL_OVERVIEW: (i32, i32) = (672, 176);
 
 /// Visible overview island (approved contract, 640x160 r22). Only used to
@@ -221,13 +229,14 @@ mod tests {
 
     #[test]
     fn scaled_size_applies_scale_factor() {
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.0), (304, 44));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.0), (78, 78));
         assert_eq!(scaled_size(LOGICAL_OVERVIEW, 1.0), (672, 176));
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 2.0), (608, 88));
-        assert_eq!(scaled_size((304, 44), 1.25), (380, 55));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 2.0), (156, 156));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.25), (98, 98));
+        assert_eq!(scaled_size((304, 44), 1.25), (380, 55)); // an arbitrary size still scales per axis
         // broken scale factors must not poison the sizes
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 0.0), (304, 44));
-        assert_eq!(scaled_size(LOGICAL_COMPACT, f64::NAN), (304, 44));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 0.0), (78, 78));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, f64::NAN), (78, 78));
     }
 
     #[test]
@@ -520,7 +529,13 @@ mod tests {
     fn approved_overview_and_compact_are_untouched_by_the_chat_view() {
         assert_eq!(OVERVIEW_VISIBLE, (640, 160));
         assert_eq!(LOGICAL_OVERVIEW, (672, 176));
-        assert_eq!(LOGICAL_COMPACT, (304, 44));
+        // #302: the resting state is a ROUND DOT (gentle-dot's 66-point disc) in a 78x78
+        // native window (6px transparent margin each side, the same edge gap as the pill).
+        assert_eq!(LOGICAL_COMPACT, (78, 78));
+        assert_eq!(DOT_DIAMETER, 66);
+        assert_eq!((LOGICAL_COMPACT.0 - DOT_DIAMETER) / 2, 6);
+        // it takes less room than the pill it replaces (288x32 visible)
+        assert!(DOT_DIAMETER * DOT_DIAMETER < 288 * 32 && LOGICAL_COMPACT.0 < 304);
         // the chat is the SAME surface: same width, only taller
         assert_eq!(LOGICAL_CHAT.0, LOGICAL_OVERVIEW.0);
     }

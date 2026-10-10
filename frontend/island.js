@@ -30,9 +30,12 @@
   };
   reduced.addEventListener('change', applyMotion);
 
-  // Visible island geometry per state. Native windows: 304x44 compact and
-  // 672x176 overview (set by Rust); margins are the difference.
-  const COMPACT = { w: 288, h: 32, r: 14, gap: 6, clay: 44, drop: 0 };
+  // Visible island geometry per state. Native windows: 78x78 compact (the dot plus
+  // a 6px transparent margin) and 672x176 overview (set by Rust); margins are the
+  // difference. #302: the resting island is gentle-dot's ROUND DOT, a 66px disc
+  // (geometry::DOT_DIAMETER); the character fills it. Drag, snap and edge memory
+  // are Rust's and only ever see the native rectangle.
+  const COMPACT = { w: 66, h: 66, r: 33, gap: 6, clay: 54, drop: 2 };
   // UI.1: R6 is 128px at the left of the plain overview and 72px while the
   // approval card is shown (only scale/position; the engine is frozen).
   const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 0, clayX: 82 };
@@ -166,7 +169,7 @@
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
     const overviewTop = lerp(COMPACT.h, OVERVIEW.h, p) / 2 - drop - cs / 2;
-    const z = Math.max(0, Math.min(1, p)); // tight framing in overview AND chat
+    const z = 1; // tight framing in the dot, the overview AND the chat (the dot's character fills the disc, #302)
     clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';

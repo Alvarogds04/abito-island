@@ -156,7 +156,7 @@ fn questioncmd_native_resize_known_size_never_bypasses_unsettled_generation() {
 }
 #[test]
 fn questioncmd_native_recovery_only_accepts_current_plan_physical_size() {
-    for (expanded, chat, expected) in [(false,false,(304,44)),(false,true,(304,44)),
+    for (expanded, chat, expected) in [(false,false,(78,78)),(false,true,(78,78)),
                                      (true,false,(672,176)),(true,true,(672,256))] {
         assert_eq!(desired_native_size(expanded, chat, 1.0), expected);
         assert_eq!(desired_native_size(expanded, chat, 2.0), (expected.0*2, expected.1*2));

@@ -376,7 +376,7 @@ test('§5 chat header: R6 ~40px VISIBLE (box x 112/128 within 4px) and inside th
   const visible = box * 112 / vb[2];
   assert.ok(Math.abs(visible - 40) <= 4, `visible ${visible}`);
   assert.ok(left - box / 2 >= 4 && top >= 2 && top + box <= 56, 'box inside the 48-56px header band');
-  assert.match(islandSrc, /const z = Math\.max\(0, Math\.min\(1, p\)\); \/\/ tight framing in overview AND chat/);
+  assert.match(islandSrc, /const z = 1; \/\/ tight framing in the dot, the overview AND the chat/);
 });
 
 test('night review: the bridge is shown (chip «Sin puente», compact triangle) and the host error face is time-boxed', () => {
@@ -468,6 +468,40 @@ test('#304 wiring: the page decides motion itself (data-motion on <html>), start
   assert.match(islandSrc, /motionReduced\(\)/);
   // the frozen engine is forced from the first frame unless the human honors the system
   assert.match(islandSrc, /AbitoClay\.setForced\(!honorSystem\)/);
+});
+
+test('#302 round dot: the compact island is gentle-dot\'s 66px disc, in step with the native 78x78 window; it takes less room than the pill', () => {
+  const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
+  const diameter = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
+  assert.equal(diameter, 66);
+  assert.match(geo, /LOGICAL_COMPACT: \(i32, i32\) = \(DOT_DIAMETER \+ 12, DOT_DIAMETER \+ 12\)/);
+  const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), drop: (\d+) \}/.exec(islandSrc);
+  assert.ok(m, 'COMPACT constant');
+  const [w, h, r, gap, clay] = m.slice(1, 6).map(Number);
+  assert.deepEqual([w, h], [diameter, diameter], 'a circle: width = height = the measured diameter');
+  assert.equal(r, diameter / 2, 'fully round');
+  assert.equal(gap, 6, 'the same edge gap the pill had: the transparent margin is (78-66)/2');
+  assert.equal(w + 2 * gap, 78, 'visible dot + margins = the native compact window');
+  assert.ok(w * h < 288 * 32, 'less area than the old pill');
+  assert.ok(clay >= 48 && clay <= diameter, 'the character box fits the disc');
+  const vbx = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
+  const visible = clay * 112 / vbx[2];
+  assert.ok(visible >= 44 && visible <= diameter - 12, `the visible character (${visible.toFixed(1)}px) sits inside the disc with a clear rim`);
+});
+
+test('#302 the dot keeps the badge/contour vocabulary: sun/red badge sits ON the disc rim; sun contour only in compact', () => {
+  const flag = /#compact-flag \{([^}]*)\}/.exec(css)[1];
+  const right = Number(/right:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
+  const cx = 66 - right - size / 2, cy = top + size / 2; // badge centre, from the dot's top-left
+  const dist = Math.hypot(cx - 33, cy - 33);
+  assert.ok(dist <= 33 && dist >= 33 - size / 2 - 4, `badge centre ${dist.toFixed(1)}px from the dot centre must be on the rim, inside the disc`);
+  assert.match(css, /#capsule\[data-card-tone="sun"\] #island \{ box-shadow: inset 0 0 0 2px var\(--sun\)/);
+});
+
+test('#302 drag/snap/edge memory are untouched: the native window is still a plain rectangle and nothing in the frontend decides docking', () => {
+  assert.doesNotMatch(islandSrc, /snap_to_edge|nearest_vertical_edge|anchor_toggle/);
+  assert.match(islandSrc, /send\('drag_press'/); assert.match(islandSrc, /send\('drag_release'/);
+  assert.match(islandSrc, /island\.style\.borderRadius = r \+ 'px'/);
 });
 
 test('CSS structure: braces balance (no stray «}» swallowing the next rule) and every critical top-level rule exists', () => {

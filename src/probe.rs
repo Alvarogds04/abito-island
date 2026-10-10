@@ -694,20 +694,28 @@ fn overview_visual_evidence(app: &AppHandle) {
         }
         sleep(Duration::from_millis(200));
         capture_visual(app, "overview-tarjeta-pendiente");
-        if !sent_run && pending_ok {
-            capture_poses(app, "tarjeta");
-        }
-        // compacta-espera: same pending card, island collapsed -> sun dot.
-        if !sent_run && pending_ok {
+        // compacta-espera: same pending card, island collapsed -> sun dot (either fixture mode).
+        if pending_ok {
             let plan = state.core.lock().expect("core lock").toggle(&io, area);
             apply_plan(app, state.inner(), plan);
             wait_for_size(app, compact, Duration::from_secs(3));
-            sleep(Duration::from_millis(700));
+            sleep(Duration::from_millis(250));
             capture_visual(app, "compacta-espera");
+            {
+                let st = app.state::<AppState>();
+                st.chat_probe.lock().expect("chat probe lock").clear();
+                let _ = main_window(app).eval("(async()=>{const c=document.getElementById('capsule'), f=document.getElementById('compact-flag'); const snap=await window.desktop.snapshot(); await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'compact_badge',dataset:{...c.dataset},flag_hidden:f.hidden,flag_tone:f.dataset.tone||null,flag_display:getComputedStyle(f).display,flag_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(f.getBoundingClientRect()),island_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(document.getElementById('island').getBoundingClientRect()),card:snap.card}}); })()");
+                let lines = wait_chat_lines(app, 1, Duration::from_secs(4));
+                emit(&json!({"step": "compact_badge", "webview": lines}));
+            }
+
             let plan = state.core.lock().expect("core lock").toggle(&io, area);
             apply_plan(app, state.inner(), plan);
             wait_for_size(app, overview, Duration::from_secs(3));
             sleep(Duration::from_millis(900));
+        }
+        if !sent_run && pending_ok {
+            capture_poses(app, "tarjeta");
         }
         line["states"].as_array_mut().expect("states array").push(json!({
             "name": "tarjeta-pendiente",
