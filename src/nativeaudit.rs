@@ -7,11 +7,11 @@ pub(crate) fn enabled() -> bool {
     std::env::var("ABITO_NATIVE_AUDIT").as_deref() == Ok("1")
 }
 
-pub(crate) fn expected(view: &str, scale: f64) -> (i32, i32) {
+pub(crate) fn expected(view: &str, scale: f64, area_h: i32) -> (i32, i32) {
     use abito_island::geometry;
     let logical = match view {
         "overview" => geometry::LOGICAL_OVERVIEW,
-        "chat" => geometry::LOGICAL_CHAT,
+        "chat" => geometry::chat_window(area_h, scale),
         _ => geometry::LOGICAL_COMPACT,
     };
     geometry::scaled_size(logical, scale)
@@ -103,7 +103,7 @@ pub(crate) fn sample(
             "socket_identity": socket_identity,
             "tauri_scale": scale, "gtk_scale": gtk.scale_factor(),
             "xft_dpi_1024": gtk::Settings::default().map(|s| s.property::<i32>("gtk-xft-dpi")),
-            "expected": scale.map(|s| expected(view, s)), "desired": desired,
+            "expected": scale.map(|s| expected(view, s, wa.rect.h)), "desired": desired,
             "requested_position": requested.0, "requested_size": requested.1,
             "tauri_inner": win.inner_size().ok().map(|s| [s.width, s.height]),
             "tauri_outer": win.outer_size().ok().map(|s| [s.width, s.height]),

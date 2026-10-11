@@ -373,6 +373,7 @@ pub fn run(app: AppHandle) {
         notification_scenes(&app);
         hotkey_evidence(&app);
         settings_scenes(&app, &std::env::var("ABITO_PROBE_SETTINGS_TAG").unwrap_or_else(|_| "sin-motor".into()));
+        column_transition_scenes(&app);
     }
     chat_evidence(&app);
 
@@ -1157,6 +1158,48 @@ fn hotkey_evidence(app: &AppHandle) {
         "after_notice_still_hidden": still_hidden, "after_show": shown}));
 }
 
+/// #309 evidence (opt-in visual run): the overview <-> column transition CAUGHT IN FLIGHT, with the
+/// native window size observed at each frame. The stage window must hold both views, so a capture
+/// taken mid-way never shows a clipped overview or a clipped column.
+fn column_transition_scenes(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    let scale = io.scale();
+    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
+    let column = geometry::scaled_size(geometry::chat_window(area.h, scale), scale);
+    let stage = geometry::stage_size(overview, column);
+    let size = || win.inner_size().map(|s| [s.width, s.height]).unwrap_or([0, 0]);
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, overview, Duration::from_secs(3));
+    sleep(Duration::from_millis(700));
+    capture_visual(app, "columna-0-resumen");
+    crate::chathost::switch_view(app, &state, true);
+    sleep(Duration::from_millis(260));
+    let opening = size();
+    capture_visual(app, "columna-1-abriendo");
+    let settled = wait_for_size(app, column, Duration::from_secs(4));
+    sleep(Duration::from_millis(500));
+    capture_visual(app, "columna-2-abierta");
+    crate::chathost::switch_view(app, &state, false);
+    sleep(Duration::from_millis(200));
+    let closing = size();
+    capture_visual(app, "columna-3-cerrando");
+    let back = wait_for_size(app, overview, Duration::from_secs(4));
+    sleep(Duration::from_millis(300));
+    capture_visual(app, "columna-4-resumen");
+    emit(&json!({
+        "step": "column_transition", "scale": scale, "overview": [overview.0, overview.1], "column": [column.0, column.1],
+        "stage_expected": [stage.0, stage.1], "native_while_opening": opening, "column_settled": settled,
+        "native_while_closing": closing, "overview_settled": back,
+    }));
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    sleep(Duration::from_millis(700));
+}
+
 /// #306 evidence (opt-in visual run): the settings panel in each section, driven through the
 /// page's own gear/tabs. The daemon state comes from `ABITO_ISLAND_DIR` (a REAL daemon with a
 /// fake agent when the caller started one, or nothing running = honest «Sin motor»).
@@ -1170,7 +1213,7 @@ fn settings_scenes(app: &AppHandle, tag: &str) {
     let io = TauriIo(&win);
     let scale = io.scale();
     let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
-    let chat_size = geometry::scaled_size(geometry::LOGICAL_CHAT, scale);
+    let chat_size = geometry::scaled_size(geometry::chat_window(area.h, scale), scale);
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
     wait_for_size(app, overview, Duration::from_secs(3));
@@ -1486,12 +1529,12 @@ fn chat_evidence(app: &AppHandle) {
     let win = main_window(app);
     let io = TauriIo(&win);
     let scale = io.scale();
+    let area = refresh_work_area(app, &state);
     let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
-    let chat_size = geometry::scaled_size(geometry::LOGICAL_CHAT, scale);
+    let chat_size = geometry::scaled_size(geometry::chat_window(area.h, scale), scale);
     let compact = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
 
     // expand (overview), then the `open` verb of the chat lane
-    let area = refresh_work_area(app, &state);
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
     wait_for_size(app, overview, Duration::from_secs(3));
@@ -1583,8 +1626,8 @@ fn chat_evidence(app: &AppHandle) {
     emit(&json!({
         "step": "chat_evidence",
         "pointer_input": "the webview drives the REAL chat_action IPC itself; no pointer events",
-        "chat_visible_constant": [geometry::CHAT_VISIBLE.0, geometry::CHAT_VISIBLE.1],
-        "chat_native_constant": [geometry::LOGICAL_CHAT.0, geometry::LOGICAL_CHAT.1],
+        "chat_visible": [geometry::chat_visible(area.h, scale).0, geometry::chat_visible(area.h, scale).1],
+        "chat_native": [geometry::chat_window(area.h, scale).0, geometry::chat_window(area.h, scale).1],
         "fake_local_router": fake.origin(),
         "fake_requests": seen,
         "fake_requests_detail": "the GETs before the POST are the open-chat availability check and the turn preflight; no inference besides the one POST",

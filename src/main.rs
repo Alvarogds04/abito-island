@@ -45,6 +45,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 const COLLAPSE_RESIZE_DELAY_MS: u64 = 400; // frontend shrink anim is 340ms
+const CHAT_SETTLE_DELAY_MS: u64 = 700; // the grow spring (R6, 160ms delay + 400ms) has settled
 
 /// Set once a clean quit starts (port of main.cjs `quitting`): guards the
 /// close-request handler and stops the background threads.

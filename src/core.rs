@@ -83,14 +83,27 @@ impl TogglePlan {
     }
 }
 
-/// Unit U1: overview <-> chat resize inside the SAME expanded island.
+/// Unit U1/#309: overview <-> chat resize inside the SAME expanded island.
 #[derive(Debug, PartialEq)]
 pub struct ViewPlan {
-    /// `true` = the chat view (LOGICAL_CHAT), `false` = the overview.
+    /// `true` = the chat column, `false` = the overview.
     pub chat: bool,
+    /// Final native window size (physical px) and rectangle.
     pub size: (i32, i32),
     pub rect: Rect,
+    /// The window that holds BOTH views while the page animates (physical px): the per-axis
+    /// maximum of the current and the final size, on the same docked edge. The host resizes to it
+    /// first and settles on `rect` afterwards, so neither view is ever clipped mid-transition.
+    pub stage: Rect,
+    /// The VISIBLE view in logical px (what the page animates to). Rust owns it.
+    pub visible: (i32, i32),
     pub edge: Edge,
+}
+
+/// The stage rectangle of a transition (see [`ViewPlan::stage`]).
+pub fn stage_rect(edge: Edge, current: Rect, target: (i32, i32), _final: (i32, i32), area: Rect) -> Rect {
+    let stage = geometry::stage_size((current.w, current.h), target);
+    geometry::anchor_toggle(edge, current, stage, area)
 }
 
 /// Session state of the island: docked edge, open state, live pointer press.
@@ -232,20 +245,26 @@ impl Core {
         if !self.expanded || self.chat == chat {
             return None;
         }
-        let logical = if chat {
-            geometry::LOGICAL_CHAT
+        let scale = io.scale();
+        let (logical, visible) = if chat {
+            (geometry::chat_window(area.h, scale), geometry::chat_visible(area.h, scale))
         } else {
-            geometry::LOGICAL_OVERVIEW
+            (geometry::LOGICAL_OVERVIEW, geometry::OVERVIEW_VISIBLE)
         };
-        let size = geometry::scaled_size(logical, io.scale());
+        let size = geometry::scaled_size(logical, scale);
         let (x, y) = io.outer_position();
         let (w, h) = io.size();
-        let rect = geometry::anchor_toggle(self.edge, Rect { x, y, w, h }, size, area);
+        let current = Rect { x, y, w, h };
+        let stage = stage_rect(self.edge, current, size, size, area);
+        // the final window is centred on the stage: the island does not jump when the stage is dropped
+        let rect = geometry::anchor_toggle(self.edge, stage, size, area);
         self.chat = chat;
         Some(ViewPlan {
             chat,
             size,
             rect,
+            stage,
+            visible,
             edge: self.edge,
         })
     }
@@ -254,7 +273,7 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{LOGICAL_CHAT, LOGICAL_COMPACT, LOGICAL_OVERVIEW};
+    use crate::geometry::{chat_visible, chat_window, LOGICAL_COMPACT, LOGICAL_OVERVIEW};
     use std::cell::Cell;
 
     fn area() -> Rect {
@@ -440,13 +459,17 @@ mod tests {
     }
 
     #[test]
-    fn overview_to_chat_grows_to_the_chat_constant_and_back() {
+    fn overview_to_chat_becomes_the_column_and_back() {
         let (mut core, io) = expanded_top();
         let open = core.plan_view(&io, area(), true).expect("open chat");
         assert!(open.chat);
-        assert_eq!(open.size, LOGICAL_CHAT);
+        assert_eq!(open.size, chat_window(area().h, 1.0));
+        assert_eq!(open.size, (432, 656));
+        assert_eq!(open.visible, chat_visible(area().h, 1.0), "Rust owns the visible size the page animates to");
         assert_eq!(open.rect.y, 32, "top-docked: grows downward");
-        assert_eq!(open.rect.w, 672);
+        assert_eq!(open.rect.w, 432);
+        // the column stays centred under the overview it replaces: 672 wide at x -> 432 wide at x+120
+        assert_eq!(open.rect.x + open.rect.w / 2, io.pos.get().0 + 672 / 2);
         assert!(core.chat && core.expanded);
         io.size.set(open.size);
         io.pos.set((open.rect.x, open.rect.y));
@@ -455,7 +478,38 @@ mod tests {
         let back = core.plan_view(&io, area(), false).expect("back");
         assert!(!back.chat);
         assert_eq!(back.size, LOGICAL_OVERVIEW);
+        assert_eq!(back.visible, (640, 160));
         assert!(!core.chat && core.expanded);
+    }
+
+    #[test]
+    fn a_view_switch_goes_through_a_stage_window_that_holds_both_views() {
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).unwrap();
+        assert_eq!((open.stage.w, open.stage.h), (672, 656), "wide as the overview, tall as the column");
+        assert_eq!(open.stage.y, 32, "same docked edge as the final window");
+        // the final window sits inside the stage, centred on it
+        assert!(open.rect.x >= open.stage.x && open.rect.right() <= open.stage.right());
+        assert_eq!(open.rect.x + open.rect.w / 2, open.stage.x + open.stage.w / 2);
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        let back = core.plan_view(&io, area(), false).unwrap();
+        assert_eq!((back.stage.w, back.stage.h), (672, 656), "closing also holds the column until the page has shrunk");
+        assert_eq!(back.stage.y, open.rect.y);
+        // when nothing needs a stage, the stage IS the final window
+        let same = Rect { x: 0, y: 0, w: 5, h: 5 };
+        assert_eq!(stage_rect(Edge::Top, same, (5, 5), (5, 5), area()), stage_rect(Edge::Top, same, (5, 5), (5, 5), area()));
+    }
+
+    #[test]
+    fn the_column_follows_the_work_area_height() {
+        for h in [1048, 768, 560] {
+            let a = Rect { x: 0, y: 32, w: 1920, h };
+            let (mut core, io) = expanded_top();
+            let open = core.plan_view(&io, a, true).unwrap();
+            assert_eq!(open.size, chat_window(h, 1.0), "{h}");
+            assert!(open.rect.bottom() <= a.bottom(), "{h}: the column fits the screen");
+        }
     }
 
     #[test]
@@ -469,7 +523,7 @@ mod tests {
         io.apply(&plan);
         let chat = core.plan_view(&io, area(), true).unwrap();
         assert_eq!(chat.rect.bottom(), area().bottom());
-        assert_eq!(chat.rect.h, 256);
+        assert_eq!(chat.rect.h, 656);
     }
 
     #[test]

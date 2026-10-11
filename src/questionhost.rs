@@ -109,7 +109,8 @@ pub fn native_resized(app: &AppHandle, size: (u32, u32)) {
             if !scale.is_finite() || scale <= 0.0 {
                 return None;
             }
-            let desired = questioncmd::desired_native_size(core.expanded, core.chat, scale);
+            let area_h = state.work_area.lock().expect("work area lock").h;
+            let desired = questioncmd::desired_native_size(core.expanded, core.chat, scale, area_h);
             let actual = win.inner_size().ok()?;
             if (actual.width, actual.height) != size
                 || state.generation.load(Ordering::SeqCst) != generation

@@ -23,7 +23,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     main_window, now_ms, publish, refresh_work_area, store_requested, AppState, TauriIo,
-    COLLAPSE_RESIZE_DELAY_MS, QUITTING,
+    CHAT_SETTLE_DELAY_MS, COLLAPSE_RESIZE_DELAY_MS, QUITTING,
 };
 
 fn chat_error(e: chat::ChatError) -> BridgeError {
@@ -48,7 +48,11 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     let chat_open = state.core.lock().expect("core lock").chat
         && *state.phase.lock().expect("phase lock") == IslandState::Expanded;
     v["view"] = json!(if chat_open { "chat" } else { "overview" });
-    v["chat_visible"] = json!([geometry::CHAT_VISIBLE.0, geometry::CHAT_VISIBLE.1]);
+    // #309: the column's height follows the work area, so Rust computes it from the current one
+    let area = *state.work_area.lock().expect("work area lock");
+    let scale = main_window(app).scale_factor().unwrap_or(1.0);
+    let (cw, ch) = geometry::chat_visible(area.h, scale);
+    v["chat_visible"] = json!([cw, ch]);
     v["target"] = match current_target(state) {
         Some(t) => json!({
             "origin": t.endpoint.origin(),
@@ -85,34 +89,36 @@ pub fn apply_view(app: &AppHandle, state: &AppState, plan: ViewPlan) {
         chat,
         size: (w, h),
         rect: r,
+        stage,
+        visible: (vw, vh),
         ..
     } = plan;
     store_requested(state, if chat { "chat" } else { "overview" }, Some((r.x, r.y)), Some((w, h)));
     let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
     let win = main_window(app);
-    let (vw, vh) = geometry::CHAT_VISIBLE;
     let push = format!(
         "window.__islandSetView && window.__islandSetView('{}',{vw},{vh});",
         if chat { "chat" } else { "overview" }
     );
-    if chat {
+    // #309: overview and column move in opposite directions per axis (672x176 <-> 432x656), so the
+    // window first becomes the STAGE that holds both views, the page animates inside it, and the
+    // window settles on the final rectangle once the animation is over. Opening: stage now, final
+    // after the grow spring; closing: stage now, final after the 340 ms shrink (same generation
+    // guard as every other deferred resize, so a newer plan always wins).
+    TauriIo(&win).set_size(stage.w, stage.h);
+    TauriIo(&win).set_outer_position(stage.x, stage.y);
+    let _ = win.eval(push);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(if chat { CHAT_SETTLE_DELAY_MS } else { COLLAPSE_RESIZE_DELAY_MS }));
+        let state = app.state::<AppState>();
+        if state.generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let win = main_window(&app);
         TauriIo(&win).set_size(w, h);
         TauriIo(&win).set_outer_position(r.x, r.y);
-        let _ = win.eval(push);
-    } else {
-        let _ = win.eval(push);
-        let app = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(COLLAPSE_RESIZE_DELAY_MS));
-            let state = app.state::<AppState>();
-            if state.generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            let win = main_window(&app);
-            TauriIo(&win).set_size(w, h);
-            TauriIo(&win).set_outer_position(r.x, r.y);
-        });
-    }
+    });
 }
 
 /// Switch the expanded island to the chat (`true`) or the overview.

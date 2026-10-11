@@ -122,11 +122,12 @@ impl NativeResizeBarrier {
     }
 }
 /// Current Core view uses the approved geometry constants, never stored intent
-/// from an obsolete compact request. Callers must reject an unknown scale.
-pub fn desired_native_size(expanded: bool, chat: bool, scale: f64) -> (u32,u32) {
+/// from an obsolete compact request. Callers must reject an unknown scale. The chat column's height
+/// follows the work area (`area_h`, physical px), so that is part of the desired size.
+pub fn desired_native_size(expanded: bool, chat: bool, scale: f64, area_h: i32) -> (u32,u32) {
     use crate::geometry;
     let logical = if !expanded { geometry::LOGICAL_COMPACT }
-        else if chat { geometry::LOGICAL_CHAT } else { geometry::LOGICAL_OVERVIEW };
+        else if chat { geometry::chat_window(area_h, scale) } else { geometry::LOGICAL_OVERVIEW };
     let (w,h) = geometry::scaled_size(logical, scale); (w as u32,h as u32)
 }
 pub fn error_code(error: Error) -> &'static str {

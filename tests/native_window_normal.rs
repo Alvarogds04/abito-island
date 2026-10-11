@@ -135,7 +135,7 @@ fn number(output: &str, label: &str) -> i32 {
         .expect("xwininfo numeric field")
 }
 
-// The contract is LOGICAL: compact 304x44, overview 672x176, chat 672x256.
+// The contract is LOGICAL: compact 304x44, overview 672x176, chat 432x(work area - 40, max 656).
 // Physical scale varies between sessions: real GTK/Tauri factors 2 and 1
 // were observed, without attributing the difference to an environment cause.
 // Use this run's SDK scale, never fixed physical dimensions. NOAUDIT is a
@@ -426,7 +426,7 @@ fn normal_compact_matches_actual_runtime_scale() {
         for (generation, view, logical) in [
             (0, "compact", (304, 44)),
             (1, "overview", (672, 176)),
-            (2, "chat", (672, 256)),
+            (2, "chat", (432, 656)), // #309: the vertical column; its height follows the work area (1048 logical here)
             (3, "overview", (672, 176)),
             (4, "compact", (304, 44)),
         ] {

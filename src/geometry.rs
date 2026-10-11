@@ -59,19 +59,48 @@ pub const LOGICAL_OVERVIEW: (i32, i32) = (672, 176);
 /// derive window margins; the overview itself is frozen.
 pub const OVERVIEW_VISIBLE: (i32, i32) = (640, 160);
 
-/// Unit U1 — THE chat height. The visible chat view of the same expanded
-/// surface, in logical px. Parent decision (HANDOFF-chat-and-models.md):
-/// 640x240; the design's minimum alternative is 640x160 — switching is this
-/// ONE line (the test `chat_view_is_640x240_visible_672x256_native` is the
-/// tripwire). The frontend receives it from Rust, never hard-codes it.
-pub const CHAT_VISIBLE: (i32, i32) = (640, 240);
+/// #309 — the chat is a vertical COLUMN (gentle-shell style): a fixed narrow width and a
+/// height that follows the work area. These are the VISIBLE sizes, in logical px; the native
+/// window adds the overview's margins (see [`chat_window`]).
+pub const CHAT_COLUMN_W: i32 = 400;
+/// Visible height when the screen allows it.
+pub const CHAT_PREFERRED_H: i32 = 640;
+/// Never shorter than the old horizontal chat (240): small screens keep a usable chat.
+pub const CHAT_MIN_H: i32 = 240;
+/// Logical px of air left between the far end of the window and the work-area edge it grows toward.
+pub const CHAT_FAR_GAP: i32 = 40;
 
-/// Native chat window: the visible chat plus the overview's window margins
-/// (672-640, 176-160) — 672x256 for the 240 chat.
-pub const LOGICAL_CHAT: (i32, i32) = (
-    CHAT_VISIBLE.0 + (LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0),
-    CHAT_VISIBLE.1 + (LOGICAL_OVERVIEW.1 - OVERVIEW_VISIBLE.1),
+/// Window margins around any visible view (the overview's 672x176 around its 640x160).
+const WINDOW_MARGIN: (i32, i32) = (
+    LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0,
+    LOGICAL_OVERVIEW.1 - OVERVIEW_VISIBLE.1,
 );
+
+/// Work-area height (PHYSICAL px, as X11 reports it) in logical px; a broken scale reads as 1.0.
+fn logical_area_h(area_h_phys: i32, scale: f64) -> i32 {
+    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    (area_h_phys as f64 / s).floor() as i32
+}
+
+/// Visible chat size in logical px for a work area of `area_h_phys` physical px. Rust owns this
+/// number: the frontend only ever receives it (`__islandSetView`), it never decides the height.
+pub fn chat_visible(area_h_phys: i32, scale: f64) -> (i32, i32) {
+    let room = logical_area_h(area_h_phys, scale) - CHAT_FAR_GAP - WINDOW_MARGIN.1;
+    (CHAT_COLUMN_W, room.clamp(CHAT_MIN_H, CHAT_PREFERRED_H))
+}
+
+/// Native chat window in logical px: the visible column plus the overview's window margins.
+pub fn chat_window(area_h_phys: i32, scale: f64) -> (i32, i32) {
+    let (w, h) = chat_visible(area_h_phys, scale);
+    (w + WINDOW_MARGIN.0, h + WINDOW_MARGIN.1)
+}
+
+/// The window that holds BOTH views of a transition. Width and height move in opposite
+/// directions between the overview and the column (672x176 <-> 432x656), so resizing straight to
+/// the target would clip the view that is still on screen; the stage is the per-axis maximum.
+pub fn stage_size(from: (i32, i32), to: (i32, i32)) -> (i32, i32) {
+    (from.0.max(to.0), from.1.max(to.1))
+}
 
 /// Pointer movement at or above this many physical px on release counts as a
 /// drag (snap, no toggle). Below it the release is a short click (toggle).
@@ -505,24 +534,73 @@ mod tests {
         assert!(!is_click(f64::NAN, CLICK_THRESHOLD_PX));
     }
 
-    // --- unit U1 (chat in the island): ONE named height, tested ----------
+    // --- #309: the chat is a vertical COLUMN whose height follows the work area ----------
 
     #[test]
-    fn chat_view_is_640x240_visible_672x256_native() {
-        // Parent decision (HANDOFF-chat-and-models.md): the chat view uses
-        // 240. Switching back to the 160 proposal is a one-line change of
-        // CHAT_VISIBLE; this test is the tripwire for that line.
-        assert_eq!(CHAT_VISIBLE, (640, 240));
-        assert_eq!(LOGICAL_CHAT, (672, 256));
-        // native = visible + the same window margins the overview uses
-        assert_eq!(
-            LOGICAL_CHAT,
-            (
-                CHAT_VISIBLE.0 + (LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0),
-                CHAT_VISIBLE.1 + (LOGICAL_OVERVIEW.1 - OVERVIEW_VISIBLE.1),
-            )
-        );
-        assert_eq!(scaled_size(LOGICAL_CHAT, 2.0), (1344, 512));
+    fn chat_column_width_is_fixed_and_the_window_adds_the_overview_margins() {
+        // measured contract: a narrow column (gentle-shell style), 400 visible
+        assert_eq!(CHAT_COLUMN_W, 400);
+        let (vw, vh) = chat_visible(1048, 1.0);
+        assert_eq!(vw, 400);
+        // native = visible + the same window margins the overview uses (32 x 16)
+        assert_eq!(chat_window(1048, 1.0), (vw + 32, vh + 16));
+        assert_eq!(chat_window(1048, 1.0).0, 432);
+    }
+
+    #[test]
+    fn chat_height_is_the_preferred_one_when_the_screen_allows_it() {
+        assert_eq!(CHAT_PREFERRED_H, 640);
+        assert_eq!(chat_visible(1048, 1.0).1, 640);
+        assert_eq!(chat_visible(2000, 1.0).1, 640, "never taller than preferred, however big the screen");
+    }
+
+    #[test]
+    fn chat_height_shrinks_with_the_work_area_and_leaves_air_at_the_far_edge() {
+        for area_h in [900, 768, 700, 600, 500] {
+            let (_, vh) = chat_visible(area_h, 1.0);
+            let window_h = vh + 16;
+            assert!(window_h <= area_h - CHAT_FAR_GAP || vh == CHAT_MIN_H, "{area_h}: window {window_h} leaves less than {CHAT_FAR_GAP}px");
+            assert!(vh >= CHAT_MIN_H);
+        }
+        assert_eq!(chat_visible(600, 1.0).1, 600 - CHAT_FAR_GAP - 16, "a short screen shrinks the column");
+        assert_eq!(chat_visible(768, 1.0).1, 640, "768 still fits the preferred height");
+        // monotonic: a taller area never gives a shorter chat
+        let mut last = 0;
+        for h in (300..1300).step_by(7) {
+            let v = chat_visible(h, 1.0).1;
+            assert!(v >= last, "{h}");
+            last = v;
+        }
+    }
+
+    #[test]
+    fn chat_is_never_shorter_than_the_old_horizontal_chat() {
+        assert_eq!(CHAT_MIN_H, 240);
+        for h in [0, 1, 100, 240, 300, 400] {
+            assert_eq!(chat_visible(h, 1.0).1.max(CHAT_MIN_H), chat_visible(h, 1.0).1, "{h}");
+        }
+        assert_eq!(chat_visible(100, 1.0).1, 240);
+    }
+
+    #[test]
+    fn chat_size_is_in_logical_px_whatever_the_scale() {
+        // the work area arrives in PHYSICAL px; the contract is logical
+        assert_eq!(chat_visible(2096, 2.0), chat_visible(1048, 1.0));
+        assert_eq!(chat_visible(1310, 1.25), chat_visible(1048, 1.0));
+        assert_eq!(scaled_size(chat_window(2096, 2.0), 2.0), (864, 1312));
+        // a broken scale degrades to 1.0, never to a zero or absurd window
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(chat_visible(1048, bad), chat_visible(1048, 1.0), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_stage_window_holds_both_views_so_nothing_is_clipped_mid_transition() {
+        // overview 672x176 <-> chat 432x656: opposite directions per axis
+        assert_eq!(stage_size(LOGICAL_OVERVIEW, (432, 656)), (672, 656));
+        assert_eq!(stage_size((432, 656), LOGICAL_OVERVIEW), (672, 656));
+        assert_eq!(stage_size((100, 100), (100, 100)), (100, 100));
+        assert_eq!(stage_size((100, 300), (200, 100)), (200, 300));
     }
 
     #[test]
@@ -536,20 +614,35 @@ mod tests {
         assert_eq!((LOGICAL_COMPACT.0 - DOT_DIAMETER) / 2, 6);
         // it takes less room than the pill it replaces (288x32 visible)
         assert!(DOT_DIAMETER * DOT_DIAMETER < 288 * 32 && LOGICAL_COMPACT.0 < 304);
-        // the chat is the SAME surface: same width, only taller
-        assert_eq!(LOGICAL_CHAT.0, LOGICAL_OVERVIEW.0);
+        // the chat column is NARROWER than the overview and much taller
+        assert!(CHAT_COLUMN_W < OVERVIEW_VISIBLE.0 && CHAT_PREFERRED_H > OVERVIEW_VISIBLE.1);
     }
 
     #[test]
-    fn chat_grows_upward_when_docked_at_the_bottom() {
+    fn chat_grows_upward_when_docked_at_the_bottom_and_stays_centred() {
         let a = area();
+        let size = chat_window(a.h, 1.0);
+        assert_eq!(size, (432, 656));
         let overview = Rect { x: 624, y: a.bottom() - 176, w: 672, h: 176 };
-        let chat = anchor_toggle(Edge::Bottom, overview, LOGICAL_CHAT, a);
+        let chat = anchor_toggle(Edge::Bottom, overview, size, a);
         assert_eq!(chat.bottom(), a.bottom());
-        assert_eq!((chat.x, chat.w, chat.h), (624, 672, 256));
+        // the window centre does not move: 624 + 672/2 == x + 432/2
+        assert_eq!((chat.x + chat.w / 2, chat.w, chat.h), (624 + 336, 432, 656));
         let top = Rect { x: 624, y: a.y, w: 672, h: 176 };
-        let chat = anchor_toggle(Edge::Top, top, LOGICAL_CHAT, a);
-        assert_eq!((chat.y, chat.h), (a.y, 256));
+        let chat = anchor_toggle(Edge::Top, top, size, a);
+        assert_eq!((chat.y, chat.h), (a.y, 656));
+    }
+
+    #[test]
+    fn a_column_at_the_screen_side_is_clamped_inside_the_work_area() {
+        let a = area();
+        let size = chat_window(a.h, 1.0);
+        let right = Rect { x: a.right() - 672, y: a.y, w: 672, h: 176 };
+        let chat = anchor_toggle(Edge::Top, right, size, a);
+        assert!(chat.x >= a.x && chat.right() <= a.right());
+        let left = Rect { x: a.x, y: a.y, w: 672, h: 176 };
+        let chat = anchor_toggle(Edge::Top, left, size, a);
+        assert!(chat.x >= a.x && chat.right() <= a.right());
     }
 
     // --- FIX-A (spec lane 4aa7c63): watcher re-clamp must keep the width ----
@@ -568,7 +661,7 @@ mod tests {
 
     #[test]
     fn workarea_change_keeps_overview_and_chat_sizes() {
-        for (w, h) in [LOGICAL_OVERVIEW, LOGICAL_CHAT] {
+        for (w, h) in [LOGICAL_OVERVIEW, chat_window(1048, 1.0)] {
             let r = Rect { x: 100, y: 32, w, h };
             assert_eq!(reclamp_on_workarea_change(r, area()), None);
             let off = Rect { x: 1700, y: 32, w, h };
@@ -580,9 +673,9 @@ mod tests {
 
     #[test]
     fn workarea_smaller_than_the_window_still_shrinks_it_onto_the_screen() {
-        let r = Rect { x: 0, y: 0, w: 672, h: 256 };
-        let tiny = Rect { x: 0, y: 0, w: 500, h: 200 };
+        let r = Rect { x: 0, y: 0, w: 432, h: 656 };
+        let tiny = Rect { x: 0, y: 0, w: 300, h: 200 };
         let moved = reclamp_on_workarea_change(r, tiny).unwrap();
-        assert_eq!((moved.w, moved.h), (500, 200));
+        assert_eq!((moved.w, moved.h), (300, 200));
     }
 }
