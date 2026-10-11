@@ -38,6 +38,7 @@ pub mod protocol;
 pub mod question;
 pub mod questioncmd;
 pub mod requests;
+pub mod renderenv;
 pub mod retry;
 pub mod transport;
 pub mod workarea;

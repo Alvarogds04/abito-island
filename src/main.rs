@@ -1180,6 +1180,8 @@ fn main() {
     if std::env::var_os("GDK_BACKEND").is_none() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
+    // #310: the renderer choice that stops the window going blank for 2 frames when it shrinks (see renderenv).
+    abito_island::renderenv::apply();
 
     let project = project_id_for_this_checkout().unwrap_or_default();
     // M3: approval lane configuration. The credential source follows legacy
