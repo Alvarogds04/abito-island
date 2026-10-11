@@ -53,6 +53,97 @@ fn x11_net_workarea() -> Option<Rect> {
     None
 }
 
+/// MONITORINFO.rcWork is given as screen-space left/top/right/bottom (SDK
+/// winuser.h); the work area is the rectangle between them. Degenerate or
+/// inverted results are refused — the same `valid()` rule the X11 seam uses,
+/// so no caller can ever receive a negative geometry. Compiled for Windows
+/// (its only runtime caller) and for tests, which pin the math on Linux.
+#[cfg(any(windows, test))]
+fn rect_from_bounds(left: i32, top: i32, right: i32, bottom: i32) -> Option<Rect> {
+    let rect = Rect {
+        x: left,
+        y: top,
+        w: right.checked_sub(left)?,
+        h: bottom.checked_sub(top)?,
+    };
+    valid(rect).then_some(rect)
+}
+
+/// The Win32 work area: the taskbar-aware `rcWork` of the monitor that owns
+/// our window (`MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST`), which is
+/// the value the X11 seam's `_NET_WORKAREA` is to Linux. `hwnd()` exists on
+/// the Tauri window only for the Windows target; its handle is passed as the
+/// raw pointer it is, so the `windows`-crate type tauri keeps private never
+/// has to be named here.
+#[cfg(windows)]
+fn win32_work_area(win: &WebviewWindow) -> Option<Rect> {
+    use windows_sys::Win32::Foundation::HWND as SysHWND;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    };
+    let hwnd = win.hwnd().ok()?;
+    // SAFETY: `hwnd` is the window's own handle, valid for the lifetime of the
+    // call; `MONITORINFO` is zeroed and carries its exact size in cbSize, as
+    // the API requires; the monitor handle comes from the same call chain.
+    unsafe {
+        let monitor = MonitorFromWindow(hwnd.0 as SysHWND, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_null() {
+            return None;
+        }
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            rcMonitor: std::mem::zeroed(),
+            rcWork: std::mem::zeroed(),
+            dwFlags: 0,
+        };
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return None;
+        }
+        rect_from_bounds(info.rcWork.left, info.rcWork.top, info.rcWork.right, info.rcWork.bottom)
+    }
+}
+
+#[cfg(not(windows))]
+fn win32_work_area(_win: &WebviewWindow) -> Option<Rect> {
+    None
+}
+
+/// Source selection for `current()` as a pure decision, so the matrix every
+/// platform falls through is pinned by tests that run on Linux (U3b). The
+/// priority is by OS-truth strength: `win32` rcWork is the real taskbar-
+/// subtracted area of the window's own monitor by construction (no intersection
+/// needed); the X11/monitor arms keep the exact unix behavior and labels.
+fn pick_work_area(
+    x11: Option<Rect>,
+    win32: Option<Rect>,
+    mon: Option<Rect>,
+) -> (Rect, &'static str) {
+    if let Some(w) = win32 {
+        return (w, "win32:GetMonitorInfoW rcWork");
+    }
+    match (x11, mon) {
+        (Some(x), Some(m)) => match geometry::intersect(x, m) {
+            Some(i) => (i, "x11:_NET_WORKAREA intersect monitor"),
+            // Both claim to be valid but disagree: the window lives on the
+            // monitor, so clamp within it rather than across the whole desktop.
+            None => (m, "monitor (X11 work area disjoint from monitor)"),
+        },
+        // Monitor unusable (e.g. 0x0 before the window is mapped under
+        // XWayland): the EWMH work area is the honest value.
+        (Some(x), None) => (x, "x11:_NET_WORKAREA (monitor geometry unusable)"),
+        (None, Some(m)) => (m, "monitor geometry (no _NET_WORKAREA)"),
+        (None, None) => (
+            Rect {
+                x: 0,
+                y: 0,
+                w: 1920,
+                h: 1080,
+            },
+            "fallback 1920x1080 (no monitor, no X11)",
+        ),
+    }
+}
+
 fn monitor_rect(win: &WebviewWindow) -> Option<Rect> {
     let monitor = win
         .current_monitor()
@@ -365,28 +456,9 @@ pub fn x11_find_own_window(_title: &str) -> Result<X11Window, OwnWindowError> {
 /// where the value came from (printed by the read-back probe).
 pub fn current(win: &WebviewWindow) -> WorkArea {
     let x11 = x11_net_workarea();
+    let win32 = win32_work_area(win);
     let mon = monitor_rect(win);
-    let (rect, source) = match (x11, mon) {
-        (Some(x), Some(m)) => match geometry::intersect(x, m) {
-            Some(i) => (i, "x11:_NET_WORKAREA intersect monitor"),
-            // Both claim to be valid but disagree: the window lives on the
-            // monitor, so clamp within it rather than across the whole desktop.
-            None => (m, "monitor (X11 work area disjoint from monitor)"),
-        },
-        // Monitor unusable (e.g. 0x0 before the window is mapped under
-        // XWayland): the EWMH work area is the honest value.
-        (Some(x), None) => (x, "x11:_NET_WORKAREA (monitor geometry unusable)"),
-        (None, Some(m)) => (m, "monitor geometry (no _NET_WORKAREA)"),
-        (None, None) => (
-            Rect {
-                x: 0,
-                y: 0,
-                w: 1920,
-                h: 1080,
-            },
-            "fallback 1920x1080 (no monitor, no X11)",
-        ),
-    };
+    let (rect, source) = pick_work_area(x11, win32, mon);
     WorkArea {
         rect,
         source,
@@ -441,5 +513,67 @@ mod tests {
     #[test]
     fn empty_list_is_not_found() {
         assert_eq!(pick_own_window(&[], 42, "Abito"), Err(OwnWindowError::NotFound));
+    }
+
+    // ---- U3b: the win32 work area is a real OS value; its math is pure and
+    // pinned here on Linux, exactly like pick_own_window pins the X11 one.
+    #[test]
+    fn rcwork_bounds_become_a_rect_by_subtraction_and_garbage_is_refused() {
+        // SDK winuser.h: MONITORINFO.rcWork is left/top/right/bottom screen coords.
+        // A 1920x1080 monitor with a 48px taskbar at the bottom reports (0,0,1920,1032).
+        assert_eq!(
+            rect_from_bounds(0, 0, 1920, 1032),
+            Some(Rect { x: 0, y: 0, w: 1920, h: 1032 })
+        );
+        // a taskbar on the LEFT shifts x and shrinks w
+        assert_eq!(
+            rect_from_bounds(48, 0, 1920, 1080),
+            Some(Rect { x: 48, y: 0, w: 1872, h: 1080 })
+        );
+        // degenerate or inverted rectangles are refused, never shipped as geometry
+        assert_eq!(rect_from_bounds(0, 0, 0, 0), None);
+        assert_eq!(rect_from_bounds(100, 100, 100, 50), None, "inverted height");
+        assert_eq!(rect_from_bounds(0, 0, 0, 1080), None, "zero width");
+        // a negative ORIGIN is not garbage: an 8x8 sliver at (-8,-8) passes the
+        // same valid() rule the X11 seam applies — only area<=0 is refused
+        assert_eq!(rect_from_bounds(-8, -8, 0, 0), Some(Rect { x: -8, y: -8, w: 8, h: 8 }));
+    }
+
+    #[test]
+    fn the_work_area_source_priority_is_win32_then_x11_then_monitor_then_fallback() {
+        let r = |x: i32, y: i32, w: i32, h: i32| Rect { x, y, w, h };
+        // win32 rcWork wins over everything: it IS the OS truth with the taskbar
+        // already subtracted, and it is by construction inside its own monitor
+        assert_eq!(
+            pick_work_area(Some(r(0, 0, 1920, 1040)), Some(r(0, 0, 1920, 1032)), Some(r(0, 0, 1920, 1080))),
+            (r(0, 0, 1920, 1032), "win32:GetMonitorInfoW rcWork")
+        );
+        // no win32: the unix matrix is preserved exactly (x11 ∩ monitor)
+        assert_eq!(
+            pick_work_area(Some(r(0, 27, 1920, 1053)), None, Some(r(0, 0, 1920, 1080))),
+            (r(0, 27, 1920, 1053), "x11:_NET_WORKAREA intersect monitor")
+        );
+        // disjoint x11 vs monitor: the monitor wins (window lives there) — unchanged unix arm
+        assert_eq!(
+            pick_work_area(Some(r(2000, 0, 800, 600)), None, Some(r(0, 0, 1920, 1080))),
+            (r(0, 0, 1920, 1080), "monitor (X11 work area disjoint from monitor)")
+        );
+        // x11 alone (monitor unusable) — unchanged unix arm
+        assert_eq!(
+            pick_work_area(Some(r(0, 27, 1920, 1053)), None, None),
+            (r(0, 27, 1920, 1053), "x11:_NET_WORKAREA (monitor geometry unusable)")
+        );
+        // the current Windows bug, frozen as the contract of the arm it falls to
+        // once win32 rcWork exists: monitor geometry alone must no longer be reached
+        // on a real Windows (rcWork will be Some); it stays the honest label when not
+        assert_eq!(
+            pick_work_area(None, None, Some(r(0, 0, 2560, 1440))),
+            (r(0, 0, 2560, 1440), "monitor geometry (no _NET_WORKAREA)")
+        );
+        // nothing at all: the 1920x1080 guess, still labeled as a guess
+        assert_eq!(
+            pick_work_area(None, None, None),
+            (r(0, 0, 1920, 1080), "fallback 1920x1080 (no monitor, no X11)")
+        );
     }
 }

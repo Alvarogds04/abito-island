@@ -51,9 +51,12 @@ gtk = "=0.18.2"
 # nothing but the VM could verify): windows-sys 0.61.2 is ALREADY in Cargo.lock
 # and in the xbuild registry volume, and its only dependency windows-link 0.2.1
 # too — same offline story as zbus above: zero new packages, the lock only
-# gains this crate's edge. Features are the minimal trio for the hotkey seam
-# (symbols verified against the cached source before declaring).
-windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+# gains this crate's edge. Features are the minimal set for the hotkey seam
+# (U3a) plus Gdi for the work-area seam (U3b: MonitorFromWindow/GetMonitorInfoW,
+# both user32-backed; symbols verified against the cached source before
+# declaring; features are not recorded in Cargo.lock, so the one-edge diff
+# stands).
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Graphics_Gdi"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 # tests only: fake key presses on a PRIVATE Xvfb (tests/hotkey_x11.rs). Never shipped.
