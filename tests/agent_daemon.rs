@@ -82,7 +82,7 @@ fn is_our_island_base(base: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let name = base.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let shape = name.strip_prefix(".aisl").and_then(|r| r.split_once('-')).is_some_and(|(pid, n)| {
-        !pid.is_empty() && !n.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) && n.strip_prefix("none").unwrap_or(n).bytes().all(|b| b.is_ascii_digit()) && n != "none"
+        !pid.is_empty() && !n.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) && n.strip_prefix("none").or_else(|| n.strip_prefix("hk")).unwrap_or(n).bytes().all(|b| b.is_ascii_digit()) && n != "none" && n != "hk"
     });
     let Ok(meta) = std::fs::symlink_metadata(base) else { return false };
     // SAFETY: getuid has no preconditions and cannot fail.
@@ -416,14 +416,16 @@ fn strict_harness_copy(into: &Path) -> PathBuf {
 /// home and nothing is ever applied (no agent_connect is sent by this test).
 #[test]
 fn the_real_daemon_lists_agents_with_a_plan_the_page_can_carry_back() {
-    let scratch = std::env::temp_dir().join(format!("abito-hk-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&scratch);
-    // a parent chain the daemon accepts (not group/world-writable): a private subdir of HOME, not /tmp itself
-    let home = PathBuf::from(std::env::var("HOME").expect("HOME")).join(format!(".ahk{}", std::process::id() % 100000));
+    // a parent chain the daemon accepts (not group/world-writable): a private subdir of HOME, not /tmp itself.
+    // Named `.aisl<pid>-hk0` so the SAME sweeper and `remove_ours` own it (a run that panics before cleanup used
+    // to leave `.ahk<pid>` dirs nobody swept).
+    static SWEPT_HK: std::sync::Once = std::sync::Once::new();
+    SWEPT_HK.call_once(sweep_abandoned);
+    let home = PathBuf::from(std::env::var("HOME").expect("HOME")).join(format!(".aisl{}-hk0", std::process::id() % 100000));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::DirBuilder::new().mode(0o700).create(&home).unwrap();
     struct Cleanup(PathBuf);
-    impl Drop for Cleanup { fn drop(&mut self) { use std::os::unix::fs::MetadataExt; if let Ok(m) = std::fs::symlink_metadata(&self.0) { if m.is_dir() && m.mode() & 0o777 == 0o700 { let _ = std::fs::remove_dir_all(&self.0); } } } }
+    impl Drop for Cleanup { fn drop(&mut self) { remove_ours(&self.0); } }
     let _cleanup = Cleanup(home.clone());
     let hook = strict_harness_copy(&home);
     // «Claude Code is installed» for the daemon = its config dir exists under the daemon's HOME (the island base,
