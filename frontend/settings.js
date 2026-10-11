@@ -204,6 +204,10 @@
     }, error => say((error && error.message) || 'No se pudo cambiar el atajo.'));
   }
 
+  // DEBT (#306): the engine also pushes a `settings` frame that holds ITS copy of the shortcut. This panel
+  // ignores it and keeps the island's own hotkey.json as the only store, so the two can drift. Reconciling
+  // them needs a decision about which store wins, not a patch here.
+
   // ---- rendering --------------------------------------------------------------------------------------------------------------
   function render() {
     if (!isOpen()) return;
