@@ -2,6 +2,7 @@
 //! never run out: a leaf is removed when its owner drops (even while panicking
 //! and even with leftovers inside) and a leaf whose owner process is gone is
 //! reclaimed on the next allocation. Parallel owners never touch each other.
+#![cfg(unix)] // Uses Unix file mode, uid, and symlink APIs.
 mod common;
 use common::fixture_leaf::{Leaf, SPACE};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};

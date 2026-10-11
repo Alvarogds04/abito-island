@@ -66,9 +66,17 @@ pub fn registry(state: &AppState) -> Vec<Entry> {
 }
 
 pub fn load_selection(app: &AppHandle, state: &AppState) {
+    #[cfg(unix)]
     let saved = match config_dir(app) {
         Some(dir) => models::read_saved_file(&dir),
         None => Saved::Absent,
+    };
+    #[cfg(not(unix))]
+    let saved = {
+        if config_dir(app).is_some() {
+            eprintln!("models: saved selection restore unavailable on this platform");
+        }
+        Saved::Absent
     };
     let target = models::initial_selection(&saved).and_then(target_of);
     if target.is_none() {
@@ -125,6 +133,7 @@ pub fn select(app: &AppHandle, state: &AppState, profile_id: &str) -> Result<(),
     let entry = models::select(&registry, profile_id).map_err(err)?;
     let target = target_of(entry).ok_or_else(|| err(ChatError::profile_missing()))?;
     *state.chat_target.lock().expect("chat target lock") = Some(target);
+    #[cfg(unix)]
     let persisted = match config_dir(app) {
         Some(dir) => match models::write_saved_file(&dir, profile_id) {
             Ok(()) => true,
@@ -134,6 +143,13 @@ pub fn select(app: &AppHandle, state: &AppState, profile_id: &str) -> Result<(),
             }
         },
         None => false,
+    };
+    #[cfg(not(unix))]
+    let persisted = {
+        if config_dir(app).is_some() {
+            eprintln!("models: selection persistence unavailable on this platform");
+        }
+        false
     };
     state.models_persisted.store(persisted, Ordering::SeqCst);
     // the chat's availability belongs to the previous target: re-check it

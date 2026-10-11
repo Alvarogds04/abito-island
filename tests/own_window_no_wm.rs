@@ -1,6 +1,7 @@
 //! The visual probe must find its own window on a PRIVATE Xvfb that has NO window manager
 //! (so no `_NET_CLIENT_LIST`): it falls back to walking the window tree for our `_NET_WM_PID`.
 //! A window of ANOTHER pid with our title is still never ours.
+#![cfg(target_os = "linux")] // Requires a private Linux Xvfb server.
 use abito_island::workarea::{x11_find_own_window, OwnWindowError};
 use std::process::{Command, Stdio};
 use std::time::Duration;

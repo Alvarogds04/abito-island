@@ -2,14 +2,23 @@
 //! on the root window and reports presses. Everything here is best effort and
 //! never panics: a collision is `Status::Taken`, a missing server is
 //! `Status::Unsupported`, and a failed attempt releases every grab it made.
+#[cfg(unix)]
 use super::{lock_variants, Combo, Status};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+#[cfg(unix)]
 use std::sync::Arc;
+#[cfg(unix)]
 use std::thread::JoinHandle;
+#[cfg(unix)]
 use x11rb::connection::Connection;
+#[cfg(unix)]
 use x11rb::protocol::xkb::ConnectionExt as _;
+#[cfg(unix)]
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask};
+#[cfg(unix)]
 use x11rb::protocol::Event;
+#[cfg(unix)]
 use x11rb::rust_connection::RustConnection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,9 +26,13 @@ pub enum GrabEvent {
     Pressed,
 }
 
+#[cfg(unix)]
 const S_ACTIVE: u8 = 1;
+#[cfg(unix)]
 const S_TAKEN: u8 = 2;
+#[cfg(unix)]
 const S_INVALID: u8 = 3;
+#[cfg(unix)]
 const S_UNSUPPORTED: u8 = 4;
 
 /// Tells a real key press from the auto-repeat of a HELD key. Holding Ctrl+Alt+A
@@ -53,12 +66,14 @@ impl RepeatGuard {
     }
 }
 
+#[cfg(unix)]
 pub struct Grabber {
     status: Arc<AtomicU8>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(unix)]
 fn keycode_for(conn: &RustConnection, keysym: u32) -> Option<u8> {
     let setup = conn.setup();
     let (min, max) = (setup.min_keycode, setup.max_keycode);
@@ -69,6 +84,7 @@ fn keycode_for(conn: &RustConnection, keysym: u32) -> Option<u8> {
 
 /// Grab every Caps/Num variant. Returns false (after releasing what it took)
 /// when any of them is held by another client.
+#[cfg(unix)]
 fn grab_all(conn: &RustConnection, root: u32, code: u8, combo: &Combo) -> bool {
     let base = combo.x11_modifiers();
     let mut taken: Vec<u16> = Vec::new();
@@ -91,6 +107,7 @@ fn grab_all(conn: &RustConnection, root: u32, code: u8, combo: &Combo) -> bool {
     true
 }
 
+#[cfg(unix)]
 impl Grabber {
     /// Connect, grab, and (when the grab succeeded) listen on a thread.
     /// `display` None = the process default.
@@ -181,6 +198,7 @@ impl Grabber {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Grabber {
     fn drop(&mut self) {
         self.shutdown();
@@ -188,6 +206,7 @@ impl Drop for Grabber {
 }
 
 /// Block until the connection's socket is readable or `ms` elapsed. Never panics.
+#[cfg(unix)]
 fn wait_readable(conn: &RustConnection, ms: i32) {
     use std::os::unix::io::AsRawFd;
     let mut fd = libc::pollfd { fd: conn.stream().as_raw_fd(), events: libc::POLLIN, revents: 0 };
@@ -197,6 +216,7 @@ fn wait_readable(conn: &RustConnection, ms: i32) {
 
 /// The window that has the keyboard (EWMH `_NET_ACTIVE_WINDOW`), or None when the
 /// WM does not say. Read BEFORE the island is shown so focus can be handed back.
+#[cfg(unix)]
 pub fn active_window(display: Option<&str>) -> Option<u32> {
     use x11rb::protocol::xproto::AtomEnum;
     let owned = display.map(str::to_owned);
@@ -210,6 +230,7 @@ pub fn active_window(display: Option<&str>) -> Option<u32> {
 
 /// Give the keyboard back to `window` (best effort, never panics). Used only when
 /// the WM focused the island on a hotkey show that nobody asked to be typed into.
+#[cfg(unix)]
 pub fn give_focus_back(display: Option<&str>, window: u32) -> bool {
     use x11rb::protocol::xproto::InputFocus;
     let owned = display.map(str::to_owned);
