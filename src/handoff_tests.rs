@@ -50,7 +50,7 @@ fn publishing_writes_one_private_file_at_a_stable_path_with_the_current_endpoint
     assert_eq!(v["v"], 1);
     assert_eq!(v["endpoint"], endpoint.to_str().unwrap());
     assert_eq!(v["pid"], std::process::id());
-    // the key set the engine's hook reader accepts TODAY; `procStart` joins it only with WRITE_PROC_START
+    // the key set both readers accept: v, endpoint, pid and the optional procStart
     let keys = v.as_object().unwrap().len();
     assert_eq!(keys, if WRITE_PROC_START { 4 } else { 3 }, "closed key set: v, endpoint, pid[, procStart]");
     if WRITE_PROC_START { assert_eq!(v["procStart"], json!(proc_start(std::process::id()).unwrap())); }
@@ -214,7 +214,52 @@ fn clear_still_removes_only_our_own_file_with_the_new_key() {
 }
 
 #[test]
-fn the_start_time_is_not_written_until_the_engine_reader_accepts_it() {
-    // guards the coordination: flipping this without the engine's reader change would silently blind the hooks
-    assert!(!WRITE_PROC_START, "enable only together with desktop-harness accepting `procStart`");
+fn the_start_time_is_written_now_that_the_engine_reader_accepts_it() {
+    // the engine's hook reader (desktop-harness) accepts and verifies `procStart` since 2ece2c3; this is the same
+    // change that turns the writing on, so the recycled-pid hole is closed on both sides
+    assert!(WRITE_PROC_START);
+    let root = fresh_root();
+    let (endpoint, _l) = bound(&root, "p-abc123");
+    publish(&root, &endpoint).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path(&root)).unwrap()).unwrap();
+    assert_eq!(v["procStart"], json!(proc_start(std::process::id()).unwrap()));
+    assert_eq!(read(&root), Some(endpoint), "our own reader still believes it");
+}
+
+#[test]
+fn the_real_node_reader_finds_the_endpoint_in_the_file_publish_writes() {
+    // END TO END against the engine's real reader: the file WE write must be one THEY accept (the previous
+    // format was invisible to a reader that wanted exactly endpoint,pid,v)
+    // The engine's reader demands a SECURE directory chain (no world-writable ancestor), so this root lives under
+    // HOME, not /tmp. Named `.abito-ho-<pid>` and removed by the guard (exact own shape only, never a symlink).
+    struct Guard(PathBuf);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            use std::os::unix::fs::MetadataExt;
+            let ok = std::fs::symlink_metadata(&self.0).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink() && m.uid() == unsafe { libc::getuid() });
+            if ok && self.0.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(".abito-ho-")) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+    let root = PathBuf::from(std::env::var("HOME").expect("HOME")).join(format!(".abito-ho-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _guard = Guard(root.clone());
+    let (endpoint, _l) = bound(&root, "p-abc123");
+    // the real receiver makes its socket 0600 (transport.rs); a bare `UnixListener::bind` under umask 002 gives
+    // 0775, which the engine's reader rightly refuses as an unsafe socket
+    std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(0o600)).unwrap();
+    publish(&root, &endpoint).unwrap();
+    let reader = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../desktop-harness/src/config.cjs");
+    let js = format!("const {{resolveConfig}}=require({:?}); const r=resolveConfig({{ABITO_SOCKET_DIR:{:?}}}, process.getuid()); process.stdout.write(r.endpoint||'');", reader, root);
+    let out = std::process::Command::new("node").arg("-e").arg(js).output().expect("node");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), endpoint.to_str().unwrap(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    // and a recycled pid (another life of the same number) is refused by THEM too
+    let real = proc_start(std::process::id()).unwrap();
+    let forged = format!("{{\"endpoint\":{:?},\"pid\":{},\"procStart\":\"{}1\",\"v\":1}}\n", endpoint.to_str().unwrap(), std::process::id(), real);
+    std::fs::write(path(&root), forged).unwrap();
+    let out = std::process::Command::new("node").arg("-e").arg(format!("const {{resolveConfig}}=require({:?}); const r=resolveConfig({{ABITO_SOCKET_DIR:{:?}}}, process.getuid()); process.stdout.write(r.endpoint||'none');", reader, root)).output().expect("node");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "none");
 }
