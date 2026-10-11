@@ -50,7 +50,10 @@ fn publishing_writes_one_private_file_at_a_stable_path_with_the_current_endpoint
     assert_eq!(v["v"], 1);
     assert_eq!(v["endpoint"], endpoint.to_str().unwrap());
     assert_eq!(v["pid"], std::process::id());
-    assert_eq!(v.as_object().unwrap().len(), 3, "closed key set: v, endpoint, pid");
+    // the key set the engine's hook reader accepts TODAY; `procStart` joins it only with WRITE_PROC_START
+    let keys = v.as_object().unwrap().len();
+    assert_eq!(keys, if WRITE_PROC_START { 4 } else { 3 }, "closed key set: v, endpoint, pid[, procStart]");
+    if WRITE_PROC_START { assert_eq!(v["procStart"], json!(proc_start(std::process::id()).unwrap())); }
     // no temp file is left behind
     let names: Vec<String> = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into()).collect();
     assert!(names.iter().all(|n| !n.contains(".tmp")), "{names:?}");
@@ -158,4 +161,60 @@ fn a_file_left_by_a_killed_island_is_not_believed_even_if_the_socket_inode_linge
     assert_eq!(read(&root), None, "the island that wrote it is gone");
     publish(&root, &endpoint).unwrap();
     assert_eq!(read(&root), Some(endpoint), "a live pid (ours) is believed");
+}
+
+// ---- #313 (engine suggestion): a PID alone is not an identity — a recycled pid would be believed ---------------
+#[test]
+fn the_start_time_of_a_process_is_read_from_proc_and_is_a_decimal_string() {
+    let mine = proc_start(std::process::id()).expect("our own start time");
+    assert!(!mine.is_empty() && mine.bytes().all(|b| b.is_ascii_digit()), "{mine}");
+    assert_eq!(proc_start(std::process::id()), Some(mine.clone()), "stable for the life of the process");
+    assert_eq!(proc_start(4_194_999), None, "a pid that does not exist has no start time");
+    assert_eq!(proc_start(0), None);
+}
+
+#[test]
+fn a_file_with_our_pid_and_the_wrong_start_time_is_a_recycled_pid_and_is_not_believed() {
+    let root = fresh_root();
+    let (endpoint, _l) = bound(&root, "p-abc123");
+    publish(&root, &endpoint).unwrap();
+    // the reader's identity check does not depend on whether WE write the key: use the true value
+    let real = proc_start(std::process::id()).expect("our own start time");
+    assert_eq!(read(&root), Some(endpoint.clone()));
+    // same pid, different life of that pid
+    let forged = format!("{{\"endpoint\":{:?},\"pid\":{},\"procStart\":\"{}1\",\"v\":1}}\n", endpoint.to_str().unwrap(), std::process::id(), real);
+    std::fs::write(path(&root), forged).unwrap();
+    assert_eq!(read(&root), None, "pid alive, but it is not the process that wrote the file");
+    for junk in ["", "abc", "-1", "1 2", "\"7\"", " 7"] {
+        let body = format!("{{\"endpoint\":{:?},\"pid\":{},\"procStart\":{:?},\"v\":1}}\n", endpoint.to_str().unwrap(), std::process::id(), junk);
+        std::fs::write(path(&root), body).unwrap();
+        assert_eq!(read(&root), None, "{junk:?}");
+    }
+}
+
+#[test]
+fn the_start_time_key_is_optional_on_read_so_an_older_file_still_works_but_nothing_else_is_added() {
+    let root = fresh_root();
+    let (endpoint, _l) = bound(&root, "p-abc123");
+    let old = format!("{{\"endpoint\":{:?},\"pid\":{},\"v\":1}}\n", endpoint.to_str().unwrap(), std::process::id());
+    std::fs::write(path(&root), old).unwrap();
+    assert_eq!(read(&root), Some(endpoint.clone()), "a file without procStart is the previous format");
+    let extra = format!("{{\"endpoint\":{:?},\"pid\":{},\"v\":1,\"x\":1}}\n", endpoint.to_str().unwrap(), std::process::id());
+    std::fs::write(path(&root), extra).unwrap();
+    assert_eq!(read(&root), None, "the key set stays closed");
+}
+
+#[test]
+fn clear_still_removes_only_our_own_file_with_the_new_key() {
+    let root = fresh_root();
+    let (mine, _l1) = bound(&root, "p-aaaaaa");
+    publish(&root, &mine).unwrap();
+    clear(&root, &mine);
+    assert!(!path(&root).exists());
+}
+
+#[test]
+fn the_start_time_is_not_written_until_the_engine_reader_accepts_it() {
+    // guards the coordination: flipping this without the engine's reader change would silently blind the hooks
+    assert!(!WRITE_PROC_START, "enable only together with desktop-harness accepting `procStart`");
 }

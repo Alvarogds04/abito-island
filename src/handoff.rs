@@ -5,8 +5,12 @@
 //! changes — `<runtime>/endpoint.json` — and remove it on exit:
 //!
 //! ```json
-//! {"v":1,"endpoint":"<runtime>/p-XXXXXX/s","pid":<island pid>}
+//! {"v":1,"endpoint":"<runtime>/p-XXXXXX/s","pid":<island pid>,"procStart":"<field 22 of /proc/<pid>/stat>"}
 //! ```
+//!
+//! `procStart` makes the pid an IDENTITY: a recycled pid has a different start time, so a file left by a
+//! killed island is not believed just because some other process now owns that number. Optional on read (a
+//! file from before this key still works); never written empty.
 //!
 //! 0600, written to a temp file then `rename`d (readers never see a half file), closed key set.
 //! It is a pointer, not an authority: the consumer still connects to the socket, which checks the
@@ -23,11 +27,26 @@ use std::path::{Component, Path, PathBuf};
 mod tests;
 
 pub const FILE_NAME: &str = "endpoint.json";
+/// Flip to `true` in the SAME change that lets `desktop-harness` accept the `procStart` key (see `publish`).
+pub const WRITE_PROC_START: bool = false;
 const MAX_FILE: u64 = 4096;
 
 /// `<runtime>/endpoint.json`.
 pub fn path(runtime: &Path) -> PathBuf {
     runtime.join(FILE_NAME)
+}
+
+/// Field 22 of `/proc/<pid>/stat` (the process start time in clock ticks since boot) as a decimal string, or
+/// `None` when the process does not exist or `/proc` cannot be read. `comm` may contain spaces and parentheses, so
+/// the fields are parsed after the LAST `)`. Mirrors the engine daemon's `procStartTicks`.
+pub fn proc_start(pid: u32) -> Option<String> {
+    if pid == 0 {
+        return None;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = stat.get(stat.rfind(')')? + 2..)?;
+    let ticks = rest.split(' ').nth(22 - 3)?;
+    (!ticks.is_empty() && ticks.bytes().all(|b| b.is_ascii_digit())).then(|| ticks.to_string())
 }
 
 /// `<runtime>/p-<6 alphanumerics>/s`, absolute and normalized, exactly one level below `runtime`.
@@ -71,7 +90,17 @@ pub fn publish(runtime: &Path, endpoint: &Path) -> std::io::Result<()> {
             return Err(io("refusing to replace a symlink or a non-file"));
         }
     }
-    let line = format!("{}\n", json!({"v": 1, "endpoint": endpoint.to_str().ok_or_else(|| io("endpoint is not UTF-8"))?, "pid": std::process::id()}));
+    let me = std::process::id();
+    let mut body = json!({"v": 1, "endpoint": endpoint.to_str().ok_or_else(|| io("endpoint is not UTF-8"))?, "pid": me});
+    // Written ONLY when WRITE_PROC_START is on. The engine's hook reader (`desktop-harness/src/config.cjs`) accepts
+    // exactly `endpoint,pid,v` today, so adding the key breaks it until the engine lane accepts `procStart`
+    // (verified: with the key present that reader finds no endpoint). Never an empty or invented value either.
+    if WRITE_PROC_START {
+        if let Some(start) = proc_start(me) {
+            body["procStart"] = json!(start);
+        }
+    }
+    let line = format!("{body}\n");
     let tmp = runtime.join(format!("{FILE_NAME}.{}.tmp", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
     let written = (|| {
@@ -90,14 +119,23 @@ pub fn publish(runtime: &Path, endpoint: &Path) -> std::io::Result<()> {
 fn parse(runtime: &Path, text: &str) -> Option<PathBuf> {
     let v: Value = serde_json::from_str(text).ok()?;
     let map = v.as_object()?;
-    if map.len() != 3 || map.get("v") != Some(&json!(1)) {
+    // closed key set: v, endpoint, pid, and optionally procStart
+    let has_start = map.contains_key("procStart");
+    if map.len() != 3 + usize::from(has_start) || map.get("v") != Some(&json!(1)) {
         return None;
     }
     // the island that wrote it must still be alive: a SIGKILL leaves the file (and the socket
     // inode) behind, and a recycled path must not be believed
-    let pid = map.get("pid")?.as_u64().filter(|p| *p > 0 && *p <= i32::MAX as u64)?;
+    let pid = map.get("pid")?.as_u64().filter(|p| *p > 0 && *p <= i32::MAX as u64)? as u32;
     if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
         return None;
+    }
+    // ...and it must be the SAME life of that pid: a recycled pid has another start time
+    if has_start {
+        let claimed = map.get("procStart")?.as_str()?;
+        if claimed.is_empty() || !claimed.bytes().all(|b| b.is_ascii_digit()) || proc_start(pid).as_deref() != Some(claimed) {
+            return None;
+        }
     }
     let endpoint = PathBuf::from(map.get("endpoint")?.as_str()?);
     endpoint_shape_ok(&endpoint, runtime).then_some(endpoint)
