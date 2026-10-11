@@ -20,6 +20,7 @@
 
 mod chathost;
 mod hotkeyhost;
+mod settingshost;
 mod modelshost;
 mod nativeaudit;
 mod nativewindow;
@@ -68,6 +69,7 @@ fn quit_clean(app: &AppHandle) {
     // (the card stays inert through the quitting rule).
     approval::abort_lane(&app.state::<AppState>().approval);
     hotkeyhost::stop(app); // release the X11 grab before leaving
+    settingshost::stop(app);
     close_transport(app);
     app.exit(0);
 }
@@ -283,6 +285,8 @@ struct AppState {
     chat_rate: Mutex<bridge::RateLimiter>,
     /// #305: the global show/hide shortcut (config + X11 grab).
     hotkey: hotkeyhost::HotkeyHost,
+    /// #306: the settings panel's host state (agent connection + prefs).
+    settings: settingshost::SettingsHost,
     /// U1: per-turn deadlines (the probe shortens them for its fake).
     chat_deadlines: Mutex<abito_island::localmodel::Deadlines>,
     /// U1 probe only: evidence lines the webview reports for the chat step.
@@ -1252,6 +1256,7 @@ fn main() {
         chat_target: Mutex::new(None),
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
         hotkey: hotkeyhost::HotkeyHost::default(),
+        settings: settingshost::SettingsHost::default(),
         chat_deadlines: Mutex::new(chathost::default_deadlines()),
         chat_probe: Mutex::new(Vec::new()),
         models_registry: Mutex::new(abito_island::models::REGISTRY.to_vec()),
@@ -1285,6 +1290,8 @@ fn main() {
             modelshost::models_action,
             questionhost::question_action,
             hotkeyhost::hotkey_action,
+            settingshost::agent_action,
+            settingshost::prefs_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence
@@ -1358,6 +1365,7 @@ fn main() {
             spawn_workarea_watcher(handle.clone());
             spawn_publish_ticker(handle.clone());
             hotkeyhost::start(&handle); // #305: global show/hide shortcut (config + X11 grab)
+            settingshost::start(&handle); // #306: settings prefs
             // M2: local notice transport + SIGINT/SIGTERM socket cleanup
             // (main.cjs creates the transport after the window loads; here it
             // starts before the probe so the probe can use its endpoint).

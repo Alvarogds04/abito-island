@@ -21,6 +21,9 @@
   <script defer src="chat-view.js"></script>
   <script defer src="chat.js"></script>
   <script defer src="models.js"></script>
+  <!-- #306: settings panel (providers, connectors, general). -->
+  <script defer src="settings-view.js"></script>
+  <script defer src="settings.js"></script>
   <script defer src="notify.js"></script>
 </head>
 <body>
@@ -40,6 +43,7 @@
       <!-- U1: the overview's primary control. Opens the chat view of THIS
            island (no other window). Enter in the overview does the same. -->
       <button id="open-chat" type="button" aria-label="Conversar con Abito" aria-describedby="open-chat-hint"><span class="ico" data-icon="bubble"></span></button>
+      <button id="open-settings" type="button" aria-label="Ajustes"><span class="ico" data-icon="gear"></span></button>
       <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
       <!-- M2: Sileo-style notice, display only (own code, silence).
            A notice never decides or approves anything. -->
@@ -139,6 +143,22 @@
           <p id="models-note" class="sr-only"></p>
           <ul id="models-list" aria-label="Modelos locales"></ul>
           <p id="models-resources" class="sr-only"></p>
+        </div>
+        <!-- #306: settings — an internal panel of the same island (like the model picker).
+             Opened from the overview gear; plain text only (textContent); a key is typed into a
+             masked field, sent once as `auth_reply` and cleared, never stored in the page. -->
+        <div id="settings" inert role="dialog" aria-label="Ajustes">
+          <div id="settings-bar">
+            <div id="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
+              <button id="tab-providers" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="true"><span class="ico" data-icon="chip"></span><span class="tab-word">Proveedores</span></button>
+              <button id="tab-connectors" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="false" tabindex="-1"><span class="ico" data-icon="plug"></span><span class="tab-word">Conectores</span></button>
+              <button id="tab-general" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="false" tabindex="-1"><span class="ico" data-icon="gear"></span><span class="tab-word">General</span></button>
+            </div>
+            <span id="settings-conn" class="chip" role="img" hidden><span class="ico" id="settings-conn-icon"></span><span class="word" id="settings-conn-word"></span></span>
+            <button id="settings-close" class="icon-btn" type="button" aria-label="Cerrar ajustes"><span class="ico" data-icon="check"></span></button>
+          </div>
+          <div id="settings-body" role="tabpanel" tabindex="-1"></div>
+          <p id="settings-live" class="sr-only" role="status" aria-live="polite"></p>
         </div>
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
       </section>
