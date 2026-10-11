@@ -47,12 +47,12 @@
   const R6_VISIBLE_UNITS = 112;
   const BASE_VB = [0, 20, 200, 160];
   const OVERVIEW_VB = [36, 32, 128, 128];
-  // U1: chat view of the SAME expanded island. Its height arrives from Rust
-  // (geometry::CHAT_VISIBLE through __islandSetView); this is only the
-  // pre-first-push default and must match that constant.
+  // #309: the chat is a vertical COLUMN of the SAME expanded island. Its size arrives from Rust
+  // (geometry::chat_visible through __islandSetView; the height follows the work area); this is
+  // only the pre-first-push default and must match geometry::CHAT_COLUMN_W / CHAT_PREFERRED_H.
   // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
   // (128 units show ~112) a 46px box shows ~40px.
-  const CHAT = { w: 640, h: 240, r: 22, clay: 46, clayLeft: 34, clayTop: 3 };
+  const CHAT = { w: 400, h: 640, r: 22, clay: 46, clayLeft: 34, clayTop: 3 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)

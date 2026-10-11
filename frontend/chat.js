@@ -171,7 +171,13 @@
   });
 
   // ---- composer ---------------------------------------------------------------
-  input.addEventListener('input', () => { localProblem = ''; renderControls(); });
+  // #309: the composer grows with what is typed (a few lines, then it scrolls), like a column chat.
+  const MIN_INPUT = 44, MAX_INPUT = 120;
+  function autosize() {
+    input.style.height = 'auto';
+    input.style.height = Math.max(MIN_INPUT, Math.min(MAX_INPUT, input.scrollHeight)) + 'px';
+  }
+  input.addEventListener('input', () => { localProblem = ''; autosize(); renderControls(); });
   input.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229) return; // IME owns the key
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -193,7 +199,7 @@
       () => {
         inFlight = false;
         pendingId = null;
-        if (input.value === text) input.value = ''; // accepted: the draft became a turn
+        if (input.value === text) { input.value = ''; autosize(); } // accepted: the draft became a turn
         renderControls();
         action({ action: 'view' }).then(apply, () => {});
       },

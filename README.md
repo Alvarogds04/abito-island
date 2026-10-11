@@ -381,15 +381,23 @@ by the tests or the probe.
 
 ## What U1 proves — chat inside the island, answered by the LOCAL model
 
-**Same island, one named height.** A short click on the compact island still
+**Same island, a vertical column (#309).** A short click on the compact island still
 opens the approved **640×160 overview** (M1 contract, untouched). Its most
 prominent control, **Conversar** (≥44 px, also `Enter` in the overview),
-switches the SAME window to the **chat view: visible 640×240, native
-672×256, r22**. That height lives in ONE constant,
-`geometry::CHAT_VISIBLE` (`LOGICAL_CHAT` is derived from it), guarded by the
-test `chat_view_is_640x240_visible_672x256_native`; Rust pushes it to the
-page (`__islandSetView`), the frontend never owns the number. Switching to
-the design's 160 alternative is that one line. `Volver` returns to the
+switches the SAME window to the **chat column: visible 400 wide, native 432
+wide, r22**, gentle-shell style (history, composer, a strip for the agent
+state). Its height follows the work area: `geometry::chat_visible` gives
+**640 when the screen allows it, otherwise work-area height − 40 px of air,
+never below 240**; native adds the overview's 32×16 margins (432×656 on a
+1048 px work area). Rust owns every number and pushes the visible size to the
+page (`__islandSetView`); the frontend never decides the height. The column is
+centred under the overview it replaces and keeps the docked edge (grows
+upward from the bottom). Overview (672×176) and column move in opposite
+directions per axis, so the window first becomes a **stage** that holds both
+(`geometry::stage_size`, per-axis maximum, 672×656), the page animates inside
+it with the R6 contract, and the window settles on the final rectangle
+afterwards (700 ms opening, 400 ms closing, generation-guarded like every
+deferred resize). `Volver` returns to the
 overview (the draft stays in page memory, never on disk); `Escape` leaves
 the composer, a second `Escape` collapses the island; a collapse always
 forgets the chat view so the next click opens the overview again.

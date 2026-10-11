@@ -321,4 +321,72 @@ test('compact island keyboard activation: Enter and Space only', () => {
   assert.equal(V.activates({ key: 'Enter', repeat: true }), false);
 });
 
+// ---- #309: the chat is a vertical column --------------------------------------------------------
+const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const html = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+const rule = sel => { const m = css.match(new RegExp('(?:^|\\n)' + sel.replace(/[.*+?^${}()|[\]\\#]/g, '\\$&') + '\\s*\\{([^}]*)\\}')); return m ? m[1] : ''; };
+
+test('column: the chat padding is symmetric (the 60px R6 gutter of the horizontal header is gone)', () => {
+  const pad = rule('#chat').match(/padding:\s*([^;]+);/);
+  assert.ok(pad, '#chat has padding');
+  const parts = pad[1].trim().split(/\s+/).map(x => parseInt(x, 10));
+  assert.ok(parts.length >= 3, pad[1]);
+  const [, right, , left = right] = [parts[0], parts[1], parts[2], parts[3]];
+  assert.equal(left, right, `left ${left} must equal right ${right}`);
+  assert.ok(left <= 20, `a narrow column cannot spend ${left}px per side`);
+});
+
+test('column: the agent state is its own full-width strip above the history, not a header chip', () => {
+  assert.match(html, /<[a-z]+[^>]*id="chat-status-strip"/, 'the strip exists');
+  assert.ok(html.indexOf('id="chat-status-strip"') < html.indexOf('id="chat-log"'), 'it sits above the history');
+  assert.ok(html.indexOf('id="chat-state"') > html.indexOf('id="chat-status-strip"') && html.indexOf('id="chat-state"') < html.indexOf('id="chat-log"'), 'the state chip lives in the strip');
+});
+
+test('column: a message uses the column, not percentages of the old 640 width', () => {
+  const user = rule('#chat-log li.user');
+  const asst = rule('#chat-log li.assistant');
+  assert.doesNotMatch(user, /margin-left:\s*\d+%/, 'no percentage gutter on the human bubble');
+  assert.match(user, /max-width:\s*(8\d|9\d)%/);
+  assert.match(asst, /max-width:\s*100%|max-width:\s*none/, 'the answer takes the whole column');
+});
+
+test('column: the composer is a full-width bottom bar and the log scrolls on its own', () => {
+  assert.match(rule('#chat-body'), /flex:\s*1/);
+  assert.match(rule('#chat-body'), /min-height:\s*0/);
+  assert.match(rule('#chat-log'), /overflow-y:\s*auto/);
+  assert.match(rule('#chat-log'), /flex:\s*1/);
+  assert.match(rule('#chat-composer'), /align-items:\s*flex-end/);
+  assert.match(rule('#chat-input'), /flex:\s*1/);
+});
+
+test('column: the composer grows with what is typed (up to a cap), never past the column', () => {
+  const input = rule('#chat-input');
+  assert.match(input, /min-height:\s*44px/);
+  const max = input.match(/max-height:\s*(\d+)px/);
+  assert.ok(max && Number(max[1]) >= 88 && Number(max[1]) <= 160, 'a few lines, then it scrolls');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  assert.match(src, /scrollHeight/, 'the textarea is auto-sized from its content');
+  assert.match(src, /input\.value = ''; autosize\(\)/, 'a sent draft shrinks the composer back');
+});
+
+test('column: touch targets stay >= 44px', () => {
+  assert.match(rule('#chat-composer .round'), /width:\s*44px/);
+  assert.match(rule('#chat-composer .round'), /height:\s*44px/);
+  assert.match(rule('#chat-input'), /min-height:\s*44px/);
+});
+
+test('column: the horizontal chat constants are gone from the page', () => {
+  const island = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'island.js'), 'utf8');
+  assert.doesNotMatch(island, /const CHAT = \{ w: 640, h: 240/);
+  assert.match(island, /const CHAT = \{ w: 400/);
+  assert.match(island, /window\.__islandSetView = \(view, vw, vh\)/, 'the size still comes from Rust');
+});
+
+test('column: a silent «ready» takes no row; only a state with a word opens the strip', () => {
+  const strip = rule('#chat-status-strip');
+  assert.match(strip, /min-height:\s*0/, 'the strip has no fixed height');
+  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind="ready"\]\)\s*\{[^}]*display:\s*none/);
+  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind=""\]\)\s*\{[^}]*display:\s*none/);
+});
+
 console.log(`chat-view-check: ${passed} passed`);

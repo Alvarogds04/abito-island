@@ -259,15 +259,21 @@ html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: 4px 12px 8px 60px; /* left: room for the scaled R6 in the header */
+  padding: 6px 12px 12px; /* #309: a narrow column spends no gutter; the character sits in the header row */
   opacity: 0;
   visibility: hidden;
   transform: translateY(calc(var(--view-dir) * var(--view-shift)));
   transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
 #capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
-#chat-header { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+#chat-header { display: flex; align-items: center; gap: 8px; min-height: 48px; padding-left: 52px; /* room for the scaled R6 */ }
 #chat-header .icon-btn:first-of-type { margin-left: auto; }
+/* #309: the agent state (ready / thinking / writing / down) is a strip of its own, full width,
+   so a long state word never fights the model and back buttons for the header row. */
+#chat-status-strip { display: flex; align-items: center; min-height: 0; padding: 0 4px 6px; }
+/* the calm state is only a dot with no word: it needs no row at all */
+#chat-status-strip:has(#chat-state[data-kind="ready"]) { display: none; }
+#chat-status-strip:has(#chat-state[data-kind=""]) { display: none; }
 #chat-target-chip .ico { color: var(--island-muted); }
 #capsule[data-chat-availability="unavailable"] #chat-state .word,
 #capsule[data-chat-availability="blocked"] #chat-state .word { color: var(--red-11); }
@@ -278,7 +284,8 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 2px 4px 2px 0;
+  padding: 4px 4px 8px 0;
+  gap: 2px;
   list-style: none;
   display: flex; flex-direction: column;
   overflow-y: auto;
@@ -292,8 +299,8 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
 #chat-log li { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* UI.2: «Vos»/«Abito» labels are gone: you sit on the right (tinted bubble),
    Abito on the left (plain). Notes/errors are icon + one word. */
-#chat-log li.user { margin-left: 18%; padding: 6px 12px; border-radius: 14px 14px 4px 14px; background: rgba(255, 255, 255, .1); color: var(--island-ink); width: fit-content; max-width: 82%; align-self: flex-end; }
-#chat-log li.assistant { max-width: 90%; color: var(--island-ink); }
+#chat-log li.user { margin-left: 0; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: rgba(255, 255, 255, .1); color: var(--island-ink); width: fit-content; max-width: 88%; align-self: flex-end; }
+#chat-log li.assistant { max-width: 100%; color: var(--island-ink); }
 #chat-log li.note, #chat-log li.error { display: flex; align-items: center; gap: 6px; font: 600 12px/1.2 var(--font-ui); color: var(--island-muted); white-space: normal; }
 #chat-log li.note .ico svg, #chat-log li.error .ico svg { width: 16px; height: 16px; }
 #chat-log li.error { color: var(--red-11); }
@@ -304,8 +311,9 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
 #chat-input {
   flex: 1;
   min-height: 44px;
-  max-height: 44px;
+  max-height: 120px;
   resize: none;
+  overflow-y: auto;
   padding: 12px 14px;
   border-radius: var(--radius-2xl);
   border: 1px solid rgba(255, 255, 255, .22);
