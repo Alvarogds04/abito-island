@@ -198,12 +198,12 @@ fn start_transport(app: &AppHandle) {
         Ok(transport) => {
             // Local address only; no received payloads or labels are logged.
             println!("ABITO_DESKTOP_SOCKET={}", transport.endpoint().display());
-            *state.transport.lock().expect("transport lock") = Some(transport);
-        }
             // P2: a stable `<runtime>/endpoint.json` so local hooks need no exported env.
             if let Err(error) = abito_island::handoff::publish(transport.runtime(), transport.endpoint()) {
                 eprintln!("endpoint handoff not published: {error}");
             }
+            *state.transport.lock().expect("transport lock") = Some(transport);
+        }
         Err(error) => fail(error.to_string()),
     }
 }
