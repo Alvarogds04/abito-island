@@ -22,10 +22,12 @@ mod chathost;
 mod hotkeyhost;
 mod settingshost;
 mod modelshost;
+#[cfg(unix)]
 mod nativeaudit;
 mod nativewindow;
 #[cfg(any(debug_assertions, feature = "probe"))]
 mod probe;
+mod platform;
 mod questionhost;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -1077,7 +1079,7 @@ fn record_frontend_evidence(
         .initial_pin
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok();
-    nativeaudit::sample(&app, "frontend-ready", 0, None);
+    platform::audit::sample(&app, "frontend-ready", 0, None);
     if !first {
         return;
     }
@@ -1092,10 +1094,10 @@ fn record_frontend_evidence(
             std::thread::sleep(Duration::from_millis(600));
             let state = app.state::<AppState>();
             if aborted(&state) {
-                nativeaudit::sample(&app, "pin-aborted", attempt, None);
+                platform::audit::sample(&app, "pin-aborted", attempt, None);
                 return;
             }
-            nativeaudit::sample(&app, "pin-before", attempt, None);
+            platform::audit::sample(&app, "pin-before", attempt, None);
             let win = main_window(&app);
             let scale = win.scale_factor().unwrap_or(1.0);
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
@@ -1114,12 +1116,12 @@ fn record_frontend_evidence(
                 return;
             }
             io.set_size(w, h);
-            nativeaudit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
+            platform::audit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
             io.set_outer_position(rect.x, rect.y);
             *state.work_area.lock().expect("work area lock") = wa.rect;
             store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
             std::thread::sleep(Duration::from_millis(200));
-            nativeaudit::sample(&app, "pin-settled", attempt, Some((w, h)));
+            platform::audit::sample(&app, "pin-settled", attempt, Some((w, h)));
             let settled = win
                 .inner_size()
                 .map(|s| (s.width as i32, s.height as i32))
@@ -1308,7 +1310,7 @@ fn main() {
             if window.label() == "main" {
                 if let tauri::WindowEvent::Resized(size) = event {
                     questionhost::native_resized(window.app_handle(), (size.width, size.height));
-                    nativeaudit::sample(
+                    platform::audit::sample(
                         window.app_handle(),
                         "resized",
                         0,
@@ -1345,9 +1347,9 @@ fn main() {
             let state = app.state::<AppState>();
             *state.work_area.lock().expect("work area lock") = wa.rect;
             store_requested(&state, "initial", Some((rect.x, rect.y)), Some((w, h)));
-            nativeaudit::sample(&handle, "setup", 0, Some((w, h)));
+            platform::audit::sample(&handle, "setup", 0, Some((w, h)));
             // Read-only sampling stops with this process. No probe or UI actions.
-            if nativeaudit::enabled() {
+            if platform::audit::enabled() {
                 let audit_handle = handle.clone();
                 std::thread::spawn(move || {
                     for second in 1..=16 {
@@ -1355,7 +1357,7 @@ fn main() {
                         if QUITTING.load(Ordering::SeqCst) {
                             break;
                         }
-                        nativeaudit::sample(&audit_handle, "timer", second, None);
+                        platform::audit::sample(&audit_handle, "timer", second, None);
                     }
                 });
             }

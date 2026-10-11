@@ -35,8 +35,17 @@ function checkFrontend(crate) {
   if (extra.length || missing.length) throw new Error(`frontend/ differs from the curated list: extra=[${extra}] missing=[${missing}]`);
   return found;
 }
+// The gate's contract is to FAIL on drift, but a bare SyntaxError does not say
+// WHICH file drifted, and these fixtures are copied around by the tests. Read,
+// name the file, rethrow: fail-fast stays, the message becomes actionable.
+function readJson(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new Error(`cannot read ${file}: ${e.message}`); }
+  try { return JSON.parse(text); } catch (e) { throw new Error(`${file} is not valid JSON: ${e.message}`); }
+}
+
 function checkConfig(crate) {
-  const conf = JSON.parse(fs.readFileSync(path.join(crate, 'tauri.conf.json'), 'utf8'));
+  const conf = readJson(path.join(crate, 'tauri.conf.json'));
   if (conf.identifier !== IDENTIFIER) throw new Error(`identifier must be ${IDENTIFIER}`);
   if (RESERVED.includes(conf.identifier)) throw new Error('identifier collides with an installed app');
   const csp = (conf.app && conf.app.security && conf.app.security.csp) || '';
@@ -46,7 +55,7 @@ function checkConfig(crate) {
   if (connect !== "'self' ipc: http://ipc.localhost") throw new Error(`connect-src must be exactly 'self' ipc: http://ipc.localhost, got: ${connect}`);
   if (!/(^|;)\s*object-src 'none'/.test(csp) || !/frame-src 'none'/.test(csp) || !/base-uri 'none'/.test(csp)) throw new Error('CSP must keep object-src/frame-src/base-uri none');
   if (conf.app.withGlobalTauri !== true) throw new Error('withGlobalTauri expected (the page uses window.__TAURI__)');
-  const cap = JSON.parse(fs.readFileSync(path.join(crate, 'capabilities', 'main.json'), 'utf8'));
+  const cap = readJson(path.join(crate, 'capabilities', 'main.json'));
   const perms = [...cap.permissions].sort();
   if (JSON.stringify(perms) !== JSON.stringify([...EXPECTED_PERMISSIONS].sort())) throw new Error(`capabilities drifted: ${perms}`);
   const cargo = fs.readFileSync(path.join(crate, 'Cargo.toml'), 'utf8');
@@ -55,8 +64,24 @@ function checkConfig(crate) {
   if (/devtools/.test(tauriLine[0]) || /devtools/.test(cargo)) throw new Error('the devtools feature must stay off');
   if (/shell|process|fs|http/.test(tauriLine[0])) throw new Error('no extra tauri features/plugins in the packaged app');
   if (/tauri-plugin-(shell|fs|http|process|opener)/.test(cargo)) throw new Error('forbidden plugin dependency');
-  // law: no synthetic input (XTest) in production. It may live ONLY under [dev-dependencies].
-  const prod = cargo.split(/^\[dev-dependencies\]/m)[0].split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+  // law: no synthetic input (XTest) in production. It may live ONLY in a
+  // dev-dependencies table. Since the Windows port (U1a) the Unix-only crates
+  // sit in target-specific tables, so the section name can be either
+  // `[dev-dependencies]` or `[target.'cfg(unix)'.dev-dependencies]`: walk the
+  // file by table and drop every dev table wherever it appears, keeping all
+  // production tables (plain `[dependencies]` AND `[target.'...'.dependencies]`)
+  // in `prod` so a target-specific smuggling of xtest still trips the law.
+  const DEV_TABLE = /^(?:target\.'[^']*'\.)?dev-dependencies$/;
+  const prodLines = [];
+  let table = '';
+  for (const line of cargo.split('\n')) {
+    const head = /^\s*\[([^\]]+)\]/.exec(line);
+    if (head) table = head[1].trim();
+    if (DEV_TABLE.test(table)) continue;
+    if (line.trim().startsWith('#')) continue;
+    prodLines.push(line);
+  }
+  const prod = prodLines.join('\n');
   if (/xtest/i.test(prod)) throw new Error('xtest (synthetic input) must not be a production dependency: keep it in [dev-dependencies]');
   return { version: conf.version, identifier: conf.identifier, csp };
 }
@@ -97,7 +122,8 @@ function verifyStage(dir, { sourceCrate } = {}) {
   const problems = [];
   const receiptPath = path.join(dir, 'receipt.json');
   if (!fs.existsSync(receiptPath)) return ['receipt.json missing'];
-  const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
+  let receipt;
+  try { receipt = readJson(receiptPath); } catch (e) { return [e.message]; }
   if (receipt.identifier !== IDENTIFIER) problems.push('receipt identifier mismatch');
   if (!String(receipt.r6_sha256 || '').startsWith(R6_PREFIX)) problems.push('receipt R6 pin mismatch');
   const prov = receipt.provenance || {};
