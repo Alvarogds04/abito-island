@@ -27,8 +27,9 @@ use std::path::{Component, Path, PathBuf};
 mod tests;
 
 pub const FILE_NAME: &str = "endpoint.json";
-/// Flip to `true` in the SAME change that lets `desktop-harness` accept the `procStart` key (see `publish`).
-pub const WRITE_PROC_START: bool = false;
+/// Write `procStart` into the handoff. On since `desktop-harness` accepts and verifies the key (2ece2c3): the
+/// engine's hook reader used to accept exactly `endpoint,pid,v`, so this was held back until both sides moved.
+pub const WRITE_PROC_START: bool = true;
 const MAX_FILE: u64 = 4096;
 
 /// `<runtime>/endpoint.json`.
@@ -92,9 +93,8 @@ pub fn publish(runtime: &Path, endpoint: &Path) -> std::io::Result<()> {
     }
     let me = std::process::id();
     let mut body = json!({"v": 1, "endpoint": endpoint.to_str().ok_or_else(|| io("endpoint is not UTF-8"))?, "pid": me});
-    // Written ONLY when WRITE_PROC_START is on. The engine's hook reader (`desktop-harness/src/config.cjs`) accepts
-    // exactly `endpoint,pid,v` today, so adding the key breaks it until the engine lane accepts `procStart`
-    // (verified: with the key present that reader finds no endpoint). Never an empty or invented value either.
+    // Never an empty or invented value: if /proc cannot say, the key is simply absent (the previous format, which
+    // the readers still accept).
     if WRITE_PROC_START {
         if let Some(start) = proc_start(me) {
             body["procStart"] = json!(start);
