@@ -1,3 +1,6 @@
+#![cfg(target_os = "linux")]
+// Linux-only integration: real receiver sockets, SO_PEERCRED, and XDG runtime policy.
+
 //! Opt-in integration with the external REAL Node producer, not a Pi/UI e2e.
 //! Default runs deliberately ignore these tests; --ignored requires the source
 //! directory and Node and fails loudly if either is unavailable (no fallback).

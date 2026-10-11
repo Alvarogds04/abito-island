@@ -38,7 +38,9 @@ use serde_json::Value;
 use crate::card::{self, Candidate, Reason, StandingRequest};
 use crate::desktop::BridgeStatus;
 use crate::http::{self, ActiveRequests, REQUEST_DEADLINE_MS};
-use crate::requests::{self, bridge_allows, parse_origin, validate_login_bytes, Origin};
+use crate::requests::{self, bridge_allows, parse_origin, Origin};
+#[cfg(unix)]
+use crate::requests::validate_login_bytes;
 use crate::retry::{AuthLadder, AuthMode, Recovery};
 
 /// `main.cjs setInterval(() => void poll(), 10000)` (303): the poll cadence
@@ -1018,6 +1020,7 @@ mod tests {
         assert_eq!(REQUEST_DEADLINE_MS, 5_000);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn valid_bridge_json_is_read_once_and_validated() {
         use std::os::unix::fs::PermissionsExt;
@@ -1039,6 +1042,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn missing_symlink_and_bad_files_all_disable_the_lane() {
         let root = state_root("invalid");

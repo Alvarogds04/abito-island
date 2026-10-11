@@ -1,3 +1,6 @@
+#![cfg(target_os = "linux")]
+// Linux-only integration: Unix agent sockets and the Linux session/daemon policy.
+
 //! #306: the island-agent client against the REAL `abito-island-daemon` (apps/desktop-daemon)
 //! running a FAKE agent in a private temp island. No Pi, no provider, no network, no
 //! credential. A daemon that is not running must read as `no_daemon`, never hang.

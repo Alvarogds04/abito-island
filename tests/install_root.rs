@@ -1,3 +1,5 @@
+#![cfg(target_os = "linux")]
+// Linux-only integration: receiver runtime policy uses XDG paths and Unix metadata.
 //! M4-PRE: a packaged (release) binary must never resolve its runtime root or
 //! project id to the source tree, and the installed root is its own private
 //! leaf that never touches the Preview's reserved roots.
