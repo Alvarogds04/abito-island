@@ -114,6 +114,12 @@ pub struct Core {
     /// U1: the expanded island shows the chat view (only while expanded).
     pub chat: bool,
     press: Option<Press>,
+    /// #309: the (stage, final) rectangles of the last view plan, while the window has not reached
+    /// the final size yet. The host applies a plan asynchronously (a set_size is only a request),
+    /// so the getter can still report the PREVIOUS window; planning the next switch from it would
+    /// shrink the stage under a view that is already on screen. Dropped when the getter reaches the
+    /// final size, on a toggle and on a drag.
+    in_flight: Option<(Rect, Rect)>,
 }
 
 impl Core {
@@ -123,6 +129,7 @@ impl Core {
 
     /// Pointer down: remember the grab offset. Client coords are CSS px.
     pub fn press(&mut self, io: &dyn WindowIo, client: (f64, f64)) {
+        self.in_flight = None; // the human takes the window: plan from where it really is
         let s = io.scale();
         let (sx, sy) = screen_at(io, client);
         self.press = Some(Press {
@@ -220,6 +227,7 @@ impl Core {
         };
         let rect = geometry::anchor_toggle(self.edge, current, size, area);
         self.expanded = !self.expanded;
+        self.in_flight = None;
         // Collapsing always forgets the chat view: the next short click
         // opens the overview (M1 contract), never the chat directly.
         self.chat = false;
@@ -254,11 +262,20 @@ impl Core {
         let size = geometry::scaled_size(logical, scale);
         let (x, y) = io.outer_position();
         let (w, h) = io.size();
-        let current = Rect { x, y, w, h };
+        let mut current = Rect { x, y, w, h };
+        if let Some((held, fin)) = self.in_flight {
+            if (w, h) == (fin.w, fin.h) {
+                self.in_flight = None; // settled: the getter is the truth again
+            } else {
+                // not settled: the window is, or is about to be, the stage that holds both views
+                current = held;
+            }
+        }
         let stage = stage_rect(self.edge, current, size, size, area);
         // the final window is centred on the stage: the island does not jump when the stage is dropped
         let rect = geometry::anchor_toggle(self.edge, stage, size, area);
         self.chat = chat;
+        self.in_flight = Some((stage, rect));
         Some(ViewPlan {
             chat,
             size,
@@ -510,6 +527,62 @@ mod tests {
             assert_eq!(open.size, chat_window(h, 1.0), "{h}");
             assert!(open.rect.bottom() <= a.bottom(), "{h}: the column fits the screen");
         }
+    }
+
+    #[test]
+    fn closing_before_the_stage_was_applied_still_holds_the_column() {
+        // the verifier's race: the getter still reports the OVERVIEW (the stage resize was only
+        // requested), and the human closes the chat. Planning from the getter gave a 672x176 stage:
+        // the column, still on screen, was clipped.
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).unwrap();
+        // NOTHING applied: io still says 672x176 at the overview origin
+        let back = core.plan_view(&io, area(), false).expect("close");
+        assert!(back.stage.w >= open.stage.w && back.stage.h >= open.stage.h, "stage {:?} must hold the in-flight stage {:?}", back.stage, open.stage);
+        assert!(back.stage.h >= open.rect.h, "the column ({}) fits the stage ({})", open.rect.h, back.stage.h);
+        assert!(back.rect.x >= back.stage.x && back.rect.right() <= back.stage.right());
+        assert_eq!((back.size, back.visible), (LOGICAL_OVERVIEW, (640, 160)));
+    }
+
+    #[test]
+    fn reopening_before_the_close_was_applied_also_holds_both_views() {
+        let (mut core, io) = expanded_top();
+        let a = core.plan_view(&io, area(), true).unwrap();
+        let b = core.plan_view(&io, area(), false).unwrap();
+        let c = core.plan_view(&io, area(), true).unwrap();
+        for plan in [&b, &c] {
+            assert!(plan.stage.w >= 672 && plan.stage.h >= a.stage.h, "{:?}", plan.stage);
+        }
+        assert_eq!(c.size, a.size);
+    }
+
+    #[test]
+    fn a_settled_window_is_planned_from_the_getter_again() {
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).unwrap();
+        // the window reached the FINAL size: the memory of the transition is dropped
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        let back = core.plan_view(&io, area(), false).unwrap();
+        assert_eq!((back.stage.w, back.stage.h), (672, 656));
+        assert_eq!((back.stage.x, back.stage.y), (open.rect.x - (672 - 432) / 2, open.rect.y));
+        io.size.set(back.size);
+        io.pos.set((back.rect.x, back.rect.y));
+        let again = core.plan_view(&io, area(), true).unwrap();
+        assert_eq!(again.size, open.size, "no stale memory changes a later plan");
+    }
+
+    #[test]
+    fn a_drag_forgets_the_transition_in_flight() {
+        let (mut core, io) = expanded_top();
+        core.plan_view(&io, area(), true).unwrap();
+        core.press(&io, (10.0, 10.0));
+        io.size.set((432, 656));
+        io.pos.set((300, 32));
+        core.release(&io, area(), (10.0, 10.0), true);
+        let back = core.plan_view(&io, area(), false).unwrap();
+        assert_eq!(back.stage.y, 32);
+        assert!(back.stage.x <= 300 && back.stage.right() >= 300 + 432, "planned around where the human left it: {:?}", back.stage);
     }
 
     #[test]

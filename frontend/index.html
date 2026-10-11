@@ -136,12 +136,13 @@
              island (replaces the transcript while open). Local only, no
              keys; listed is never shown as ready. -->
         <div id="models" inert aria-label="Modelo local">
+          <!-- #309: the buttons come first so wrapping pushes the meters to a second row, never a button out of the island -->
           <div id="models-bar">
             <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
             <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>
-            <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
             <button id="models-refresh" class="icon-btn" type="button" aria-label="Actualizar modelos locales"><span class="ico" data-icon="refresh"></span></button>
             <button id="models-close" class="icon-btn" type="button" aria-label="Listo, volver a la conversación"><span class="ico" data-icon="check"></span></button>
+            <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
           </div>
           <p id="models-note" class="sr-only"></p>
           <ul id="models-list" aria-label="Modelos locales"></ul>
@@ -151,14 +152,15 @@
              Opened from the overview gear; plain text only (textContent); a key is typed into a
              masked field, sent once as `auth_reply` and cleared, never stored in the page. -->
         <div id="settings" inert role="dialog" aria-label="Ajustes">
+          <!-- #309: two rows in the 400px column. Row 1: connection chip + close (always inside, pinned right); row 2: the tabs. -->
           <div id="settings-bar">
+            <span id="settings-conn" class="chip" role="img" hidden><span class="ico" id="settings-conn-icon"></span><span class="word" id="settings-conn-word"></span></span>
+            <button id="settings-close" class="icon-btn" type="button" aria-label="Cerrar ajustes"><span class="ico" data-icon="check"></span></button>
             <div id="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
               <button id="tab-providers" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="true"><span class="ico" data-icon="chip"></span><span class="tab-word">Proveedores</span></button>
               <button id="tab-connectors" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="false" tabindex="-1"><span class="ico" data-icon="plug"></span><span class="tab-word">Conectores</span></button>
               <button id="tab-general" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="false" tabindex="-1"><span class="ico" data-icon="gear"></span><span class="tab-word">General</span></button>
             </div>
-            <span id="settings-conn" class="chip" role="img" hidden><span class="ico" id="settings-conn-icon"></span><span class="word" id="settings-conn-word"></span></span>
-            <button id="settings-close" class="icon-btn" type="button" aria-label="Cerrar ajustes"><span class="ico" data-icon="check"></span></button>
           </div>
           <div id="settings-body" role="tabpanel" tabindex="-1"></div>
           <p id="settings-live" class="sr-only" role="status" aria-live="polite"></p>

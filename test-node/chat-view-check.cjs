@@ -389,4 +389,93 @@ test('column: a silent «ready» takes no row; only a state with a word opens th
   assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind=""\]\)\s*\{[^}]*display:\s*none/);
 });
 
+// ---- #309 verifier: Settings and Models were designed for 640 and broke in the 400 column ---------
+// A small box model: every control of the two panels is laid out from the CSS+markup rules below and
+// must fit INSIDE the visible island width. Not a browser; it measures the arithmetic that failed.
+const COLUMN_W = 400;
+const px = (text, re, d) => { const m = text.match(re); return m ? Number(m[1]) : d; };
+const panelBox = id => {
+  const r = rule(id);
+  return { left: px(r, /left:\s*(\d+)px/, 0), right: px(r, /right:\s*(\d+)px/, 0) };
+};
+
+test('column: Settings and Models span the whole column (no 60px gutter left over from the 640 layout)', () => {
+  for (const id of ['#settings', '#models']) {
+    const b = panelBox(id);
+    assert.ok(b.left <= 12, `${id} left ${b.left}px`);
+    assert.ok(b.right <= 12, `${id} right ${b.right}px`);
+    assert.ok(COLUMN_W - b.left - b.right >= 376, `${id} inner width ${COLUMN_W - b.left - b.right}px`);
+  }
+});
+
+test('column: the settings bar is two rows — tabs on their own full-width row, close + connection chip above — so nothing leaves the island', () => {
+  assert.match(rule('#settings-bar'), /flex-wrap:\s*wrap/, 'the bar wraps instead of overflowing');
+  // the close button is in the FIRST row (before the tabs in the DOM) and pushed to the right
+  const bar = html.slice(html.indexOf('id="settings-bar"'), html.indexOf('id="settings-body"'));
+  assert.ok(bar.indexOf('id="settings-close"') < bar.indexOf('id="settings-tabs"'), 'close comes before the tabs');
+  assert.ok(bar.indexOf('id="settings-conn"') < bar.indexOf('id="settings-tabs"'), 'the connection chip comes before the tabs');
+  assert.match(rule('#settings-tabs'), /(flex-basis:\s*100%|width:\s*100%|order:\s*\d)/, 'the tabs take a row of their own');
+  assert.match(rule('#settings-close'), /margin-left:\s*auto/, 'close is pinned to the right edge');
+});
+
+test('column: the three tabs fit one 376px row (icon + word, 44px high), each one reachable', () => {
+  const tab = rule('.tab');
+  const pad = tab.match(/padding:\s*0\s+(\d+)px\s+0\s+(\d+)px/);
+  assert.ok(pad, 'tab padding');
+  const gap = px(tab, /gap:\s*(\d+)px/, 0);
+  const tabsGap = px(rule('#settings-tabs'), /gap:\s*(\d+)px/, 0);
+  const icon = 18; // .ico svg in a tab
+  // a tab = padding + icon + gap + word; words at 13px/600 are ~7.4px per glyph
+  const words = ['Proveedores', 'Conectores', 'General'];
+  const width = w => Number(pad[1]) + Number(pad[2]) + icon + gap + Math.ceil(w.length * 7.4);
+  const total = words.reduce((a, w) => a + width(w), 0) + tabsGap * (words.length - 1);
+  assert.ok(total <= COLUMN_W - 24, `tabs need ${total}px of ${COLUMN_W - 24}px`);
+  assert.match(tab, /min-height:\s*44px/);
+});
+
+test('column: the models bar is two rows — [count, info, refresh, done] then the meters — and «Actualizar» and «Listo» are always inside', () => {
+  assert.match(rule('#models-bar'), /flex-wrap:\s*wrap/);
+  const bar = html.slice(html.indexOf('id="models-bar"'), html.indexOf('id="models-note"'));
+  const at = id => bar.indexOf(`id="${id}"`);
+  assert.ok(at('models-refresh') > -1 && at('models-close') > -1);
+  assert.ok(at('models-refresh') < at('models-meters') && at('models-close') < at('models-meters'), 'the buttons come BEFORE the meters, so wrapping pushes the meters down, never the buttons out');
+  assert.match(rule('#models-meters'), /(flex-basis:\s*100%|width:\s*100%|order:\s*\d)/, 'the meters take their own row');
+  // first row: chip + 3 icon buttons (44px each) + gaps must fit
+  const first = 44 * 3 + 44 /* chip, generous */ + 8 * 3;
+  assert.ok(first <= COLUMN_W - 24, `first row needs ${first}px`);
+  // second row: three meters with their gaps must fit
+  const gap = px(rule('#models-meters'), /gap:\s*(\d+)px/, 0);
+  const meter = 6 + 44 + 6; // label + bar + gap, measured from the captures
+  assert.ok(meter * 3 + gap * 2 <= COLUMN_W - 24, `meters need ${meter * 3 + gap * 2}px`);
+});
+
+test('column: the sticky controls cannot be hidden by the content (close is not inside the scrolling body)', () => {
+  assert.ok(html.indexOf('id="settings-close"') < html.indexOf('id="settings-body"'));
+  assert.match(rule('#settings-body'), /overflow-y:\s*auto/);
+  assert.match(rule('#models-list'), /overflow-y:\s*auto/);
+});
+
+test('column: with Settings open the chat header is hidden, so the panel must carry its OWN exit', () => {
+  assert.match(css, /#capsule\[data-settings="open"\] #chat-header/);
+  assert.ok(html.includes('id="settings-close"') && /aria-label="Cerrar ajustes"/.test(html));
+  const setCss = rule('#settings');
+  assert.match(setCss, /left:\s*12px/);
+  assert.match(setCss, /right:\s*12px/);
+});
+
+test('column: an open panel (Modelos, Ajustes) hides the chat status strip, so «Bloqueado» never overlaps the panel', () => {
+  const hides = sel => new RegExp('#capsule\\[data-' + sel + '="open"\\][^{]*#chat-status-strip').test(css);
+  assert.ok(hides('models'), 'Modelos hides the strip');
+  assert.ok(hides('settings'), 'Ajustes hides the strip');
+  const rules = [...css.matchAll(/(^|\n)([^{}\n][^{}]*#chat-status-strip[^{}]*)\{([^}]*)\}/g)].map(m => m[3]);
+  assert.ok(rules.some(b => /visibility:\s*hidden/.test(b)));
+});
+
+test('column: the account-name field never truncates its own placeholder', () => {
+  const field = rule('.sfield');
+  assert.match(field, /min-width:\s*(\d+)px/);
+  const min = px(field, /min-width:\s*(\d+)px/, 0);
+  assert.ok(min >= 140 || /flex:\s*1\s+1\s+100%/.test(rule('#settings-body .sform .sfield[type="text"]')) , `min-width ${min}px cannot show «Nombre de la cuenta»`);
+});
+
 console.log(`chat-view-check: ${passed} passed`);
