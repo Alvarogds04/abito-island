@@ -223,3 +223,61 @@ fn a_connection_that_drops_starts_a_clean_error_slate() {
     st.apply(&json!({"type":"error","code":"unavailable"})).unwrap();
     assert_eq!(serde_json::to_value(&st).unwrap()["last_error"]["code"], json!("unavailable"));
 }
+
+// ---- #310: connect Claude Code / Codex / OpenCode with one click (island-agent/1 `agents`) ----------------
+#[test]
+fn the_agent_commands_are_a_closed_set_with_an_id_allowlist() {
+    assert!(matches!(parse_ui_command(&json!({"action":"agents_list"})), Ok(UiCommand::Wire(w)) if w == "{\"type\":\"agents_list\"}\n"));
+    for (action, id) in [("agent_connect", "claude-code"), ("agent_connect", "codex"), ("agent_connect", "opencode"), ("agent_disconnect", "codex")] {
+        match parse_ui_command(&json!({"action": action, "agentId": id})) {
+            Ok(UiCommand::Wire(w)) => assert_eq!(w, format!("{{\"type\":\"{action}\",\"agentId\":\"{id}\"}}\n")),
+            other => panic!("{action} {id}: {other:?}"),
+        }
+    }
+    for bad in [json!({"action":"agent_connect"}), json!({"action":"agent_connect","agentId":"rm -rf"}), json!({"action":"agent_connect","agentId":"Codex"}),
+                json!({"action":"agent_connect","agentId":"../x"}), json!({"action":"agent_connect","agentId":""}), json!({"action":"agent_connect","agentId":7}),
+                json!({"action":"agent_connect","agentId":"codex","command":"x"}), json!({"action":"agent_connect","agentId":"codex","path":"/etc"}),
+                json!({"action":"agents_list","x":1}), json!({"action":"agent_install","agentId":"codex"})] {
+        assert!(parse_ui_command(&bad).is_err(), "must refuse {bad}");
+    }
+}
+
+#[test]
+fn an_agents_frame_is_folded_into_a_flat_closed_view() {
+    let mut st = ClientState::connected();
+    assert_eq!(serde_json::to_value(&st).unwrap()["agents"], json!(null), "unknown until the engine says so");
+    st.apply(&json!({"type":"agents","agents":[
+        {"id":"claude-code","name":"<b>x</b>","state":"connected","backup":true,"detail":null,"path":"/home/a/.claude/settings.json","hook":"rm -rf /"},
+        {"id":"codex","state":"outdated","backup":false,"detail":null},
+        {"id":"opencode","state":"error","backup":false,"detail":"not_writable"}]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["agents"][0], json!({"id":"claude-code","state":"connected","backup":true,"detail":null}), "no name, path or hook line reaches the page");
+    assert_eq!(v["agents"][2], json!({"id":"opencode","state":"error","backup":false,"detail":"not_writable"}));
+    let text = v["agents"].to_string();
+    assert!(!text.contains("rm -rf") && !text.contains("/home/") && !text.contains("<b>"), "{text}");
+}
+
+#[test]
+fn hostile_agent_entries_are_dropped_or_clamped() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"agents","agents":[
+        {"id":"evil","state":"connected"}, {"id":"codex","state":"<img>"}, {"id":"codex","state":"connected"}, {"id":7,"state":"connected"},
+        {"id":"opencode","state":"error","detail":"<script>"}, "junk", null]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    let list = v["agents"].as_array().unwrap();
+    assert_eq!(list.len(), 2, "{list:?}");
+    assert_eq!(list[0], json!({"id":"codex","state":"error","backup":false,"detail":null}), "an unknown state reads as error; a duplicate keeps the first");
+    assert_eq!(list[1]["detail"], json!(null), "an unknown detail never reaches the page");
+    // a non-array leaves the previous view alone
+    st.apply(&json!({"type":"agents","agents":"nope"})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["agents"].as_array().unwrap().len(), 2);
+    // at most the three known agents
+    let many: Vec<_> = (0..50).map(|_| json!({"id":"codex","state":"connected"})).collect();
+    st.apply(&json!({"type":"agents","agents":many})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["agents"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn a_connection_that_drops_forgets_the_agents() {
+    assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["agents"], json!(null));
+}

@@ -10,16 +10,17 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AbitoSettings = Object.freeze(api);
 })(typeof self !== 'undefined' ? self : this, () => {
-  const SECTIONS = Object.freeze([
-    Object.freeze({ id: 'providers', label: 'Proveedores', icon: 'chip' }),
-    Object.freeze({ id: 'connectors', label: 'Conectores', icon: 'plug' }),
-    Object.freeze({ id: 'general', label: 'General', icon: 'info' }),
+  // ---- screens ------------------------------------------------------------------------------------------------
+  // Copied from gentle-dot (MIT): one icon button per screen in the chat header; each screen COVERS the chat
+  // body with a title, a close button and a one-line hint. Opening one closes the others.
+  const SCREENS = Object.freeze([
+    Object.freeze({ id: 'accounts', title: 'Cuentas', icon: 'user', label: 'Cuentas',
+      hint: 'Conectá el servicio de IA que ya pagás o pegá una clave de API. Tu inicio de sesión queda en esta computadora.' }),
+    Object.freeze({ id: 'connectors', title: 'Conectores', icon: 'plug', label: 'Conectores',
+      hint: 'Conectá tus agentes de código y dejá que Abito lea tus apps. Pregunta antes de enviar o cambiar algo.' }),
+    Object.freeze({ id: 'settings', title: 'Ajustes', icon: 'gear', label: 'Ajustes', hint: '' }),
   ]);
-  function nextSection(current, step) {
-    const i = SECTIONS.findIndex(s => s.id === current);
-    if (i < 0) return SECTIONS[0].id;
-    return SECTIONS[(i + step + SECTIONS.length) % SECTIONS.length].id;
-  }
+  const screenById = id => SCREENS.find(x => x.id === id) || null;
 
   // ---- connection to the island agent (the daemon) ------------------------------------
   const CONNECTION = Object.freeze({
@@ -177,6 +178,99 @@
     return { kind: 'combo', text: [...mods, key].join('+') };
   }
 
+  // ---- Cuentas: the two method cards, the provider list, the login plan (gentle-dot AccountsPanel) ------------------
+  const METHOD_CARDS = Object.freeze([
+    Object.freeze({ id: 'oauth', title: 'Usar una suscripción', hint: 'Iniciá sesión con un plan que ya pagás, como ChatGPT, GitHub Copilot o Grok.' }),
+    Object.freeze({ id: 'api_key', title: 'Usar una clave de API', hint: 'Pegá una clave de la web del proveedor. Funciona con todos los servicios.' }),
+  ]);
+  function accountOfProvider(state, providerId) {
+    return ((state && state.accounts) || []).find(a => a.provider === providerId && a.local !== true) || null;
+  }
+  function providerList(state, method, filter) {
+    if (!METHOD_CARDS.some(c => c.id === method)) return [];
+    const needle = String(filter || '').trim().toLowerCase();
+    return ((state && state.providers) || [])
+      .filter(p => Array.isArray(p.methods) && p.methods.includes(method) && String(p.name || '').toLowerCase().includes(needle))
+      .map(p => {
+        const account = accountOfProvider(state, p.id);
+        return {
+          id: p.id, name: String(p.name || p.id), connected: p.configured === true || (!!account && account.configured === true),
+          accountId: account ? account.accountId : null, canLogout: !!account && account.configured === true,
+          actionLabel: method === 'oauth' ? 'Iniciar sesión' : 'Usar una clave de API',
+        };
+      });
+  }
+  function labelFor(name, fallback) {
+    const clean = Array.from(String(name || '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim()).slice(0, 80).join('').trim();
+    return clean || String(fallback || '');
+  }
+  // The engine keys a sign-in on an ACCOUNT. gentle-dot logs in per provider, so: reuse the provider's account,
+  // or create one named after the provider and log in when it appears (pendingLogin / pendingLoginReady).
+  function loginPlan(state, providerId, method) {
+    if (!connected(state)) return null;
+    const provider = providerOf(state, providerId);
+    if (!provider || !Array.isArray(provider.methods) || !provider.methods.includes(method) || !METHOD_ORDER.includes(method)) return null;
+    const account = accountOfProvider(state, providerId);
+    if (account) return { kind: 'start', accountId: account.accountId, method };
+    return { kind: 'create', provider: providerId, label: labelFor(provider.name, providerId), method };
+  }
+  function pendingLogin(state, provider, method) {
+    return { provider, method, known: ((state && state.accounts) || []).map(a => a.accountId) };
+  }
+  function pendingLoginReady(state, pending) {
+    if (!pending) return null;
+    const fresh = ((state && state.accounts) || []).find(a => a.provider === pending.provider && a.local !== true && !pending.known.includes(a.accountId));
+    return fresh ? { accountId: fresh.accountId, method: pending.method } : null;
+  }
+  function connectedAccounts(state) {
+    const signedIn = new Set(((state && state.accounts) || []).filter(a => a.configured === true || a.local === true).map(a => a.accountId));
+    return accountRows(state).filter(r => signedIn.has(r.accountId)).map(r => Object.assign({}, r, { signedIn: !r.local }));
+  }
+
+  // ---- agents: connect Claude Code / Codex / OpenCode with ONE click (no terminal) -------------------------------------
+  // The state comes from the engine's `agents` frame. Names and sentences are OURS: nothing the engine sends is
+  // shown as text, only chosen from these closed tables.
+  const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' });
+  const AGENT_IDS = Object.freeze(Object.keys(AGENT_NAMES));
+  const AGENT_STATES = Object.freeze({
+    not_connected: ['Sin conectar', 'plug-off', 'faint'], connected: ['Conectado', 'check', 'go'], outdated: ['Desactualizado', 'info', 'sun'],
+    working: ['En curso', 'ring', 'live'], unavailable: ['No encontrado', 'plug-off', 'faint'], error: ['No se pudo', 'triangle', 'red'],
+  });
+  const AGENT_ERRORS = Object.freeze({
+    config_invalid: 'La configuración actual no es válida; no se tocó nada.',
+    not_writable: 'No hay permiso de escritura en la configuración; no se tocó nada.',
+    backup_failed: 'No se pudo hacer el respaldo; no se tocó nada.',
+  });
+  function agentsView(state) {
+    if (state && state.connection && state.connection !== 'connected' && state.connection !== 'connecting') {
+      const cv = connectionView(state);
+      if (cv) return { kind: 'no_engine', word: cv.word, icon: cv.icon, tone: cv.tone, aria: cv.aria };
+    }
+    const list = state && state.agents;
+    if (!Array.isArray(list)) return { kind: 'loading', rows: [] };
+    const seen = new Set();
+    const rows = [];
+    for (const a of list) {
+      if (!a || typeof a !== 'object' || !AGENT_IDS.includes(a.id) || seen.has(a.id)) continue;
+      seen.add(a.id);
+      const st = Object.prototype.hasOwnProperty.call(AGENT_STATES, a.state) ? a.state : 'error';
+      const [word, icon, tone] = AGENT_STATES[st];
+      const cmd = action => ({ action, agentId: a.id });
+      let primary = null, secondary = null, note = '';
+      if (st === 'not_connected') primary = { label: 'Conectar', command: cmd('agent_connect') };
+      if (st === 'outdated') { primary = { label: 'Actualizar', command: cmd('agent_connect') }; secondary = { label: 'Desconectar', command: cmd('agent_disconnect') }; }
+      if (st === 'connected') { secondary = { label: 'Desconectar', command: cmd('agent_disconnect') }; if (a.backup === true) note = 'Hay un respaldo de tu configuración anterior.'; }
+      if (st === 'unavailable') note = 'No está instalado en esta computadora.';
+      if (st === 'error') {
+        primary = { label: 'Reintentar', command: cmd('agent_connect') };
+        note = Object.prototype.hasOwnProperty.call(AGENT_ERRORS, a.detail) ? AGENT_ERRORS[a.detail] : 'No se pudo completar; no se tocó nada.';
+      }
+      rows.push({ id: a.id, name: AGENT_NAMES[a.id], state: st, word, icon, tone, primary, secondary, note, busy: st === 'working',
+        aria: `${AGENT_NAMES[a.id]}: ${word}${note ? '. ' + note : ''}` });
+    }
+    return { kind: 'ready', rows };
+  }
+
   // ---- what to tell the human after a command ---------------------------------------------------------------------
   // The page used to say «Cuenta creada» when it WROTE the command. The engine answers later (state
   // frames) and may refuse (`error{failed|busy|bad_request|...}`): success is only said when the state
@@ -231,6 +325,6 @@
     };
   }
 
-  return { commandOutcome, hotkeySetOutcome, makeDrafts, SECTIONS, SOUND_DEFAULT: false, CONNECTORS_NOTE, nextSection, connectionView, accountRows, loginMethods, createValidity,
+  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
 });

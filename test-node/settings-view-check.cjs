@@ -12,14 +12,14 @@ const S = require(path.join(frontend, 'settings-view.js'));
 let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
 
-// ---- sections ----------------------------------------------------------------
-test('three sections in a fixed order, each with a name and an icon', () => {
-  assert.deepEqual(S.SECTIONS.map(s => s.id), ['providers', 'connectors', 'general']);
-  for (const s of S.SECTIONS) { assert.ok(s.label && s.icon, s.id); }
-  assert.equal(S.nextSection('providers', 1), 'connectors');
-  assert.equal(S.nextSection('general', 1), 'providers', 'wraps');
-  assert.equal(S.nextSection('providers', -1), 'general');
-  assert.equal(S.nextSection('nope', 1), 'providers');
+// ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
+test('three screens in gentle-dot order — Cuentas, Conectores, Ajustes — each with title, icon and a one-line hint', () => {
+  assert.deepEqual(S.SCREENS.map(x => x.id), ['accounts', 'connectors', 'settings']);
+  assert.deepEqual(S.SCREENS.map(x => x.title), ['Cuentas', 'Conectores', 'Ajustes']);
+  for (const x of S.SCREENS) { assert.ok(x.icon, x.id); assert.ok(x.id === 'settings' || x.hint.length > 20, x.id); }
+  assert.equal(S.screenById('connectors').title, 'Conectores');
+  assert.equal(S.screenById('nope'), null);
+  assert.equal(S.SECTIONS, undefined, 'the tab strip is gone');
 });
 
 // ---- connection chip -------------------------------------------------------------
@@ -184,11 +184,12 @@ test('markup: gear + every icon-only control is named; sections are real tabs; t
   assert.match(html, /<script defer src="settings\.js"><\/script>/);
   assert.match(html, /id="open-settings"[^>]*aria-label="Ajustes"/);
   assert.match(html, /id="settings"[^>]*role="dialog"[^>]*aria-label="Ajustes"/);
-  assert.match(html, /role="tablist"/);
-  for (const id of ['providers', 'connectors', 'general']) {
-    const tag = new RegExp(`<button[^>]*id="tab-${id}"[^>]*>`).exec(html);
-    assert.ok(tag, id); assert.match(tag[0], /role="tab"/, id);
+  assert.doesNotMatch(html, /role="tablist"/, 'no tab strip: each screen has its own header button');
+  for (const id of ['accounts', 'connectors', 'settings']) {
+    const tag = new RegExp(`<button[^>]*id="open-screen-${id}"[^>]*>`).exec(html);
+    assert.ok(tag, id); assert.match(tag[0], /aria-label="[^"]{3,}"/, id); assert.match(tag[0], /aria-expanded="false"/, id);
   }
+  assert.match(html, /<h2[^>]*id="settings-title"/, 'the screen title is a real heading');
   assert.match(html, /id="settings-close"[^>]*aria-label="[^"]{3,}"/);
 });
 test('wiring: only the closed IPC; a masked field never reaches the DOM as text and is cleared after sending', () => {
@@ -345,6 +346,116 @@ test('layout: General fits the 256px chat window without cutting its last row', 
   const room = win - top - bottom - bar - gap;
   const rows = 4, rowH = 44; // sound, motion, shortcut, shortcut-enabled
   assert.ok(room >= rows * rowH + (rows - 1) * bodyGap, `room ${room}px < ${rows * rowH + (rows - 1) * bodyGap}px`);
+});
+
+// ---- Cuentas: connected list, two method cards, provider list with search (gentle-dot AccountsPanel) ----
+const st2 = (extra = {}) => state({ providers: [
+  { id: 'anthropic', name: 'Anthropic', methods: ['api_key', 'oauth'], configured: true },
+  { id: 'openai', name: 'OpenAI', methods: ['oauth'], configured: false },
+  { id: 'groq', name: 'Groq', methods: ['api_key'], configured: false }], ...extra });
+
+test('accounts: two method cards, in gentle-dot wording', () => {
+  assert.deepEqual(S.METHOD_CARDS.map(c => c.id), ['oauth', 'api_key']);
+  assert.equal(S.METHOD_CARDS[0].title, 'Usar una suscripción');
+  assert.equal(S.METHOD_CARDS[1].title, 'Usar una clave de API');
+  for (const c of S.METHOD_CARDS) assert.ok(c.hint.length > 30);
+});
+
+test('accounts: the provider list is filtered by method and by the search box', () => {
+  const ids = (m, f) => S.providerList(st2(), m, f).map(p => p.id);
+  assert.deepEqual(ids('oauth', ''), ['anthropic', 'openai']);
+  assert.deepEqual(ids('api_key', ''), ['anthropic', 'groq']);
+  assert.deepEqual(ids('api_key', '  GRO '), ['groq'], 'case-insensitive, trimmed');
+  assert.deepEqual(ids('api_key', 'zzz'), []);
+  assert.deepEqual(ids('weird', ''), [], 'an unknown method lists nothing');
+  const row = S.providerList(st2(), 'oauth', '')[0];
+  assert.equal(row.name, 'Anthropic'); assert.equal(row.connected, true);
+  assert.equal(S.providerList(st2(), 'oauth', '')[1].connected, false);
+  assert.equal(S.providerList(st2(), 'oauth', '')[0].actionLabel, 'Iniciar sesión');
+  assert.equal(S.providerList(st2(), 'api_key', '')[0].actionLabel, 'Usar una clave de API');
+});
+
+test('accounts: «Iniciar sesión» uses the provider\'s account, or creates one named after the provider first', () => {
+  const have = S.loginPlan(st2(), 'anthropic', 'oauth');
+  assert.deepEqual(have, { kind: 'start', accountId: 'personal', method: 'oauth' });
+  const none = S.loginPlan(st2(), 'groq', 'api_key');
+  assert.deepEqual(none, { kind: 'create', provider: 'groq', label: 'Groq', method: 'api_key' });
+  assert.equal(S.loginPlan(st2(), 'groq', 'oauth'), null, 'a method the provider does not offer');
+  assert.equal(S.loginPlan(st2(), 'nope', 'oauth'), null);
+  assert.equal(S.loginPlan(st2({ connection: 'no_daemon' }), 'groq', 'api_key'), null, 'no engine, no login');
+  // a hostile provider name never becomes a label with control characters
+  const hostile = st2({ providers: [{ id: 'evil', name: 'Ev\nil' + 'x'.repeat(200), methods: ['api_key'], configured: false }] });
+  const plan = S.loginPlan(hostile, 'evil', 'api_key');
+  assert.equal(plan.kind, 'create');
+  assert.ok(!/[\u0000-\u001f]/.test(plan.label) && Array.from(plan.label).length <= 80);
+});
+
+test('accounts: after creating, the login starts as soon as the NEW account appears (never one that already existed)', () => {
+  const pending = S.pendingLogin(st2(), 'groq', 'api_key');
+  assert.deepEqual(pending.known, ['personal', 'work', 'lmstudio']);
+  assert.equal(S.pendingLoginReady(st2(), pending), null, 'nothing new yet');
+  const after = st2({ accounts: [...st2().accounts, { accountId: 'groq-1', label: 'Groq', provider: 'groq', authMethod: 'none', configured: false }] });
+  assert.deepEqual(S.pendingLoginReady(after, pending), { accountId: 'groq-1', method: 'api_key' });
+  const other = st2({ accounts: [...st2().accounts, { accountId: 'x', label: 'X', provider: 'openai', authMethod: 'none', configured: false }] });
+  assert.equal(S.pendingLoginReady(other, pending), null, 'a new account of ANOTHER provider is not ours');
+});
+
+test('accounts: the connected list shows only signed-in accounts, with «Salir»', () => {
+  const rows = S.connectedAccounts(st2());
+  assert.ok(rows.every(r => r.signedIn || r.local));
+  assert.ok(rows.find(r => r.accountId === 'personal'));
+  assert.equal(rows.find(r => r.accountId === 'work'), undefined, 'a signed-out account is not «Conectada»');
+});
+
+// ---- Conectores: agents (one click, no terminal) + services ----------------------------------------
+const agentsState = (list, extra = {}) => state({ agents: list, ...extra });
+test('agents: three known agents, names from OUR table, never from the engine payload', () => {
+  assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'opencode']);
+  const v = S.agentsView(agentsState([{ id: 'claude-code', name: '<b>pwn</b>', state: 'not_connected', backup: false, detail: null }]));
+  assert.equal(v.kind, 'ready');
+  assert.equal(v.rows[0].name, 'Claude Code');
+  assert.deepEqual(v.rows.map(r => r.id), ['claude-code']);
+  // an id outside the allowlist is dropped, a duplicate keeps the first
+  const odd = S.agentsView(agentsState([{ id: 'rm -rf', state: 'connected' }, { id: 'codex', state: 'connected' }, { id: 'codex', state: 'error' }]));
+  assert.deepEqual(odd.rows.map(r => r.id), ['codex']);
+  assert.equal(odd.rows[0].state, 'connected');
+});
+
+test('agents: each state is icon + one word with the right button — «Conectar», «Actualizar», «Desconectar» — never a terminal', () => {
+  const row = (state, extra = {}) => S.agentsView(agentsState([{ id: 'codex', state, backup: false, detail: null, ...extra }])).rows[0];
+  const nc = row('not_connected');
+  assert.deepEqual([nc.word, nc.tone, nc.primary && nc.primary.label], ['Sin conectar', 'faint', 'Conectar']);
+  assert.deepEqual(nc.primary.command, { action: 'agent_connect', agentId: 'codex' });
+  assert.equal(nc.secondary, null);
+  const ok = row('connected');
+  assert.deepEqual([ok.word, ok.tone, ok.primary], ['Conectado', 'go', null]);
+  assert.deepEqual(ok.secondary, { label: 'Desconectar', command: { action: 'agent_disconnect', agentId: 'codex' } });
+  const old = row('outdated');
+  assert.equal(old.primary.label, 'Actualizar'); assert.equal(old.primary.command.action, 'agent_connect'); assert.equal(old.secondary.label, 'Desconectar');
+  const work = row('working');
+  assert.deepEqual([work.word, work.primary, work.secondary, work.busy], ['En curso', null, null, true]);
+  const gone = row('unavailable');
+  assert.deepEqual([gone.word, gone.primary, gone.secondary], ['No encontrado', null, null]);
+  assert.match(gone.note, /no está instalad/i);
+  const bad = row('error', { detail: 'not_writable' });
+  assert.equal(bad.word, 'No se pudo'); assert.equal(bad.tone, 'red'); assert.equal(bad.primary.label, 'Reintentar');
+  assert.match(bad.note, /permiso/i);
+  assert.match(row('error', { detail: 'backup_failed' }).note, /respaldo/i);
+  assert.match(row('error', { detail: 'config_invalid' }).note, /config/i);
+  assert.ok(row('error', { detail: '<script>' }).note.length > 5, 'an unknown detail reads as a generic sentence, never as text');
+  assert.ok(!/<script>/.test(row('error', { detail: '<script>' }).note));
+  // a hostile state value is an error, not a free-form chip
+  assert.equal(row('<img>').state, 'error');
+  assert.ok(!/terminal|comando|consola/i.test(JSON.stringify([nc, ok, old, work, gone, bad])), 'no word asks the human to use a terminal');
+});
+
+test('agents: a backup is mentioned when there is one; the list is honest without an engine', () => {
+  const ok = S.agentsView(agentsState([{ id: 'claude-code', state: 'connected', backup: true, detail: null }])).rows[0];
+  assert.match(ok.note, /respaldo/i);
+  assert.equal(S.agentsView(state({ connection: 'no_daemon', agents: null })).kind, 'no_engine');
+  assert.equal(S.agentsView(state({ connection: 'connected', agents: null })).kind, 'loading');
+  assert.equal(S.agentsView(agentsState([])).kind, 'ready');
+  assert.equal(S.agentsView(agentsState([])).rows.length, 0);
 });
 
 console.log(`settings-view-check: ${passed} passed`);

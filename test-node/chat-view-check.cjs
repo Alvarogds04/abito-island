@@ -408,29 +408,23 @@ test('column: Settings and Models span the whole column (no 60px gutter left ove
   }
 });
 
-test('column: the settings bar is two rows — tabs on their own full-width row, close + connection chip above — so nothing leaves the island', () => {
-  assert.match(rule('#settings-bar'), /flex-wrap:\s*wrap/, 'the bar wraps instead of overflowing');
-  // the close button is in the FIRST row (before the tabs in the DOM) and pushed to the right
-  const bar = html.slice(html.indexOf('id="settings-bar"'), html.indexOf('id="settings-body"'));
-  assert.ok(bar.indexOf('id="settings-close"') < bar.indexOf('id="settings-tabs"'), 'close comes before the tabs');
-  assert.ok(bar.indexOf('id="settings-conn"') < bar.indexOf('id="settings-tabs"'), 'the connection chip comes before the tabs');
-  assert.match(rule('#settings-tabs'), /(flex-basis:\s*100%|width:\s*100%|order:\s*\d)/, 'the tabs take a row of their own');
+test('column: a settings screen is ONE row — title, connection chip and a close button pinned to the right — so nothing leaves the island', () => {
+  const bar = html.slice(html.indexOf('id="settings-bar"'), html.indexOf('id="settings-hint"'));
+  assert.ok(bar.indexOf('id="settings-title"') < bar.indexOf('id="settings-close"'), 'title first, close last');
+  assert.ok(bar.indexOf('id="settings-conn"') < bar.indexOf('id="settings-close"'));
   assert.match(rule('#settings-close'), /margin-left:\s*auto/, 'close is pinned to the right edge');
+  assert.match(rule('#settings-title'), /min-width:\s*0/, 'a long title shrinks instead of pushing close out');
+  assert.match(rule('#settings-title'), /text-overflow:\s*ellipsis/);
 });
 
-test('column: the three tabs fit one 376px row (icon + word, 44px high), each one reachable', () => {
-  const tab = rule('.tab');
-  const pad = tab.match(/padding:\s*0\s+(\d+)px\s+0\s+(\d+)px/);
-  assert.ok(pad, 'tab padding');
-  const gap = px(tab, /gap:\s*(\d+)px/, 0);
-  const tabsGap = px(rule('#settings-tabs'), /gap:\s*(\d+)px/, 0);
-  const icon = 18; // .ico svg in a tab
-  // a tab = padding + icon + gap + word; words at 13px/600 are ~7.4px per glyph
-  const words = ['Proveedores', 'Conectores', 'General'];
-  const width = w => Number(pad[1]) + Number(pad[2]) + icon + gap + Math.ceil(w.length * 7.4);
-  const total = words.reduce((a, w) => a + width(w), 0) + tabsGap * (words.length - 1);
-  assert.ok(total <= COLUMN_W - 24, `tabs need ${total}px of ${COLUMN_W - 24}px`);
-  assert.match(tab, /min-height:\s*44px/);
+test('column: the three header buttons (Cuentas, Conectores, Ajustes) plus Modelos and Volver fit the 400 header', () => {
+  const header = html.slice(html.indexOf('id="chat-header"'), html.indexOf('id="chat-status-strip"'));
+  const buttons = (header.match(/<button /g) || []).length;
+  assert.equal(buttons, 5, 'accounts, connectors, settings, models, back');
+  const gap = px(rule('#chat-header'), /gap:\s*(\d+)px/, 0);
+  const inner = COLUMN_W - 24 /* gutters */ - 52 /* R6 */;
+  const need = buttons * 44 + 70 /* the «local» chip */ + gap * buttons;
+  assert.ok(need <= inner, `header needs ${need}px of ${inner}px`);
 });
 
 test('column: the models bar is two rows — [count, info, refresh, done] then the meters — and «Actualizar» and «Listo» are always inside', () => {
@@ -476,6 +470,13 @@ test('column: the account-name field never truncates its own placeholder', () =>
   assert.match(field, /min-width:\s*(\d+)px/);
   const min = px(field, /min-width:\s*(\d+)px/, 0);
   assert.ok(min >= 140 || /flex:\s*1\s+1\s+100%/.test(rule('#settings-body .sform .sfield[type="text"]')) , `min-width ${min}px cannot show «Nombre de la cuenta»`);
+});
+
+test('column: the provider search box is a single 44px field, never a stretched block', () => {
+  const r = rule('#settings-filter');
+  assert.match(r, /flex:\s*0\s+0\s+auto/, 'it must not grow inside the column body');
+  assert.match(r, /height:\s*44px|min-height:\s*44px/);
+  assert.match(r, /max-height:\s*44px|height:\s*44px/);
 });
 
 console.log(`chat-view-check: ${passed} passed`);

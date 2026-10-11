@@ -36,6 +36,10 @@ test('every icon is own inline SVG: 20px grid, currentColor, 2px round stroke, n
   }
 });
 
+test('the settings screens have their icons (user = Cuentas)', () => {
+  for (const name of ['user', 'gear', 'plug', 'ring']) assert.ok(I.NAMES.includes(name), name);
+});
+
 test('unknown icon yields an empty string, never throws', () => {
   assert.equal(I.svg('nope'), '');
   assert.equal(I.svg(undefined), '');

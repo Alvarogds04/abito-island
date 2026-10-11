@@ -38,15 +38,17 @@
   const call = (cmd, payload) => (invoke ? invoke(cmd, { payload }) : Promise.reject(new Error('no ipc')));
   const agent = payload => call('agent_action', payload);
 
-  const tabs = Array.from(panel.querySelectorAll('[role="tab"]'));
+  const openers = V.SCREENS.map(x => $(`open-screen-${x.id}`)).filter(Boolean);
   const live = $('settings-live');
-  let section = 'providers';
+  let screen = 'accounts';
+  let method = null;      // Cuentas: null = the two method cards, else 'oauth' | 'api_key' (the provider list)
+  let filter = '';
+  let pendingLogin = null; // a login that waits for the account it just asked the engine to create
   let agentState = null;
   let prefs = { sound: false };
   let hotkey = null;
   let motionOverride = true;
   let capturing = false;
-  let createDraft = { provider: '', label: '' };
   let pendingOpen = false;
   const drafts = V.makeDrafts(); // what is being typed survives the re-renders (memory only)
   let busy = false;
@@ -78,59 +80,59 @@
   }
 
   // ---- open / close ---------------------------------------------------------------------------------------
-  function open() {
+  // gentle-dot: one header button per screen; a screen covers the chat body; opening one replaces the other.
+  function showScreen(id) {
+    screen = id;
+    if (id !== 'accounts') { method = null; filter = ''; }
+    const def = V.screenById(id);
+    $('settings-title').textContent = def.title;
+    $('settings-hint').textContent = def.hint;
+    $('settings-hint').hidden = !def.hint;
+    panel.setAttribute('aria-label', def.title);
+    for (const b of openers) b.setAttribute('aria-expanded', b.id === `open-screen-${id}` ? 'true' : 'false');
+    if (id === 'connectors') { agent({ action: 'connectors_list' }).catch(() => {}); agent({ action: 'agents_list' }).catch(() => {}); }
+    render();
+  }
+  function open(id) {
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
     refreshAll();
-    const first = tabs.find(t => t.getAttribute('aria-selected') === 'true') || tabs[0];
-    if (first) first.focus();
+    showScreen(id || screen);
+    $('settings-close').focus();
   }
   function close(byKeyboard) {
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
-    capturing = false;
+    capturing = false; method = null; filter = ''; pendingLogin = null;
+    for (const b of openers) b.setAttribute('aria-expanded', 'false');
     drafts.reset(); // a half-typed key never outlives the panel
     if (waiting) { clearTimeout(waiting.timer); waiting = null; }
-    // the gear is overview-only; the panel lives in the chat view, so focus returns to the chat input
+    // the panel lives in the chat view: focus returns to the chat input
     if (byKeyboard) { const c = $('chat-input'); if (c && !c.disabled) c.focus(); }
   }
   const isOpen = () => panel.dataset.open === 'true';
 
-  // the gear lives in the overview; the panel lives in the chat-sized view: open it through the chat view
+  // the header buttons toggle their screen; the gear of the overview opens the chat view first
+  for (const b of openers) b.addEventListener('click', e => {
+    if (e.isTrusted !== true) return;
+    const id = b.id.replace('open-screen-', '');
+    if (isOpen() && screen === id) close(e.detail === 0); else open(id);
+  });
   const gear = $('open-settings');
   if (gear) gear.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
-    pendingOpen = true;
+    pendingOpen = 'settings';
     call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; });
   });
   document.addEventListener('island:view', e => {
-    if (e.detail === 'chat' && pendingOpen) { pendingOpen = false; open(); }
+    if (e.detail === 'chat' && pendingOpen) { const id = pendingOpen; pendingOpen = false; open(id); }
     else if (e.detail !== 'chat' && isOpen()) close(false);
   });
   $('settings-close').addEventListener('click', e => { if (e.isTrusted === true) close(e.detail === 0); });
-
-  // ---- tabs (roving tabindex, arrows, Home/End) ---------------------------------------------------------------------
-  function selectSection(id, focus) {
-    section = id;
-    for (const t of tabs) { const on = t.id === `tab-${id}`; t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); }
-    body.setAttribute('aria-labelledby', `tab-${id}`);
-    render();
-    if (id === 'connectors') agent({ action: 'connectors_list' }).catch(() => {});
-  }
-  for (const t of tabs) {
-    t.addEventListener('click', e => { if (e.isTrusted === true) selectSection(t.id.replace('tab-', ''), false); });
-    t.addEventListener('keydown', e => {
-      if (e.isComposing) return;
-      const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-      if (step) { e.preventDefault(); selectSection(V.nextSection(section, step), true); }
-      else if (e.key === 'Home') { e.preventDefault(); selectSection(V.SECTIONS[0].id, true); }
-      else if (e.key === 'End') { e.preventDefault(); selectSection(V.SECTIONS[V.SECTIONS.length - 1].id, true); }
-    });
-  }
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
-  // that only opens the panel or selects which tab is shown, never a setting. The shipped binary has no
-  // probe, so nothing ever fires it.
+  // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
-    if (e.detail === 'open') { pendingOpen = true; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
-    else if (V.SECTIONS.some(x => x.id === e.detail)) selectSection(e.detail, false);
+    if (e.detail === 'open') { pendingOpen = 'settings'; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
+    else if (V.screenById(e.detail)) { method = null; filter = ''; if (isOpen()) showScreen(e.detail); else open(e.detail); }
+    else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { method = e.detail.split(':')[1]; if (isOpen()) showScreen('accounts'); else open('accounts'); }
   });
   // Escape: the shortcut capture first, then the panel (never the island)
   document.addEventListener('keydown', e => {
@@ -218,10 +220,10 @@
     body.textContent = '';
     const conn = V.connectionView(agentState);
     const chip = $('settings-conn');
-    chip.hidden = !conn || section === 'general';
+    chip.hidden = !conn || screen === 'settings';
     if (conn) { chip.dataset.tone = conn.tone; chip.setAttribute('aria-label', conn.aria); putIcon($('settings-conn-icon'), conn.icon); $('settings-conn-word').textContent = conn.word; }
-    if (section === 'providers') renderProviders();
-    else if (section === 'connectors') renderConnectors();
+    if (screen === 'accounts') renderAccounts();
+    else if (screen === 'connectors') renderConnectors();
     else renderGeneral();
     body.scrollTop = keep;
     if (focused && $(focused) && body.contains($(focused))) {
@@ -230,70 +232,72 @@
     }
   }
 
-  function renderProviders() {
+  // ---- Cuentas (gentle-dot AccountsPanel): Conectadas → dos tarjetas de método → lista de proveedores con buscador ----
+  function sectionTitle(text) { return el('h3', 'ssection', text); }
+  function renderAccounts() {
     const st = agentState || { connection: 'no_daemon', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
     const auth = st.auth || {};
     const prompt = V.promptView(auth.prompt);
     drafts.scope(prompt ? `${prompt.flowId}:${prompt.promptId}` : '');
     const eventV = V.eventView(auth.event);
-    if (prompt || eventV || (auth.flowId && !auth.last)) body.append(renderFlow(auth, prompt, eventV));
+    // a login that was waiting for its brand-new account starts the moment that account shows up
+    const ready = V.pendingLoginReady(st, pendingLogin);
+    if (ready) { pendingLogin = null; queueMicrotask(() => send({ action: 'auth_start', accountId: ready.accountId, method: ready.method })); }
+    if (prompt || eventV || (auth.flowId && !auth.last)) { body.append(renderFlow(auth, prompt, eventV)); return; }
     const outcome = V.flowOutcome(auth.last);
-    if (outcome && !prompt) body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
-    const rows = V.accountRows(st);
-    const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Cuentas');
-    for (const r of rows) list.append(accountRow(r, st));
-    if (!rows.length && V.connectionView(st) === null) list.append(el('li', 'sempty', ''));
-    body.append(list);
-    body.append(createForm(st));
-  }
-
-  function accountRow(r, st) {
-    const li = el('li', 'srow');
-    li.append(el('span', 'srow-title', r.label), el('span', 'srow-sub', r.providerName));
-    for (const c of r.chips) li.append(chipNode({ tone: 'faint', icon: c.icon, word: c.text, aria: 'Sólo local' }));
-    if (r.active) li.append(chipNode({ tone: 'go', icon: 'check', word: '', aria: 'En uso por el perfil activo' }));
-    if (r.state.word) li.append(chipNode({ tone: r.state.tone, icon: r.state.icon, word: r.state.word, aria: r.state.word }));
-    const actions = el('span', 'srow-actions');
-    if (r.actions.includes('login')) {
-      for (const m of V.loginMethods(st, r.accountId)) {
-        actions.append(wordBtn(m === 'api_key' ? 'Clave' : 'Cuenta', () => send({ action: 'auth_start', accountId: r.accountId, method: m }), { icon: m === 'api_key' ? 'lock' : 'plug', aria: `Conectar ${r.label} con ${m === 'api_key' ? 'una clave' : 'tu cuenta'}` }));
+    if (outcome) body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
+    if (method === null) {
+      const have = V.connectedAccounts(st);
+      if (have.length) {
+        const sec = el('section', 'ssec'); sec.append(sectionTitle('Conectadas'));
+        const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Cuentas conectadas');
+        for (const r of have) {
+          const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.providerName));
+          if (r.local) li.append(chipNode({ tone: 'faint', icon: 'lock', word: 'local', aria: 'Sólo local' }));
+          else li.append(wordBtn('Salir', () => send({ action: 'account_logout', accountId: r.accountId }, `${r.providerName}: sesión cerrada.`), { icon: 'plug-off', aria: `Salir de ${r.providerName}` }));
+          list.append(li);
+        }
+        sec.append(list); body.append(sec);
       }
+      const cards = el('div', 'smethods');
+      for (const c of V.METHOD_CARDS) {
+        const b = el('button', 'smethod'); b.type = 'button';
+        b.append(el('b', '', c.title), el('span', '', c.hint));
+        b.addEventListener('click', e => { if (e.isTrusted === true) { method = c.id; filter = ''; render(); } });
+        cards.append(b);
+      }
+      body.append(cards);
+      return;
     }
-    if (r.actions.includes('logout')) actions.append(wordBtn('Salir', () => send({ action: 'account_logout', accountId: r.accountId }, `${r.label}: sesión cerrada.`), { icon: 'plug-off', aria: `Cerrar sesión de ${r.label}` }));
-    if (r.actions.includes('remove')) actions.append(iconBtn('cross', `Quitar la cuenta ${r.label}`, () => send({ action: 'account_remove', accountId: r.accountId }, `${r.label} quitada.`)));
-    li.append(actions);
-    return li;
+    // provider list for the chosen method
+    const back = wordBtn('Volver', () => { method = null; filter = ''; render(); }, { icon: 'arrow-left' }); back.classList.add('sback');
+    body.append(back);
+    const search = el('input', 'sfield'); search.type = 'search'; search.id = 'settings-filter'; search.placeholder = 'Buscar proveedor';
+    search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
+    search.addEventListener('input', () => { filter = search.value; render(); });
+    body.append(search);
+    const card = V.METHOD_CARDS.find(c => c.id === method);
+    const sec = el('section', 'ssec'); sec.append(sectionTitle(card.title), el('p', 'snote', card.hint));
+    const rows = V.providerList(st, method, filter);
+    const list = el('ul', 'srows'); list.setAttribute('aria-label', card.title);
+    for (const r of rows) {
+      const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.name));
+      if (r.connected) li.append(chipNode({ tone: 'go', icon: 'check', word: 'Conectado', aria: `${r.name}: conectado` }));
+      const actions = el('span', 'srow-actions');
+      actions.append(wordBtn(r.actionLabel, () => loginWith(r.id, method), { primary: method === 'oauth', aria: `${r.actionLabel}: ${r.name}`, disabled: !V.loginPlan(st, r.id, method) }));
+      if (r.canLogout) actions.append(wordBtn('Salir', () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { aria: `Salir de ${r.name}` }));
+      li.append(actions); list.append(li);
+    }
+    if (!rows.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
+    sec.append(list); body.append(sec);
   }
-
-  function createForm(st) {
-    const form = el('form', 'sform'); form.noValidate = true;
-    const sel = el('select', 'sfield'); sel.setAttribute('aria-label', 'Proveedor');
-    sel.append(Object.assign(el('option', '', 'Proveedor'), { value: '' }));
-    for (const p of st.providers || []) sel.append(Object.assign(el('option', '', p.name), { value: p.id }));
-    sel.value = createDraft.provider;
-    const inp = el('input', 'sfield'); inp.type = 'text'; inp.placeholder = 'Nombre de la cuenta'; inp.maxLength = 80; inp.autocomplete = 'off'; inp.id = 'settings-create-label';
-    inp.setAttribute('aria-label', 'Nombre de la cuenta'); inp.value = createDraft.label;
-    const word = el('span', 'chip'); word.dataset.tone = 'red'; word.hidden = true;
-    const submit = wordBtn('Crear', () => {}, { icon: 'check', primary: true, disabled: true });
-    submit.type = 'submit';
-    const refresh = () => {
-      createDraft = { provider: sel.value, label: inp.value };
-      const v = V.createValidity(st, sel.value, inp.value);
-      submit.disabled = !v.ok; word.hidden = !v.word; word.textContent = v.word;
-    };
-    sel.addEventListener('change', refresh); inp.addEventListener('input', refresh);
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      if (e.isTrusted !== true) return;
-      const v = V.createValidity(st, sel.value, inp.value);
-      if (!v.ok) return;
-      const label = inp.value;
-      createDraft = { provider: '', label: '' };
-      send({ action: 'account_create', provider: sel.value, label }, `Cuenta ${label} creada.`);
-    });
-    form.append(sel, inp, word, submit);
-    refresh();
-    return form;
+  // «Iniciar sesión» / «Usar una clave»: reuse the provider's account, or create one named after the provider first
+  function loginWith(providerId, m) {
+    const plan = V.loginPlan(agentState, providerId, m);
+    if (!plan) return;
+    if (plan.kind === 'start') { send({ action: 'auth_start', accountId: plan.accountId, method: plan.method }); return; }
+    pendingLogin = V.pendingLogin(agentState, plan.provider, plan.method);
+    send({ action: 'account_create', provider: plan.provider, label: plan.label }, `${plan.label}: cuenta creada.`);
   }
 
   // The sign-in flow. The ONLY secret path: a masked field -> auth_reply -> cleared.
@@ -341,18 +345,45 @@
     agent({ action: 'auth_reply', flowId: prompt.flowId, promptId: prompt.promptId, value }).then(applyAgent, () => say('No se pudo enviar la respuesta.'));
   }
 
+  // ---- Conectores (gentle-dot ConnectorsPanel): your code agents with ONE click, then the services ----------------------
   function renderConnectors() {
-    const v = V.connectorsView(agentState);
-    if (v.kind !== 'ready') { body.append(chipNode(v)); return; }
-    const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Conectores');
-    for (const i of v.items) {
-      const li = el('li', 'srow'); li.append(el('span', 'srow-title', i.label));
-      if (i.sends) li.append(chipNode({ tone: 'sun', icon: 'arrow-up', word: 'Puede enviar', aria: 'Este conector puede enviar, no sólo leer' }));
-      if (i.word || i.icon) li.append(chipNode({ tone: i.tone, icon: i.icon, word: i.word, aria: i.word || 'Conectado' }));
-      list.append(li);
+    // 1) agents: Conectar / Actualizar / Desconectar. The click IS the confirmation; the engine installs with a
+    //    backup. Nothing here asks the human to open a terminal.
+    const av = V.agentsView(agentState);
+    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código'));
+    if (av.kind !== 'ready') sec.append(chipNode(av.kind === 'loading' ? { tone: 'live', icon: 'ring', word: '', aria: 'Leyendo agentes' } : av));
+    else {
+      const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Agentes de código');
+      for (const r of av.rows) {
+        const li = el('li', 'srow sagent'); li.dataset.state = r.state;
+        const head = el('span', 'sagent-head'); head.append(el('b', 'srow-title', r.name), chipNode({ tone: r.tone, icon: r.icon, word: r.word, aria: r.aria }));
+        li.append(head);
+        if (r.note) li.append(el('p', 'snote', r.note));
+        const actions = el('span', 'srow-actions');
+        if (r.primary) actions.append(wordBtn(r.primary.label, () => send(r.primary.command, `${r.name}: ${r.primary.label === 'Actualizar' ? 'actualizado' : 'conectado'}.`), { primary: true, aria: `${r.primary.label} ${r.name}` }));
+        if (r.secondary) actions.append(wordBtn(r.secondary.label, () => send(r.secondary.command, `${r.name}: desconectado.`), { aria: `${r.secondary.label} ${r.name}` }));
+        li.append(actions); list.append(li);
+      }
+      if (!av.rows.length) list.append(el('li', 'sempty', 'Sin agentes'));
+      sec.append(list);
     }
-    if (v.empty) list.append(el('li', 'sempty', 'Sin conectores'));
-    body.append(list, el('p', 'snote', V.CONNECTORS_NOTE));
+    body.append(sec);
+    // 2) services (read-only until the engine can connect them)
+    const v = V.connectorsView(agentState);
+    const svc = el('section', 'ssec'); svc.append(sectionTitle('Servicios'));
+    if (v.kind !== 'ready') svc.append(chipNode(v));
+    else {
+      const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Servicios');
+      for (const i of v.items) {
+        const li = el('li', 'srow'); li.append(el('b', 'srow-title', i.label));
+        if (i.sends) li.append(chipNode({ tone: 'sun', icon: 'arrow-up', word: 'Puede enviar', aria: 'Este conector puede enviar, no sólo leer' }));
+        if (i.word || i.icon) li.append(chipNode({ tone: i.tone, icon: i.icon, word: i.word, aria: i.word || 'Conectado' }));
+        list.append(li);
+      }
+      if (v.empty) list.append(el('li', 'sempty', 'Sin servicios'));
+      svc.append(list, el('p', 'snote', V.CONNECTORS_NOTE + ' Por ahora sólo se pueden ver; conectarlos llega con el motor.'));
+    }
+    body.append(svc);
   }
 
   function toggleRow(id, word, on, onClick, extraChip) {
@@ -365,14 +396,12 @@
     row.append(b);
     return row;
   }
+  // ---- Ajustes (gentle-dot SettingsPanel): «Atajo de teclado» first, then the rest, each under its own heading -----------
   function renderGeneral() {
     const g = V.generalView({ sound: prefs.sound, motionOverride, hotkey });
-    body.append(toggleRow('sw-sound', 'Sonido', g.sound.on, () => call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); }, () => {})));
-    body.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
-      if (!window.desktop) return;
-      (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
-    }));
+    const group = (title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); body.append(sec); return sec; };
     if (g.hotkey) {
+      const sec = group('Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
       const h = g.hotkey;
       const row = el('div', 'srow');
       row.append(el('span', 'srow-title', 'Atajo'));
@@ -382,9 +411,16 @@
       actions.append(wordBtn(capturing ? 'Cancelar' : 'Cambiar', () => { capturing = !capturing; render(); if (capturing) say('Pulsá la combinación nueva; Escape cancela.'); }, { icon: 'refresh' }));
       actions.append(wordBtn('Original', () => call('hotkey_action', { action: 'reset' }).then(r => { hotkey = r; render(); }, () => {})));
       row.append(actions);
-      body.append(row);
-      body.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
-      if (h.note) body.append(el('p', 'snote', h.note));
+      sec.append(row);
+      sec.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
+      if (h.note) sec.append(el('p', 'snote', h.note));
     }
+    const sound = group('Sonido', 'Avisos sonoros de la isla. Empieza apagado.');
+    sound.append(toggleRow('sw-sound', 'Sonido', g.sound.on, () => call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); }, () => {})));
+    const motion = group('Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
+    motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
+      if (!window.desktop) return;
+      (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
+    }));
   }
 })();

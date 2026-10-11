@@ -13,6 +13,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
 use abito_island::core::{screen_at, ReleaseOutcome, WindowIo};
@@ -1233,7 +1234,7 @@ fn settings_scenes(app: &AppHandle, tag: &str) {
     let _ = win.eval("(async()=>{let r; try { r = await (window.__TAURI__.core.invoke)('agent_action',{payload:{action:'view'}}); r = 'OK:' + JSON.stringify(r).slice(0,200); } catch(e) { r = 'ERR:' + (typeof e === 'string' ? e : JSON.stringify(e)); } await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'agent_raw', r}}); })()".to_string());
     let raw = wait_chat_lines(app, 1, Duration::from_secs(10));
     emit(&json!({"step": "agent_raw", "webview": raw}));
-    for (section, name) in [("providers", "proveedores"), ("connectors", "conectores"), ("general", "general")] {
+    for (section, name) in [("accounts", "cuentas"), ("accounts:oauth", "cuentas-suscripcion"), ("accounts:api_key", "cuentas-clave"), ("connectors", "conectores"), ("settings", "ajustes")] {
         // a script click is not a trusted gesture (the tab buttons rightly ignore it), so the probe
         // selects the tab through the panel's one inert seam: a CustomEvent that only changes which
         // section is shown.
@@ -1246,6 +1247,31 @@ fn settings_scenes(app: &AppHandle, tag: &str) {
               await (window.__TAURI__.core.invoke)('record_chat_evidence',{{evidence:{{phase:'settings',direct_view:direct,section:'{section}',open:document.getElementById('settings').dataset.open,conn_chip:(c=>c.hidden?null:c.textContent.trim())(document.getElementById('settings-conn')),rows,undersized:sizes.filter(s=>s[1]<44||s[2]<44),count:sizes.length}}}}); }})()"
         ));
         emit(&json!({"step": "settings_section", "tag": tag, "section": section, "webview": lines}));
+        capture_visual(app, &format!("ajustes-{tag}-{name}"));
+    }
+    // PROBE-ONLY evidence with content: a made-up engine state pushed through the same `agent:state` event the
+    // page really listens to, so the screens are captured with agents and providers. The shipped binary has no
+    // probe feature, so this never runs there.
+    let fake = json!({
+        "connection": "connected",
+        "providers": [{"id":"anthropic","name":"Anthropic","configured":true,"methods":["oauth","api_key"]},
+                      {"id":"openai","name":"OpenAI","configured":false,"methods":["oauth","api_key"]},
+                      {"id":"groq","name":"Groq","configured":false,"methods":["api_key"]}],
+        "accounts": [{"accountId":"anthropic-1","label":"Anthropic","provider":"anthropic","authMethod":"oauth","configured":true}],
+        "profiles": {"profiles": [], "active": null},
+        "auth": {"flowId": null, "prompt": null, "event": null, "last": null},
+        "connectors": {"state": "ready", "items": [{"id":"notion","label":"Notion","mode":"read_only","enabled":true,"configured":true,"status":"connected"},
+                                                    {"id":"gmail","label":"Gmail","mode":"read_and_send","enabled":true,"configured":false,"status":"needs_setup"}]},
+        "last_error": {"code": null, "n": 0},
+        "agents": [{"id":"claude-code","state":"connected","backup":true,"detail":null},
+                   {"id":"codex","state":"not_connected","backup":false,"detail":null},
+                   {"id":"opencode","state":"unavailable","backup":false,"detail":null}],
+    });
+    for (detail, name) in [("connectors", "conectores-con-datos"), ("accounts:oauth", "cuentas-suscripcion-con-datos"), ("accounts:api_key", "cuentas-clave-con-datos"), ("accounts", "cuentas-con-datos")] {
+        let _ = win.eval(format!("document.dispatchEvent(new CustomEvent('abito:settings-select', {{ detail: '{detail}' }}))"));
+        sleep(Duration::from_millis(700));
+        let _ = app.emit("agent:state", &fake);
+        sleep(Duration::from_millis(700));
         capture_visual(app, &format!("ajustes-{tag}-{name}"));
     }
     sleep(Duration::from_millis(300));

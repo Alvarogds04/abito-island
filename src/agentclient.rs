@@ -191,6 +191,20 @@ pub fn parse_ui_command(payload: &Value) -> Result<UiCommand, CommandError> {
     match action {
         "view" => exact(1).map(|_| UiCommand::View),
         "refresh" => exact(1).map(|_| UiCommand::Refresh),
+        // #310: one click connects a code agent. The id is an allowlist, so nothing the page sends can
+        // name a path, a command or any other agent; the daemon does the install (with a backup).
+        "agents_list" => {
+            exact(1)?;
+            wire(&[("type", "agents_list")])
+        }
+        "agent_connect" | "agent_disconnect" => {
+            exact(2)?;
+            let id = get("agentId")?;
+            if !AGENT_IDS.contains(&id) {
+                return Err(CommandError);
+            }
+            wire(&[("type", action), ("agentId", id)])
+        }
         "connectors_list" | "settings_get" | "profile_deactivate" => {
             exact(1)?;
             wire(&[("type", action)])
@@ -268,7 +282,12 @@ pub struct ClientState {
     /// The engine's last refusal of a command: a code from its closed set and a counter, so the
     /// page can tell "an error arrived AFTER my command" without parsing any text.
     last_error: Value,
+    /// The engine's `agents` frame, folded to a flat closed view (None until it speaks).
+    agents: Value,
 }
+
+/// The code agents the island can connect (the installers exist for these).
+pub const AGENT_IDS: [&str; 3] = ["claude-code", "codex", "opencode"];
 
 fn clip(v: &Value, key: &str, max: usize) -> Value {
     v.get(key).and_then(Value::as_str).map(|s| Value::from(s.chars().filter(|c| !c.is_control()).take(max).collect::<String>())).unwrap_or(Value::Null)
@@ -290,6 +309,7 @@ impl ClientState {
             auth: json!({"flowId": null, "prompt": null, "event": null, "last": null}),
             connectors: json!({"state": "loading", "items": []}),
             last_error: json!({"code": null, "n": 0}),
+            agents: Value::Null,
         }
     }
     pub fn connected() -> ClientState {
@@ -370,6 +390,30 @@ impl ClientState {
                     "status": c.get("status").map(|s| clip(s, "state", 32)).unwrap_or(Value::Null),
                 })).collect();
                 self.connectors = json!({"state": "ready", "items": rows});
+            }
+            "agents" => {
+                // Only the three known ids, one entry each (the first wins), a closed state and a closed
+                // detail. No name, path or hook line from the engine is ever forwarded to the page.
+                let Some(list) = frame.get("agents").and_then(Value::as_array) else { return Ok(()) };
+                let mut seen: Vec<&str> = Vec::new();
+                let mut out: Vec<Value> = Vec::new();
+                for a in list.iter().take(64) {
+                    let Some(id) = a.get("id").and_then(Value::as_str).and_then(|i| AGENT_IDS.iter().copied().find(|k| *k == i)) else { continue };
+                    if seen.contains(&id) {
+                        continue;
+                    }
+                    seen.push(id);
+                    let state = match a.get("state").and_then(Value::as_str) {
+                        Some(x @ ("not_connected" | "connected" | "outdated" | "working" | "unavailable" | "error")) => x,
+                        _ => "error",
+                    };
+                    let detail = match a.get("detail").and_then(Value::as_str) {
+                        Some(d @ ("config_invalid" | "not_writable" | "backup_failed")) => json!(d),
+                        _ => Value::Null,
+                    };
+                    out.push(json!({"id": id, "state": state, "backup": a.get("backup").and_then(Value::as_bool).unwrap_or(false), "detail": detail}));
+                }
+                self.agents = Value::Array(out);
             }
             "error" => {
                 // the daemon's closed code set (anything else reads as plain `failed`), never free text

@@ -266,7 +266,7 @@ html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
   transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
 #capsule[data-phase="expanded"][data-view="chat"] #chat { opacity: 1; visibility: visible; transform: none; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s; }
-#chat-header { display: flex; align-items: center; gap: 8px; min-height: 48px; padding-left: 52px; /* room for the scaled R6 */ }
+#chat-header { display: flex; align-items: center; gap: 4px; min-height: 48px; padding-left: 52px; /* room for the scaled R6 */ }
 #chat-header .icon-btn:first-of-type { margin-left: auto; }
 /* #309: the agent state (ready / thinking / writing / down) is a strip of its own, full width,
    so a long state word never fights the model and back buttons for the header row. */
@@ -521,16 +521,12 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
   transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s;
 }
 #capsule[data-settings="open"] #chat-header, #capsule[data-settings="open"] #chat-body, #capsule[data-settings="open"] #models { opacity: 0; visibility: hidden; }
-#settings-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 44px; }
-#settings-conn { margin-left: 0; }
-#settings-close { margin-left: auto; } /* #309: always inside, pinned to the right of row 1 */
-#settings-tabs { display: flex; flex: 0 0 100%; order: 2; gap: 4px; }
-.tab {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px 0 10px;
-  border-radius: var(--radius-full); border: 1px solid transparent; background: transparent; color: var(--island-muted); font: 600 13px/1 var(--font-ui); cursor: pointer;
-}
-.tab .ico svg { width: 18px; height: 18px; }
-.tab[aria-selected="true"] { color: var(--island-ink); border-color: rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); }
+#settings-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+/* #310: the screen title (gentle-dot's «Accounts» / «Connectors» / «Settings»), one row with the close button */
+#settings-title { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--island-ink); font: 700 16px/1.2 var(--font-ui); }
+#settings-conn { margin-left: 0; flex: 0 0 auto; }
+#settings-close { margin-left: auto; flex: 0 0 auto; } /* always inside, pinned to the right */
+#settings-hint { margin: 0 0 6px; }
 #settings-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 0; padding-right: 2px; }
 .srows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .srow { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; flex-wrap: wrap; }
@@ -572,3 +568,24 @@ select.sfield option { background: #18181b; color: var(--island-ink); }
 .switch[aria-checked="true"] .knob { transform: translateX(24px); background: #000; }
 html[data-motion="reduce"] #open-settings, html[data-motion="reduce"] #settings { transition: none !important; transform: none !important; }
 html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .knob { transition: none; }
+
+/* ---- #310: settings screens, copied from gentle-dot (MIT): sections with a small uppercase heading,
+   method cards, provider rows, agent cards. Every control >= 44px; every state is icon + one word. */
+.ssec { margin-top: 14px; }
+.ssec:first-child { margin-top: 4px; }
+.ssection { margin: 0 0 2px; font: 600 11px/16px var(--font-mono, ui-monospace, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--island-muted); }
+.ssec > .snote { margin: 2px 0 6px; }
+.smethods { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.smethod {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 44px; padding: 12px 14px; text-align: left;
+  border-radius: var(--radius-xl); border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .04); color: var(--island-ink); cursor: pointer;
+}
+.smethod b { font: 700 14px/1.2 var(--font-ui); }
+.smethod span { font: 400 12px/1.4 var(--font-ui); color: var(--island-muted); }
+.smethod:hover b { color: var(--go); }
+.sback { align-self: flex-start; margin: 2px 0 8px; }
+#settings-filter { flex: 0 0 auto; width: 100%; height: 44px; min-height: 44px; max-height: 44px; margin-bottom: 4px; }
+.sagent { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+.sagent:first-child { border-top: 0; }
+.sagent-head { display: flex; align-items: center; gap: 8px; }
+.sagent .srow-actions { margin-left: 0; justify-content: flex-end; }

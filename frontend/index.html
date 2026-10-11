@@ -111,6 +111,9 @@
           <span id="chat-target-chip" class="chip" role="img"><span class="ico" data-icon="lock"></span><span class="word">local</span></span>
           <span id="chat-target" class="sr-only"></span>
           <p id="chat-status" class="sr-only"></p>
+          <button id="open-screen-accounts" class="icon-btn" type="button" aria-label="Cuentas" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="user"></span></button>
+          <button id="open-screen-connectors" class="icon-btn" type="button" aria-label="Conectores" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="plug"></span></button>
+          <button id="open-screen-settings" class="icon-btn" type="button" aria-label="Ajustes" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="gear"></span></button>
           <button id="chat-models" class="icon-btn" type="button" aria-label="Modelo local" aria-expanded="false" aria-controls="models"><span class="ico" data-icon="chip"></span></button>
           <button id="chat-back" class="icon-btn" type="button" aria-label="Volver"><span class="ico" data-icon="arrow-left"></span></button>
         </header>
@@ -148,21 +151,17 @@
           <ul id="models-list" aria-label="Modelos locales"></ul>
           <p id="models-resources" class="sr-only"></p>
         </div>
-        <!-- #306: settings — an internal panel of the same island (like the model picker).
-             Opened from the overview gear; plain text only (textContent); a key is typed into a
-             masked field, sent once as `auth_reply` and cleared, never stored in the page. -->
-        <div id="settings" inert role="dialog" aria-label="Ajustes">
-          <!-- #309: two rows in the 400px column. Row 1: connection chip + close (always inside, pinned right); row 2: the tabs. -->
+        <!-- #310: settings, copied from gentle-dot (MIT). Three SCREENS (Cuentas, Conectores, Ajustes), one header
+             button each; a screen covers the chat body with a title, a close button and a one-line hint. Plain text
+             only (textContent); a key is typed into a masked field, sent once as `auth_reply` and cleared. -->
+        <div id="settings" inert role="dialog" aria-labelledby="settings-title" aria-label="Ajustes">
           <div id="settings-bar">
+            <h2 id="settings-title"></h2>
             <span id="settings-conn" class="chip" role="img" hidden><span class="ico" id="settings-conn-icon"></span><span class="word" id="settings-conn-word"></span></span>
             <button id="settings-close" class="icon-btn" type="button" aria-label="Cerrar ajustes"><span class="ico" data-icon="check"></span></button>
-            <div id="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
-              <button id="tab-providers" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="true"><span class="ico" data-icon="chip"></span><span class="tab-word">Proveedores</span></button>
-              <button id="tab-connectors" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="false" tabindex="-1"><span class="ico" data-icon="plug"></span><span class="tab-word">Conectores</span></button>
-              <button id="tab-general" class="tab" type="button" role="tab" aria-controls="settings-body" aria-selected="false" tabindex="-1"><span class="ico" data-icon="gear"></span><span class="tab-word">General</span></button>
-            </div>
           </div>
-          <div id="settings-body" role="tabpanel" tabindex="-1"></div>
+          <p id="settings-hint" class="snote"></p>
+          <div id="settings-body" tabindex="-1"></div>
           <p id="settings-live" class="sr-only" role="status" aria-live="polite"></p>
         </div>
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
