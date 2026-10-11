@@ -65,11 +65,33 @@ case "$cmd" in
       --features tauri/custom-protocol "$@"
     echo "artifact: /abito/target/x86_64-pc-windows-msvc/release/abito-island.exe (volume $VOL_TARGET)"
     ;;
+  package)
+    # U4, decision B (NSIS-direct): cross-release build + installer, all inside
+    # the container. No bundler, no downloads beyond the SDK cache. Artifacts
+    # land in the crate's gitignored dist/; nothing here installs or launches.
+    mkdir -p "$crate/dist"
+    version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$crate/tauri.conf.json" | head -1)
+    [ -n "$version" ] || { echo "xbuild: could not read version from tauri.conf.json" >&2; exit 1; }
+    "$rt" run --rm \
+      -v "$crate":/abito/src \
+      -v "$VOL_CARGO":/usr/local/cargo/registry:U \
+      -v "$VOL_TARGET":/abito/target:U \
+      -v "$VOL_XWIN":/xwin-cache:U \
+      -v "$crate/dist":/abito/dist \
+      -e CARGO_TARGET_DIR=/abito/target \
+      -w /abito/src \
+      "$IMAGE" sh -eu -c "
+        cargo xwin build --release --locked --target x86_64-pc-windows-msvc --features tauri/custom-protocol
+        cp /abito/target/x86_64-pc-windows-msvc/release/abito-island.exe /abito/dist/abito-island.exe
+        makensis -V2 -DVERSION=$version -DBINDIR=/abito/dist -DICON=/abito/src/icons/icon.ico -DOUTDIR=/abito/dist /abito/src/packaging/windows/abito.nsi
+        sha256sum /abito/dist/abito-island.exe /abito/dist/abito-island-$version-win-x64-setup.exe"
+    echo "artifacts: $crate/dist (exe + setup + hashes above; receipt: packaging/windows/stage-win.cjs)"
+    ;;
   shell)
     run sh "$@"
     ;;
   *)
-    echo "usage: xbuild.sh {image|check|build|shell}" >&2
+    echo "usage: xbuild.sh {image|check|build|package|shell}" >&2
     exit 2
     ;;
 esac
