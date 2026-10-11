@@ -103,7 +103,12 @@
     agentsAsk = ask;
     agent({ action: 'agents_list' }).catch(() => {});
   }
+  // The first state normally arrives within a few ms. If it never does, stop saying «Conectando»: the engine
+  // is not there, and the screen says so (the same honest word as before, just not before it was asked).
+  let connectTimer = 0;
   function open(id) {
+    clearTimeout(connectTimer);
+    if (agentState === null) connectTimer = setTimeout(() => { if (agentState === null) { agentState = { connection: 'no_daemon' }; if (isOpen()) render(); } }, V.CONNECT_WAIT_MS);
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
     refreshAll();
     showScreen(id || screen);
@@ -246,7 +251,7 @@
   // ---- Cuentas (gentle-dot AccountsPanel): Conectadas → dos tarjetas de método → lista de proveedores con buscador ----
   function sectionTitle(text) { return el('h3', 'ssection', text); }
   function renderAccounts() {
-    const st = agentState || { connection: 'no_daemon', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
+    const st = agentState || { connection: 'connecting', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
     const auth = st.auth || {};
     const prompt = V.promptView(auth.prompt);
     drafts.scope(prompt ? `${prompt.flowId}:${prompt.promptId}` : '');

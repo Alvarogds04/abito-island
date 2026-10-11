@@ -29,7 +29,13 @@
     bad_session: ['Sesión no válida', 'triangle', 'red', 'El archivo de sesión del motor no es de fiar (permisos o formato); no se usó.'],
     refused: ['Motor no responde', 'triangle', 'red', 'El motor rechazó o no completó la conexión.'],
   });
+  const CONNECT_WAIT_MS = 4000; // how long the page may show «Conectando» before it stops waiting for a first state
   function connectionView(state) {
+    // No state at all = the engine has not answered yet. That is a WAIT, not «Sin motor»: saying the engine is
+    // missing before it was even asked made every first open look broken.
+    if (state === null || state === undefined || (state && state.connection === 'connecting')) {
+      return { kind: 'connecting', word: 'Conectando', icon: 'ring', tone: 'live', aria: 'Conectando con el motor del agente.' };
+    }
     const c = state && state.connection;
     if (c === 'connected') return null;
     const row = Object.prototype.hasOwnProperty.call(CONNECTION, c) ? CONNECTION[c] : CONNECTION.no_daemon;
@@ -337,6 +343,6 @@
     };
   }
 
-  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, AGENTS_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
 });

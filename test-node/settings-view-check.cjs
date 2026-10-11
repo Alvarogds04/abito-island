@@ -32,7 +32,7 @@ test('the daemon connection is one icon + one word; a problem is never hidden', 
   assert.equal(S.connectionView({ connection: 'lost' }).tone, 'red');
   assert.equal(S.connectionView({ connection: 'bad_session' }).word, 'Sesión no válida');
   assert.equal(S.connectionView({ connection: 'refused' }).word, 'Motor no responde');
-  assert.equal(S.connectionView(null).word, 'Sin motor');
+  assert.equal(S.connectionView(null).word, 'Conectando', 'no state yet is a wait, not «Sin motor» (see #310)');
   assert.equal(S.connectionView({ connection: 'whatever' }).word, 'Sin motor', 'unknown = honest «no motor», never «connected»');
 });
 
@@ -528,6 +528,32 @@ test('chat header: stays visible with a screen open so the human can switch scre
   // the panel must start BELOW the header so both are visible at once
   assert.match(css.slice(css.indexOf('#settings {')), /top:\s*(5\d|6\d)px/);
   assert.ok(html.indexOf('id="chat-header"') < html.indexOf('id="settings"'));
+});
+
+// ---- #310: «lento al abrir» — the panel must not claim «Sin motor» before the engine has even been asked -----
+test('connecting: no state yet = «Conectando», never the false claim «Sin motor»; the real states keep their words', () => {
+  for (const nothing of [null, undefined]) {
+    const v = S.connectionView(nothing);
+    assert.equal(v.kind, 'connecting'); assert.equal(v.word, 'Conectando'); assert.equal(v.icon, 'ring'); assert.equal(v.tone, 'live');
+  }
+  assert.equal(S.connectionView({ connection: 'connecting' }).kind, 'connecting');
+  assert.equal(S.connectionView({ connection: 'no_daemon' }).word, 'Sin motor', 'a REAL no_daemon still says so');
+  assert.equal(S.connectionView({ connection: 'lost' }).word, 'Motor caído');
+  assert.equal(S.connectionView({ connection: 'connected' }), null);
+  assert.equal(S.connectionView({ connection: 'whatever' }).word, 'Sin motor', 'an unknown state stays the honest default');
+});
+
+test('connecting: the lists show a wait («Conectando»), not an empty or «No disponible» result, until the first state arrives', () => {
+  assert.equal(S.connectorsView(null).kind, 'loading');
+  assert.equal(S.agentsView(null).kind, 'loading');
+  assert.equal(S.agentsView(state({ connection: 'connecting', agents: null })).kind, 'loading');
+});
+
+test('connecting: the screen draws «Conectando» while the first state is on its way, with a deadline so it can never hang', () => {
+  assert.ok(Number.isInteger(S.CONNECT_WAIT_MS) && S.CONNECT_WAIT_MS >= 2000 && S.CONNECT_WAIT_MS <= 10000);
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /CONNECT_WAIT_MS/);
+  assert.doesNotMatch(src, /agentState \|\| \{ connection: 'no_daemon'/, 'the stand-in for «no state yet» must not claim the engine is missing');
 });
 
 console.log(`settings-view-check: ${passed} passed`);
