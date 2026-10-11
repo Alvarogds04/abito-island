@@ -22,10 +22,12 @@ mod chathost;
 mod hotkeyhost;
 mod settingshost;
 mod modelshost;
+#[cfg(unix)]
 mod nativeaudit;
 mod nativewindow;
 #[cfg(any(debug_assertions, feature = "probe"))]
 mod probe;
+mod platform;
 mod questionhost;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -86,19 +88,10 @@ extern "C" fn handle_shutdown_signal(_signal: libc::c_int) {
 }
 
 /// main.cjs line 393: SIGINT/SIGTERM run the clean quit instead of the
-/// default terminate (which would leave a stale socket behind).
+/// default terminate (which would leave a stale socket behind). Which of those
+/// the OS can actually deliver is the platform seam's call, not ours.
 fn install_shutdown_handlers() {
-    // SAFETY: the handler only performs an atomic store.
-    unsafe {
-        libc::signal(
-            libc::SIGINT,
-            handle_shutdown_signal as *const () as libc::sighandler_t,
-        );
-        libc::signal(
-            libc::SIGTERM,
-            handle_shutdown_signal as *const () as libc::sighandler_t,
-        );
-    }
+    platform::signals::install(handle_shutdown_signal);
 }
 
 /// Signal thread: socket cleanup first, then exit — same cleanup a normal
@@ -619,30 +612,10 @@ fn persist_motion_override(app: &AppHandle, value: bool) {
         return;
     }
     let data = serde_json::json!({ "v": 1, "override": value }).to_string();
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(dir.join("motion.json"))
-        {
-            Ok(mut file) => {
-                if let Err(e) = file.write_all(data.as_bytes()) {
-                    // A read-only state root keeps the choice in memory for
-                    // this launch (main.cjs persistMotionOverride).
-                    eprintln!("motion override not persisted: {e}");
-                }
-            }
-            Err(e) => eprintln!("motion override not persisted: {e}"),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = std::fs::write(dir.join("motion.json"), data);
+    if let Err(e) = platform::fs::write_private(&dir.join("motion.json"), data.as_bytes()) {
+        // A read-only state root keeps the choice in memory for this launch
+        // (main.cjs persistMotionOverride).
+        eprintln!("motion override not persisted: {e}");
     }
 }
 
@@ -1077,7 +1050,7 @@ fn record_frontend_evidence(
         .initial_pin
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok();
-    nativeaudit::sample(&app, "frontend-ready", 0, None);
+    platform::audit::sample(&app, "frontend-ready", 0, None);
     if !first {
         return;
     }
@@ -1092,10 +1065,10 @@ fn record_frontend_evidence(
             std::thread::sleep(Duration::from_millis(600));
             let state = app.state::<AppState>();
             if aborted(&state) {
-                nativeaudit::sample(&app, "pin-aborted", attempt, None);
+                platform::audit::sample(&app, "pin-aborted", attempt, None);
                 return;
             }
-            nativeaudit::sample(&app, "pin-before", attempt, None);
+            platform::audit::sample(&app, "pin-before", attempt, None);
             let win = main_window(&app);
             let scale = win.scale_factor().unwrap_or(1.0);
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
@@ -1114,12 +1087,12 @@ fn record_frontend_evidence(
                 return;
             }
             io.set_size(w, h);
-            nativeaudit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
+            platform::audit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
             io.set_outer_position(rect.x, rect.y);
             *state.work_area.lock().expect("work area lock") = wa.rect;
             store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
             std::thread::sleep(Duration::from_millis(200));
-            nativeaudit::sample(&app, "pin-settled", attempt, Some((w, h)));
+            platform::audit::sample(&app, "pin-settled", attempt, Some((w, h)));
             let settled = win
                 .inner_size()
                 .map(|s| (s.width as i32, s.height as i32))
@@ -1312,7 +1285,7 @@ fn main() {
                     #[cfg(any(debug_assertions, feature = "probe"))]
                     probe::mark(format!("tao Resized {}x{}", size.width, size.height));
                     questionhost::native_resized(window.app_handle(), (size.width, size.height));
-                    nativeaudit::sample(
+                    platform::audit::sample(
                         window.app_handle(),
                         "resized",
                         0,
@@ -1349,9 +1322,9 @@ fn main() {
             let state = app.state::<AppState>();
             *state.work_area.lock().expect("work area lock") = wa.rect;
             store_requested(&state, "initial", Some((rect.x, rect.y)), Some((w, h)));
-            nativeaudit::sample(&handle, "setup", 0, Some((w, h)));
+            platform::audit::sample(&handle, "setup", 0, Some((w, h)));
             // Read-only sampling stops with this process. No probe or UI actions.
-            if nativeaudit::enabled() {
+            if platform::audit::enabled() {
                 let audit_handle = handle.clone();
                 std::thread::spawn(move || {
                     for second in 1..=16 {
@@ -1359,7 +1332,7 @@ fn main() {
                         if QUITTING.load(Ordering::SeqCst) {
                             break;
                         }
-                        nativeaudit::sample(&audit_handle, "timer", second, None);
+                        platform::audit::sample(&audit_handle, "timer", second, None);
                     }
                 });
             }

@@ -1,3 +1,6 @@
+#![cfg(target_os = "linux")]
+// Linux-only integration: real receiver sockets, SO_PEERCRED, and XDG runtime policy.
+
 //! M2 integration tests: a real receiver bound in a private temp/runtime dir
 //! driven through real `UnixStream` clients — no GUI, no display.
 //!

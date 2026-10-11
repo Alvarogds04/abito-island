@@ -157,10 +157,22 @@ test('verify: the shipped binary must not carry the probe or the fake backend st
   }
 });
 test('law: XTest (synthetic input) is never a production dependency, and the shipped binary must not contain it', () => {
-  assert.doesNotThrow(() => L.checkConfig(crate), 'the real Cargo.toml keeps xtest under [dev-dependencies]');
+  // The real crate keeps xtest in a target-specific DEV table (Windows port U1a):
+  // the law must read tables, not just the first `[dev-dependencies]` header.
+  assert.doesNotThrow(() => L.checkConfig(crate), 'the real Cargo.toml keeps xtest under a dev-dependencies table');
   let d = copyCrate();
   fs.writeFileSync(path.join(d, 'Cargo.toml'), fs.readFileSync(path.join(d, 'Cargo.toml'), 'utf8').replace('x11rb = { version = "0.13", features = ["xkb"] }', 'x11rb = { version = "0.13", features = ["xkb", "xtest"] }'));
   assert.throws(() => L.checkConfig(d), /xtest/); fs.rmSync(d, { recursive: true });
+  // Same crate, renamed table: a dev-dependencies table relabelled as a
+  // target-specific PRODUCTION table must trip the law even though the text of
+  // the dependency line did not change.
+  d = copyCrate();
+  fs.writeFileSync(path.join(d, 'Cargo.toml'), fs.readFileSync(path.join(d, 'Cargo.toml'), 'utf8').replace("[target.'cfg(unix)'.dev-dependencies]", "[target.'cfg(unix)'.dependencies]"));
+  assert.throws(() => L.checkConfig(d), /xtest/, 'xtest smuggled into a target-specific production table'); fs.rmSync(d, { recursive: true });
+  // And the plain form still trips: xtest moved into `[dependencies]`.
+  d = copyCrate();
+  fs.writeFileSync(path.join(d, 'Cargo.toml'), fs.readFileSync(path.join(d, 'Cargo.toml'), 'utf8').replace('[dependencies]', '[dependencies]\nx11rb = { version = "0.13", features = ["xtest"] }'));
+  assert.throws(() => L.checkConfig(d), /xtest/, 'xtest in the plain production table'); fs.rmSync(d, { recursive: true });
   const st = fakeStage(); fs.writeFileSync(path.join(st, 'abito-island'), '#!/bin/true\nXTEST\n', { mode: 0o755 });
   const r = readJson(path.join(st, 'receipt.json')); r.files['abito-island'] = L.sha256File(path.join(st, 'abito-island'));
   fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r));

@@ -7,6 +7,7 @@
 //! probe. Under pure Wayland neither value exists — see README.
 
 use crate::geometry::{self, Rect};
+#[cfg(unix)]
 use std::sync::{Mutex, OnceLock};
 use tauri::WebviewWindow;
 
@@ -24,6 +25,7 @@ fn valid(r: Rect) -> bool {
 }
 
 /// Read `_NET_WORKAREA` from the root window (first 4 CARDINALs: x, y, w, h).
+#[cfg(unix)]
 fn x11_net_workarea() -> Option<Rect> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::AtomEnum;
@@ -43,6 +45,12 @@ fn x11_net_workarea() -> Option<Rect> {
     let h = vals.next()? as i32;
     let rect = Rect { x, y, w, h };
     valid(rect).then_some(rect)
+}
+
+/// No EWMH `_NET_WORKAREA` exists here; `current()` labels the monitor/fallback honestly.
+#[cfg(not(unix))]
+fn x11_net_workarea() -> Option<Rect> {
+    None
 }
 
 fn monitor_rect(win: &WebviewWindow) -> Option<Rect> {
@@ -80,6 +88,7 @@ pub struct X11Window {
     pub wm_class: Option<String>,
 }
 
+#[cfg(unix)]
 fn get_string_property(
     conn: &x11rb::rust_connection::RustConnection,
     window: x11rb::protocol::xproto::Window,
@@ -161,6 +170,7 @@ pub fn pick_own_window(list: &[Candidate], pid: u32, title: &str) -> Result<u32,
 
 /// Every descendant of `root` (breadth first, bounded): the fallback list when no window
 /// manager publishes `_NET_CLIENT_LIST`. Read-only.
+#[cfg(unix)]
 fn tree_windows(conn: &x11rb::rust_connection::RustConnection, root: u32) -> Vec<u32> {
     use x11rb::protocol::xproto::ConnectionExt;
     const MAX: usize = 512;
@@ -182,6 +192,7 @@ fn tree_windows(conn: &x11rb::rust_connection::RustConnection, root: u32) -> Vec
 /// Find OUR window (read-only; never modifies any window) by
 /// [`pick_own_window`] over the EWMH client list, and report its raw X11
 /// state. The title is only the secondary condition.
+#[cfg(unix)]
 pub fn x11_find_own_window(title: &str) -> Result<X11Window, OwnWindowError> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::AtomEnum;
@@ -286,8 +297,10 @@ pub fn x11_find_own_window(title: &str) -> Result<X11Window, OwnWindowError> {
 
 /// Cached X id of our window: after the first scan every origin read costs
 /// only two round trips (translate + connection setup).
+#[cfg(unix)]
 static CACHED_WID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
 
+#[cfg(unix)]
 fn x11_origin_by_id(wid: u32) -> Option<(i32, i32)> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt;
@@ -308,6 +321,7 @@ fn x11_origin_by_id(wid: u32) -> Option<(i32, i32)> {
 /// (observed: requested 32, getter -5, X server 32). Setters are accurate;
 /// only the getter drifts, so the drag math reads the X server directly.
 /// Returns `None` before the window is mapped; callers fall back to Tauri.
+#[cfg(unix)]
 pub fn x11_window_origin() -> Option<(i32, i32)> {
     let cache = CACHED_WID.get_or_init(|| Mutex::new(None));
     if let Some(wid) = *cache.lock().expect("wid cache lock") {
@@ -333,6 +347,18 @@ pub fn x11_window_origin() -> Option<(i32, i32)> {
     };
     *cache.lock().expect("wid cache lock") = Some(win.id);
     Some((win.x, win.y))
+}
+
+/// This target has no X11 origin to read, so callers truthfully fall back to Tauri's getter.
+#[cfg(not(unix))]
+pub fn x11_window_origin() -> Option<(i32, i32)> {
+    None
+}
+
+/// No X server/EWMH client list exists here, so report the existing truthful error.
+#[cfg(not(unix))]
+pub fn x11_find_own_window(_title: &str) -> Result<X11Window, OwnWindowError> {
+    Err(OwnWindowError::NoX11)
 }
 
 /// Best available work area for the window's monitor, plus a label describing

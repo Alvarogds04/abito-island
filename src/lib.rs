@@ -14,6 +14,10 @@
 //! script.
 
 pub mod agentclient;
+#[cfg(target_os = "linux")]
+pub mod agentconn;
+#[cfg(not(target_os = "linux"))]
+#[path = "agentconn_unavailable.rs"]
 pub mod agentconn;
 pub mod approval;
 pub mod bridge;
@@ -27,6 +31,10 @@ pub mod fakebridge;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakemodel;
 pub mod geometry;
+#[cfg(target_os = "linux")]
+pub mod handoff;
+#[cfg(not(target_os = "linux"))]
+#[path = "handoff_unavailable.rs"]
 pub mod handoff;
 pub mod hotkey;
 pub mod http;
@@ -40,5 +48,12 @@ pub mod questioncmd;
 pub mod requests;
 pub mod renderenv;
 pub mod retry;
+pub mod transport_view;
+// The real receiver is Linux-only (UDS + SO_PEERCRED). Windows named pipes
+// and a macOS backend remain separate human decisions with their own cfg arms.
+#[cfg(target_os = "linux")]
+pub mod transport;
+#[cfg(not(target_os = "linux"))]
+#[path = "transport_unavailable.rs"]
 pub mod transport;
 pub mod workarea;

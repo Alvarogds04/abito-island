@@ -1,3 +1,6 @@
+#![cfg(target_os = "linux")]
+// Linux-only integration: real receiver sockets, SO_PEERCRED, and XDG runtime policy.
+
 //! QP.2: owner-only fake producers, real private UDS, no app or model.
 mod common;
 use abito_island::{protocol, question, transport::{self, Transport, TransportOptions}};
