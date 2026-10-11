@@ -18,6 +18,12 @@
 //!   `notices`/`connections`/`unavailable` into the snapshot, wires the
 //!   `dismiss` verb, and is cleaned up on quit and on SIGINT/SIGTERM.
 
+// U4 (windows port): the shipped build must not open a console window — the
+// island is a GUI app. Debug builds keep the console on purpose: the U2 VM
+// session reads stdout through SSH, and losing the log would trade one
+// artifact flaw for a blind spot.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
 mod chathost;
 #[cfg(unix)]
 mod hotkeyhost;
