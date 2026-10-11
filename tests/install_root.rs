@@ -61,16 +61,26 @@ fn this_binary_resolves_to_the_source_tree_only_in_a_debug_build() {
 fn source_never_bakes_the_build_tree_outside_debug_only_items() {
     // Static guard: every `CARGO_MANIFEST_DIR` read in src/ must sit right
     // under `#[cfg(debug_assertions)]`.
+    let mut observed = 0usize;
     for file in ["src/transport.rs", "src/identity.rs", "src/main.rs"] {
         let text = std::fs::read_to_string(Path::new(BUILD_TREE).join(file)).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         for (i, line) in lines.iter().enumerate() {
             if line.contains("option_env!(\"CARGO_MANIFEST_DIR\")") && !line.trim_start().starts_with("//") {
+                observed += 1;
                 let guarded = (1..=2).any(|back| i >= back && lines[i - back].trim() == "#[cfg(debug_assertions)]");
                 assert!(guarded, "{file}:{} reads CARGO_MANIFEST_DIR outside a debug-only fn", i + 1);
             }
         }
     }
+    // A static guard that matched nothing has stopped guarding: it would pass
+    // forever while the thing it polices moves to another spelling or another
+    // file. Fail loudly and name the maintenance act instead.
+    assert!(
+        observed >= 2,
+        "this guard inspected {observed} CARGO_MANIFEST_DIR reads, expected at least the 2 known ones \
+         (src/transport.rs, src/identity.rs): the pattern moved or was renamed, so the loop asserted nothing"
+    );
 }
 
 #[test]

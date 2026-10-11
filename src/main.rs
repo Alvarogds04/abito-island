@@ -88,19 +88,10 @@ extern "C" fn handle_shutdown_signal(_signal: libc::c_int) {
 }
 
 /// main.cjs line 393: SIGINT/SIGTERM run the clean quit instead of the
-/// default terminate (which would leave a stale socket behind).
+/// default terminate (which would leave a stale socket behind). Which of those
+/// the OS can actually deliver is the platform seam's call, not ours.
 fn install_shutdown_handlers() {
-    // SAFETY: the handler only performs an atomic store.
-    unsafe {
-        libc::signal(
-            libc::SIGINT,
-            handle_shutdown_signal as *const () as libc::sighandler_t,
-        );
-        libc::signal(
-            libc::SIGTERM,
-            handle_shutdown_signal as *const () as libc::sighandler_t,
-        );
-    }
+    platform::signals::install(handle_shutdown_signal);
 }
 
 /// Signal thread: socket cleanup first, then exit — same cleanup a normal
@@ -621,30 +612,10 @@ fn persist_motion_override(app: &AppHandle, value: bool) {
         return;
     }
     let data = serde_json::json!({ "v": 1, "override": value }).to_string();
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(dir.join("motion.json"))
-        {
-            Ok(mut file) => {
-                if let Err(e) = file.write_all(data.as_bytes()) {
-                    // A read-only state root keeps the choice in memory for
-                    // this launch (main.cjs persistMotionOverride).
-                    eprintln!("motion override not persisted: {e}");
-                }
-            }
-            Err(e) => eprintln!("motion override not persisted: {e}"),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = std::fs::write(dir.join("motion.json"), data);
+    if let Err(e) = platform::fs::write_private(&dir.join("motion.json"), data.as_bytes()) {
+        // A read-only state root keeps the choice in memory for this launch
+        // (main.cjs persistMotionOverride).
+        eprintln!("motion override not persisted: {e}");
     }
 }
 

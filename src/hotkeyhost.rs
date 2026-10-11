@@ -82,24 +82,11 @@ fn persist(app: &AppHandle, cfg: &HotkeyConfig) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        // temp + rename: an interrupted write never leaves a half config behind
-        let tmp = dir.join(format!(".{FILE}.{}", std::process::id()));
-        let written = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
-            .and_then(|mut f| f.write_all(cfg.to_text().as_bytes()))
-            .and_then(|_| std::fs::rename(&tmp, &path));
-        if written.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-    }
+    // temp + rename, private to the owner where the OS has mode bits: an
+    // interrupted write never leaves a half config behind. The seam keeps this
+    // live on every target — the bare `#[cfg(unix)]` block it replaces had no
+    // other arm, so a Windows build silently never saved the binding.
+    let _ = crate::platform::fs::write_private_atomic(&path, cfg.to_text().as_bytes());
 }
 
 /// Marshal a press to the main thread exactly like the X11 listener does (window
