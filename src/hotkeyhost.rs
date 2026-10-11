@@ -109,10 +109,16 @@ pub(crate) fn press_on_main(app: &AppHandle) {
     let _ = app.run_on_main_thread(move || on_press(&inner));
 }
 
+/// One gate for BOTH backends: the same physical press reported by the portal and by the X11 grab toggles once.
+static PRESS_GATE: std::sync::Mutex<hotkey::PressGate> = std::sync::Mutex::new(hotkey::PressGate::new_const());
+
 /// What pressing the hotkey does, on the main thread.
 fn on_press(app: &AppHandle) {
     if QUITTING.load(Ordering::SeqCst) {
         return;
+    }
+    if !PRESS_GATE.lock().map(|mut g| g.accept(crate::now_ms() as u64)).unwrap_or(true) {
+        return; // the other backend already reported this very press
     }
     let state = app.state::<AppState>();
     let hidden = *state.phase.lock().expect("phase lock") == IslandState::Hidden;

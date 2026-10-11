@@ -376,6 +376,7 @@ pub fn run(app: AppHandle) {
         settings_scenes(&app, &std::env::var("ABITO_PROBE_SETTINGS_TAG").unwrap_or_else(|_| "sin-motor".into()));
         column_transition_scenes(&app);
         hotkey_hide_from_views(&app);
+        panel_open_timing(&app);
     }
     chat_evidence(&app);
 
@@ -1517,6 +1518,51 @@ fn wait_chat_lines(app: &AppHandle, n: usize, timeout: Duration) -> Vec<serde_js
         }
         sleep(Duration::from_millis(100));
     }
+}
+
+/// #310 diagnosis: «slow to open some panels». For each panel, time from the (probe) click to the moment the
+/// panel shows content, and report which IPC calls ran in between and how long each took.
+fn panel_open_timing(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    if !state.core.lock().expect("core lock").expanded {
+        let plan = state.core.lock().expect("core lock").toggle(&io, area);
+        apply_plan(app, &state, plan);
+        sleep(Duration::from_millis(900));
+    }
+    crate::chathost::switch_view(app, &state, true);
+    sleep(Duration::from_millis(1200));
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let js = "(async () => {
+      const invoke = window.__TAURI__.core.invoke;
+      const calls = [];
+      const orig = invoke;
+      window.__TAURI__.core.invoke = (cmd, args) => { const t = performance.now(); const p = orig(cmd, args); const done = () => calls.push([cmd, args && args.payload && args.payload.action || '', Math.round(performance.now() - t)]); p.then(done, done); return p; };
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const frames = () => new Promise(r => { let n = 0, last = performance.now(), worst = 0; const f = t => { worst = Math.max(worst, t - last); last = t; if (++n < 30) requestAnimationFrame(f); else r(Math.round(worst)); }; requestAnimationFrame(f); });
+      const out = [];
+      for (const [name, sel] of [['cuentas', 'open-screen-accounts'], ['conectores', 'open-screen-connectors'], ['ajustes', 'open-screen-settings'], ['modelos', 'chat-models']]) {
+        calls.length = 0;
+        if (document.getElementById('settings').dataset.open === 'true') document.getElementById('settings-close').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        if (document.getElementById('models').dataset.open === 'true') document.getElementById('models-close').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await wait(500);
+        const t0 = performance.now();
+        document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: name === 'modelos' ? 'x' : sel.replace('open-screen-', '') }));
+        if (name === 'modelos') document.getElementById(sel).click();
+        let firstContent = null;
+        for (let i = 0; i < 300 && firstContent === null; i++) { const body = document.getElementById(name === 'modelos' ? 'models-list' : 'settings-body'); if (body && body.children.length) firstContent = Math.round(performance.now() - t0); else await new Promise(r => requestAnimationFrame(r)); }
+        const worst = await frames();
+        await wait(600);
+        out.push({ panel: name, first_content_ms: firstContent, worst_frame_ms: worst, calls: calls.map(c => c.join(':')).join(' ') });
+      }
+      window.__TAURI__.core.invoke = orig;
+      await orig('record_chat_evidence', { evidence: { phase: 'panel_timing', panels: out } });
+    })()";
+    let _ = win.eval(js);
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
+    emit(&json!({"step": "panel_timing", "webview": lines}));
 }
 
 /// #310 diagnosis: the human opens the island, works in the chat or in a settings screen and presses the

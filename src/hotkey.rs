@@ -264,6 +264,36 @@ pub fn session_kind(xdg_session_type: Option<&str>, wayland_display: Option<&str
     }
 }
 
+// ---- one physical press, one toggle ----------------------------------------------------------
+/// While the portal's OS dialog is open BOTH routes (the portal's `Activated` and the limited X11 grab) are
+/// armed so the shortcut is never without a route. With the island focused a single physical press can then
+/// reach the host twice, once from each backend: Hide, then Show. The human sees «it opens but does not hide».
+/// Reports of the same press inside this window are ONE press.
+pub const PRESS_DEDUP_MS: u64 = 250;
+
+#[derive(Debug, Default)]
+pub struct PressGate {
+    last_accepted: Option<u64>,
+}
+
+impl PressGate {
+    pub const fn new_const() -> PressGate {
+        PressGate { last_accepted: None }
+    }
+    /// `now_ms` = any monotonic-enough millisecond clock. True = a real press that must toggle. The window
+    /// is measured from the last ACCEPTED press (a dropped duplicate never extends it), and a clock that
+    /// goes backwards never blocks the shortcut.
+    pub fn accept(&mut self, now_ms: u64) -> bool {
+        if let Some(last) = self.last_accepted {
+            if now_ms >= last && now_ms - last < PRESS_DEDUP_MS {
+                return false;
+            }
+        }
+        self.last_accepted = Some(now_ms);
+        true
+    }
+}
+
 // ---- what the hotkey does ------------------------------------------------------------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToggleDecision {

@@ -316,3 +316,46 @@ fn the_view_remembers_why_the_portal_was_dropped() {
     let none = View { portal_note: None, ..v };
     assert_eq!(serde_json::to_value(&none).unwrap()["portal_note"], serde_json::Value::Null);
 }
+
+// ---- #310: one physical press must toggle ONCE, whichever backends report it -------------------------
+#[test]
+fn two_backends_reporting_the_same_press_toggle_once() {
+    use crate::hotkey::PressGate;
+    let mut gate = PressGate::default();
+    assert!(gate.accept(10_000), "the first report is the press");
+    assert!(!gate.accept(10_040), "the X11 grab reporting the SAME press 40ms later is the same press");
+    assert!(!gate.accept(10_000 + crate::hotkey::PRESS_DEDUP_MS - 1), "still inside the window");
+}
+
+#[test]
+fn a_real_second_press_after_the_window_toggles_again() {
+    use crate::hotkey::PressGate;
+    let mut gate = PressGate::default();
+    assert!(gate.accept(1_000));
+    assert!(gate.accept(1_000 + crate::hotkey::PRESS_DEDUP_MS), "exactly at the window edge it is a new press");
+    assert!(gate.accept(1_000 + 5 * crate::hotkey::PRESS_DEDUP_MS));
+}
+
+#[test]
+fn a_dropped_duplicate_does_not_extend_the_window_so_a_steady_double_press_is_not_swallowed_forever() {
+    use crate::hotkey::PressGate;
+    let mut gate = PressGate::default();
+    let w = crate::hotkey::PRESS_DEDUP_MS;
+    assert!(gate.accept(0));
+    assert!(!gate.accept(w - 10), "duplicate, dropped");
+    assert!(gate.accept(w + 5), "measured from the LAST ACCEPTED press, not from the dropped duplicate");
+}
+
+#[test]
+fn the_window_is_short_enough_for_a_human_double_tap_and_long_enough_for_two_backends() {
+    assert!(crate::hotkey::PRESS_DEDUP_MS >= 150, "two backends can disagree by more than a frame");
+    assert!(crate::hotkey::PRESS_DEDUP_MS <= 400, "a deliberate second press (hide right after show) must work");
+}
+
+#[test]
+fn a_clock_that_goes_backwards_never_blocks_the_hotkey() {
+    use crate::hotkey::PressGate;
+    let mut gate = PressGate::default();
+    assert!(gate.accept(50_000));
+    assert!(gate.accept(10), "an earlier timestamp is not a duplicate");
+}
