@@ -278,4 +278,32 @@ test('BEHAVIOUR: the visible-only rule is checked on EVERY answering path (sourc
   assert.match(src, /root\.inert \|\| !onScreen\(\)/);
 });
 
+// ---- P1: who is asking ---------------------------------------------------
+test('agent: no field = Pi; a valid slug names the asker; a bad one never reaches the screen', () => {
+  assert.equal(N.fromPending(pending()).agent, 'pi');
+  assert.equal(N.askedBy(N.fromPending(pending())), 'Pi pregunta');
+  const cc = N.fromPending(pending({ agent: 'claude-code', agent_label: 'Claude Code' }));
+  assert.equal(cc.agent, 'claude-code');
+  assert.equal(N.askedBy(cc), 'Claude Code pregunta');
+  assert.equal(N.askedBy(N.fromPending(pending({ agent: 'codex', agent_label: 'Codex' }))), 'Codex pregunta');
+  // the label is never trusted blindly: derived from the slug when missing or off
+  assert.equal(N.askedBy(N.fromPending(pending({ agent: 'opencode' }))), 'OpenCode pregunta');
+  assert.equal(N.askedBy(N.fromPending(pending({ agent: 'gemini-cli' }))), 'Gemini Cli pregunta');
+  for (const bad of ['Claude Code', '', '<b>x</b>', 'a'.repeat(33), 7, null, {}, '../x', 'x\ny']) {
+    const n = N.fromPending(pending({ agent: bad, agent_label: '<img src=x>' }));
+    assert.equal(n.agent, 'pi', `a bad agent falls back to the safe default: ${JSON.stringify(bad)}`);
+    assert.equal(N.askedBy(n), 'Pi pregunta');
+  }
+  // a hostile label next to a good slug is ignored (the label comes from the slug)
+  assert.equal(N.askedBy(N.fromPending(pending({ agent: 'codex', agent_label: '<script>x</script>' }))), 'Codex pregunta');
+});
+
+test('agent: the screen reader and title use the asker, written with textContent only', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /N\.askedBy\(n\)|askedBy\(n\)/, 'the live-region announcement names the asker');
+  assert.doesNotMatch(src, /say\(`Pi pregunta/, 'no hardcoded Pi in the announcement');
+  // innerHTML is only for our own static icons: never for the asker or the question text
+  assert.doesNotMatch(src, /innerHTML[^\n]*(askedBy|agent|\.text\b)/);
+});
+
 Promise.all(pendingTests).then(() => console.log(`notify-view-check: ${passed} passed`), e => { console.error(e); process.exit(1); });

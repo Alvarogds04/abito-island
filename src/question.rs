@@ -100,8 +100,15 @@ pub struct Question {
     options: Vec<QuestionOption>,
     allow_free_text: bool,
     expires_at: u64,
+    /// Who is asking (`pi` when the frame carries no `agent`): a short validated slug.
+    agent: String,
 }
 impl Question {
+    /// The wire identity of the asking agent (`pi` by default).
+    pub fn agent(&self) -> &str { &self.agent }
+    /// The human-facing name: the four known agents have their proper spelling, any other
+    /// slug is shown title-cased. Plain text, derived only from the validated slug.
+    pub fn agent_label(&self) -> String { agent_label(&self.agent) }
     pub fn id(&self) -> &str { &self.id }
     pub fn kind(&self) -> Kind { self.kind }
     pub fn text(&self) -> &str { &self.text }
@@ -150,6 +157,8 @@ enum Wire {
         id: String, kind: Kind, text: String, options: Vec<QuestionOption>,
         #[serde(rename = "allowFreeText")] allow_free_text: bool,
         #[serde(rename = "expiresAt")] expires_at: u64,
+        /// OPTIONAL (P1): absent = `pi`. A present value must be a safe slug (see `agent_slug_ok`).
+        #[serde(default, deserialize_with = "present_string")] agent: Option<String>,
     },
     #[serde(rename = "question_cancel")]
     Cancel {
@@ -171,6 +180,12 @@ enum Wire {
     },
 }
 
+// A present value must be a real string: an explicit `null` is NOT "absent" (Option<String> alone
+// would accept it as None and silently mean `pi`), so it is refused with the rest of the junk.
+fn present_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
 // Absence is level 1; present MUST be integer 1. Option<u8> would accept null.
 fn busy_reason_capability<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
     if u8::deserialize(deserializer)? != 1 { return Err(serde::de::Error::custom("invalid capability")); }
@@ -188,9 +203,14 @@ pub fn decode(body: &[u8], identity: &Identity, now: u64) -> Result<Inbound, Err
              if busy_reason { Inbound::HelloBusyReason } else { Inbound::Hello })
         }
         Wire::Question { v, question_version, project, session_id, at, id, kind, text,
-                         options, allow_free_text, expires_at } => {
+                         options, allow_free_text, expires_at, agent } => {
             let base = Base { project, session_id, at };
-            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at };
+            let agent = match agent {
+                None => DEFAULT_AGENT.to_owned(),
+                Some(a) if agent_slug_ok(&a) => a,
+                Some(_) => return Err(Error::InvalidQuestion),
+            };
+            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent };
             validate_question(&question, now)?;
             (v, question_version, base, Inbound::Question(question))
         }
@@ -263,6 +283,45 @@ fn plain(text: &str, max: usize, allow_empty: bool) -> bool {
         && text.chars().all(|c| !matches!(c, '\u{0000}'..='\u{0008}' | '\u{000b}'
             | '\u{000c}' | '\u{000e}'..='\u{001f}' | '\u{007f}'))
 }
+/// The agent a question comes from when the frame names none (every pre-P1 producer).
+pub const DEFAULT_AGENT: &str = "pi";
+pub const AGENT_MAX: usize = 32;
+
+/// `[a-z0-9][a-z0-9._-]{0,31}`: lowercase ASCII only, no spaces, no control, no markup characters,
+/// no path separators. It is shown to the human (in a title) and compared nowhere else, so it is
+/// kept narrow instead of trying to escape anything.
+pub fn agent_slug_ok(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty() && b.len() <= AGENT_MAX && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-'))
+}
+
+pub fn agent_label(slug: &str) -> String {
+    match slug {
+        "pi" => "Pi".into(),
+        "claude-code" => "Claude Code".into(),
+        "codex" => "Codex".into(),
+        "opencode" => "OpenCode".into(),
+        other => {
+            // title-case each word: `gemini-cli` -> `Gemini Cli`
+            let mut out = String::new();
+            let mut start = true;
+            for c in other.chars() {
+                if c == '-' || c == '_' {
+                    out.push(' ');
+                    start = true;
+                } else if start {
+                    out.extend(c.to_uppercase());
+                    start = false;
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        }
+    }
+}
+
 fn validate_question(q: &Question, now: u64) -> Result<(), Error> {
     validate_id(&q.id)?;
     let duration = q.expires_at.checked_sub(q.base.at).ok_or(Error::InvalidQuestion)?;

@@ -442,3 +442,64 @@ fn question_diagnostics_do_not_leak_payloads() {
     let prepared = slot.prepare_answer(7,&identity(),ID,HumanAnswer::Text { text:"secret-private-answer".into() },NOW).unwrap();
     assert!(!format!("{prepared:?}").contains("secret-private-answer"));
 }
+
+// ---- P1: optional `agent` identity on the `question` frame --------------------------------
+#[test]
+fn without_the_agent_field_everything_is_exactly_as_before_and_the_agent_is_pi() {
+    let q = question(question_value());
+    assert_eq!(q.agent(), "pi", "backward compatible: no field = Pi");
+    assert_eq!(q.agent_label(), "Pi");
+}
+
+#[test]
+fn a_valid_agent_identity_is_accepted_and_labelled_for_display() {
+    for (wire, label) in [("pi", "Pi"), ("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("gemini-cli", "Gemini Cli"),
+                          ("my_agent.v2", "My Agent.V2"), ("a", "A"), ("agent-0123456789-abcdefghij", "Agent-0123456789-Abcdefghij")] {
+        let mut v = question_value();
+        v["agent"] = json!(wire);
+        let q = question(v);
+        assert_eq!(q.agent(), wire, "{wire}");
+        assert!(!q.agent_label().is_empty());
+        if ["pi", "claude-code", "codex", "opencode"].contains(&wire) { assert_eq!(q.agent_label(), label, "{wire}"); }
+    }
+}
+
+#[test]
+fn the_agent_field_is_a_short_safe_slug_or_the_whole_frame_is_refused() {
+    for bad in [json!(""), json!("   "), json!("Claude Code"), json!("CLAUDE"), json!("claude code"), json!("claude\ncode"), json!("claude\u{0}"),
+                json!("claude/code"), json!("claude<script>"), json!("../x"), json!("%s"), json!("{x}"), json!("ñandú"), json!("🙂"),
+                json!("-leading"), json!(".leading"), json!("a".repeat(33)), json!(7), json!(null), json!(true), json!(["pi"]), json!({"id":"pi"})] {
+        let mut v = question_value();
+        v["agent"] = bad.clone();
+        assert!(parse(&v).is_err(), "must refuse agent = {bad}");
+    }
+    // exactly 32 chars is the cap
+    let mut v = question_value();
+    v["agent"] = json!(format!("a{}", "b".repeat(31)));
+    assert!(parse(&v).is_ok());
+}
+
+#[test]
+fn the_agent_field_exists_only_on_the_question_frame() {
+    // an unknown key is still refused everywhere else (the schema stays closed)
+    for kind in ["question_cancel", "question_resolved", "question_answer_rejected", "questions_hello"] {
+        let mut v = base(kind);
+        v["agent"] = json!("codex");
+        if kind != "questions_hello" { v["id"] = json!(ID); }
+        assert!(parse(&v).is_err(), "{kind} must not accept `agent`");
+    }
+}
+
+#[test]
+fn the_agent_identity_never_changes_who_may_answer_or_how() {
+    // same scope rules, same one-live-question slot, same answer frame for any agent
+    let mut v = question_value();
+    v["agent"] = json!("claude-code");
+    let mut slot = QuestionSlot::new();
+    assert!(matches!(slot.admit(7, &identity(), question(v), NOW).unwrap(), Admission::Accepted));
+    let mut second = question_value();
+    second["id"] = json!(OTHER_ID);
+    second["agent"] = json!("codex");
+    assert!(matches!(slot.admit(8, &identity(), question(second), NOW).unwrap(), Admission::Busy(_)), "one live question globally, whatever the agent");
+    assert_eq!(slot.active().unwrap().question().agent(), "claude-code");
+}

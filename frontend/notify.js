@@ -75,7 +75,7 @@
     root.inert = !(showing || (outcome && capsule.dataset.view === 'overview'));
     capsule.dataset.question = n ? (view.kind === 'expired' ? 'expired' : 'pending') : (outcome ? 'outcome' : '');
     if (n) {
-      if (renderedId !== n.id) { renderedId = n.id; textEl.value = ''; budget = null; renderOptions(n, view.controlsEnabled); say(`Pi pregunta: ${n.text}`); }
+      if (renderedId !== n.id) { renderedId = n.id; textEl.value = ''; budget = null; renderOptions(n, view.controlsEnabled); say(`${N.askedBy(n)}: ${n.text}`); }
       body.textContent = n.text;
       body.title = n.text; // the full text stays reachable when the view cuts it to two lines
       for (const b of optionsEl.querySelectorAll('button')) b.disabled = !view.controlsEnabled;

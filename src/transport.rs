@@ -60,6 +60,8 @@ pub struct QuestionOptionView { pub index: usize, pub label: String, pub descrip
 pub struct PendingQuestionView {
     pub id: String, pub kind: question::Kind, pub text: String,
     pub options: Vec<QuestionOptionView>, pub allow_free_text: bool, pub expires_at: u64,
+    /// Who asks (P1): the validated slug and its display name.
+    pub agent: String, pub agent_label: String,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -98,7 +100,8 @@ impl Questions {
             PendingQuestionView { id: q.id().into(), kind: q.kind(), text: q.text().into(),
                 options: q.options().iter().enumerate().map(|(index, o)| QuestionOptionView {
                     index, label: o.label().into(), description: o.description().into(),
-                }).collect(), allow_free_text: q.allow_free_text(), expires_at: q.expires_at() }
+                }).collect(), allow_free_text: q.allow_free_text(), expires_at: q.expires_at(),
+                agent: q.agent().into(), agent_label: q.agent_label() }
         });
         QuestionSnapshot { pending, deliveries: self.deliveries.iter().map(|d| d.view.clone()).collect(),
             ready_connections: self.ready.len(), notice: self.notice, native_transition: self.native_resize.state() }

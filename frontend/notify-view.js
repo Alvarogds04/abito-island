@@ -18,6 +18,15 @@
   // `pending` is the host's PendingQuestionView (display text only: never a
   // wire token, scope or suggested option). Returns null for anything that is
   // not a well-formed, answerable notification.
+  // P1: who is asking. The backend already refuses a bad slug, but this view never trusts a
+  // string it is about to show: same closed shape, else the safe default `pi`.
+  const AGENT_SLUG = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+  const KNOWN_AGENTS = { pi: 'Pi', 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
+  function agentLabel(slug) {
+    if (KNOWN_AGENTS[slug]) return KNOWN_AGENTS[slug];
+    return slug.replace(/(^|[-_])([a-z0-9])/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase());
+  }
+  const askedBy = n => `${agentLabel(n && AGENT_SLUG.test(n.agent) ? n.agent : 'pi')} pregunta`;
   function fromPending(p) {
     if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !UUID_V4.test(p.id)) return null;
     const kind = p.kind === 'approval' ? 'approval' : p.kind === 'question' ? 'question' : null;
@@ -33,7 +42,8 @@
     if (kind === 'approval' && (options.length !== 2 || allowFreeText)) return null;
     if (!options.length && !allowFreeText) return null;
     if (options.some(o => !o.label)) return null;
-    return { id: p.id, kind, agent: 'pi', text: p.text, options, allowFreeText,
+    const agent = typeof p.agent === 'string' && AGENT_SLUG.test(p.agent) ? p.agent : 'pi';
+    return { id: p.id, kind, agent, text: p.text, options, allowFreeText,
       expiresAt: Number.isFinite(p.expires_at) ? p.expires_at : 0,
       // a Pi-session answer: it authorizes nothing in the backend and never uses the approval card
       approvesProposal: false };
@@ -143,6 +153,6 @@
   // The host's byte budget is authoritative: no answer yet, or «not allowed», means no send.
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
-  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, trusted, onScreen, optionForKey, expired, expiryWord, fraction,
+  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, agentLabel, trusted, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, utf8Bytes, textWord, canSendText };
 });
