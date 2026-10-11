@@ -14,6 +14,7 @@
 //! - Names outside `^<prefix>[0-9a-f]{2}$` are never touched.
 //! - Drop removes the leaf recursively, also while panicking and also with
 //!   leftovers (a stale socket after a failed close), without ever panicking.
+#![cfg(unix)] // Uses Unix file mode, uid, and symlink APIs.
 #![allow(dead_code)]
 use std::io::ErrorKind;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};

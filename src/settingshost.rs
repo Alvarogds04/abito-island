@@ -45,9 +45,14 @@ fn persist_prefs(app: &AppHandle, p: &Prefs) {
         return;
     }
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = dir.join(format!(".{}.{}", prefs::FILE, std::process::id()));
-    let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let ok = options.open(&tmp)
         .and_then(|mut f| f.write_all(p.to_text().as_bytes()))
         .and_then(|_| std::fs::rename(&tmp, &path));
     if ok.is_err() {

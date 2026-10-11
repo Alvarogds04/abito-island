@@ -1,6 +1,7 @@
 //! #305: the REAL XGrabKey grabber, on a PRIVATE Xvfb (never the human's display).
 //! XTest fake input drives the key presses; the test fails loudly if Xvfb is
 //! missing (a missing runner must never read as green).
+#![cfg(target_os = "linux")] // Requires the Linux Xvfb/XTest runner.
 use abito_island::hotkey::{x11::Grabber, x11::GrabEvent, Combo, Status};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};

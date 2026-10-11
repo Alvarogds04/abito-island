@@ -393,6 +393,7 @@ pub fn run(app: AppHandle) {
 /// M2 transport read-back: one real UnixStream round trip to the receiver
 /// this process bound, plus the snapshot state it produced. Prints one JSON
 /// line (`transport_evidence`).
+#[cfg(unix)]
 fn transport_evidence(app: &AppHandle) {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
@@ -528,6 +529,15 @@ fn transport_evidence(app: &AppHandle) {
     emit(&line);
 }
 
+#[cfg(not(unix))]
+fn transport_evidence(_app: &AppHandle) {
+    emit(&json!({
+        "step": "transport_evidence",
+        "status": "not_run",
+        "reason": "unavailable on this platform: unix socket read-back",
+    }));
+}
+
 /// UI.1 visual read-back: the five OVERVIEW scenes on a known background.
 /// State is driven through the REAL host paths (transport receiver, fake
 /// backend + dispatch funnel the webview's `allow` verb reaches) — never
@@ -626,6 +636,7 @@ fn overview_visual_evidence(app: &AppHandle) {
 
         // conectado: a REAL hello → ready round trip against OUR receiver; the
         // connection count stays 1 while the stream stays open.
+        #[cfg(unix)]
         let connected = (|| -> Result<bool, String> {
             use std::io::{Read, Write};
             use std::os::unix::net::UnixStream;
@@ -680,9 +691,15 @@ fn overview_visual_evidence(app: &AppHandle) {
             drop(stream);
             Ok(true)
         })();
+        #[cfg(unix)]
         line["states"].as_array_mut().expect("states array").push(json!({
             "name": "conectado+aviso",
             "ok": connected,
+        }));
+        #[cfg(not(unix))]
+        line["states"].as_array_mut().expect("states array").push(json!({
+            "name": "conectado+aviso",
+            "not_run": "unavailable on this platform: unix socket read-back",
         }));
     } else {
         // tarjeta-pendiente: serve a FRESH pending proposal (same payload_hash
@@ -811,13 +828,21 @@ fn overview_visual_evidence(app: &AppHandle) {
 /// #304 diagnosis (read-only): what the SYSTEM tells WebKit about motion, and
 /// what the page decides. Reads GtkSettings on the main thread; changes nothing.
 fn motion_diag(app: &AppHandle, tag: &str) {
-    use gtk::prelude::ObjectExt as _;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let _ = app.run_on_main_thread(move || {
-        let gtk_value = gtk::Settings::default().map(|s| s.property::<bool>("gtk-enable-animations"));
-        let _ = tx.send(gtk_value);
+    #[cfg(unix)]
+    let gtk_value = {
+        use gtk::prelude::ObjectExt as _;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = app.run_on_main_thread(move || {
+            let gtk_value = gtk::Settings::default().map(|s| s.property::<bool>("gtk-enable-animations"));
+            let _ = tx.send(gtk_value);
+        });
+        rx.recv_timeout(Duration::from_secs(2)).ok().flatten()
+    };
+    #[cfg(not(unix))]
+    let gtk_value = json!({
+        "status": "not_run",
+        "reason": "unavailable on this platform: GTK settings read-back",
     });
-    let gtk_value = rx.recv_timeout(Duration::from_secs(2)).ok().flatten();
     let state = app.state::<AppState>();
     state.chat_probe.lock().expect("chat probe lock").clear();
     let page = main_window(app);
@@ -947,6 +972,7 @@ fn capture_sequence(app: &AppHandle, name: &str, fps: u32, millis: u64, action: 
 /// socket to OUR receiver, with the island showing the notification. One
 /// connection plays the Pi producer; the human's gesture is the only thing
 /// that answers. PNGs on the sand background, one per state.
+#[cfg(unix)]
 fn notification_scenes(app: &AppHandle) {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::net::UnixStream;
@@ -1107,6 +1133,15 @@ fn notification_scenes(app: &AppHandle) {
     wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
 }
 
+#[cfg(not(unix))]
+fn notification_scenes(_app: &AppHandle) {
+    emit(&json!({
+        "step": "notification_scenes",
+        "status": "not_run",
+        "reason": "unavailable on this platform: unix socket read-back",
+    }));
+}
+
 /// #305 evidence (opt-in visual run): the hotkey's ACTION against the live app. The
 /// press is delivered through the same `on_press` the X11 grab calls (the grab itself
 /// is proven on a private Xvfb in tests/hotkey_x11.rs; the human's keyboard is never
@@ -1124,7 +1159,9 @@ fn hotkey_evidence(app: &AppHandle) {
     let visible = |w: &tauri::WebviewWindow| w.is_visible().unwrap_or(false);
 
     // keep one real Pi connection open across hide/show
+    #[cfg(unix)]
     let endpoint = state.transport.lock().expect("transport lock").as_ref().map(|t| t.endpoint().to_path_buf());
+    #[cfg(unix)]
     let mut stream = endpoint.and_then(|e| {
         use std::io::{Read, Write};
         let mut s = std::os::unix::net::UnixStream::connect(e).ok()?;
@@ -1143,10 +1180,16 @@ fn hotkey_evidence(app: &AppHandle) {
     let hidden = json!({"phase": phase(&state), "visible": visible(&win), "connections": conns(&state), "transport": transport_ok(&state),
         "chat_availability_kept": state.chat.lock().expect("chat lane lock").availability.state});
     // a notice arriving while hidden does not pop it open
+    #[cfg(unix)]
     let notice_ok = stream.as_mut().map(|s| {
         use std::io::Write;
         let settled = json!({"v":1,"type":"settled","project":state.project.clone(),"sessionId":"probe-hotkey","at":crate::now_ms() as u64,"id":"probe-hotkey-1"});
         s.write_all(format!("{settled}\n").as_bytes()).is_ok()
+    });
+    #[cfg(not(unix))]
+    let notice_ok = json!({
+        "status": "not_run",
+        "reason": "unavailable on this platform: unix socket read-back",
     });
     sleep(Duration::from_millis(600));
     let still_hidden = json!({"phase": phase(&state), "visible": visible(&win),
@@ -1157,6 +1200,7 @@ fn hotkey_evidence(app: &AppHandle) {
     let shown = json!({"phase": phase(&state), "visible": visible(&win), "connections": conns(&state), "transport": transport_ok(&state),
         "focused": win.is_focused().unwrap_or(false)});
     capture_visual(app, "atajo-mostrada");
+    #[cfg(unix)]
     drop(stream.take());
     emit(&json!({"step": "hotkey_evidence", "before": before, "after_hide": hidden, "notice_sent_while_hidden": notice_ok,
         "after_notice_still_hidden": still_hidden, "after_show": shown}));

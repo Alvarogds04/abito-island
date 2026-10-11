@@ -123,4 +123,5 @@ pub fn fallback_for(backend: Backend, status: super::Status) -> Fallback {
     }
 }
 
+#[cfg(unix)]
 pub mod client;

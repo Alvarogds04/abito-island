@@ -19,6 +19,10 @@
 //!   `dismiss` verb, and is cleaned up on quit and on SIGINT/SIGTERM.
 
 mod chathost;
+#[cfg(unix)]
+mod hotkeyhost;
+#[cfg(not(unix))]
+#[path = "hotkeyhost_windows.rs"]
 mod hotkeyhost;
 mod settingshost;
 mod modelshost;

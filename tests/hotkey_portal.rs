@@ -2,6 +2,7 @@
 //! bus (`dbus-daemon`, its own socket). The human's bus and keyboard are never used.
 //! The fake follows the documented Request/Response protocol, including the OS
 //! permission dialog (accept / decline / never answered).
+#![cfg(target_os = "linux")] // Requires the Linux private-bus D-Bus runner.
 use abito_island::hotkey::{portal::client::{probe, PortalGrabber}, portal::{PortalState, SHORTCUT_ID}, Combo, Status};
 use std::collections::HashMap;
 use std::os::unix::fs::DirBuilderExt;
