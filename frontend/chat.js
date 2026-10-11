@@ -153,6 +153,8 @@
     renderLog();
     renderControls();
     if (capsule.dataset.view === 'chat') setLive(said);
+    // #313: turns and the model going down become cues by TRANSITION (history and the first snapshot are baselines)
+    try { const w = window.AbitoSoundWiringInstance; if (w) w.observeChat(next); } catch { /* sound never breaks the chat */ }
   }
 
   // ---- open / back --------------------------------------------------------

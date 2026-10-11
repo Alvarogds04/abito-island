@@ -377,6 +377,11 @@
   // Q1: polite announcement of a NEW notice (once), plain text.
   const noticeLive = $('notice-live');
   let lastNoticeId = null;
+  // #313: the sound wiring (sound-wiring.js) is optional: no engine, no cue, no error.
+  function soundCue(method, arg) {
+    const w = window.AbitoSoundWiringInstance;
+    try { if (w && typeof w[method] === 'function') w[method](arg); } catch { /* sound never breaks the island */ }
+  }
   function announceNotice(notices) {
     const V = window.AbitoChatView;
     if (!V || !noticeLive) return;
@@ -397,6 +402,7 @@
     if (!snapshot || !noticesEl || !O) return;
     const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
     announceNotice(notices);
+    soundCue('observeNotices', notices); // #313: only a NEW top notice sounds, never the ones already there at start-up
     const conn = O.connectionView(snapshot);
     connectionEl.dataset.tone = conn.tone;
     connectionEl.setAttribute('aria-label', conn.aria);
@@ -450,7 +456,7 @@
   }
   if (window.desktop) {
     try { window.desktop.onState(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
-    try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }, () => {}); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); soundCue('firstSnapshotRendered'); }, () => {}); } catch { /* facade optional */ }
   }
   // #305: the global shortcut status (READ only: changing it is the settings panel's job, #308).
   function paintHotkey(view) {
@@ -542,6 +548,7 @@
     paintCompactFlag();
     const card = current && current.card;
     const valid = validCard(card);
+    soundCue('observeCard', valid && card.state === 'pending' && typeof card.id === 'string' ? card.id : null); // #313: a card BECOMING pending
     const permission = $('permission');
     if (!permission || !O) return;
     permission.hidden = !valid;
