@@ -265,6 +265,9 @@ pub struct ClientState {
     profiles: Value,
     auth: Value,
     connectors: Value,
+    /// The engine's last refusal of a command: a code from its closed set and a counter, so the
+    /// page can tell "an error arrived AFTER my command" without parsing any text.
+    last_error: Value,
 }
 
 fn clip(v: &Value, key: &str, max: usize) -> Value {
@@ -286,6 +289,7 @@ impl ClientState {
             profiles: json!({"profiles": [], "active": null}),
             auth: json!({"flowId": null, "prompt": null, "event": null, "last": null}),
             connectors: json!({"state": "loading", "items": []}),
+            last_error: json!({"code": null, "n": 0}),
         }
     }
     pub fn connected() -> ClientState {
@@ -368,7 +372,13 @@ impl ClientState {
                 self.connectors = json!({"state": "ready", "items": rows});
             }
             "error" => {
-                // a generic code from the daemon; only the connectors panel cares, and only when it asked
+                // the daemon's closed code set (anything else reads as plain `failed`), never free text
+                let code = match frame.get("code").and_then(Value::as_str) {
+                    Some(c @ ("bad_request" | "busy" | "not_busy" | "unavailable" | "rate_limited" | "unknown_ask" | "failed")) => c,
+                    _ => "failed",
+                };
+                let n = self.last_error["n"].as_u64().unwrap_or(0) + 1;
+                self.last_error = json!({"code": code, "n": n});
                 if frame.get("code").and_then(Value::as_str) == Some("unavailable") && self.connectors["state"] == "loading" {
                     self.note_connectors_error("unavailable");
                 }

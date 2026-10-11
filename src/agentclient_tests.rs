@@ -187,3 +187,39 @@ fn disconnected_state_explains_why_with_a_closed_vocabulary() {
     }
     assert_eq!(serde_json::to_value(ClientState::connected()).unwrap()["connection"], json!("connected"));
 }
+
+// ---- the engine's refusals reach the panel (so it never announces success it did not get) ----
+#[test]
+fn a_command_error_from_the_engine_is_kept_as_a_closed_code_with_a_counter() {
+    let mut st = ClientState::connected();
+    assert_eq!(serde_json::to_value(&st).unwrap()["last_error"], json!({"code": null, "n": 0}));
+    for (n, code) in ["failed", "busy", "bad_request", "rate_limited"].iter().enumerate() {
+        st.apply(&json!({"type":"error","code":code})).unwrap();
+        let v = serde_json::to_value(&st).unwrap();
+        assert_eq!(v["last_error"], json!({"code": code, "n": n + 1}), "{code}");
+    }
+    // the same code twice is still a NEW event: the counter is how the page tells them apart
+    st.apply(&json!({"type":"error","code":"failed"})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["last_error"]["n"], json!(5));
+}
+
+#[test]
+fn an_unknown_or_hostile_error_code_never_reaches_the_page_as_text() {
+    let mut st = ClientState::connected();
+    for bad in [json!("<script>"), json!("a".repeat(500)), json!(7), json!(null), json!({"x":1})] {
+        st.apply(&json!({"type":"error","code":bad})).unwrap();
+    }
+    st.apply(&json!({"type":"error"})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["last_error"]["code"], json!("failed"), "anything outside the daemon's closed set reads as plain `failed`");
+    let text = v["last_error"].to_string();
+    assert!(!text.contains("script") && text.len() < 60, "{text}");
+}
+
+#[test]
+fn a_connection_that_drops_starts_a_clean_error_slate() {
+    let mut st = ClientState::disconnected(Reason::Lost);
+    assert_eq!(serde_json::to_value(&st).unwrap()["last_error"], json!({"code": null, "n": 0}));
+    st.apply(&json!({"type":"error","code":"unavailable"})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["last_error"]["code"], json!("unavailable"));
+}
