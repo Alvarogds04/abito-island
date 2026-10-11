@@ -270,10 +270,10 @@ html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
 #chat-header .icon-btn:first-of-type { margin-left: auto; }
 /* #309: the agent state (ready / thinking / writing / down) is a strip of its own, full width,
    so a long state word never fights the model and back buttons for the header row. */
-#chat-status-strip { display: flex; align-items: center; min-height: 0; padding: 0 4px 6px; }
-/* the calm state is only a dot with no word: it needs no row at all */
-#chat-status-strip:has(#chat-state[data-kind="ready"]) { display: none; }
-#chat-status-strip:has(#chat-state[data-kind=""]) { display: none; }
+#chat-status-strip { display: flex; align-items: center; min-height: 28px; padding: 0 4px 4px; }
+/* #310: the calm state is invisible but KEEPS its row: a strip that appeared and disappeared moved the whole history */
+#chat-status-strip:has(#chat-state[data-kind="ready"]) { visibility: hidden; }
+#chat-status-strip:has(#chat-state[data-kind=""]) { visibility: hidden; }
 #chat-target-chip .ico { color: var(--island-muted); }
 #capsule[data-chat-availability="unavailable"] #chat-state .word,
 #capsule[data-chat-availability="blocked"] #chat-state .word { color: var(--red-11); }

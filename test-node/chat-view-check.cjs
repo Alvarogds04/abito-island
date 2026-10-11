@@ -382,11 +382,11 @@ test('column: the horizontal chat constants are gone from the page', () => {
   assert.match(island, /window\.__islandSetView = \(view, vw, vh\)/, 'the size still comes from Rust');
 });
 
-test('column: a silent «ready» takes no row; only a state with a word opens the strip', () => {
+test('column: the status strip never changes height (a strip that appears and disappears pushed the whole history: the flash on send)', () => {
   const strip = rule('#chat-status-strip');
-  assert.match(strip, /min-height:\s*0/, 'the strip has no fixed height');
-  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind="ready"\]\)\s*\{[^}]*display:\s*none/);
-  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind=""\]\)\s*\{[^}]*display:\s*none/);
+  assert.match(strip, /height:\s*28px|min-height:\s*28px/, 'it always keeps its row');
+  assert.doesNotMatch(css, /#chat-status-strip:has\([^)]*\)\s*\{[^}]*display:\s*none/, 'no rule may collapse it');
+  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind="ready"\]\)\s*\{[^}]*visibility:\s*hidden/, 'calm = invisible, but the space stays');
 });
 
 // ---- #309 verifier: Settings and Models were designed for 640 and broke in the 400 column ---------
@@ -477,6 +477,44 @@ test('column: the provider search box is a single 44px field, never a stretched 
   assert.match(r, /flex:\s*0\s+0\s+auto/, 'it must not grow inside the column body');
   assert.match(r, /height:\s*44px|min-height:\s*44px/);
   assert.match(r, /max-height:\s*44px|height:\s*44px/);
+});
+
+// ---- #310 flicker: the history is RECONCILED, never rebuilt ---------------------------------------
+// Measured with the probe: sending one message removed 23 nodes to go from 2 to 4 rows and the first row jumped twice.
+test('reconcile: rows that did not change are kept as they are', () => {
+  const row = (kind, text) => ({ kind, text });
+  const before = [row('user', 'hola'), row('assistant', 'Hola, soy')];
+  assert.deepEqual(V.reconcileRows(before, before), { keep: 2, patch: [], append: [], remove: 0 }, 'identical = nothing to do');
+  const grown = [row('user', 'hola'), row('assistant', 'Hola, soy Abito'), row('user', 'otra')];
+  const plan = V.reconcileRows(before, grown);
+  assert.equal(plan.keep, 1, 'the unchanged first row is untouched');
+  assert.deepEqual(plan.patch, [{ index: 1, row: grown[1] }], 'a streaming answer is patched in place');
+  assert.deepEqual(plan.append, [grown[2]]);
+  assert.equal(plan.remove, 0);
+});
+
+test('reconcile: a shorter list removes only the tail; a kind change replaces one row; empty -> rows and back', () => {
+  const r = (kind, text) => ({ kind, text });
+  assert.deepEqual(V.reconcileRows([r('user', 'a'), r('user', 'b'), r('user', 'c')], [r('user', 'a')]), { keep: 1, patch: [], append: [], remove: 2 });
+  const swap = V.reconcileRows([r('user', 'a'), r('note', 'x')], [r('user', 'a'), r('error', 'x')]);
+  assert.equal(swap.keep, 1); assert.equal(swap.patch.length, 1);
+  assert.deepEqual(V.reconcileRows([], [r('user', 'a')]), { keep: 0, patch: [], append: [r('user', 'a')], remove: 0 });
+  assert.deepEqual(V.reconcileRows([r('user', 'a')], []), { keep: 0, patch: [], append: [], remove: 1 });
+  assert.deepEqual(V.reconcileRows(null, null), { keep: 0, patch: [], append: [], remove: 0 });
+});
+
+test('reconcile: the key of a row covers everything the page draws (so a changed icon or word is never skipped)', () => {
+  const a = { kind: 'note', text: 'x', short: 'Recortado', icon: 'info' };
+  assert.equal(V.rowKey(a), V.rowKey({ ...a }));
+  for (const change of [{ text: 'y' }, { short: 'Otro' }, { icon: 'cross' }, { kind: 'error' }]) assert.notEqual(V.rowKey(a), V.rowKey({ ...a, ...change }), JSON.stringify(change));
+});
+
+test('flicker: renderLog uses the reconciler and never empties the log while turns exist', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  const fn = src.slice(src.indexOf('function renderLog'), src.indexOf('function renderControls'));
+  assert.match(fn, /V\.reconcileRows\(/);
+  assert.doesNotMatch(fn, /log\.textContent = ''(?![^]*empty)/, 'no unconditional wipe of the history');
+  assert.match(fn, /classList\.add\('enter'\)/, 'only NEW rows animate');
 });
 
 console.log(`chat-view-check: ${passed} passed`);

@@ -122,6 +122,23 @@
   }
 
   // Rows for one turn: user, optional trim note, assistant/error, notes.
+
+  // ---- #310: reconcile the history instead of rebuilding it ----------------------------------------------------
+  // The log used to be emptied and redrawn on every state push (a streaming answer pushes many), which made
+  // every row flash and the first row jump. Rows are now compared by a key that covers everything drawn:
+  // the unchanged prefix is left alone, a changed row is patched in place, new rows are appended.
+  const rowKey = row => JSON.stringify([row.kind, row.text, row.short || '', row.icon || '']);
+  function reconcileRows(before, after) {
+    const a = Array.isArray(before) ? before : [];
+    const b = Array.isArray(after) ? after : [];
+    let keep = 0;
+    while (keep < a.length && keep < b.length && rowKey(a[keep]) === rowKey(b[keep])) keep += 1;
+    const patch = [];
+    let i = keep;
+    for (; i < a.length && i < b.length; i += 1) patch.push({ index: i, row: b[i] });
+    return { keep, patch, append: b.slice(i), remove: Math.max(0, a.length - b.length) };
+  }
+
   function turnRows(turn) {
     const rows = [{ kind: 'user', text: turn.user_text }];
     if (turn.trimmed_turns > 0) {
@@ -258,5 +275,5 @@
   }
   const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
 
-  return { poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  return { reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });

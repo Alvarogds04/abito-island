@@ -59,39 +59,55 @@
     $('chat-target-chip').setAttribute('aria-label', V.targetAria(t));
   }
 
+  // #310: the history is reconciled against what is drawn, never rebuilt. Measured before the fix: sending one
+  // message removed 23 nodes to go from 2 to 4 rows and moved the first row twice (the flash).
+  let drawn = [];            // the rows as last drawn, in order
+  function paintRow(li, row) {
+    li.className = row.kind;
+    li.textContent = '';
+    li.removeAttribute('aria-label'); delete li.dataset.tone;
+    if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
+      li.setAttribute('aria-label', row.text);
+      const i = document.createElement('span');
+      i.className = 'ico'; i.innerHTML = icon(row.icon);
+      const w = document.createElement('span');
+      w.className = 'word'; w.textContent = row.kind === 'error' ? row.text : row.short;
+      li.append(i, w);
+      if (row.kind === 'error') li.dataset.tone = 'red';
+    } else li.textContent = row.text;
+  }
   function renderLog() {
     const pinned = V.atBottom(log.scrollTop, log.scrollHeight, log.clientHeight);
     const before = log.scrollHeight;
-    const priorRows = log.children.length;
-    let rowIndex = 0;
-    log.textContent = '';
     const turns = (view && Array.isArray(view.turns)) ? view.turns : [];
+    const rows = [];
+    for (const turn of turns) for (const row of V.turnRows(turn)) rows.push(row);
+    const placeholder = log.querySelector('li.empty');
     if (!turns.length) {
-      const li = document.createElement('li');
-      li.className = 'empty';
-      // §2.3: lock «local» + eye-off, centred; the whole sentence is aria.
-      li.setAttribute('role', 'img');
-      li.setAttribute('aria-label', 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.');
-      li.innerHTML = `<span class="ico">${icon('lock')}</span><span class="ico">${icon('eye-off')}</span>`;
-      log.appendChild(li);
-    }
-    for (const turn of turns) {
-      for (const row of V.turnRows(turn)) {
+      if (!placeholder) {
+        log.textContent = '';
         const li = document.createElement('li');
-        li.className = row.kind;
-        if (priorRows && rowIndex >= priorRows) li.classList.add('enter'); // only NEW rows animate
-        rowIndex += 1;
-        if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
-          li.setAttribute('aria-label', row.text);
-          const i = document.createElement('span');
-          i.className = 'ico'; i.innerHTML = icon(row.icon);
-          const w = document.createElement('span');
-          w.className = 'word'; w.textContent = row.kind === 'error' ? row.text : row.short;
-          li.append(i, w);
-          if (row.kind === 'error') li.dataset.tone = 'red';
-        } else li.textContent = row.text;
+        li.className = 'empty';
+        // §2.3: lock «local» + eye-off, centred; the whole sentence is aria.
+        li.setAttribute('role', 'img');
+        li.setAttribute('aria-label', 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.');
+        li.innerHTML = `<span class="ico">${icon('lock')}</span><span class="ico">${icon('eye-off')}</span>`;
         log.appendChild(li);
       }
+      drawn = [];
+    } else {
+      if (placeholder) { placeholder.remove(); drawn = []; }
+      const plan = V.reconcileRows(drawn, rows);
+      const hadRows = drawn.length > 0;
+      for (const { index, row } of plan.patch) paintRow(log.children[index], row);
+      for (let k = 0; k < plan.remove; k += 1) log.lastElementChild.remove();
+      for (const row of plan.append) {
+        const li = document.createElement('li');
+        paintRow(li, row);
+        if (hadRows) li.classList.add('enter'); // only NEW rows animate
+        log.appendChild(li);
+      }
+      drawn = rows;
     }
     if (!turns.length) {
       newer.hidden = true; // nothing left to scroll to (conversation reset)

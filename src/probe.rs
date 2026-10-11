@@ -1518,6 +1518,58 @@ fn wait_chat_lines(app: &AppHandle, n: usize, timeout: Duration) -> Vec<serde_js
     }
 }
 
+/// #310 diagnosis (opt-in visual run): what the page DOES to the chat while a message is sent. The page
+/// watches itself frame by frame — rows destroyed and recreated, the log and composer boxes, any frame in
+/// which the visible chat is partly transparent or missing — and reports counts, not pictures.
+fn send_flicker_diagnosis(app: &AppHandle) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let page = main_window(app);
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let start = "(() => { const S = { t0: performance.now(), frames: [], removed: 0, added: 0, replaced: 0, logWrites: 0, firstRowIds: [] };
+      window.__flick = S;
+      const log = document.getElementById('chat-log');
+      new MutationObserver(ms => { for (const m of ms) { S.removed += m.removedNodes.length; S.added += m.addedNodes.length; if (m.removedNodes.length && m.addedNodes.length) S.replaced++; S.logWrites++; } })
+        .observe(log, { childList: true });
+      let prev = null;
+      const tick = () => {
+        const now = performance.now() - S.t0;
+        const c = document.getElementById('chat'), i = document.getElementById('chat-input'), l = document.getElementById('chat-log');
+        const cs = getComputedStyle(c);
+        const rows = [...l.children].map(x => Math.round(x.getBoundingClientRect().top));
+        const f = { t: Math.round(now), op: +cs.opacity, vis: cs.visibility, inh: i.getBoundingClientRect().height | 0, lh: l.getBoundingClientRect().height | 0,
+          n: l.children.length, sc: Math.round(l.scrollTop), sh: l.scrollHeight, rows0: rows[0] === undefined ? null : rows[0], active: document.activeElement && document.activeElement.id };
+        S.frames.push(f); prev = f;
+        if (now < 2600) requestAnimationFrame(tick); else S.done = true;
+      };
+      requestAnimationFrame(tick); })()";
+    let _ = page.eval(start);
+    sleep(Duration::from_millis(300));
+    let _ = page.eval("(window.__TAURI__.core.invoke)('chat_action', { payload: { action: 'submit', text: 'mensaje de diagnóstico', client_request_id: 'req-flick-0001' } })");
+    sleep(Duration::from_millis(3000));
+    let finish = "(async () => { const S = window.__flick; const invoke = (window.__TAURI__.core.invoke);
+      const F = S.frames; let jumpsRow0 = 0, jumpsLog = 0, jumpsInput = 0, dips = 0, focusLoss = 0, scrollBack = 0, maxGap = 0;
+      for (let k = 1; k < F.length; k++) {
+        const a = F[k - 1], b = F[k];
+        if (a.rows0 !== null && b.rows0 !== null && Math.abs(a.rows0 - b.rows0) > 1) jumpsRow0++;
+        if (Math.abs(a.lh - b.lh) > 1) jumpsLog++;
+        if (Math.abs(a.inh - b.inh) > 1) jumpsInput++;
+        if (b.op < 1 || b.vis !== 'visible') dips++;
+        if (a.active === 'chat-input' && b.active !== 'chat-input') focusLoss++;
+        if (b.sc + 2 < a.sc) scrollBack++;
+        maxGap = Math.max(maxGap, b.t - a.t);
+      }
+      const rowCounts = []; for (const f of F) if (rowCounts[rowCounts.length - 1] !== f.n) rowCounts.push(f.n);
+      await invoke('record_chat_evidence', { evidence: { phase: 'flicker', frames: F.length, log_removed: S.removed, log_added: S.added, log_replaced: S.replaced,
+        log_writes: S.logWrites, row0_jumps: jumpsRow0, log_height_jumps: jumpsLog, composer_height_jumps: jumpsInput, chat_opacity_dips: dips,
+        focus_losses: focusLoss, scroll_back_moves: scrollBack, max_frame_gap_ms: Math.round(maxGap), row_count_sequence: rowCounts } }); })()";
+    let _ = page.eval(finish);
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(10));
+    emit(&json!({"step": "send_flicker", "webview": lines}));
+}
+
 fn chat_evidence(app: &AppHandle) {
     use abito_island::chatlane::{self, Target};
     use abito_island::fakemodel::{closed_port, FakeModel, FakeModelConfig, Reply};
@@ -1630,6 +1682,7 @@ fn chat_evidence(app: &AppHandle) {
     let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
     sleep(Duration::from_millis(300));
     capture_visual(app, "chat-respondio");
+    send_flicker_diagnosis(app);
     // now an unreachable local target: honest unavailable, no fallback
     let completions_before = fake.completions();
     // the registered local route goes down (registry + target follow it)
