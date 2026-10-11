@@ -6,6 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const L = require('../packaging/lib.cjs');
+const T = require('./tmpdirs.cjs'); // self-cleaning temp dirs
+// a malformed fixture must fail the test with the file named, not with a bare SyntaxError
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`cannot read JSON ${file}: ${e.message}`); }
+}
 const crate = path.resolve(__dirname, '..');
 let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
@@ -18,7 +23,7 @@ test('source gates pass on the real crate (R6 pin, curated frontend, config, cap
 });
 
 function copyCrate() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abito-pkg-'));
+  const dir = T.make('abito-pkg-');
   for (const f of ['tauri.conf.json', 'Cargo.toml']) fs.copyFileSync(path.join(crate, f), path.join(dir, f));
   fs.mkdirSync(path.join(dir, 'capabilities')); fs.copyFileSync(path.join(crate, 'capabilities', 'main.json'), path.join(dir, 'capabilities', 'main.json'));
   fs.mkdirSync(path.join(dir, 'frontend'));
@@ -43,7 +48,7 @@ test('each gate FAILS when its rule is broken', () => {
 });
 
 function fakeStage({ crateDir = crate } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abito-stage-'));
+  const dir = T.make('abito-stage-');
   fs.writeFileSync(path.join(dir, 'abito-island'), '#!/bin/true\nfake binary\n', { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'abito-island-launcher'), L.launcherText(), { mode: 0o755 });
   fs.writeFileSync(path.join(dir, `${L.IDENTIFIER}.desktop`), L.desktopText(), { mode: 0o644 });
@@ -73,7 +78,7 @@ test('verify: devtools markers and an embedded source-tree path fail the stage',
   for (const [marker, expect] of [['--remote-debugging-port', /devtools/], [crate, /source-tree path/]]) {
     const d = fakeStage();
     fs.writeFileSync(path.join(d, 'abito-island'), `#!/bin/true\n${marker}\n`, { mode: 0o755 });
-    const r = JSON.parse(fs.readFileSync(path.join(d, 'receipt.json'), 'utf8')); r.files['abito-island'] = L.sha256File(path.join(d, 'abito-island'));
+    const r = readJson(path.join(d, 'receipt.json')); r.files['abito-island'] = L.sha256File(path.join(d, 'abito-island'));
     fs.writeFileSync(path.join(d, 'receipt.json'), JSON.stringify(r));
     assert.match(L.verifyStage(d, { sourceCrate: crate }).join(), expect);
     fs.rmSync(d, { recursive: true });
@@ -103,7 +108,7 @@ test('launcher: no args, refuses whole env families, forces X11, execs only its 
 });
 test('provenance gate: a dirty or untracked product file fails; a clean tree passes (real git repo)', () => {
   const cp = require('node:child_process');
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'abito-git-'));
+  const repo = T.make('abito-git-');
   const git = (...a) => cp.spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: repo, encoding: 'utf8' });
   git('init', '-q'); fs.writeFileSync(path.join(repo, 'a.txt'), '1'); git('add', '.'); git('commit', '-qm', 'x');
   const clean = L.requireClean(repo); assert.match(clean.head, /^[0-9a-f]{40}$/); assert.equal(clean.clean, true);
@@ -113,7 +118,7 @@ test('provenance gate: a dirty or untracked product file fails; a clean tree pas
   fs.rmSync(repo, { recursive: true });
 });
 test('verify: a receipt without HEAD / clean attestation fails', () => {
-  const d = fakeStage(); const r = JSON.parse(fs.readFileSync(path.join(d, 'receipt.json'), 'utf8'));
+  const d = fakeStage(); const r = readJson(path.join(d, 'receipt.json'));
   delete r.provenance; fs.writeFileSync(path.join(d, 'receipt.json'), JSON.stringify(r));
   assert.match(L.verifyStage(d).join(), /no git HEAD/); fs.rmSync(d, { recursive: true });
 });
@@ -145,7 +150,7 @@ test('verify: the shipped binary must not carry the probe or the fake backend st
   for (const marker of ['ABITO_PROBE', 'Prueba M3: propuesta servida por el backend falso']) {
     const d = fakeStage();
     fs.writeFileSync(path.join(d, 'abito-island'), `#!/bin/true\n${marker}\n`, { mode: 0o755 });
-    const r = JSON.parse(fs.readFileSync(path.join(d, 'receipt.json'), 'utf8')); r.files['abito-island'] = L.sha256File(path.join(d, 'abito-island'));
+    const r = readJson(path.join(d, 'receipt.json')); r.files['abito-island'] = L.sha256File(path.join(d, 'abito-island'));
     fs.writeFileSync(path.join(d, 'receipt.json'), JSON.stringify(r));
     assert.match(L.verifyStage(d).join(), /probe\/fake/, marker);
     fs.rmSync(d, { recursive: true });
@@ -157,7 +162,7 @@ test('law: XTest (synthetic input) is never a production dependency, and the shi
   fs.writeFileSync(path.join(d, 'Cargo.toml'), fs.readFileSync(path.join(d, 'Cargo.toml'), 'utf8').replace('x11rb = { version = "0.13", features = ["xkb"] }', 'x11rb = { version = "0.13", features = ["xkb", "xtest"] }'));
   assert.throws(() => L.checkConfig(d), /xtest/); fs.rmSync(d, { recursive: true });
   const st = fakeStage(); fs.writeFileSync(path.join(st, 'abito-island'), '#!/bin/true\nXTEST\n', { mode: 0o755 });
-  const r = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); r.files['abito-island'] = L.sha256File(path.join(st, 'abito-island'));
+  const r = readJson(path.join(st, 'receipt.json')); r.files['abito-island'] = L.sha256File(path.join(st, 'abito-island'));
   fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r));
   assert.match(L.verifyStage(st).join(), /XTEST/); fs.rmSync(st, { recursive: true });
 });

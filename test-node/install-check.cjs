@@ -13,7 +13,8 @@ const SCRIPT = path.join(__dirname, '..', 'packaging', 'install.sh');
 let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
-const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'abito-inst-')));
+const T = require('./tmpdirs.cjs'); // self-cleaning: removed at exit, dead runs swept
+const tmp = () => T.make('abito-inst-');
 
 function stage() {
   const dir = tmp();
