@@ -32,16 +32,10 @@ fi
 #
 # The container runs as root (NOT --userns=keep-id): the toolchain lives in
 # root-owned volumes (/usr/local/cargo) and xwin must write its SDK cache, so a
-# mapped-down uid only breaks those volumes. Root inside rootless podman is
-# still this host user, and the worktree bind mount stays writable, but any file
-# cargo rewrites in the tree comes back owned by container storage, so
-# chown_host() hands them back to us right after the run.
-chown_host() {
-  if [ "$rt" = podman ]; then
-    "$rt" unshare --map-root-user chown -R "$(id -u):$(id -g)" /abito/src/Cargo.lock 2>/dev/null || true
-  fi
-}
-
+# mapped-down uid only breaks those volumes. `:U` hands each volume to the
+# container user. Nothing is written back into the worktree because every cargo
+# call here uses --locked: if the Windows graph needed a lock change, the run
+# fails loudly instead of rewriting Cargo.lock as root.
 run() {
   "$rt" run --rm \
     -v "$crate":/abito/src \
@@ -64,7 +58,7 @@ case "$cmd" in
   check)
     # Type-check the Windows tree (including tests): this is what proves the
     # platform seams are complete, since none of it can run here.
-    run cargo xwin check --target x86_64-pc-windows-msvc --all-targets "$@"
+    run cargo xwin check --locked --target x86_64-pc-windows-msvc --all-targets "$@"
     ;;
   build)
     run cargo xwin build --release --locked --target x86_64-pc-windows-msvc \
