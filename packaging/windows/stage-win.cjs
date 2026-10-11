@@ -59,7 +59,7 @@ const receipt = {
     subsystem: 'windows_subsystem=windows in release (no console); debug keeps the console for U2 VM logs',
     signing: 'NONE - unsigned; the VM checklist validates the SmartScreen path explicitly',
   },
-  note: 'Staged only (dist/, gitignored). Nothing installed, nothing launched. dirty_entries is the honest count at build time; a final receipt from a clean checkout must show clean:true.',
+  note: 'Staged only (dist/, gitignored). Nothing installed, nothing launched. dirty_entries is the honest count at build time; a final receipt from a clean checkout must show clean:true. Measured: the cargo exe is byte-identical across rebuilds of one commit (6c2e44b9 on two runs), but makensis embeds a build timestamp in the installer PE header, so the SETUP hash is per packaging run — the receipt and its dist/ files are a matched pair; regenerating the installer invalidates --check by design.',
 };
 fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n');
 console.log(`receipt: ${receiptPath}`);
