@@ -336,16 +336,14 @@ test('focus: closing the panel by keyboard lands on something visible in the CHA
   assert.doesNotMatch(close, /AbitoFocusHome/);
 });
 
-test('layout: General fits the 256px chat window without cutting its last row', () => {
-  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+test('layout: a screen scrolls inside its own body, so the close bar is always inside even in the shortest column (240)', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const px = (re, d) => { const m = css.match(re); return m ? Number(m[1]) : d; };
-  const win = 256, top = px(/#settings \{[^}]*top:\s*(\d+)px/, 8), bottom = px(/#settings \{[^}]*bottom:\s*(\d+)px/, 8);
-  const bar = px(/#settings-bar \{[^}]*min-height:\s*(\d+)px/, 48);
-  const gap = px(/#settings \{[^}]*gap:\s*(\d+)px/, 4);
-  const bodyGap = px(/#settings-body \{[^}]*gap:\s*(\d+)px/, 4);
-  const room = win - top - bottom - bar - gap;
-  const rows = 4, rowH = 44; // sound, motion, shortcut, shortcut-enabled
-  assert.ok(room >= rows * rowH + (rows - 1) * bodyGap, `room ${room}px < ${rows * rowH + (rows - 1) * bodyGap}px`);
+  assert.match(css.match(/#settings-body \{([^}]*)\}/)[1], /overflow-y:\s*auto/);
+  assert.match(css.match(/#settings-body \{([^}]*)\}/)[1], /min-height:\s*0/);
+  const win = 256 /* shortest native window: CHAT_MIN_H 240 + margins */, top = px(/#settings \{[^}]*top:\s*(\d+)px/, 8), bottom = px(/#settings \{[^}]*bottom:\s*(\d+)px/, 8);
+  const bar = px(/#settings-bar \{[^}]*min-height:\s*(\d+)px/, 44);
+  assert.ok(win - top - bottom >= bar + 44, `the panel (${win - top - bottom}px) must hold the bar and at least one row`);
 });
 
 // ---- Cuentas: connected list, two method cards, provider list with search (gentle-dot AccountsPanel) ----
@@ -456,6 +454,80 @@ test('agents: a backup is mentioned when there is one; the list is honest withou
   assert.equal(S.agentsView(state({ connection: 'connected', agents: null })).kind, 'loading');
   assert.equal(S.agentsView(agentsState([])).kind, 'ready');
   assert.equal(S.agentsView(agentsState([])).rows.length, 0);
+});
+
+// ---- verdict settings-gd ---------------------------------------------------------------------------------
+test('agents: an engine that does not know agents_list ends the wait honestly — never an endless ring', () => {
+  const noFrame = state({ agents: null, last_error: { code: null, n: 0 } });
+  assert.equal(S.agentsView(noFrame).kind, 'loading', 'before anything was asked it is a real wait');
+  // the engine of TODAY answers agents_list with error{bad_request}: that is «no disponible», not a spinner
+  for (const code of ['bad_request', 'unavailable']) {
+    const v = S.agentsView(state({ agents: null, last_error: { code, n: 3 } }), { askedAtError: 2 });
+    assert.equal(v.kind, 'unsupported', code);
+    assert.equal(v.word, 'No disponible'); assert.equal(v.note, 'El motor todavía no puede conectar agentes.');
+    assert.ok(v.icon && v.icon !== 'ring', 'no ring');
+  }
+  // an error that arrived BEFORE the question does not count; the same counter means no new error
+  assert.equal(S.agentsView(state({ agents: null, last_error: { code: 'bad_request', n: 3 } }), { askedAtError: 3 }).kind, 'loading');
+  // other errors (busy, rate_limited...) are not «unsupported»
+  assert.equal(S.agentsView(state({ agents: null, last_error: { code: 'busy', n: 5 } }), { askedAtError: 2 }).kind, 'loading');
+  // a real frame always wins
+  assert.equal(S.agentsView(state({ agents: [], last_error: { code: 'bad_request', n: 9 } }), { askedAtError: 2 }).kind, 'ready');
+  // silence: no frame within the deadline is the same honest answer
+  assert.equal(S.agentsView(noFrame, { timedOut: true }).kind, 'unsupported');
+  assert.equal(S.agentsView(state({ agents: [{ id: 'codex', state: 'connected' }] }), { timedOut: true }).kind, 'ready');
+});
+
+test('agents: the deadline for the engine to answer is a named constant', () => {
+  assert.ok(Number.isInteger(S.AGENTS_WAIT_MS) && S.AGENTS_WAIT_MS >= 2000 && S.AGENTS_WAIT_MS <= 10000);
+});
+
+test('no human-facing string of the settings page asks for a terminal (state JSON AND the fixed strings of the source)', () => {
+  const strip = t => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const literals = text => [...strip(text).matchAll(/(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g)].map(m => m[2]).filter(x => /[a-záéíóúñ]{3,}/i.test(x));
+  const bad = /\b(terminal|consola|l[ií]nea de comandos|comando|shell|bash|cli|sudo|npm|install)\b/i;
+  const where = [];
+  for (const f of ['settings.js', 'settings-view.js']) {
+    for (const lit of literals(fs.readFileSync(path.join(frontend, f), 'utf8'))) if (bad.test(lit) && !/^(agent_|abito:|settings|agents_)/.test(lit)) where.push(`${f}: ${lit}`);
+  }
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  const sect = html.slice(html.indexOf('id="settings"'), html.indexOf('id="chat-live"'));
+  for (const m of sect.matchAll(/(?:aria-label|title|placeholder)="([^"]*)"/g)) if (bad.test(m[1])) where.push(`index.html: ${m[1]}`);
+  assert.deepEqual(where, [], 'a fixed string mentions a terminal or a command');
+});
+
+test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
+  const all = JSON.stringify(S.SCREENS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
+  assert.match(S.screenById('connectors').hint, /Preguntá antes de enviar/);
+  assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
+});
+
+test('verbs follow gentle-dot: «Cerrar sesión» for an account (its Sign out), «Desconectar» for an agent (its Disconnect)', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.doesNotMatch(src, /wordBtn\('Salir'/, 'no «Salir» button');
+  assert.match(src, /wordBtn\(V\.LOGOUT_WORD/, 'the button takes its word from the one constant');
+  assert.equal(S.LOGOUT_WORD, 'Cerrar sesión');
+  assert.equal(S.agentsView(agentsState([{ id: 'codex', state: 'connected' }])).rows[0].secondary.label, 'Desconectar');
+});
+
+test('close glyph: the screen closes with a cross (gentle-dot ×), never the ✓ that means «allow» in our vocabulary', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  const tag = /<button[^>]*id="settings-close"[^>]*>.*?<\/button>/.exec(html);
+  assert.ok(tag);
+  assert.match(tag[0], /data-icon="cross"/);
+  assert.doesNotMatch(tag[0], /data-icon="check"/);
+  assert.match(tag[0], /aria-label="Cerrar/);
+});
+
+test('chat header: stays visible with a screen open so the human can switch screens with the pointer', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const hidden = [...css.matchAll(/([^{}]*data-settings="open"[^{}]*)\{([^}]*)\}/g)].filter(m => /visibility:\s*hidden/.test(m[2])).map(m => m[1]);
+  assert.ok(!hidden.some(sel => /#chat-header/.test(sel)), `a rule hides #chat-header: ${hidden.join(' | ')}`);
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  // the panel must start BELOW the header so both are visible at once
+  assert.match(css.slice(css.indexOf('#settings {')), /top:\s*(5\d|6\d)px/);
+  assert.ok(html.indexOf('id="chat-header"') < html.indexOf('id="settings"'));
 });
 
 console.log(`settings-view-check: ${passed} passed`);

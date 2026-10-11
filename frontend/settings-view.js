@@ -17,7 +17,7 @@
     Object.freeze({ id: 'accounts', title: 'Cuentas', icon: 'user', label: 'Cuentas',
       hint: 'Conectá el servicio de IA que ya pagás o pegá una clave de API. Tu inicio de sesión queda en esta computadora.' }),
     Object.freeze({ id: 'connectors', title: 'Conectores', icon: 'plug', label: 'Conectores',
-      hint: 'Conectá tus agentes de código y dejá que Abito lea tus apps. Pregunta antes de enviar o cambiar algo.' }),
+      hint: 'Conectá tus agentes de código y dejá que Abito lea tus apps. Preguntá antes de enviar o cambiar algo.' }),
     Object.freeze({ id: 'settings', title: 'Ajustes', icon: 'gear', label: 'Ajustes', hint: '' }),
   ]);
   const screenById = id => SCREENS.find(x => x.id === id) || null;
@@ -241,13 +241,25 @@
     not_writable: 'No hay permiso de escritura en la configuración; no se tocó nada.',
     backup_failed: 'No se pudo hacer el respaldo; no se tocó nada.',
   });
-  function agentsView(state) {
+  const AGENTS_WAIT_MS = 4000; // how long the page waits for the engine's `agents` frame before saying so
+  const LOGOUT_WORD = 'Cerrar sesión'; // gentle-dot's «Sign out»
+  const errorSeqOf = st => (st && st.last_error && Number.isInteger(st.last_error.n) ? st.last_error.n : 0);
+  // opts.askedAtError: the engine error counter when `agents_list` was sent; opts.timedOut: the wait ran out.
+  function agentsView(state, opts) {
+    const o = opts || {};
     if (state && state.connection && state.connection !== 'connected' && state.connection !== 'connecting') {
       const cv = connectionView(state);
       if (cv) return { kind: 'no_engine', word: cv.word, icon: cv.icon, tone: cv.tone, aria: cv.aria };
     }
     const list = state && state.agents;
-    if (!Array.isArray(list)) return { kind: 'loading', rows: [] };
+    if (!Array.isArray(list)) {
+      // The engine of today may not know `agents_list`: it answers error{bad_request|unavailable}, or nothing.
+      // Either way the wait ENDS, in words, with no ring (the same class as the services spinner).
+      const code = state && state.last_error && state.last_error.code;
+      const newError = Number.isInteger(o.askedAtError) && errorSeqOf(state) > o.askedAtError && (code === 'bad_request' || code === 'unavailable');
+      if (newError || o.timedOut === true) return { kind: 'unsupported', word: 'No disponible', icon: 'plug-off', tone: 'faint', note: 'El motor todavía no puede conectar agentes.', aria: 'No disponible: el motor todavía no puede conectar agentes.', rows: [] };
+      return { kind: 'loading', rows: [] };
+    }
     const seen = new Set();
     const rows = [];
     for (const a of list) {
@@ -325,6 +337,6 @@
     };
   }
 
-  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, AGENTS_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
 });

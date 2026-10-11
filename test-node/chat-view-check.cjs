@@ -449,12 +449,14 @@ test('column: the sticky controls cannot be hidden by the content (close is not 
   assert.match(rule('#models-list'), /overflow-y:\s*auto/);
 });
 
-test('column: with Settings open the chat header is hidden, so the panel must carry its OWN exit', () => {
-  assert.match(css, /#capsule\[data-settings="open"\] #chat-header/);
-  assert.ok(html.includes('id="settings-close"') && /aria-label="Cerrar ajustes"/.test(html));
+test('column: with a screen open the chat header STAYS visible (gentle-dot): the header buttons switch screens, the panel carries its own close', () => {
+  assert.doesNotMatch(css, /#capsule\[data-settings="open"\][^{]*#chat-header[^{]*\{[^}]*visibility:\s*hidden/, 'nothing hides the header');
+  assert.ok(html.includes('id="settings-close"') && /aria-label="Cerrar/.test(html));
   const setCss = rule('#settings');
   assert.match(setCss, /left:\s*12px/);
   assert.match(setCss, /right:\s*12px/);
+  assert.match(setCss, /top:\s*5\d px|top:\s*(5\d|6\d)px/, 'the panel starts BELOW the header');
+  assert.match(html, /id="open-screen-accounts"[^>]*aria-expanded="false"/);
 });
 
 test('column: an open panel (Modelos, Ajustes) hides the chat status strip, so «Bloqueado» never overlaps the panel', () => {

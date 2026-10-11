@@ -302,3 +302,36 @@ fn the_host_pattern_connect_under_the_slot_mutex_with_a_callback_that_reads_the_
     worker.join().unwrap();
     assert!(emitted.load(Ordering::SeqCst) > 0);
 }
+
+/// #310 verdict: the engine of TODAY does not know `agents_list`. It must answer with an error the page can
+/// read (a closed `last_error` with a counter) — and the page must then say «No disponible», not wait
+/// forever. This runs the real daemon, so the day the engine learns the command this test turns into the
+/// `agents` frame case without the page changing.
+#[test]
+fn a_daemon_that_does_not_know_agents_list_ends_the_wait_with_a_readable_error() {
+    let island = Island::start();
+    let conn = AgentConn::new(|_| {});
+    conn.connect(&island.root);
+    let before = wait_for(&conn, "connected", |v| v["connection"] == json!("connected"));
+    let n0 = before["last_error"]["n"].as_u64().unwrap();
+    assert_eq!(before["agents"], json!(null), "nothing known yet");
+    conn.command(&json!({"action":"agents_list"})).unwrap();
+    let after = wait_for(&conn, "an engine answer to agents_list", |v| {
+        v["agents"].is_array() || v["last_error"]["n"].as_u64().unwrap_or(0) > n0
+    });
+    if after["agents"].is_array() {
+        // an engine that implements it: the closed view, every entry from the allowlist
+        for a in after["agents"].as_array().unwrap() {
+            assert!(["claude-code", "codex", "opencode"].contains(&a["id"].as_str().unwrap()), "{a}");
+        }
+    } else {
+        let code = after["last_error"]["code"].as_str().unwrap();
+        assert!(["bad_request", "unavailable"].contains(&code), "an engine that does not know the command says so with a closed code: {code}");
+    }
+    // and the page's pure view turns exactly this state into an honest, finite answer
+    let node = Command::new("node").arg("-e").arg(format!(
+        "const S=require('{}/frontend/settings-view.js'); const st={}; const v=S.agentsView(st,{{askedAtError:{}}}); process.stdout.write(v.kind);",
+        env!("CARGO_MANIFEST_DIR"), after, n0)).output().expect("node");
+    let kind = String::from_utf8_lossy(&node.stdout).to_string();
+    assert!(kind == "unsupported" || kind == "ready", "the page must never keep waiting on this state: {kind} ({})", String::from_utf8_lossy(&node.stderr));
+}

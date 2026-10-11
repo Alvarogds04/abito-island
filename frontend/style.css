@@ -511,7 +511,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #capsule[data-phase="expanded"][data-view="overview"][data-card] #open-settings { opacity: 0; visibility: hidden; }
 #open-settings:hover { background: rgba(255, 255, 255, .08); }
 #settings {
-  position: absolute; left: 12px; right: 12px; top: 6px; bottom: 12px; z-index: 3; display: flex; flex-direction: column; gap: 4px;
+  position: absolute; left: 12px; right: 12px; top: 58px; bottom: 12px; z-index: 3; /* below the chat header, which stays visible */ display: flex; flex-direction: column; gap: 4px;
   background: var(--island); color: var(--island-muted);
   opacity: 0; visibility: hidden; transform: translateY(calc(var(--view-dir) * var(--view-shift)));
   transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
@@ -520,7 +520,8 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
   opacity: 1; visibility: visible; transform: none;
   transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s;
 }
-#capsule[data-settings="open"] #chat-header, #capsule[data-settings="open"] #chat-body, #capsule[data-settings="open"] #models { opacity: 0; visibility: hidden; }
+/* #310: the chat HEADER stays visible with a screen open (gentle-dot): its buttons switch screens with the pointer */
+#capsule[data-settings="open"] #chat-body, #capsule[data-settings="open"] #models { opacity: 0; visibility: hidden; }
 #settings-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 /* #310: the screen title (gentle-dot's «Accounts» / «Connectors» / «Settings»), one row with the close button */
 #settings-title { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--island-ink); font: 700 16px/1.2 var(--font-ui); }

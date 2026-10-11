@@ -43,6 +43,7 @@
   let screen = 'accounts';
   let method = null;      // Cuentas: null = the two method cards, else 'oauth' | 'api_key' (the provider list)
   let filter = '';
+  let agentsAsk = null;   // { at: engine error counter when agents_list was sent, timer, timedOut }
   let pendingLogin = null; // a login that waits for the account it just asked the engine to create
   let agentState = null;
   let prefs = { sound: false };
@@ -90,8 +91,17 @@
     $('settings-hint').hidden = !def.hint;
     panel.setAttribute('aria-label', def.title);
     for (const b of openers) b.setAttribute('aria-expanded', b.id === `open-screen-${id}` ? 'true' : 'false');
-    if (id === 'connectors') { agent({ action: 'connectors_list' }).catch(() => {}); agent({ action: 'agents_list' }).catch(() => {}); }
+    if (id === 'connectors') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
     render();
+  }
+  // The engine answers `agents_list` with an `agents` frame — or, if it does not know the command, with
+  // error{bad_request}, or with silence. All three end the wait (see V.agentsView).
+  function askAgents() {
+    if (agentsAsk) clearTimeout(agentsAsk.timer);
+    const ask = { at: (agentState && agentState.last_error && agentState.last_error.n) || 0, timedOut: false, timer: 0 };
+    ask.timer = setTimeout(() => { ask.timedOut = true; if (isOpen() && screen === 'connectors') render(); }, V.AGENTS_WAIT_MS);
+    agentsAsk = ask;
+    agent({ action: 'agents_list' }).catch(() => {});
   }
   function open(id) {
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
@@ -102,6 +112,7 @@
   function close(byKeyboard) {
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     capturing = false; method = null; filter = ''; pendingLogin = null;
+    if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
     drafts.reset(); // a half-typed key never outlives the panel
     if (waiting) { clearTimeout(waiting.timer); waiting = null; }
@@ -254,7 +265,7 @@
         for (const r of have) {
           const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.providerName));
           if (r.local) li.append(chipNode({ tone: 'faint', icon: 'lock', word: 'local', aria: 'Sólo local' }));
-          else li.append(wordBtn('Salir', () => send({ action: 'account_logout', accountId: r.accountId }, `${r.providerName}: sesión cerrada.`), { icon: 'plug-off', aria: `Salir de ${r.providerName}` }));
+          else li.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.providerName}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${r.providerName}` }));
           list.append(li);
         }
         sec.append(list); body.append(sec);
@@ -285,7 +296,7 @@
       if (r.connected) li.append(chipNode({ tone: 'go', icon: 'check', word: 'Conectado', aria: `${r.name}: conectado` }));
       const actions = el('span', 'srow-actions');
       actions.append(wordBtn(r.actionLabel, () => loginWith(r.id, method), { primary: method === 'oauth', aria: `${r.actionLabel}: ${r.name}`, disabled: !V.loginPlan(st, r.id, method) }));
-      if (r.canLogout) actions.append(wordBtn('Salir', () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { aria: `Salir de ${r.name}` }));
+      if (r.canLogout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { aria: `${V.LOGOUT_WORD}: ${r.name}` }));
       li.append(actions); list.append(li);
     }
     if (!rows.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
@@ -349,9 +360,10 @@
   function renderConnectors() {
     // 1) agents: Conectar / Actualizar / Desconectar. The click IS the confirmation; the engine installs with a
     //    backup. Nothing here asks the human to open a terminal.
-    const av = V.agentsView(agentState);
+    const av = V.agentsView(agentState, agentsAsk ? { askedAtError: agentsAsk.at, timedOut: agentsAsk.timedOut } : {});
     const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código'));
-    if (av.kind !== 'ready') sec.append(chipNode(av.kind === 'loading' ? { tone: 'live', icon: 'ring', word: '', aria: 'Leyendo agentes' } : av));
+    if (av.kind === 'unsupported') { sec.append(chipNode(av), el('p', 'snote', av.note)); }
+    else if (av.kind !== 'ready') sec.append(chipNode(av.kind === 'loading' ? { tone: 'live', icon: 'ring', word: '', aria: 'Leyendo agentes' } : av));
     else {
       const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Agentes de código');
       for (const r of av.rows) {
