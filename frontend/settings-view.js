@@ -246,7 +246,23 @@
     config_invalid: 'La configuración actual no es válida; no se tocó nada.',
     not_writable: 'No hay permiso de escritura en la configuración; no se tocó nada.',
     backup_failed: 'No se pudo hacer el respaldo; no se tocó nada.',
+    plan_changed: 'Algo cambió desde la vista previa; revisá el nuevo cambio y volvé a intentar.',
+    audit_unavailable: 'No se pudo abrir el registro de cambios, así que no se tocó nada.',
+    install_failed: 'No se pudo completar; no se tocó nada.',
   });
+  const PLAN_FALLBACK = 'Se van a agregar los hooks de Abito. Antes se hace un respaldo.';
+  const PLAN_HASH = /^[0-9a-f]{64}$/;
+  // The engine prints a CLOSED English template for the plan. The page never shows engine text: it recognises
+  // the template and says the same thing in Spanish; anything else becomes one generic, true sentence.
+  const PLAN_RE = /^(Adds|Updates) the Abito hooks (?:\(PermissionRequest, Stop\) )?(?:to|in) (~\/[\w.\/-]{1,120}|\/[\w.\/-]{1,200})\. A backup is made first\.( Codex will ask you to trust them in \/hooks\.)?( This change is large: review it in the file\.)?$/;
+  function planSummary(text) {
+    const m = typeof text === 'string' && text.length <= 400 ? PLAN_RE.exec(text) : null;
+    if (!m) return PLAN_FALLBACK;
+    const verb = m[1] === 'Adds' ? 'Agrega los hooks de Abito' : 'Actualiza los hooks de Abito';
+    const joiner = m[1] === 'Adds' ? 'a' : 'en';
+    const withNames = /\(PermissionRequest, Stop\)/.test(text) && m[1] === 'Adds' ? ' (PermissionRequest, Stop)' : '';
+    return `${verb}${withNames} ${joiner} ${m[2]}. Antes se hace un respaldo.${m[3] ? ' Codex te va a pedir que confíes en ellos en /hooks.' : ''}${m[4] ? ' Es un cambio grande: revisalo en el archivo.' : ''}`;
+  }
   const AGENTS_WAIT_MS = 4000; // how long the page waits for the engine's `agents` frame before saying so
   const LOGOUT_WORD = 'Cerrar sesión'; // gentle-dot's «Sign out»
   const errorSeqOf = st => (st && st.last_error && Number.isInteger(st.last_error.n) ? st.last_error.n : 0);
@@ -274,17 +290,32 @@
       const st = Object.prototype.hasOwnProperty.call(AGENT_STATES, a.state) ? a.state : 'error';
       const [word, icon, tone] = AGENT_STATES[st];
       const cmd = action => ({ action, agentId: a.id });
+      const hash = typeof a.plan_hash === 'string' && PLAN_HASH.test(a.plan_hash) ? a.plan_hash : null;
+      const reviewable = a.reviewable !== false;
+      const offersPlan = st === 'not_connected' || st === 'outdated' || (st === 'error' && a.detail === 'plan_changed');
+      // the click carries the hash of the plan the human SAW; no hash = nothing to approve = no button
+      const connectCmd = () => ({ action: 'agent_connect', agentId: a.id, plan_hash: hash });
+      const summary = offersPlan && hash ? planSummary(a.summary) : '';
       let primary = null, secondary = null, note = '';
-      if (st === 'not_connected') primary = { label: 'Conectar', command: cmd('agent_connect') };
-      if (st === 'outdated') { primary = { label: 'Actualizar', command: cmd('agent_connect') }; secondary = { label: 'Desconectar', command: cmd('agent_disconnect') }; }
-      if (st === 'connected') { secondary = { label: 'Desconectar', command: cmd('agent_disconnect') }; if (a.backup === true) note = 'Hay un respaldo de tu configuración anterior.'; }
+      if (st === 'not_connected' || st === 'outdated') {
+        if (st === 'outdated') secondary = { label: 'Desconectar', command: cmd('agent_disconnect') };
+        if (!hash) note = 'No hay una vista previa del cambio; volvé a abrir esta pantalla.';
+        else if (!reviewable) note = 'Es un cambio grande: revisalo en el archivo.';
+        else primary = { label: st === 'outdated' ? 'Actualizar' : 'Conectar', command: connectCmd() };
+      }
+      if (st === 'connected') {
+        secondary = { label: 'Desconectar', command: cmd('agent_disconnect') };
+        if (a.backup === true) note = 'Hay un respaldo de tu configuración anterior.';
+      }
       if (st === 'unavailable') note = 'No está instalado en esta computadora.';
       if (st === 'error') {
-        primary = { label: 'Reintentar', command: cmd('agent_connect') };
+        primary = { label: 'Reintentar', command: hash ? connectCmd() : cmd('agent_connect') };
         note = Object.prototype.hasOwnProperty.call(AGENT_ERRORS, a.detail) ? AGENT_ERRORS[a.detail] : 'No se pudo completar; no se tocó nada.';
       }
-      rows.push({ id: a.id, name: AGENT_NAMES[a.id], state: st, word, icon, tone, primary, secondary, note, busy: st === 'working',
-        aria: `${AGENT_NAMES[a.id]}: ${word}${note ? '. ' + note : ''}` });
+      const trust = a.trust_review === true;
+      if (trust) note = `${note ? note + ' ' : ''}Ahora confiá en los hooks desde /hooks dentro de ${AGENT_NAMES[a.id]}: hasta entonces no se activan.`;
+      rows.push({ id: a.id, name: AGENT_NAMES[a.id], state: st, word, icon, tone, primary, secondary, note, summary, reviewable, trust, busy: st === 'working',
+        aria: `${AGENT_NAMES[a.id]}: ${word}${summary ? '. ' + summary : ''}${note ? '. ' + note : ''}` });
     }
     return { kind: 'ready', rows };
   }
@@ -343,6 +374,6 @@
     };
   }
 
-  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
 });

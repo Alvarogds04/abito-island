@@ -197,13 +197,35 @@ pub fn parse_ui_command(payload: &Value) -> Result<UiCommand, CommandError> {
             exact(1)?;
             wire(&[("type", "agents_list")])
         }
-        "agent_connect" | "agent_disconnect" => {
-            exact(2)?;
+        "agent_connect" => {
+            // The plan the human SAW travels back with the click; the engine previews again and refuses to apply
+            // a different one. Optional (absent = the engine applies a fresh preview), and exactly 64 lowercase hex.
             let id = get("agentId")?;
             if !AGENT_IDS.contains(&id) {
                 return Err(CommandError);
             }
-            wire(&[("type", action), ("agentId", id)])
+            match map.get("plan_hash") {
+                None => {
+                    exact(2)?;
+                    wire(&[("type", "agent_connect"), ("agentId", id)])
+                }
+                Some(h) => {
+                    exact(3)?;
+                    let hash = h.as_str().ok_or(CommandError)?;
+                    if !plan_hash_ok(hash) {
+                        return Err(CommandError);
+                    }
+                    wire(&[("type", "agent_connect"), ("agentId", id), ("plan_hash", hash)])
+                }
+            }
+        }
+        "agent_disconnect" => {
+            exact(2)?; // a disconnect carries no plan: the engine previews the REMOVE plan itself
+            let id = get("agentId")?;
+            if !AGENT_IDS.contains(&id) {
+                return Err(CommandError);
+            }
+            wire(&[("type", "agent_disconnect"), ("agentId", id)])
         }
         "connectors_list" | "settings_get" | "profile_deactivate" => {
             exact(1)?;
@@ -284,6 +306,15 @@ pub struct ClientState {
     last_error: Value,
     /// The engine's `agents` frame, folded to a flat closed view (None until it speaks).
     agents: Value,
+}
+
+/// A plan hash from the engine: exactly 64 lowercase hex characters.
+pub fn plan_hash_ok(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+/// The closed template the engine prints for a plan: plain text, one line, bounded, no markup.
+fn plan_summary_ok(s: &str) -> bool {
+    !s.is_empty() && s.chars().count() <= 400 && !s.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | '`'))
 }
 
 /// The code agents the island can connect (the installers exist for these).
@@ -408,10 +439,23 @@ impl ClientState {
                         _ => "error",
                     };
                     let detail = match a.get("detail").and_then(Value::as_str) {
-                        Some(d @ ("config_invalid" | "not_writable" | "backup_failed")) => json!(d),
+                        Some(d @ ("config_invalid" | "not_writable" | "backup_failed" | "plan_changed" | "audit_unavailable" | "install_failed")) => json!(d),
                         _ => Value::Null,
                     };
-                    out.push(json!({"id": id, "state": state, "backup": a.get("backup").and_then(Value::as_bool).unwrap_or(false), "detail": detail}));
+                    // the plan exists only for a state that offers a button, and only when BOTH parts look like ours
+                    let offers = matches!(state, "not_connected" | "outdated") || (state == "error" && detail == json!("plan_changed"));
+                    let hash = a.get("plan_hash").and_then(Value::as_str).filter(|h| plan_hash_ok(h));
+                    let summary = a.get("summary").and_then(Value::as_str).filter(|t| plan_summary_ok(t));
+                    let (plan_hash, plan_summary) = match (offers, hash, summary) {
+                        (true, Some(h), Some(t)) => (json!(h), json!(t)),
+                        _ => (Value::Null, Value::Null),
+                    };
+                    out.push(json!({
+                        "id": id, "state": state, "backup": a.get("backup").and_then(Value::as_bool).unwrap_or(false), "detail": detail,
+                        "plan_hash": plan_hash, "summary": plan_summary,
+                        "reviewable": a.get("reviewable").and_then(Value::as_bool).unwrap_or(true),
+                        "trust_review": a.get("trust_review").and_then(Value::as_bool).unwrap_or(false),
+                    }));
                 }
                 self.agents = Value::Array(out);
             }

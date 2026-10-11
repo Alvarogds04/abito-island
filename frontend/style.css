@@ -590,3 +590,5 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
 .sagent:first-child { border-top: 0; }
 .sagent-head { display: flex; align-items: center; gap: 8px; }
 .sagent .srow-actions { margin-left: 0; justify-content: flex-end; }
+.splan { margin: 2px 0 0; font: 400 12px/1.4 var(--font-ui); color: var(--island-ink); }
+.strust { color: var(--sun); }

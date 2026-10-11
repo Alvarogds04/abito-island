@@ -375,9 +375,11 @@
         const li = el('li', 'srow sagent'); li.dataset.state = r.state;
         const head = el('span', 'sagent-head'); head.append(el('b', 'srow-title', r.name), chipNode({ tone: r.tone, icon: r.icon, word: r.word, aria: r.aria }));
         li.append(head);
-        if (r.note) li.append(el('p', 'snote', r.note));
+        // the plan the human is about to approve, in OUR words, right above the button that approves it
+        if (r.summary) li.append(el('p', 'splan', r.summary));
+        if (r.note) li.append(el('p', r.trust ? 'snote strust' : 'snote', r.note));
         const actions = el('span', 'srow-actions');
-        if (r.primary) actions.append(wordBtn(r.primary.label, () => send(r.primary.command, `${r.name}: ${r.primary.label === 'Actualizar' ? 'actualizado' : 'conectado'}.`), { primary: true, aria: `${r.primary.label} ${r.name}` }));
+        if (r.primary) actions.append(wordBtn(r.primary.label, () => send(r.primary.command, `${r.name}: ${r.primary.label === 'Actualizar' ? 'actualizado' : 'conectado'}.`), { primary: true, aria: `${r.primary.label} ${r.name}. ${r.summary || ''}` }));
         if (r.secondary) actions.append(wordBtn(r.secondary.label, () => send(r.secondary.command, `${r.name}: desconectado.`), { aria: `${r.secondary.label} ${r.name}` }));
         li.append(actions); list.append(li);
       }

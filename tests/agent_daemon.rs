@@ -18,6 +18,10 @@ struct Island { root: PathBuf, child: Option<Child> }
 impl Island {
     /// A SHORT private root (the socket path is capped at 107 bytes).
     fn start() -> Island {
+        Island::start_with(json!({}))
+    }
+    /// Same, with extra keys in the island's config.json (e.g. `hookInstallerBin`).
+    fn start_with(extra: Value) -> Island {
         static N: AtomicU32 = AtomicU32::new(0);
         static SWEPT: std::sync::Once = std::sync::Once::new();
         SWEPT.call_once(sweep_abandoned);
@@ -30,7 +34,9 @@ impl Island {
         let node = String::from_utf8(Command::new("sh").args(["-c", "command -v node"]).output().unwrap().stdout).unwrap();
         std::fs::write(&wrapper, format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", node.trim(), fake.display())).unwrap();
         { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap(); }
-        std::fs::write(root.join("config.json"), json!({"command": wrapper}).to_string()).unwrap();
+        let mut config = json!({"command": wrapper});
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() { config[k] = v; }
+        std::fs::write(root.join("config.json"), config.to_string()).unwrap();
         { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(root.join("config.json"), std::fs::Permissions::from_mode(0o600)).unwrap(); }
         let child = Command::new(node.trim()).arg(daemon_dir().join("src/cli.cjs")).arg("run")
             .env_clear().env("PATH", std::env::var("PATH").unwrap()).env("HOME", &base).env("ABITO_ISLAND_DIR", &root)
@@ -69,14 +75,55 @@ impl Drop for Island {
     }
 }
 
-/// Remove an island base this test created: only `~/.aislN-M` dirs that are real, ours and 0700.
-fn remove_ours(base: &Path) {
+/// Is this one of OUR island bases? Exact shape `.aisl<pid>-<n>`, a real directory (never a symlink), owned by us.
+/// The mode is deliberately NOT part of the test: an earlier run under a different umask left 0775 leftovers that a
+/// 0700-only rule could never clean, and a stricter rule here only means garbage accumulates.
+fn is_our_island_base(base: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let name = base.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let Ok(meta) = std::fs::symlink_metadata(base) else { return };
-    if name.starts_with(".aisl") && meta.is_dir() && !meta.file_type().is_symlink() && meta.mode() & 0o777 == 0o700 {
+    let shape = name.strip_prefix(".aisl").and_then(|r| r.split_once('-')).is_some_and(|(pid, n)| {
+        !pid.is_empty() && !n.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) && n.strip_prefix("none").unwrap_or(n).bytes().all(|b| b.is_ascii_digit()) && n != "none"
+    });
+    let Ok(meta) = std::fs::symlink_metadata(base) else { return false };
+    // SAFETY: getuid has no preconditions and cannot fail.
+    shape && meta.is_dir() && !meta.file_type().is_symlink() && meta.uid() == unsafe { libc::getuid() }
+}
+
+/// Remove an island base this test created (see `is_our_island_base`).
+fn remove_ours(base: &Path) {
+    if is_our_island_base(base) {
         let _ = std::fs::remove_dir_all(base);
     }
+}
+
+#[test]
+fn only_our_own_island_bases_are_removed_whatever_their_mode() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let scratch = PathBuf::from(std::env::var("HOME").expect("HOME")).join(format!(".aislz{}", std::process::id() % 100000));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::DirBuilder::new().mode(0o700).create(&scratch).unwrap();
+    let mk = |name: &str, mode: u32| {
+        let p = scratch.join(name);
+        std::fs::create_dir(&p).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        p
+    };
+    let ours_775 = mk(".aisl4242-0", 0o775);
+    let ours_700 = mk(".aisl4242-1", 0o700);
+    let bad_name = [mk(".aisl-x", 0o700), mk(".aislabc-1", 0o700), mk(".aisl12-", 0o700), mk(".aisl-1", 0o700), mk("aisl12-1", 0o700), mk(".aisl12-1x", 0o700)];
+    let outside = scratch.join("outside"); std::fs::create_dir(&outside).unwrap(); std::fs::write(outside.join("keep"), "x").unwrap();
+    let link = scratch.join(".aisl4243-0"); symlink(&outside, &link).unwrap();
+    let file = scratch.join(".aisl4244-0"); std::fs::write(&file, "plain file").unwrap();
+    assert!(is_our_island_base(&ours_775), "a 0775 leftover is ours");
+    assert!(is_our_island_base(&ours_700));
+    for b in &bad_name { assert!(!is_our_island_base(b), "{b:?}"); }
+    assert!(!is_our_island_base(&link), "a symlink is never followed");
+    assert!(!is_our_island_base(&file), "a plain file is not a directory");
+    remove_ours(&ours_775); remove_ours(&link);
+    assert!(!ours_775.exists());
+    assert!(std::fs::symlink_metadata(&link).is_ok() && outside.join("keep").exists(), "the link target was never touched");
+    // tidy: this scratch dir is ours and uses a shape the sweeper does not match
+    let _ = std::fs::remove_file(&link); let _ = std::fs::remove_dir_all(&scratch);
 }
 
 /// Sweep islands of earlier runs whose test process is gone (a panicking test must not leak).
@@ -114,8 +161,12 @@ fn island_root_comes_from_the_environment_only() {
 
 #[test]
 fn no_daemon_reads_as_no_daemon_and_commands_fail_cleanly() {
-    let base = PathBuf::from(std::env::var("HOME").unwrap()).join(format!(".aisl-none{}", std::process::id() % 100000));
+    // the same `.aisl<pid>-<n>` shape as every other island base, so the sweeper and `remove_ours` own it too
+    let base = PathBuf::from(std::env::var("HOME").unwrap()).join(format!(".aisl{}-none0", std::process::id() % 100000));
     let _ = std::fs::DirBuilder::new().mode(0o700).create(&base);
+    struct Tidy(PathBuf);
+    impl Drop for Tidy { fn drop(&mut self) { remove_ours(&self.0); } }
+    let _tidy = Tidy(base.clone());
     let conn = AgentConn::new(|_| {});
     conn.connect(&base);
     assert_eq!(conn.view()["connection"], json!("no_daemon"));
@@ -334,4 +385,69 @@ fn a_daemon_that_does_not_know_agents_list_ends_the_wait_with_a_readable_error()
         env!("CARGO_MANIFEST_DIR"), after, n0)).output().expect("node");
     let kind = String::from_utf8_lossy(&node.stdout).to_string();
     assert!(kind == "unsupported" || kind == "ready", "the page must never keep waiting on this state: {kind} ({})", String::from_utf8_lossy(&node.stderr));
+}
+
+
+/// A private copy of `apps/desktop-harness` with strict modes (dirs 0755, files 0644, the installer 0755), so the
+/// real daemon's trust check accepts it whatever umask the checkout was made with. The original is only read.
+fn strict_harness_copy(into: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for e in std::fs::read_dir(from).unwrap().flatten() {
+            let (src, dst) = (e.path(), to.join(e.file_name()));
+            if e.file_name() == "node_modules" || e.file_name() == "test" { continue; }
+            if src.is_dir() { copy(&src, &dst); } else {
+                std::fs::copy(&src, &dst).unwrap();
+                std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o644)).unwrap();
+            }
+        }
+    }
+    let root = into.join("harness");
+    copy(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../desktop-harness"), &root);
+    let bin = root.join("bin/abito-hook.cjs");
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+/// #310 final contract (H2b), against the REAL daemon, READ-ONLY: `agents_list` makes the daemon preview the
+/// hook plan for each installable agent. HOME is the private island base, so the preview looks at an empty
+/// home and nothing is ever applied (no agent_connect is sent by this test).
+#[test]
+fn the_real_daemon_lists_agents_with_a_plan_the_page_can_carry_back() {
+    let scratch = std::env::temp_dir().join(format!("abito-hk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    // a parent chain the daemon accepts (not group/world-writable): a private subdir of HOME, not /tmp itself
+    let home = PathBuf::from(std::env::var("HOME").expect("HOME")).join(format!(".ahk{}", std::process::id() % 100000));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::DirBuilder::new().mode(0o700).create(&home).unwrap();
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { use std::os::unix::fs::MetadataExt; if let Ok(m) = std::fs::symlink_metadata(&self.0) { if m.is_dir() && m.mode() & 0o777 == 0o700 { let _ = std::fs::remove_dir_all(&self.0); } } } }
+    let _cleanup = Cleanup(home.clone());
+    let hook = strict_harness_copy(&home);
+    // «Claude Code is installed» for the daemon = its config dir exists under the daemon's HOME (the island base,
+    // which is the parent of the island root). No settings file: a clean machine with the tool and no hooks.
+    let island = Island::start_with(json!({"hookInstallerBin": hook}));
+    let daemon_home = island.root.parent().unwrap().to_path_buf();
+    std::fs::DirBuilder::new().mode(0o700).create(daemon_home.join(".claude")).unwrap();
+    let conn = AgentConn::new(|_| {});
+    conn.connect(&island.root);
+    wait_for(&conn, "connected", |v| v["connection"] == json!("connected"));
+    conn.command(&json!({"action":"agents_list"})).unwrap();
+    let v = wait_for(&conn, "agents frame", |v| v["agents"].is_array());
+    let list = v["agents"].as_array().unwrap();
+    let claude = list.iter().find(|a| a["id"] == json!("claude-code")).unwrap_or_else(|| panic!("claude-code missing: {list:?}"));
+    assert_eq!(claude["state"], json!("not_connected"), "an empty private home has no hooks: {claude}");
+    let hash = claude["plan_hash"].as_str().expect("a plan_hash for a button state");
+    assert!(abito_island::agentclient::plan_hash_ok(hash), "{hash}");
+    assert_eq!(claude["reviewable"], json!(true));
+    // the page's pure view turns exactly this real frame into a one-click row carrying the hash it shows
+    let js = format!("const S=require('{}/frontend/settings-view.js'); const st={}; const r=S.agentsView(st).rows.find(x=>x.id==='claude-code'); process.stdout.write(JSON.stringify({{label:r.primary&&r.primary.label,hash:r.primary&&r.primary.command.plan_hash,summary:r.summary}}));", env!("CARGO_MANIFEST_DIR"), v);
+    let out = Command::new("node").arg("-e").arg(js).output().expect("node");
+    let row: Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&out.stderr)));
+    assert_eq!(row["label"], json!("Conectar"));
+    assert_eq!(row["hash"], json!(hash), "the click carries the hash the human saw");
+    assert!(row["summary"].as_str().unwrap().starts_with("Agrega los hooks de Abito"), "{row}");
+    if let Some(o) = list.iter().find(|a| a["id"] == json!("opencode")) { assert_eq!(o["state"], json!("unavailable")); }
 }
