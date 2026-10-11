@@ -1307,6 +1307,8 @@ fn main() {
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let tauri::WindowEvent::Resized(size) = event {
+                    #[cfg(any(debug_assertions, feature = "probe"))]
+                    probe::mark(format!("tao Resized {}x{}", size.width, size.height));
                     questionhost::native_resized(window.app_handle(), (size.width, size.height));
                     nativeaudit::sample(
                         window.app_handle(),

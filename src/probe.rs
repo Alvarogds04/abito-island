@@ -377,6 +377,7 @@ pub fn run(app: AppHandle) {
         column_transition_scenes(&app);
         hotkey_hide_from_views(&app);
         panel_open_timing(&app);
+        native_resize_flash_scene(&app);
     }
     chat_evidence(&app);
 
@@ -1563,6 +1564,130 @@ fn panel_open_timing(app: &AppHandle) {
     let _ = win.eval(js);
     let lines = wait_chat_lines(app, 1, Duration::from_secs(20));
     emit(&json!({"step": "panel_timing", "webview": lines}));
+}
+
+/// A common timeline for the native-resize diagnosis (#310 «flash al cambiar de vista»): Rust marks the
+/// moments the host asks for a size, applies it and receives the window's `Resized`; the page marks what it
+/// sees. Debug/probe builds only, bounded.
+static TIMELINE: std::sync::Mutex<Vec<(u128, String)>> = std::sync::Mutex::new(Vec::new());
+pub(crate) fn mark(label: impl Into<String>) {
+    if let Ok(mut t) = TIMELINE.lock() {
+        if t.len() < 600 {
+            t.push((crate::now_ms(), label.into()));
+        }
+    }
+}
+
+/// #310: the human still sees ONE small flash when the view changes (dot → overview → column). The flash lives
+/// between the page and the real window, so this scene watches the WINDOW: ffmpeg grabs the X server's pixels
+/// of the island's region at 60 fps while the views are walked, and the page and the host write a shared
+/// timeline. Frames and timeline are analysed offline (a pre-compositor view: it shows what the X window
+/// holds at each instant, not what a Wayland compositor then does with it).
+fn native_resize_flash_scene(app: &AppHandle) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let Some(root) = std::env::var_os("ABITO_SOCKET_DIR") else { return };
+    let dir = match std::env::var_os("ABITO_PROBE_VISUAL_DIR") {
+        Some(c) => std::path::PathBuf::from(c),
+        None => std::path::Path::new(&root).join("visual"),
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let tag = std::env::var("ABITO_PROBE_FLASH_TAG").unwrap_or_else(|_| "ahora".into());
+    let video = dir.join(format!("flash-{tag}.mkv"));
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    // a known beige behind the island for the whole recording: anything that is not beige, island black or
+    // island content is an artefact
+    let _ = win.eval("document.body.classList.add('probe-capture-bg')");
+    let _ = win.eval(r#"(() => { const S = { ev: [], rows: [], gaps: [] }; window.__tl = S;
+      const cap = document.getElementById('capsule'), isl = document.getElementById('island');
+      addEventListener('resize', () => S.ev.push([Date.now(), 'page resize', innerWidth, innerHeight]));
+      document.addEventListener('island:view', e => S.ev.push([Date.now(), 'island:view', e.detail]));
+      let last = '', prev = performance.now();
+      const tick = now => { const r = isl.getBoundingClientRect();
+        const k = innerWidth + 'x' + innerHeight + '|' + Math.round(r.width) + 'x' + Math.round(r.height) + '|' + cap.dataset.view + '/' + cap.dataset.phase;
+        if (k !== last) { S.rows.push([Date.now(), innerWidth, innerHeight, Math.round(r.width), Math.round(r.height), cap.dataset.view, cap.dataset.phase]); last = k; }
+        if (now - prev > 24) S.gaps.push([Date.now(), Math.round(now - prev)]);
+        prev = now; if (!S.stop) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick); })()"#);
+    // known starting state: COMPACT (the dot). Earlier scenes leave the island expanded.
+    if state.core.lock().expect("core lock").expanded {
+        if state.core.lock().expect("core lock").chat {
+            crate::chathost::switch_view(app, &state, false);
+            sleep(Duration::from_millis(900));
+        }
+        let plan = state.core.lock().expect("core lock").toggle(&io, area);
+        apply_plan(app, &state, plan);
+        sleep(Duration::from_millis(1500));
+    }
+    sleep(Duration::from_millis(300));
+    let scale = io.scale();
+    let w_px = 0i64;
+    let (x0, y0) = (0i32, 0i32);
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+    let start_ms = crate::now_ms();
+    // the WHOLE root (a fixed region would read outside the window when it moves/resizes): the window's own
+    // geometry is sampled from the X server on a side thread and the frames are cropped to it offline
+    let mut rec = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "x11grab", "-draw_mouse", "0", "-framerate", "60",
+               "-i", &format!("{display}+0,0"), "-t", "11", "-c:v", "ffv1", "-an"])
+        .arg(&video)
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .spawn()
+        .ok();
+    let geom: std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, i32, i32, i32)>>> = Default::default();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (g2, s2) = (geom.clone(), stop.clone());
+    let sampler = std::thread::spawn(move || {
+        while !s2.load(std::sync::atomic::Ordering::SeqCst) {
+            if let Ok(w) = abito_island::workarea::x11_find_own_window("Abito") {
+                if let Ok(mut g) = g2.lock() {
+                    if g.len() < 4000 {
+                        g.push((crate::now_ms(), w.x, w.y, w.w, w.h));
+                    }
+                }
+            } else if let Ok(mut g) = g2.lock() {
+                if g.len() < 4000 {
+                    g.push((crate::now_ms(), -1, -1, -1, -1)); // not found: unmapped or mid-reconfigure
+                }
+            }
+            sleep(Duration::from_millis(4));
+        }
+    });
+    sleep(Duration::from_millis(1200)); // ffmpeg is up and grabbing
+    mark("S0 recording steady (compact)");
+    TIMELINE.lock().map(|mut t| t.retain(|(ms, _)| *ms >= start_ms)).ok();
+    mark("S1 expand: dot -> overview");
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    sleep(Duration::from_millis(1700));
+    mark("S2 view: overview -> column");
+    crate::chathost::switch_view(app, &state, true);
+    sleep(Duration::from_millis(2000));
+    mark("S3 view: column -> overview");
+    crate::chathost::switch_view(app, &state, false);
+    sleep(Duration::from_millis(1700));
+    mark("S4 collapse: overview -> dot");
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    sleep(Duration::from_millis(1800));
+    mark("S5 end");
+    let _ = win.eval("document.body.classList.remove('probe-capture-bg'); window.__tl.stop = true;");
+    if let Some(r) = rec.as_mut() {
+        let _ = r.wait();
+    }
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = sampler.join();
+    let geometry: Vec<_> = geom.lock().map(|g| g.iter().map(|(t, x, y, w, h)| json!([*t as u64, x, y, w, h])).collect()).unwrap_or_default();
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let _ = win.eval("(window.__TAURI__.core.invoke)('record_chat_evidence', { evidence: { phase: 'flash_timeline', ev: window.__tl.ev, rows: window.__tl.rows, gaps: window.__tl.gaps } })");
+    let lines = wait_chat_lines(app, 1, Duration::from_secs(10));
+    let host: Vec<_> = TIMELINE.lock().map(|t| t.iter().map(|(ms, l)| json!([*ms as u64, l])).collect()).unwrap_or_default();
+    emit(&json!({"step": "flash_timeline", "tag": tag, "video": video.to_string_lossy(), "record_start_ms": start_ms as u64, "grab": [x0, y0, w_px], "window_geometry": geometry,
+                 "scale": scale, "host": host, "page": lines}));
 }
 
 /// #310 diagnosis: the human opens the island, works in the chat or in a settings screen and presses the

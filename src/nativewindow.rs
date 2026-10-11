@@ -31,6 +31,8 @@ pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()>
         .state::<super::AppState>()
         .generation
         .load(Ordering::SeqCst);
+    #[cfg(any(debug_assertions, feature = "probe"))]
+    crate::probe::mark(format!("native set_size {w}x{h} requested"));
     let window = win.clone();
     win.run_on_main_thread(move || {
         defer(move || {
@@ -43,6 +45,8 @@ pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()>
             {
                 return; // a newer plan owns the window; native recovery remains event-based
             }
+            #[cfg(any(debug_assertions, feature = "probe"))]
+            crate::probe::mark(format!("native set_size {w}x{h} applied"));
             let apply = || -> Result<(), String> {
                 let scale = window.scale_factor().map_err(|e| e.to_string())?;
                 let (lw, lh) = logical_size(w, h, scale).map_err(str::to_string)?;
