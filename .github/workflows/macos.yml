@@ -1,0 +1,40 @@
+name: macOS build + smoke evidence
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-smoke:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Build release (locked)
+        run: cargo build --release --locked
+      - name: Node packaging checks
+        run: |
+          cd test-node 2>/dev/null || true
+          for f in packaging-check.cjs; do node "$f" || exit 1; done
+      - name: Launch island + capture evidence
+        run: |
+          BIN=target/release/abito-island
+          [ -x "$BIN" ] || { echo "binario no encontrado"; exit 1; }
+          export ABITO_PROJECT_ROOT="$PWD"
+          "$BIN" &
+          APP_PID=$!
+          sleep 8
+          mkdir -p evidence
+          screencapture -x evidence/island-launch.png || echo "screencapture falló"
+          kill $APP_PID 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abito-macos-evidence
+          path: |
+            evidence/
+            target/release/bundle/dmg/*.dmg
+          if-no-files-found: warn
