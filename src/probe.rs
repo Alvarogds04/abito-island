@@ -375,6 +375,7 @@ pub fn run(app: AppHandle) {
         hotkey_evidence(&app);
         settings_scenes(&app, &std::env::var("ABITO_PROBE_SETTINGS_TAG").unwrap_or_else(|_| "sin-motor".into()));
         column_transition_scenes(&app);
+        hotkey_hide_from_views(&app);
     }
     chat_evidence(&app);
 
@@ -1515,6 +1516,55 @@ fn wait_chat_lines(app: &AppHandle, n: usize, timeout: Duration) -> Vec<serde_js
             return lines;
         }
         sleep(Duration::from_millis(100));
+    }
+}
+
+/// #310 diagnosis: the human opens the island, works in the chat or in a settings screen and presses the
+/// shortcut AGAIN expecting it to hide. Press it from each view (the same entry point the X11 grab and the
+/// portal's `Activated` use) and report phase and real visibility.
+fn hotkey_hide_from_views(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    let phase = |s: &AppState| format!("{:?}", *s.phase.lock().expect("phase lock"));
+    let visible = |w: &tauri::WebviewWindow| w.is_visible().unwrap_or(false);
+    let mut rows = Vec::new();
+    for view in ["overview", "chat", "settings-screen", "chat-just-opened"] {
+        // make sure we start visible and expanded in the right view
+        if phase(&state) == "Hidden" {
+            crate::hotkeyhost::press_on_main(app);
+            sleep(Duration::from_millis(700));
+        }
+        if !state.core.lock().expect("core lock").expanded {
+            let plan = state.core.lock().expect("core lock").toggle(&io, area);
+            apply_plan(app, &state, plan);
+            sleep(Duration::from_millis(900));
+        }
+        if view != "overview" {
+            crate::chathost::switch_view(app, &state, true);
+            sleep(Duration::from_millis(if view == "chat-just-opened" { 120 } else { 1200 }));
+        }
+        if view == "settings-screen" {
+            let _ = win.eval("document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: 'accounts' }))");
+            sleep(Duration::from_millis(700));
+        }
+        let before = json!({"phase": phase(&state), "visible": visible(&win), "expanded": state.core.lock().expect("core lock").expanded, "chat": state.core.lock().expect("core lock").chat});
+        crate::hotkeyhost::press_on_main(app);
+        sleep(Duration::from_millis(900));
+        let after = json!({"phase": phase(&state), "visible": visible(&win)});
+        rows.push(json!({"from": view, "before": before, "after_press": after}));
+        if phase(&state) != "Hidden" {
+            // a second press, to see whether it toggles the other way or stays visible
+            crate::hotkeyhost::press_on_main(app);
+            sleep(Duration::from_millis(900));
+            rows.push(json!({"from": view, "second_press": {"phase": phase(&state), "visible": visible(&win)}}));
+        }
+    }
+    emit(&json!({"step": "hotkey_hide_views", "rows": rows}));
+    if phase(&state) == "Hidden" {
+        crate::hotkeyhost::press_on_main(app);
+        sleep(Duration::from_millis(700));
     }
 }
 
