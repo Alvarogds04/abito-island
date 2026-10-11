@@ -35,6 +35,7 @@
     'load-off': `<path d="M10 3v8M6.5 8L10 11.5 13.5 8M3 13v3h14v-3"/><path d="${SLASH}"/>`, // loading needed (Abito never loads)
     'eye': EYE,
     'arrow-down': '<path d="M10 4v12M5 11l5 5 5-5"/>',
+    'gear': '<circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/>',
     'ring': '<path d="M10 2a8 8 0 1 0 8 8"/>', // open arc; the page spins it
   });
   const NAMES = Object.freeze(Object.keys(PATHS));

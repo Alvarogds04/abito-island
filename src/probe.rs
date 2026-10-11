@@ -372,6 +372,7 @@ pub fn run(app: AppHandle) {
     if visual_run {
         notification_scenes(&app);
         hotkey_evidence(&app);
+        settings_scenes(&app, &std::env::var("ABITO_PROBE_SETTINGS_TAG").unwrap_or_else(|_| "sin-motor".into()));
     }
     chat_evidence(&app);
 
@@ -1154,6 +1155,62 @@ fn hotkey_evidence(app: &AppHandle) {
     drop(stream.take());
     emit(&json!({"step": "hotkey_evidence", "before": before, "after_hide": hidden, "notice_sent_while_hidden": notice_ok,
         "after_notice_still_hidden": still_hidden, "after_show": shown}));
+}
+
+/// #306 evidence (opt-in visual run): the settings panel in each section, driven through the
+/// page's own gear/tabs. The daemon state comes from `ABITO_ISLAND_DIR` (a REAL daemon with a
+/// fake agent when the caller started one, or nothing running = honest «Sin motor»).
+fn settings_scenes(app: &AppHandle, tag: &str) {
+    if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let win = main_window(app);
+    let area = refresh_work_area(app, &state);
+    let io = TauriIo(&win);
+    let scale = io.scale();
+    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
+    let chat_size = geometry::scaled_size(geometry::LOGICAL_CHAT, scale);
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, overview, Duration::from_secs(3));
+    sleep(Duration::from_millis(900));
+    capture_visual(app, &format!("ajustes-{tag}-engranaje"));
+    // the gear (a real click on the real button; the probe page click is the human's gesture stand-in)
+    let _ = win.eval("document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: 'open' }))");
+    wait_for_size(app, chat_size, Duration::from_secs(3));
+    sleep(Duration::from_millis(1400));
+    let probe = |js: &str| {
+        state.chat_probe.lock().expect("chat probe lock").clear();
+        let _ = win.eval(js.to_string());
+        wait_chat_lines(app, 1, Duration::from_secs(15))
+    };
+    // Raw diagnostic FIRST: what does the page get from agent_action? (error text, not a guess)
+    state.chat_probe.lock().expect("chat probe lock").clear();
+    let _ = win.eval("(async()=>{let r; try { r = await (window.__TAURI__.core.invoke)('agent_action',{payload:{action:'view'}}); r = 'OK:' + JSON.stringify(r).slice(0,200); } catch(e) { r = 'ERR:' + (typeof e === 'string' ? e : JSON.stringify(e)); } await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'agent_raw', r}}); })()".to_string());
+    let raw = wait_chat_lines(app, 1, Duration::from_secs(10));
+    emit(&json!({"step": "agent_raw", "webview": raw}));
+    for (section, name) in [("providers", "proveedores"), ("connectors", "conectores"), ("general", "general")] {
+        // a script click is not a trusted gesture (the tab buttons rightly ignore it), so the probe
+        // selects the tab through the panel's one inert seam: a CustomEvent that only changes which
+        // section is shown.
+        let _ = win.eval(format!("document.dispatchEvent(new CustomEvent('abito:settings-select', {{ detail: '{section}' }}))"));
+        sleep(Duration::from_millis(900));
+        let lines = probe(&format!(
+            "(async()=>{{let direct=null; try {{ direct = await (window.__TAURI__.core.invoke)('agent_action',{{payload:{{action:'view'}}}}); direct = direct.connection; }} catch(e) {{ direct = 'ERR:' + JSON.stringify(e); }}
+              const rows=[...document.querySelectorAll('#settings-body .srow')].map(r=>r.textContent.replace(/\\s+/g,' ').trim());
+              const sizes=[...document.querySelectorAll('#settings button, #settings input, #settings select')].filter(e=>e.getBoundingClientRect().width>0).map(e=>{{const r=e.getBoundingClientRect(); return [e.id||e.className||e.tagName, Math.round(r.width), Math.round(r.height)];}});
+              await (window.__TAURI__.core.invoke)('record_chat_evidence',{{evidence:{{phase:'settings',direct_view:direct,section:'{section}',open:document.getElementById('settings').dataset.open,conn_chip:(c=>c.hidden?null:c.textContent.trim())(document.getElementById('settings-conn')),rows,undersized:sizes.filter(s=>s[1]<44||s[2]<44),count:sizes.length}}}}); }})()"
+        ));
+        emit(&json!({"step": "settings_section", "tag": tag, "section": section, "webview": lines}));
+        capture_visual(app, &format!("ajustes-{tag}-{name}"));
+    }
+    sleep(Duration::from_millis(300));
+    crate::chathost::switch_view(app, &state, false);
+    wait_for_size(app, overview, Duration::from_secs(3));
+    let plan = state.core.lock().expect("core lock").toggle(&io, area);
+    apply_plan(app, &state, plan);
+    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
 }
 
 /// UI contract §9.1/§9.5 «Abito alive by default»: the R6 in `idle` must be

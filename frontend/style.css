@@ -482,3 +482,76 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #question-word { position: absolute; right: 64px; bottom: 50px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
 #question-state[data-kind="sent"] .ico { color: var(--island-live); }
 
+
+/* ---- #306: settings (gear in the overview + an internal panel of the chat view) ---------------
+   Same motion as the model picker (inert + visibility/opacity, §9.2); controls >= 44px;
+   every state is icon + one word; nothing here depends on hover. */
+#open-settings {
+  position: absolute; right: 72px; bottom: 12px; display: grid; place-items: center; width: 48px; height: 48px; padding: 0;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); cursor: pointer;
+  opacity: 0; visibility: hidden; transform: translateY(6px);
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
+}
+#capsule[data-phase="expanded"][data-view="overview"] #open-settings {
+  opacity: 1; visibility: visible; transform: none;
+  transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s;
+}
+/* these must out-rank the «shown in the overview» rule above (2 attributes), or they never apply */
+#capsule[data-phase="expanded"][data-view="overview"][data-question="pending"]:not([data-card]) #open-settings,
+#capsule[data-phase="expanded"][data-view="overview"][data-card] #open-settings { opacity: 0; visibility: hidden; }
+#open-settings:hover { background: rgba(255, 255, 255, .08); }
+#settings {
+  position: absolute; left: 12px; right: 12px; top: 4px; bottom: 4px; z-index: 3; display: flex; flex-direction: column; gap: 4px;
+  background: var(--island); color: var(--island-muted);
+  opacity: 0; visibility: hidden; transform: translateY(calc(var(--view-dir) * var(--view-shift)));
+  transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
+}
+#settings[data-open="true"] {
+  opacity: 1; visibility: visible; transform: none;
+  transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s;
+}
+#capsule[data-settings="open"] #chat-header, #capsule[data-settings="open"] #chat-body, #capsule[data-settings="open"] #models { opacity: 0; visibility: hidden; }
+#settings-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+#settings-tabs { display: flex; gap: 6px; margin-right: auto; }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px 0 10px;
+  border-radius: var(--radius-full); border: 1px solid transparent; background: transparent; color: var(--island-muted); font: 600 13px/1 var(--font-ui); cursor: pointer;
+}
+.tab[aria-selected="true"] { color: var(--island-ink); border-color: rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); }
+#settings-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 0; padding-right: 2px; }
+.srows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.srow { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; flex-wrap: wrap; }
+.srow-title { color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); }
+.srow-sub { font-size: 12px; color: var(--island-muted); }
+.srow-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.sempty, .snote { margin: 0; font-size: 12px; color: var(--island-muted); line-height: 1.35; }
+.sline { margin: 0; font-size: 13px; color: var(--island-ink); line-height: 1.35; overflow-wrap: anywhere; }
+.sline.sub { font-size: 12px; color: var(--island-muted); }
+.scode { align-self: flex-start; padding: 4px 10px; border-radius: 8px; background: #18181b; color: var(--island-ink); font: 700 15px/1.2 ui-monospace, monospace; letter-spacing: .08em; -webkit-user-select: text; user-select: text; cursor: text; }
+.sflow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-xl); border: 1px solid var(--island-live); }
+.sform { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
+.sfield {
+  flex: 1; min-width: 120px; min-height: 44px; padding: 0 14px; border-radius: var(--radius-2xl); border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .06); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui); -webkit-user-select: text; user-select: text; cursor: text;
+  color-scheme: dark;
+}
+select.sfield { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--island-ink) 50%), linear-gradient(135deg, var(--island-ink) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+select.sfield option { background: #18181b; color: var(--island-ink); }
+.sbtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px 0 10px;
+  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); cursor: pointer;
+}
+.sbtn.primary { background: var(--go); border-color: var(--go); color: #000; }
+.sbtn:disabled { opacity: .4; cursor: default; }
+.skbd { padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .3); background: #18181b; color: var(--island-ink); font: 700 12px/1.2 ui-monospace, monospace; }
+.switch {
+  position: relative; margin-left: auto; width: 56px; height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer;
+}
+.switch::before { content: ""; position: absolute; left: 4px; top: 10px; width: 48px; height: 24px; border-radius: 12px; border: 2px solid rgba(255, 255, 255, .4); box-sizing: border-box; transition: background-color var(--dur-state) var(--ease-out), border-color var(--dur-state) var(--ease-out); }
+.switch[aria-checked="true"]::before { background: var(--go); border-color: var(--go); }
+.switch .knob { position: absolute; top: 14px; left: 10px; width: 16px; height: 16px; border-radius: 50%; background: var(--island-ink); transition: transform var(--dur-state) var(--ease-out); }
+.switch[aria-checked="true"] .knob { transform: translateX(24px); background: #000; }
+html[data-motion="reduce"] #open-settings, html[data-motion="reduce"] #settings { transition: none !important; transform: none !important; }
+html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .knob { transition: none; }

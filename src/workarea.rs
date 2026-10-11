@@ -159,6 +159,26 @@ pub fn pick_own_window(list: &[Candidate], pid: u32, title: &str) -> Result<u32,
     Err(OwnWindowError::NotFound)
 }
 
+/// Every descendant of `root` (breadth first, bounded): the fallback list when no window
+/// manager publishes `_NET_CLIENT_LIST`. Read-only.
+fn tree_windows(conn: &x11rb::rust_connection::RustConnection, root: u32) -> Vec<u32> {
+    use x11rb::protocol::xproto::ConnectionExt;
+    const MAX: usize = 512;
+    let mut out = Vec::new();
+    let mut queue = vec![root];
+    while let Some(w) = queue.pop() {
+        let Some(tree) = conn.query_tree(w).ok().and_then(|c| c.reply().ok()) else { continue };
+        for child in tree.children {
+            if out.len() >= MAX {
+                return out;
+            }
+            out.push(child);
+            queue.push(child);
+        }
+    }
+    out
+}
+
 /// Find OUR window (read-only; never modifies any window) by
 /// [`pick_own_window`] over the EWMH client list, and report its raw X11
 /// state. The title is only the secondary condition.
@@ -191,6 +211,12 @@ pub fn x11_find_own_window(title: &str) -> Result<X11Window, OwnWindowError> {
                 .ok()?;
             let v: Vec<u32> = reply.value32()?.collect();
             (!v.is_empty()).then_some(v)
+        })
+        // No EWMH list (a bare X server with no window manager, e.g. a private Xvfb): walk the
+        // window tree instead. Identity is still the pid, so nothing weaker than before.
+        .or_else(|| {
+            let found = tree_windows(&conn, screen.root);
+            (!found.is_empty()).then_some(found)
         })
         .ok_or(OwnWindowError::NoX11)?;
     let net_wm_name = atom(b"_NET_WM_NAME")?;

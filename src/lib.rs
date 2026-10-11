@@ -13,6 +13,8 @@
 //! headless); `main.rs` is the Tauri wiring and `probe.rs` its read-back
 //! script.
 
+pub mod agentclient;
+pub mod agentconn;
 pub mod approval;
 pub mod bridge;
 pub mod card;
@@ -31,6 +33,7 @@ pub mod http;
 pub mod identity;
 pub mod localmodel;
 pub mod models;
+pub mod prefs;
 pub mod protocol;
 pub mod question;
 pub mod questioncmd;
