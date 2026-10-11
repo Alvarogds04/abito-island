@@ -25,6 +25,7 @@ pub mod fakebridge;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakemodel;
 pub mod geometry;
+pub mod handoff;
 pub mod hotkey;
 pub mod http;
 pub mod identity;

@@ -134,6 +134,8 @@ fn close_transport(app: &AppHandle) {
     };
     if let Err(error) = transport.close() {
         eprintln!("Private socket cleanup refused; inspect the local runtime directory.");
+    // P2: the stable pointer goes first, and only if it still names OUR socket.
+    abito_island::handoff::clear(transport.runtime(), transport.endpoint());
         eprintln!("transport cleanup: {error}");
     }
 }
@@ -198,6 +200,10 @@ fn start_transport(app: &AppHandle) {
             println!("ABITO_DESKTOP_SOCKET={}", transport.endpoint().display());
             *state.transport.lock().expect("transport lock") = Some(transport);
         }
+            // P2: a stable `<runtime>/endpoint.json` so local hooks need no exported env.
+            if let Err(error) = abito_island::handoff::publish(transport.runtime(), transport.endpoint()) {
+                eprintln!("endpoint handoff not published: {error}");
+            }
         Err(error) => fail(error.to_string()),
     }
 }

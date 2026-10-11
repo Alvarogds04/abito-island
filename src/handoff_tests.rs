@@ -1,0 +1,161 @@
+use super::*;
+use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::net::UnixListener;
+
+static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static SWEPT: std::sync::Once = std::sync::Once::new();
+/// Every test dir lives under `/tmp/abito-ho-<pid>/`; the parents of DEAD test runs are swept the
+/// first time (the same self-cleaning idea as the node checks), never a live process's.
+fn fresh_root() -> PathBuf {
+    let tmp = std::env::temp_dir();
+    SWEPT.call_once(|| {
+        for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(pid) = name.strip_prefix("abito-ho-").and_then(|p| p.parse::<u32>().ok()) else { continue };
+            if pid != std::process::id() && !Path::new(&format!("/proc/{pid}")).exists() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    });
+    let parent = tmp.join(format!("abito-ho-{}", std::process::id()));
+    std::fs::create_dir_all(&parent).unwrap();
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = parent.join(n.to_string());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    dir
+}
+/// A real bound socket at `<root>/p-abc123/s`, like the transport makes.
+fn bound(root: &Path, leaf: &str) -> (PathBuf, UnixListener) {
+    let dir = root.join(leaf);
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let endpoint = dir.join("s");
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    (endpoint, listener)
+}
+fn mode(p: &Path) -> u32 { std::fs::metadata(p).unwrap().permissions().mode() & 0o777 }
+
+#[test]
+fn publishing_writes_one_private_file_at_a_stable_path_with_the_current_endpoint() {
+    let root = fresh_root();
+    let (endpoint, _l) = bound(&root, "p-abc123");
+    publish(&root, &endpoint).unwrap();
+    let file = path(&root);
+    assert_eq!(file, root.join("endpoint.json"), "the path never depends on the random p-XXXXXX leaf");
+    assert_eq!(mode(&file), 0o600);
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.ends_with('\n') && text.matches('\n').count() == 1, "one line");
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["v"], 1);
+    assert_eq!(v["endpoint"], endpoint.to_str().unwrap());
+    assert_eq!(v["pid"], std::process::id());
+    assert_eq!(v.as_object().unwrap().len(), 3, "closed key set: v, endpoint, pid");
+    // no temp file is left behind
+    let names: Vec<String> = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into()).collect();
+    assert!(names.iter().all(|n| !n.contains(".tmp")), "{names:?}");
+}
+
+#[test]
+fn every_start_replaces_the_file_atomically_with_the_new_endpoint() {
+    let root = fresh_root();
+    let (first, l1) = bound(&root, "p-aaaaaa");
+    publish(&root, &first).unwrap();
+    drop(l1);
+    let (second, _l2) = bound(&root, "p-bbbbbb");
+    publish(&root, &second).unwrap();
+    assert_eq!(read(&root).unwrap(), second, "the latest start wins");
+    assert_eq!(mode(&path(&root)), 0o600);
+}
+
+#[test]
+fn clear_removes_only_our_own_handoff() {
+    let root = fresh_root();
+    let (mine, _l1) = bound(&root, "p-aaaaaa");
+    publish(&root, &mine).unwrap();
+    // another island took over the file after us: ours must NOT delete theirs
+    let (theirs, _l2) = bound(&root, "p-bbbbbb");
+    publish(&root, &theirs).unwrap();
+    clear(&root, &mine);
+    assert!(path(&root).exists(), "a newer instance's handoff survives our exit");
+    clear(&root, &theirs);
+    assert!(!path(&root).exists(), "the owner's exit removes it");
+    clear(&root, &theirs); // idempotent, no panic
+}
+
+#[test]
+fn clear_never_follows_or_removes_a_symlink_or_a_foreign_file() {
+    let root = fresh_root();
+    let (endpoint, _l) = bound(&root, "p-aaaaaa");
+    let target = root.join("precious");
+    std::fs::write(&target, "keep").unwrap();
+    symlink(&target, path(&root)).unwrap();
+    clear(&root, &endpoint);
+    assert!(std::fs::symlink_metadata(path(&root)).is_ok(), "a symlink is not ours to remove");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+    assert!(publish(&root, &endpoint).is_err(), "publish refuses to write through a symlink");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep", "nothing was written through it");
+    std::fs::remove_file(path(&root)).unwrap();
+    std::fs::write(path(&root), "{\"not\":\"ours\"}\n").unwrap();
+    clear(&root, &endpoint);
+    assert!(path(&root).exists(), "a file that does not name our endpoint is left alone");
+}
+
+#[test]
+fn publish_refuses_an_endpoint_that_is_not_the_exact_receiver_shape() {
+    let root = fresh_root();
+    let (good, _l) = bound(&root, "p-abc123");
+    let elsewhere = fresh_root();
+    let (outside, _l2) = bound(&elsewhere, "p-abc123");
+    for bad in [outside.clone(), root.join("p-abc12").join("s"), root.join("p-abc123").join("x"), root.join("q-abc123").join("s"),
+                root.join("p-abc123/../p-abc123/s"), PathBuf::from("relative/p-abc123/s"), root.join("p-abc123")] {
+        assert!(publish(&root, &bad).is_err(), "must refuse {bad:?}");
+        assert!(!path(&root).exists(), "a refused publish writes nothing");
+    }
+    publish(&root, &good).unwrap();
+}
+
+#[test]
+fn publish_requires_a_live_socket_and_a_private_runtime_root() {
+    let root = fresh_root();
+    let dir = root.join("p-abc123");
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("s"), "a plain file is not a socket").unwrap();
+    assert!(publish(&root, &dir.join("s")).is_err(), "not a socket");
+    let (endpoint, _l) = bound(&root, "p-zzzzzz");
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(publish(&root, &endpoint).is_err(), "a runtime root that is not 0700 is refused");
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    publish(&root, &endpoint).unwrap();
+}
+
+#[test]
+fn a_consumer_reads_it_back_and_a_stale_file_is_never_believed() {
+    let root = fresh_root();
+    assert_eq!(read(&root), None, "no file, no endpoint");
+    let (endpoint, l) = bound(&root, "p-abc123");
+    publish(&root, &endpoint).unwrap();
+    assert_eq!(read(&root), Some(endpoint.clone()));
+    // the island died: its pid is gone and the socket is gone
+    drop(l);
+    std::fs::remove_file(&endpoint).unwrap();
+    assert_eq!(read(&root), None, "the socket no longer exists");
+    // garbage in the file
+    for junk in ["", "not json", "{}", "[]", "{\"v\":2,\"endpoint\":\"/x\",\"pid\":1}", "{\"v\":1,\"endpoint\":7,\"pid\":1}",
+                 "{\"v\":1,\"endpoint\":\"/etc/passwd\",\"pid\":1}", "{\"v\":1,\"endpoint\":\"rel/p-abc123/s\",\"pid\":1}"] {
+        std::fs::write(path(&root), junk).unwrap();
+        assert_eq!(read(&root), None, "{junk:?}");
+    }
+}
+
+#[test]
+fn a_file_left_by_a_killed_island_is_not_believed_even_if_the_socket_inode_lingers() {
+    let root = fresh_root();
+    let (endpoint, _listener) = bound(&root, "p-abc123");
+    // a pid that is certainly not alive (pid_max is far below this)
+    let dead = format!("{{\"endpoint\":{:?},\"pid\":4194999,\"v\":1}}\n", endpoint.to_str().unwrap());
+    std::fs::write(path(&root), dead).unwrap();
+    assert_eq!(read(&root), None, "the island that wrote it is gone");
+    publish(&root, &endpoint).unwrap();
+    assert_eq!(read(&root), Some(endpoint), "a live pid (ours) is believed");
+}
