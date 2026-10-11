@@ -172,9 +172,10 @@
   function apply(next) {
     if (!next || typeof next !== 'object') return;
     previous = snapshot; snapshot = next;
-    // Cue ids only (no audio exists): kept so the human-enabled sound switch has one place to hook.
+    // Cue ids go to the sound engine through the page event (see sound-wiring.js).
     const cue = N.soundFor(previous, snapshot);
-    if (cue && limiter.allow(cue, Date.now()) && N.SOUND_ENABLED_DEFAULT) document.dispatchEvent(new CustomEvent('abito:cue', { detail: cue }));
+    // #313: the gate is the sound ENGINE (off until the human enables it, silent until ready), not a constant
+    if (cue && limiter.allow(cue, Date.now())) document.dispatchEvent(new CustomEvent('abito:cue', { detail: cue }));
     render();
     // a pending question is also a compact signal (sun dot): island.js reads capsule.dataset.question
     document.dispatchEvent(new CustomEvent('abito:question', { detail: { pending: !!(N.fromPending(snapshot.pending)), show: !!capsule.dataset.question } }));
