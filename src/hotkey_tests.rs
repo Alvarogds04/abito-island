@@ -59,6 +59,31 @@ fn x11_masks_and_keysyms_are_the_protocol_values() {
 }
 
 #[test]
+fn win_modifier_bits_and_virtual_keys_are_the_win32_protocol_values() {
+    // RegisterHotKey fsModifiers, read from the real SDK winuser.h in the xwin
+    // cache (line 3577-3580): MOD_ALT 0x0001, MOD_CONTROL 0x0002, MOD_SHIFT
+    // 0x0004, MOD_WIN 0x0008 (NOT 0x8000 as an early design note claimed),
+    // MOD_NOREPEAT 0x4000. windows-sys 0.61.2 agrees with the header.
+    let c = Combo::parse("Ctrl+Alt+Shift+Super+A").unwrap();
+    assert_eq!(c.win_modifiers(), 0x0001 | 0x0002 | 0x0004 | 0x0008);
+    assert_eq!(Combo::parse("Ctrl+A").unwrap().win_modifiers(), 0x0002);
+    assert_eq!(Combo::parse("Alt+Space").unwrap().win_modifiers(), 0x0001);
+    assert_eq!(Combo::parse("Super+Space").unwrap().win_modifiers(), 0x0008);
+    assert_eq!(Combo::parse("Shift+Ctrl+9").unwrap().win_modifiers(), 0x0002 | 0x0004);
+    // VK codes, read from the same winuser.h: the header comment says VK_A-VK_Z
+    // are ASCII 'A'-'Z' (0x41-0x5A) and VK_0-VK_9 ASCII '0'-'9' (0x30-0x39);
+    // VK_SPACE 0x20; VK_F1 0x70 .. VK_F12 0x7B; VK_F4 verified 0x73.
+    assert_eq!(Combo::parse("Ctrl+A").unwrap().win_vk(), 0x41);
+    assert_eq!(Combo::parse("Ctrl+Z").unwrap().win_vk(), 0x5a);
+    assert_eq!(Combo::parse("Ctrl+0").unwrap().win_vk(), 0x30);
+    assert_eq!(Combo::parse("Ctrl+9").unwrap().win_vk(), 0x39);
+    assert_eq!(Combo::parse("Ctrl+Space").unwrap().win_vk(), 0x20);
+    assert_eq!(Combo::parse("Alt+F4").unwrap().win_vk(), 0x73);
+    assert_eq!(Combo::parse("Ctrl+F1").unwrap().win_vk(), 0x70);
+    assert_eq!(Combo::parse("Ctrl+F12").unwrap().win_vk(), 0x7b);
+}
+
+#[test]
 fn every_lock_state_is_grabbed_so_numlock_or_capslock_never_breaks_the_hotkey() {
     let variants = lock_variants();
     assert_eq!(variants.len(), 4);

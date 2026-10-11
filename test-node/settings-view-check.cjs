@@ -157,6 +157,13 @@ test('general: sound switch is persisted (default OFF), motion is «respect the 
   assert.equal(g.hotkey.combo, 'Ctrl+Alt+A'); assert.equal(g.hotkey.backendLabel, 'Atajo del sistema');
   const x11 = S.generalView({ sound: false, motionOverride: true, hotkey: { combo: 'Ctrl+Alt+A', enabled: true, status: 'active', limited: true, backend: 'x11', portal_note: 'permission_denied' } });
   assert.equal(x11.hotkey.backendLabel, 'Atajo limitado (X11)'); assert.match(x11.hotkey.note, /rechazaste/i);
+  // U3a: Windows' RegisterHotKey is a REAL backend. Normalizing anything that
+  // is not portal to «Atajo de X11» is precisely the lie the port must not ship.
+  const win = S.generalView({ sound: false, motionOverride: true, hotkey: { combo: 'Ctrl+Alt+A', enabled: true, status: 'active', limited: false, backend: 'win32', portal_note: null } });
+  assert.equal(win.hotkey.backend, 'win32');
+  assert.equal(win.hotkey.backendLabel, 'Atajo de Windows');
+  const winTaken = S.generalView({ sound: false, motionOverride: true, hotkey: { combo: 'Ctrl+Alt+A', enabled: true, status: 'taken', limited: false, backend: 'win32', portal_note: null } });
+  assert.equal(winTaken.hotkey.backendLabel, 'Atajo de Windows', 'a denied grab still names the right backend');
   assert.equal(S.generalView({ sound: false, motionOverride: true, hotkey: { combo: 'Ctrl+Alt+A', enabled: false, status: 'disabled', limited: false, backend: 'x11', portal_note: null } }).hotkey.enabled, false);
   assert.equal(S.generalView({}).sound.on, false); assert.equal(S.generalView(null).hotkey, null);
 });

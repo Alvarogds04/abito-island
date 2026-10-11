@@ -553,6 +553,18 @@ test('#305 hotkey feedback: a taken/unsupported/invalid grab is VISIBLE (icon + 
   assert.equal(O.hotkeyView(v('taken', { limited: true })).word, 'Atajo ocupado');
 });
 
+test('U3a win32 hotkey feedback: «Atajo sin soporte» says so WITHOUT the X11 excuse; taken stays «otra aplicación»; a working grab is silent', () => {
+  const wv = (status, extra = {}) => ({ combo: 'Ctrl+Alt+A', enabled: true, status, limited: false, backend: 'win32', portal_note: null, ...extra });
+  const unsup = O.hotkeyView(wv('unsupported'));
+  assert.equal(unsup.word, 'Atajo sin soporte');
+  assert.doesNotMatch(unsup.aria, /X11/, 'there is no X server on Windows; blaming one is the lie U3a kills');
+  assert.match(unsup.aria, /no se pudo registrar/);
+  const taken = O.hotkeyView(wv('taken'));
+  assert.equal(taken.word, 'Atajo ocupado'); assert.match(taken.aria, /otra aplicación/);
+  assert.equal(O.hotkeyView(wv('active')), null, 'a real Win32 grab that works says nothing');
+  assert.equal(O.hotkeyView(wv('disabled')), null);
+});
+
 test('#305 wiring: the island listens to hotkey:state and paints the chip; the page never grabs or answers anything', () => {
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   assert.match(html, /id="hotkey" class="chip" role="img" hidden/);

@@ -22,6 +22,9 @@ mod tests;
 
 pub mod portal;
 pub mod x11;
+// U3a: the Win32 grabber seam; its whole body is cfg(windows)-gated, so this
+// mount compiles empty everywhere else (same pattern as the x11/portal files).
+pub mod win32;
 
 const MAX_INPUT: usize = 64;
 const SHIFT: u8 = 1;
@@ -157,6 +160,31 @@ impl Combo {
             Key::Digit(c) => u32::from(c),
             Key::Space => 0x20,
             Key::F(n) => 0xffbe + u32::from(n) - 1,
+        }
+    }
+
+    /// Win32 `RegisterHotKey` fsModifiers, per the SDK `winuser.h` (MOD_ALT 0x1,
+    /// MOD_CONTROL 0x2, MOD_SHIFT 0x4, MOD_WIN **0x8** — not the 0x8000 hook bit).
+    /// `MOD_NOREPEAT` is a registration option, not a combo mapping: the win32
+    /// grabber adds it there, as the clean twin of the X11 RepeatGuard.
+    pub fn win_modifiers(&self) -> u32 {
+        let mut m = 0u32;
+        if self.mods & ALT != 0 { m |= 0x0001; }
+        if self.mods & CTRL != 0 { m |= 0x0002; }
+        if self.mods & SHIFT != 0 { m |= 0x0004; }
+        if self.mods & SUPER != 0 { m |= 0x0008; }
+        m
+    }
+
+    /// Win32 virtual-key code for `RegisterHotKey`. The SDK header pins the
+    /// identity: VK_0–VK_9 are ASCII '0'–'9', VK_A–VK_Z ASCII 'A'–'Z',
+    /// VK_SPACE 0x20, VK_F1..VK_F12 are 0x70..0x7B.
+    pub fn win_vk(&self) -> u32 {
+        match self.key {
+            Key::Letter(c) => u32::from(c.to_ascii_uppercase()),
+            Key::Digit(c) => u32::from(c),
+            Key::Space => 0x20,
+            Key::F(n) => 0x70 + u32::from(n) - 1,
         }
     }
 

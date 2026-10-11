@@ -164,10 +164,16 @@
     // portal route (#305b): the OS asks the human ONCE; a decline is visible and the X11 fallback takes over
     permission_denied: ['Atajo sin permiso', 'triangle', 'red', 'no se activó porque rechazaste el permiso del sistema; usamos el atajo limitado de X11'],
   });
+  // U3a: the unsupported reason above blames X11, and on Windows that is a lie (there
+  // is no X server to blame). Only that one tuple changes per backend; everything else
+  // the table says is backend-neutral truth.
+  const HOTKEY_PROBLEM_WIN32 = Object.freeze(['Atajo sin soporte', 'triangle', 'red', 'no se pudo registrar como atajo global; elegí otra combinación']);
   function hotkeyView(view) {
     if (!view || typeof view !== 'object' || view.enabled === false) return null;
     const combo = String(view.combo || '');
-    const problem = Object.prototype.hasOwnProperty.call(HOTKEY_PROBLEMS, view.status) ? HOTKEY_PROBLEMS[view.status] : null;
+    const problem = Object.prototype.hasOwnProperty.call(HOTKEY_PROBLEMS, view.status)
+      ? (view.status === 'unsupported' && view.backend === 'win32' ? HOTKEY_PROBLEM_WIN32 : HOTKEY_PROBLEMS[view.status])
+      : null;
     if (problem) {
       return { kind: view.status, word: problem[0], icon: problem[1], tone: problem[2], aria: `${problem[0]}: ${combo} ${problem[3]}` };
     }

@@ -1,17 +1,47 @@
-//! Windows U1 hotkey host: configuration remains visible, but no global
-//! shortcut backend is implemented on this platform yet.
+//! Windows U3a hotkey host: a real `RegisterHotKey` grab held on a dedicated
+//! pump thread (`crate::hotkey::win32::Grabber`), with the same honest status
+//! contract as the Unix host. Configuration IPC mirrors `hotkeyhost.rs`: every
+//! change rebinds, persists, and publishes the REAL grabber status — Active
+//! when the shortcut is ours, Taken when another app holds the combo,
+//! Unsupported when the system refuses it. The backend string is `win32` so
+//! the frontend can say «Atajo de Windows» instead of lying about X11.
 use crate::AppState;
 use abito_island::bridge::{self, BridgeError};
-use abito_island::hotkey::{self, Command, HotkeyConfig, Status, View};
+use abito_island::hotkey::{self, Command, HotkeyConfig, View};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const FILE: &str = "hotkey.json";
 
+/// The system-wide id our WM_HOTKEY messages carry back. One live grab at a
+/// time (a rebind always releases the old one before registering anew).
+#[cfg(windows)]
+const HOTKEY_ID: u32 = 1;
+
+#[cfg(windows)]
+use abito_island::hotkey::win32::Grabber;
+
+/// The Windows host is only ever compiled for the Windows target (main.rs
+/// mounts this file under cfg(not(unix)), and the only non-unix build here is
+/// x86_64-pc-windows-msvc). The alias documents the shape this file would have
+/// elsewhere: a grab that exists but holds nothing.
+#[cfg(all(not(unix), not(windows)))]
+#[derive(Default)]
+struct Grabber;
+#[cfg(all(not(unix), not(windows)))]
+impl Grabber {
+    fn status(&self) -> hotkey::Status {
+        hotkey::Status::Unsupported
+    }
+}
+
+/// The live grab, if any. `None` means the shortcut is not held: either it is
+/// disabled or the app is between grabs.
 #[derive(Default)]
 pub struct HotkeyHost {
     config: Mutex<HotkeyConfig>,
+    grabber: Mutex<Option<Grabber>>,
 }
 
 fn config_path(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -28,40 +58,86 @@ fn persist(app: &AppHandle, config: &HotkeyConfig) {
     let _ = crate::platform::fs::write_private_atomic(&path, config.to_text().as_bytes());
 }
 
-fn view_of(config: &HotkeyConfig) -> View {
+/// The View mirrors the Unix host's `view_of`: held grabber → its real status;
+/// no grabber → the idle truth from `hotkey::idle_status` (disabled, or
+/// honestly unsupported while nothing holds the shortcut).
+fn view_of(config: &HotkeyConfig, held: Option<&Grabber>) -> View {
     View {
         combo: config.combo.to_string(),
         enabled: config.enabled,
-        status: if config.enabled { Status::Unsupported } else { Status::Disabled },
+        status: match held {
+            Some(g) => g.status(),
+            None => hotkey::idle_status(config),
+        },
         limited: false,
-        // Keep the existing backend field value used by the Unix idle path;
-        // status=unsupported makes clear that no shortcut is actually held.
-        backend: "x11",
+        backend: "win32",
         portal_note: None,
     }
 }
 
-fn publish(app: &AppHandle, host: &HotkeyHost) {
+fn publish(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let host = &state.hotkey;
     let config = host.config.lock().expect("hotkey config lock");
-    let _ = app.emit("hotkey:state", view_of(&config));
+    let held = host.grabber.lock().expect("hotkey grabber lock");
+    let _ = app.emit("hotkey:state", view_of(&config, held.as_ref()));
 }
 
-/// Startup loads configuration but registers no global shortcut on Windows U1.
+/// (Re)grab according to the current config, exactly like the Unix `rebind`:
+/// the old grab is released first so a rebind never leaves two; a taken combo
+/// is REPORTED, never retried silently.
+fn rebind(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let host = &state.hotkey;
+    if let Some(old) = host.grabber.lock().expect("hotkey grabber lock").take() {
+        drop(old); // releases the system grab (the pump unregisters on its own thread)
+    }
+    let cfg = host.config.lock().expect("hotkey config lock").clone();
+    if cfg.enabled {
+        #[cfg(windows)]
+        {
+            let handle = app.clone();
+            let grab = Grabber::start(HOTKEY_ID, cfg.combo, move |event| {
+                let _ = event; // GrabEvent::Pressed is the only variant
+                press_on_main(&handle);
+            });
+            *host.grabber.lock().expect("hotkey grabber lock") = Some(grab);
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = &cfg;
+        }
+    }
+    publish(app);
+}
+
+/// Startup: load the persisted config and grab it (probe/test runs stay out of
+/// the human's keyboard unless they ask for it).
 pub fn start(app: &AppHandle) {
     let state = app.state::<AppState>();
     *state.hotkey.config.lock().expect("hotkey config lock") = load(app);
-    publish(app, &state.hotkey);
+    rebind(app);
 }
 
-/// There is no native grab to release on this platform yet.
-pub fn stop(_app: &AppHandle) {}
+/// Release the grab before leaving (mirrors the Unix host's stop). The old
+/// grab moves into a local first so the MutexGuard temporary dies on the same
+/// statement: as the block's tail expression the if-let would drop its
+/// temporaries AFTER `state` (E0597, edition-2024 tail scope).
+pub fn stop(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let host = &state.hotkey;
+    let old = host.grabber.lock().expect("hotkey grabber lock").take();
+    if let Some(old) = old {
+        drop(old);
+    }
+}
 
 fn err(code: &str) -> BridgeError {
     BridgeError { code: code.into(), message: "No se pudo cambiar el atajo.".into() }
 }
 
-/// Settings IPC remains available, while the returned status honestly reports
-/// that Windows U1 has no global-shortcut backend.
+/// Settings IPC: same closed command set as the Unix host; every mutation
+/// rebinds so the status the user sees is the status the OS gave us.
 #[tauri::command]
 pub async fn hotkey_action(
     app: AppHandle,
@@ -89,15 +165,16 @@ pub async fn hotkey_action(
             config.clone()
         };
         persist(&app, &next);
-        publish(&app, &state.hotkey);
+        rebind(&app);
     }
     let config = state.hotkey.config.lock().expect("hotkey config lock");
-    Ok(json!(view_of(&config)))
+    let held = state.hotkey.grabber.lock().expect("hotkey grabber lock");
+    Ok(json!(view_of(&config, held.as_ref())))
 }
 
-/// Probe-only simulated press: it exercises the UI action independently from
-/// the unavailable OS shortcut backend.
-#[cfg(any(debug_assertions, feature = "probe"))]
+/// A real WM_HOTKEY press lands here (pump thread → main thread), and the
+/// probe calls the same function: one route, the Unix `on_press` minus the
+/// X11 focus hand-back that has no twin here.
 pub(crate) fn press_on_main(app: &AppHandle) {
     let inner = app.clone();
     let _ = app.run_on_main_thread(move || {
