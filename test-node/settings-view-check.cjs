@@ -232,4 +232,119 @@ test('style: form fields are dark controls (the provider select was white with u
   assert.match(css, /select\.sfield\s*\{[^}]*appearance:\s*none/);
 });
 
+// ---- never announce a result the engine did not give (verifier, #306) --------------------------
+const ac = (code, n, extra = {}) => ({ ...state({ connection: 'connected' }), last_error: { code, n }, ...extra });
+test('outcome: success is announced only when no engine error arrived after the command', () => {
+  const sent = ac(null, 0);
+  assert.deepEqual(S.commandOutcome(sent, ac(null, 0), 'Cuenta Casa creada.'), { ok: true, say: 'Cuenta Casa creada.' });
+  // an error that arrived while the command was in flight (same state otherwise)
+  for (const [code, word] of [['failed', 'No se pudo'], ['busy', 'Motor ocupado'], ['bad_request', 'Pedido no válido'], ['rate_limited', 'Demasiados pedidos']]) {
+    const r = S.commandOutcome(ac(null, 0), ac(code, 1), 'Cuenta Casa creada.');
+    assert.equal(r.ok, false, code);
+    assert.equal(r.word, word, code);
+    assert.ok(r.icon && r.tone, code);
+    assert.ok(!r.say.includes('creada'), `${code}: the success text is never said (${r.say})`);
+    assert.ok(r.say.includes(word), code);
+  }
+  // the SAME code twice is a new event: the counter decides
+  assert.equal(S.commandOutcome(ac('failed', 4), ac('failed', 5), 'x').ok, false);
+  assert.equal(S.commandOutcome(ac('failed', 4), ac('failed', 4), 'x.').ok, true, 'an old error is not this command\'s');
+  // no engine / lost connection after the command: no success either
+  assert.equal(S.commandOutcome(ac(null, 0), state({ connection: 'lost' }), 'Hecho.').ok, false);
+  assert.equal(S.commandOutcome(null, null, 'Hecho.').ok, false);
+  // an unknown code reads as the generic failure, never as text
+  assert.equal(S.commandOutcome(ac(null, 0), ac('<b>x</b>', 1), 'Hecho.').word, 'No se pudo');
+});
+
+test('hotkey: «cambiado» only when the backend really took it; taken/invalid/denied say so', () => {
+  const view = (status, extra = {}) => ({ combo: 'Ctrl+Alt+K', enabled: true, status, backend: 'x11', ...extra });
+  assert.deepEqual(S.hotkeySetOutcome(view('active'), 'Ctrl+Alt+K'), { ok: true, say: 'Atajo cambiado a Ctrl+Alt+K.' });
+  assert.equal(S.hotkeySetOutcome(view('taken'), 'Ctrl+Alt+K').ok, false);
+  assert.match(S.hotkeySetOutcome(view('taken'), 'Ctrl+Alt+K').say, /ocupado/i);
+  assert.match(S.hotkeySetOutcome(view('invalid'), 'Ctrl+Alt+K').say, /inválido/i);
+  assert.match(S.hotkeySetOutcome(view('unsupported'), 'Ctrl+Alt+K').say, /soporte/i);
+  assert.match(S.hotkeySetOutcome(view('permission_denied'), 'Ctrl+Alt+K').say, /permiso/i);
+  for (const status of ['taken', 'invalid', 'unsupported', 'permission_denied']) assert.ok(!/cambiado/i.test(S.hotkeySetOutcome(view(status), 'Ctrl+Alt+K').say), status);
+  // portal: the OS dialog is still open — not changed yet, not failed either
+  const pending = S.hotkeySetOutcome(view('permission_pending', { backend: 'portal' }), 'Ctrl+Alt+K');
+  assert.equal(pending.ok, null);
+  assert.match(pending.say, /confirm|permiso|sistema/i);
+  assert.ok(!/cambiado/i.test(pending.say));
+  // the combo shown is the one the backend reports, not what was typed
+  assert.equal(S.hotkeySetOutcome(view('active', { combo: 'Ctrl+Alt+J' }), 'Ctrl+Alt+K').say, 'Atajo cambiado a Ctrl+Alt+J.');
+  assert.equal(S.hotkeySetOutcome(null, 'Ctrl+Alt+K').ok, false);
+});
+
+test('draft: what the human typed survives a re-render and never leaks into the next form', () => {
+  const d = S.makeDrafts();
+  assert.equal(d.get('settings-secret'), '');
+  d.set('settings-secret', 'sk-abc');
+  assert.equal(d.get('settings-secret'), 'sk-abc');
+  d.clear('settings-secret');
+  assert.equal(d.get('settings-secret'), '', 'cleared the moment it is sent');
+  // a different prompt is a different form: the old key is NOT carried into it
+  d.scope('flow-1'); d.set('settings-secret', 'sk-old'); d.scope('flow-1');
+  assert.equal(d.get('settings-secret'), 'sk-old', 'same scope: kept');
+  d.scope('flow-2');
+  assert.equal(d.get('settings-secret'), '', 'a new prompt starts empty');
+  d.set('settings-secret', 'sk-new'); d.reset();
+  assert.equal(d.get('settings-secret'), '');
+});
+
+test('wiring: the motion switch, the clear-on-send of the secret and the draft are wired (source contract)', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  // motion: switch -> exactly one of the two backend calls, then the REAL answer drives the label
+  assert.match(src, /sw-motion/);
+  assert.match(src, /g\.motion\.respectSystem \? window\.desktop\.animateAnyway\(\) : window\.desktop\.respectSystemMotion\(\)/);
+  assert.match(src, /motionOverride = s\.motionOverride !== false/);
+  // the secret field: draft kept across renders, wiped at send, never rendered back
+  assert.match(src, /drafts\.set\('settings-secret'/);
+  assert.match(src, /drafts\.clear\('settings-secret'\)/);
+  assert.doesNotMatch(src, /createDraft[^\n]*secret/);
+  // no success text is said before the engine answered
+  assert.doesNotMatch(src, /agent\(payload\)\.then\(next => \{ busy = false; applyAgent\(next\); if \(okSay\) say\(okSay\)/);
+  assert.match(src, /commandOutcome\(/);
+  assert.match(src, /hotkeySetOutcome\(/);
+});
+
+// ---- cheap UX defects found by the verifier -----------------------------------------------------
+// CSS specificity as (ids, classes+attributes+pseudo, types), enough for the selectors used here.
+const specificity = sel => {
+  const ids = (sel.match(/#[\w-]+/g) || []).length;
+  const attrs = (sel.match(/\[[^\]]+\]/g) || []).length + (sel.match(/:(?!not\b)[\w-]+/g) || []).length;
+  const negated = (sel.match(/:not\(([^)]*)\)/g) || []).map(n => specificity(n.slice(5, -1)));
+  const sum = negated.reduce((a, b) => [a[0] + b[0], a[1] + b[1]], [0, 0]);
+  return [ids + sum[0], attrs + sum[1]];
+};
+const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
+test('style: the rules that HIDE the gear are at least as specific as the rule that shows it', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/(^|\n)([^{}\n][^{}]*#open-settings[^{}]*)\{([^}]*)\}/g)].map(m => ({ sel: m[2].trim(), body: m[3] }));
+  const shows = rules.filter(r => /visibility:\s*visible/.test(r.body));
+  const hides = rules.filter(r => /visibility:\s*hidden/.test(r.body) && /\[data-(card|question)/.test(r.sel));
+  assert.ok(shows.length >= 1 && hides.length >= 1);
+  for (const h of hides) for (const sh of shows) {
+    for (const part of h.sel.split(',').map(x => x.trim())) assert.ok(cmp(specificity(part), specificity(sh.sel)) >= 0, `«${part}» would lose to «${sh.sel}»`);
+  }
+});
+
+test('focus: closing the panel by keyboard lands on something visible in the CHAT view (the gear is overview-only)', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const close = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
+  assert.match(close, /chat-input/, 'focus goes back to the chat input');
+  assert.doesNotMatch(close, /AbitoFocusHome/);
+});
+
+test('layout: General fits the 256px chat window without cutting its last row', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8');
+  const px = (re, d) => { const m = css.match(re); return m ? Number(m[1]) : d; };
+  const win = 256, top = px(/#settings \{[^}]*top:\s*(\d+)px/, 8), bottom = px(/#settings \{[^}]*bottom:\s*(\d+)px/, 8);
+  const bar = px(/#settings-bar \{[^}]*min-height:\s*(\d+)px/, 48);
+  const gap = px(/#settings \{[^}]*gap:\s*(\d+)px/, 4);
+  const bodyGap = px(/#settings-body \{[^}]*gap:\s*(\d+)px/, 4);
+  const room = win - top - bottom - bar - gap;
+  const rows = 4, rowH = 44; // sound, motion, shortcut, shortcut-enabled
+  assert.ok(room >= rows * rowH + (rows - 1) * bodyGap, `room ${room}px < ${rows * rowH + (rows - 1) * bodyGap}px`);
+});
+
 console.log(`settings-view-check: ${passed} passed`);

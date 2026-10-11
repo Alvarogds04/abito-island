@@ -177,6 +177,60 @@
     return { kind: 'combo', text: [...mods, key].join('+') };
   }
 
-  return { SECTIONS, SOUND_DEFAULT: false, CONNECTORS_NOTE, nextSection, connectionView, accountRows, loginMethods, createValidity,
+  // ---- what to tell the human after a command ---------------------------------------------------------------------
+  // The page used to say «Cuenta creada» when it WROTE the command. The engine answers later (state
+  // frames) and may refuse (`error{failed|busy|bad_request|...}`): success is only said when the state
+  // that came back carries no error newer than the one we had when we sent it.
+  const ENGINE_ERRORS = Object.freeze({
+    failed: ['No se pudo', 'triangle', 'red'], busy: ['Motor ocupado', 'lock', 'sun'],
+    bad_request: ['Pedido no válido', 'triangle', 'red'], rate_limited: ['Demasiados pedidos', 'clock', 'sun'],
+    unavailable: ['No disponible', 'plug-off', 'faint'], not_busy: ['Nada en curso', 'info', 'faint'], unknown_ask: ['Pedido desconocido', 'info', 'faint'],
+  });
+  const errorSeq = st => (st && st.last_error && Number.isInteger(st.last_error.n) ? st.last_error.n : 0);
+  function commandOutcome(before, after, okSay) {
+    const failure = (word, icon, tone) => ({ ok: false, word, icon, tone, say: `${word}.` });
+    if (!after || typeof after !== 'object') return failure('No se pudo', 'triangle', 'red');
+    if (after.connection && after.connection !== 'connected') {
+      const cv = connectionView(after);
+      return cv ? failure(cv.word, cv.icon, cv.tone) : failure('No se pudo', 'triangle', 'red');
+    }
+    if (errorSeq(after) > errorSeq(before)) {
+      const code = after.last_error && after.last_error.code;
+      const row = Object.prototype.hasOwnProperty.call(ENGINE_ERRORS, code) ? ENGINE_ERRORS[code] : ENGINE_ERRORS.failed;
+      return failure(row[0], row[1], row[2]);
+    }
+    return { ok: true, say: okSay };
+  }
+
+  // The shortcut backend answers `set` with the status it ended in. «Cambiado» only when it is really active.
+  const HOTKEY_SET_FAILS = Object.freeze({
+    taken: 'Atajo ocupado: lo usa otra aplicación.', invalid: 'Atajo inválido: necesita Ctrl, Alt o Súper.',
+    unsupported: 'Atajo sin soporte: no se pudo registrar.', permission_denied: 'Atajo sin permiso: rechazaste el permiso del sistema.',
+  });
+  function hotkeySetOutcome(view, typed) {
+    if (!view || typeof view !== 'object') return { ok: false, say: 'No se pudo cambiar el atajo.' };
+    if (Object.prototype.hasOwnProperty.call(HOTKEY_SET_FAILS, view.status)) return { ok: false, say: HOTKEY_SET_FAILS[view.status] };
+    if (view.status === 'permission_pending') return { ok: null, say: 'Falta confirmar el permiso del sistema para cambiar el atajo.' };
+    const combo = typeof view.combo === 'string' && view.combo ? view.combo : String(typed || '');
+    return { ok: true, say: `Atajo cambiado a ${combo}.` };
+  }
+
+  // ---- drafts: what the human is typing survives a re-render --------------------------------------------------------
+  // The panel rebuilds its DOM on every state push (the portal pushes every 400 ms while its dialog is open),
+  // which used to wipe a half-typed key. Kept here, per field id, inside one «scope» (one prompt/flow); a
+  // new scope starts empty so one prompt's key is never carried into the next. Memory only, never persisted.
+  function makeDrafts() {
+    let scopeId = '';
+    let values = Object.create(null);
+    return {
+      get: id => values[id] || '',
+      set(id, v) { values[id] = String(v); },
+      clear(id) { delete values[id]; },
+      scope(next) { if (next !== scopeId) { scopeId = next; values = Object.create(null); } },
+      reset() { scopeId = ''; values = Object.create(null); },
+    };
+  }
+
+  return { commandOutcome, hotkeySetOutcome, makeDrafts, SECTIONS, SOUND_DEFAULT: false, CONNECTORS_NOTE, nextSection, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
 });

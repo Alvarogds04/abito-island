@@ -48,6 +48,7 @@
   let capturing = false;
   let createDraft = { provider: '', label: '' };
   let pendingOpen = false;
+  const drafts = V.makeDrafts(); // what is being typed survives the re-renders (memory only)
   let busy = false;
 
   const say = text => { if (text) { live.textContent = ''; requestAnimationFrame(() => { live.textContent = text; }); } };
@@ -86,7 +87,10 @@
   function close(byKeyboard) {
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     capturing = false;
-    if (byKeyboard) { const g = $('open-settings'); if (g) g.focus(); }
+    drafts.reset(); // a half-typed key never outlives the panel
+    if (waiting) { clearTimeout(waiting.timer); waiting = null; }
+    // the gear is overview-only; the panel lives in the chat view, so focus returns to the chat input
+    if (byKeyboard) { const c = $('chat-input'); if (c && !c.disabled) c.focus(); }
   }
   const isOpen = () => panel.dataset.open === 'true';
 
@@ -153,26 +157,60 @@
     call('hotkey_action', { action: 'view' }).then(h => { hotkey = h; render(); }, () => {});
     if (window.desktop) window.desktop.snapshot().then(s => { motionOverride = s.motionOverride !== false; render(); }, () => {});
   }
-  function applyAgent(next) { if (next && typeof next === 'object') { agentState = next; render(); } }
+  function applyAgent(next) { if (next && typeof next === 'object') { agentState = next; settle(next); render(); } }
   if (listen) {
     listen('agent:state', e => applyAgent(e && e.payload)).catch(() => {});
     listen('prefs:state', e => { if (e && e.payload) { prefs = e.payload; render(); } }).catch(() => {});
     listen('hotkey:state', e => { if (e && e.payload) { hotkey = e.payload; render(); } }).catch(() => {});
   }
+  // A command is only «done» when the engine says so: the invoke result is the state at WRITE time, the answer
+  // arrives later as `agent:state`. `waiting` holds what we sent; the next state either carries a newer
+  // engine error (say it, with icon+word) or a real change (say the success). Silence past the deadline is
+  // reported honestly, never as success.
+  const WAIT_MS = 5000;
+  let waiting = null;
+  const withoutError = st => JSON.stringify(Object.assign({}, st, { last_error: null }));
+  function settle(after) {
+    if (!waiting) return;
+    const w = waiting;
+    const out = V.commandOutcome(w.before, after, w.okSay);
+    if (out.ok === false) { waiting = null; clearTimeout(w.timer); say(out.say); showFailure(out); return; }
+    if (after && withoutError(after) !== w.beforeJson) { waiting = null; clearTimeout(w.timer); if (w.okSay) say(w.okSay); }
+  }
+  function showFailure(out) {
+    const chip = $('settings-conn');
+    chip.hidden = false; chip.dataset.tone = out.tone; chip.setAttribute('aria-label', out.say);
+    putIcon($('settings-conn-icon'), out.icon); $('settings-conn-word').textContent = out.word;
+    clearTimeout(failureTimer); failureTimer = setTimeout(() => render(), 6000);
+  }
+  let failureTimer = 0;
   function send(payload, okSay) {
     if (busy) return;
     busy = true;
-    agent(payload).then(next => { busy = false; applyAgent(next); if (okSay) say(okSay); }, error => { busy = false; say((error && error.message) || 'No se pudo completar.'); render(); });
+    const before = agentState;
+    if (waiting) clearTimeout(waiting.timer);
+    waiting = okSay ? { before, beforeJson: withoutError(before), okSay, timer: setTimeout(() => { waiting = null; say('El motor no respondió.'); showFailure({ word: 'Sin respuesta', icon: 'clock', tone: 'sun', say: 'Sin respuesta.' }); }, WAIT_MS) } : null;
+    agent(payload).then(next => { busy = false; applyAgent(next); }, error => {
+      busy = false;
+      if (waiting) { clearTimeout(waiting.timer); waiting = null; }
+      say((error && error.message) || 'No se pudo completar.'); render();
+    });
   }
   function setHotkey(text) {
-    call('hotkey_action', { action: 'set', combo: text }).then(h => { hotkey = h; render(); say(`Atajo cambiado a ${text}.`); }, error => say((error && error.message) || 'No se pudo cambiar el atajo.'));
+    call('hotkey_action', { action: 'set', combo: text }).then(h => {
+      hotkey = h; render();
+      const out = V.hotkeySetOutcome(h, text); // «cambiado» only when the backend really took it
+      say(out.say);
+    }, error => say((error && error.message) || 'No se pudo cambiar el atajo.'));
   }
 
   // ---- rendering --------------------------------------------------------------------------------------------------------------
   function render() {
     if (!isOpen()) return;
     const keep = body.scrollTop;
-    const focused = document.activeElement && document.activeElement.id;
+    const active = document.activeElement;
+    const focused = active && active.id;
+    const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
     body.textContent = '';
     const conn = V.connectionView(agentState);
     const chip = $('settings-conn');
@@ -182,13 +220,17 @@
     else if (section === 'connectors') renderConnectors();
     else renderGeneral();
     body.scrollTop = keep;
-    if (focused && $(focused) && body.contains($(focused))) $(focused).focus();
+    if (focused && $(focused) && body.contains($(focused))) {
+      $(focused).focus();
+      if (caret) { try { $(focused).setSelectionRange(caret[0], caret[1]); } catch { /* not a text field */ } }
+    }
   }
 
   function renderProviders() {
     const st = agentState || { connection: 'no_daemon', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
     const auth = st.auth || {};
     const prompt = V.promptView(auth.prompt);
+    drafts.scope(prompt ? `${prompt.flowId}:${prompt.promptId}` : '');
     const eventV = V.eventView(auth.event);
     if (prompt || eventV || (auth.flowId && !auth.last)) body.append(renderFlow(auth, prompt, eventV));
     const outcome = V.flowOutcome(auth.last);
@@ -273,12 +315,15 @@
         inp.setAttribute('aria-label', prompt.masked ? 'Clave (se oculta al escribir)' : 'Respuesta');
         const send1 = wordBtn('Enviar', () => {}, { icon: 'arrow-up', primary: true, disabled: true });
         send1.type = 'submit';
-        inp.addEventListener('input', () => { send1.disabled = !V.replyValid(inp.value); });
+        inp.value = drafts.get('settings-secret'); // a re-render (the portal pushes every 400 ms) never eats a half-typed key
+        send1.disabled = !V.replyValid(inp.value);
+        inp.addEventListener('input', () => { drafts.set('settings-secret', inp.value); send1.disabled = !V.replyValid(inp.value); });
         f.addEventListener('submit', e => {
           e.preventDefault();
           if (e.isTrusted !== true || !V.replyValid(inp.value)) return;
           const value = inp.value;
           inp.value = ''; // gone from the page before the round trip even starts
+          drafts.clear('settings-secret');
           reply(prompt, value);
         });
         f.append(inp, send1);
