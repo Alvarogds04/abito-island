@@ -1,8 +1,12 @@
 //! GTK 3.24: explicit logical widget requests suppress NO_CONTENT_CHILD_NAT
 //! (200), which otherwise becomes fixed-window WM hints with an empty child.
+#[cfg(unix)]
 use gtk::prelude::*;
+#[cfg(unix)]
 use std::sync::atomic::Ordering;
-use tauri::{Manager, WebviewWindow};
+#[cfg(unix)]
+use tauri::Manager;
+use tauri::WebviewWindow;
 
 pub(crate) fn logical_size(w: i32, h: i32, scale: f64) -> Result<(i32, i32), &'static str> {
     if w <= 0 || h <= 0 || !scale.is_finite() || scale <= 0.0 {
@@ -19,6 +23,7 @@ pub(crate) fn logical_size(w: i32, h: i32, scale: f64) -> Result<(i32, i32), &'s
     Ok((convert(w)?, convert(h)?))
 }
 
+#[cfg(unix)]
 pub(crate) fn defer(task: impl FnOnce() + Send + 'static) {
     gtk::glib::idle_add_once(task);
 }
@@ -26,6 +31,7 @@ pub(crate) fn defer(task: impl FnOnce() + Send + 'static) {
 /// run_on_main_thread may inline; installing an idle source does NOT dispatch
 /// it. GTK handles are obtained only in that later default GUI-context turn,
 /// after compact admission guards have returned. No synthetic resize ACK.
+#[cfg(unix)]
 pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()> {
     let generation = win
         .state::<super::AppState>()
@@ -61,6 +67,14 @@ pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()>
     })
 }
 
+/// D3: Windows uses a real plain resize; the GTK logical hint only suppresses
+/// GTK's empty-child WM-hint bug and has no equivalent role on this target.
+/// U2 validates this direct resize in the Windows VM.
+#[cfg(not(unix))]
+pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()> {
+    win.set_size(tauri::PhysicalSize::new(w as u32, h as u32))
+}
+
 /// Debug fixture actuation, not a human/isTrusted claim or public command.
 /// Only normal IPC view verbs: no geometry overrides, answers, sends or focus.
 #[cfg(debug_assertions)]
@@ -87,6 +101,6 @@ pub(crate) fn start_view_test(win: &WebviewWindow) {
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "nativewindow_tests.rs"]
 mod tests;
