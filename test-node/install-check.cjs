@@ -15,6 +15,10 @@ const test = (name, fn) => { fn(); passed += 1; };
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 const T = require('./tmpdirs.cjs'); // self-cleaning: removed at exit, dead runs swept
 const tmp = () => T.make('abito-inst-');
+function receipt(st) {
+  try { return JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); }
+  catch (error) { throw new Error(`invalid test receipt: ${error.message}`); }
+}
 
 function stage() {
   const dir = tmp();
@@ -22,10 +26,16 @@ function stage() {
   fs.writeFileSync(path.join(dir, 'abito-island-launcher'), L.launcherText(), { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'abito-island.png'), 'png-bytes', { mode: 0o644 });
   fs.writeFileSync(path.join(dir, `${L.IDENTIFIER}.desktop`), L.desktopText(), { mode: 0o644 });
+  for (const n of L.DAEMON_FILES) {
+    const file = path.join(dir, 'desktop-daemon', n);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+    fs.copyFileSync(path.join(__dirname, '..', '..', 'desktop-daemon', n), file);
+    fs.chmodSync(file, 0o644);
+  }
   const files = {};
   for (const n of L.STAGED) files[n] = sha(fs.readFileSync(path.join(dir, n)));
   fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, version: '0.1.0', r6_sha256: L.checkR6(path.join(__dirname, '..')),
-    provenance: { head: 'a'.repeat(40), clean: true, dirty_entries: 0 }, files }, null, 2) + '\n');
+    provenance: { head: 'a'.repeat(40), clean: true, dirty_entries: 0 }, files }, null, 2) + '\n', { mode: 0o644 });
   return dir;
 }
 function env() {
@@ -71,6 +81,13 @@ test('the generated .desktop is valid for desktop-file-validate (when available)
 
 test('VERIFY FIRST: any mismatch / missing / extra / bad receipt aborts and touches NOTHING', () => {
   const mutations = {
+    'tampered daemon': st => fs.appendFileSync(path.join(st, 'desktop-daemon/src/cli.cjs'), '\n// tamper'),
+    'extra daemon file': st => fs.writeFileSync(path.join(st, 'desktop-daemon/src/extra.cjs'), 'x'),
+    'missing daemon file': st => fs.rmSync(path.join(st, 'desktop-daemon/src/cli.cjs')),
+    'symlink daemon file': st => { fs.rmSync(path.join(st, 'desktop-daemon/src/cli.cjs')); fs.symlinkSync('/bin/true', path.join(st, 'desktop-daemon/src/cli.cjs')); },
+    'symlink daemon directory': st => { fs.renameSync(path.join(st, 'desktop-daemon/src'), path.join(st, 'moved')); fs.symlinkSync('../moved', path.join(st, 'desktop-daemon/src')); },
+    'extra empty directory': st => fs.mkdirSync(path.join(st, 'desktop-daemon/extra')),
+    'extra receipt key': st => { const r = receipt(st); r.files['desktop-daemon/extra'] = 'a'.repeat(64); fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
     'tampered binary': st => fs.appendFileSync(path.join(st, 'abito-island'), 'x'),
     'tampered launcher': st => fs.writeFileSync(path.join(st, 'abito-island-launcher'), '#!/bin/sh\nexec "$@"\n'),
     'tampered png': st => fs.writeFileSync(path.join(st, 'abito-island.png'), 'other'),
@@ -78,10 +95,10 @@ test('VERIFY FIRST: any mismatch / missing / extra / bad receipt aborts and touc
     'missing file': st => fs.rmSync(path.join(st, 'abito-island.png')),
     'extra file': st => fs.writeFileSync(path.join(st, 'surprise'), 'x'),
     'no receipt': st => fs.rmSync(path.join(st, 'receipt.json')),
-    'receipt not clean': st => { const r = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); r.provenance.clean = false; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
-    'receipt no head': st => { const r = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); delete r.provenance; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
-    'foreign identifier': st => { const r = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); r.identifier = 'com.abitog.Abito.Preview'; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
-    'hash of another file listed': st => { const r = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); r.files['abito-island'] = r.files['abito-island.png']; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
+    'receipt not clean': st => { const r = receipt(st); r.provenance.clean = false; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
+    'receipt no head': st => { const r = receipt(st); delete r.provenance; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
+    'foreign identifier': st => { const r = receipt(st); r.identifier = 'com.abitog.Abito.Preview'; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
+    'hash of another file listed': st => { const r = receipt(st); r.files['abito-island'] = r.files['abito-island.png']; fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r, null, 2)); },
     'binary is a symlink': st => { fs.rmSync(path.join(st, 'abito-island')); fs.symlinkSync('/bin/true', path.join(st, 'abito-island')); },
   };
   for (const [name, mutate] of Object.entries(mutations)) {
@@ -92,6 +109,25 @@ test('VERIFY FIRST: any mismatch / missing / extra / bad receipt aborts and touc
     assert.equal(snapshot(e), before, `${name}: nothing created`);
     assert.equal(fs.existsSync(e.prefix), false, `${name}: no install dir`);
   }
+});
+
+test('installed directory symlink and extra files are refused without writing through them', () => {
+  const st = stage(), e = env();
+  assert.equal(install(st, e).status, 0);
+  const external = tmp();
+  fs.rmSync(path.join(e.prefix, 'desktop-daemon/src'), { recursive: true });
+  fs.symlinkSync(external, path.join(e.prefix, 'desktop-daemon/src'));
+  const r = install(st, e);
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(fs.readdirSync(external), []);
+  assert.equal(r.stdout, 'Stage verified against receipt.json (' + st + ').\n');
+  assert.match(r.stderr, /symlink/);
+  const other = env(); assert.equal(install(st, other).status, 0);
+  fs.writeFileSync(path.join(other.prefix, 'desktop-daemon/extra'), 'keep');
+  const before = fs.readFileSync(path.join(other.prefix, 'receipt.json'));
+  const extra = install(st, other);
+  assert.equal(extra.status, 1); assert.match(extra.stderr, /unexpected/);
+  assert.deepEqual(fs.readFileSync(path.join(other.prefix, 'receipt.json')), before);
 });
 
 test('a failed verification on a REINSTALL leaves the previous install untouched', () => {
@@ -118,7 +154,7 @@ test('idempotent: reinstall over itself gives identical files and no errors', ()
 test('replaces a RUNNING binary (rename, not overwrite → no «text file busy»)', () => {
   const st = stage(), e = env(); assert.equal(install(st, e).status, 0);
   fs.writeFileSync(path.join(st, 'abito-island'), '#!/bin/sh\nsleep 5\n', { mode: 0o755 });
-  const r0 = JSON.parse(fs.readFileSync(path.join(st, 'receipt.json'), 'utf8')); r0.files['abito-island'] = sha(fs.readFileSync(path.join(st, 'abito-island')));
+  const r0 = receipt(st); r0.files['abito-island'] = sha(fs.readFileSync(path.join(st, 'abito-island')));
   fs.writeFileSync(path.join(st, 'receipt.json'), JSON.stringify(r0, null, 2));
   const child = cp.spawn(path.join(e.prefix, 'abito-island'), { stdio: 'ignore' });
   try { assert.equal(install(st, e).status, 0); } finally { child.kill(); }

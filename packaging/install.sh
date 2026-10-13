@@ -6,7 +6,8 @@
 #
 # <stage-dir> is what packaging/build.cjs stages (dist/abito-island/<version>) or a
 # copy of it (artifacts/abito-island-<version>-<commit>). POSIX sh, no dependencies
-# beyond coreutils + sha256sum (or shasum). No root, no network.
+# beyond Node (PATH then /usr/bin/node), coreutils + sha256sum (or shasum).
+# Keep install.sh beside lib.cjs. No root, no network.
 #
 # Order of work (nothing is touched until step 1 passes):
 #   1. VERIFY: receipt.json is read and EVERY file is re-hashed against it; the
@@ -36,7 +37,12 @@ umask 022
 
 ID="com.abitog.AbitoTauri"
 DESKTOP="$ID.desktop"
-FILES="abito-island abito-island-launcher abito-island.png $DESKTOP"
+# Node is also the installed host runtime. PATH first, canonical fallback only.
+NODE="$(command -v node || true)"
+[ -n "$NODE" ] || { [ ! -x /usr/bin/node ] || NODE=/usr/bin/node; }
+[ -n "$NODE" ] || { echo 'install.sh: node missing (PATH, /usr/bin/node)' >&2; exit 1; }
+LIB="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/lib.cjs"
+FILES="$("$NODE" -e 'process.stdout.write(require(process.argv[1]).STAGED.join(" "))' "$LIB")"
 EXEC_FILES="abito-island abito-island-launcher"
 
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
@@ -58,7 +64,9 @@ Abito (Tauri) one-command installer (user-local, no root, no network).
   --uninstall           remove the installed files and the .desktop entry
   -h, --help            this text
 
-Every file is re-hashed against receipt.json BEFORE anything is installed; any
+Node (PATH then /usr/bin/node) and the sibling lib.cjs are required.
+Every shipped file, including desktop-daemon/src, is recursively re-hashed
+against receipt.json BEFORE anything is installed; no symlinks or extras. Any
 mismatch aborts without touching the system. Reinstalling is safe (idempotent).
 USAGE
 }
@@ -127,7 +135,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
     if [ -e "$PREFIX/$f" ] || [ -L "$PREFIX/$f" ]; then rm -f "$PREFIX/$f"; removed="$removed $f"; fi
   done
   if [ -e "$APPS/$DESKTOP" ] || [ -L "$APPS/$DESKTOP" ]; then rm -f "$APPS/$DESKTOP"; removed="$removed $DESKTOP(applications)"; fi
-  rmdir "$PREFIX" 2>/dev/null || true
+  rmdir "$PREFIX/desktop-daemon/src" "$PREFIX/desktop-daemon" "$PREFIX" 2>/dev/null || true
   refresh_desktop_db
   if [ -n "$removed" ]; then note "Removed:$removed"; else note "Nothing to remove (not installed under $PREFIX)."; fi
   if [ -d "$PREFIX" ]; then note "Kept $PREFIX: it still holds files that are not ours."; fi
@@ -144,13 +152,8 @@ STAGE="$(cd "$STAGE" && pwd -P)"
 RECEIPT="$STAGE/receipt.json"
 [ -f "$RECEIPT" ] && [ ! -L "$RECEIPT" ] || die "no receipt.json in $STAGE"
 
-# exactly the expected entries, all regular files (no symlinks, no extras)
-for f in $FILES receipt.json; do
-  [ -f "$STAGE/$f" ] && [ ! -L "$STAGE/$f" ] || die "stage entry missing or not a regular file: $f"
-done
-expected_count=$(( $(printf '%s\n' $FILES | wc -l) + 1 ))
-actual_count="$(find "$STAGE" -mindepth 1 -maxdepth 1 | wc -l)"
-[ "$actual_count" -eq "$expected_count" ] || die "stage holds unexpected entries ($actual_count, expected $expected_count)"
+# Recursive, closed-set verification; no symlinks, including empty extra dirs.
+"$NODE" -e 'const L=require(process.argv[1]); const p=L.verifyStage(process.argv[2]); if(p.length){console.error(p.join("\n"));process.exit(1)}' "$LIB" "$STAGE" || die "stage verification failed: nothing was installed"
 
 grep -q "^  \"identifier\": \"$ID\",\$" "$RECEIPT" || die "receipt identifier is not $ID"
 grep -q '^    "head": "[0-9a-f]\{40\}",$' "$RECEIPT" || die "receipt carries no git HEAD"
@@ -163,17 +166,20 @@ parsed="$(printf '%s\n' "$block" | sed -n 's/^    "\([^"]*\)": "\([0-9a-f]\{64\}
 [ "$(printf '%s\n' "$block" | wc -l)" -eq "$(printf '%s\n' "$parsed" | wc -l)" ] || die "receipt files block is malformed"
 [ "$(printf '%s\n' "$parsed" | wc -l)" -eq "$(printf '%s\n' $FILES | wc -l)" ] || die "receipt lists a different set of files"
 for f in $FILES; do
-  want="$(printf '%s\n' "$parsed" | sed -n "s/^$(printf '%s' "$f" | sed 's/[.]/\\./g') \\([0-9a-f]\\{64\\}\\)\$/\\1/p")"
+  want="$(printf '%s\n' "$parsed" | sed -n "s|^$(printf '%s' "$f" | sed 's/[.]/\\./g') \\([0-9a-f]\\{64\\}\\)\$|\\1|p")"
   [ -n "$want" ] || die "receipt has no hash for $f"
   got="$(sha_of "$STAGE/$f")"
   [ "$got" = "$want" ] || die "HASH MISMATCH for $f (receipt $want, file $got): nothing was installed"
 done
 note "Stage verified against receipt.json ($STAGE)."
+# Applications may contain unrelated desktop entries, so validate its ancestor
+# chain only; PREFIX must not contain any undeclared installed entry.
+"$NODE" -e 'const L=require(process.argv[1]);const fs=require("node:fs"),path=require("node:path");const p=L.checkInstalledLayout(process.argv[2]);for(let d=path.resolve(process.argv[3]);;d=path.dirname(d)){try{if(fs.lstatSync(d).isSymbolicLink())p.push(d+" is a symlink")}catch(e){if(e.code!=="ENOENT")throw e}if(path.dirname(d)===d)break}if(p.length){console.error(p.join("\n"));process.exit(1)}' "$LIB" "$PREFIX" "$APPS" || die "unsafe installed layout: nothing was installed"
 
 # ---- 2. stage everything in temp files next to the targets, re-verify, then rename -----------
 TMP_SUFFIX=".new.$$"
 cleanup() {
-  for f in $FILES receipt.json; do rm -f "$PREFIX/.$f$TMP_SUFFIX" 2>/dev/null || true; done
+  for f in $FILES receipt.json; do rm -f "$PREFIX/$f$TMP_SUFFIX" 2>/dev/null || true; done
   rm -f "$APPS/.new.$$.$DESKTOP" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -188,17 +194,18 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
 fi
 
 for f in $FILES receipt.json; do
-  cp "$STAGE/$f" "$PREFIX/.$f$TMP_SUFFIX"
-  case " $EXEC_FILES " in *" $f "*) chmod 755 "$PREFIX/.$f$TMP_SUFFIX" ;; *) chmod 644 "$PREFIX/.$f$TMP_SUFFIX" ;; esac
+  mkdir -p "$(dirname "$PREFIX/$f")"
+  cp "$STAGE/$f" "$PREFIX/$f$TMP_SUFFIX"
+  case " $EXEC_FILES " in *" $f "*) chmod 755 "$PREFIX/$f$TMP_SUFFIX" ;; *) chmod 644 "$PREFIX/$f$TMP_SUFFIX" ;; esac
 done
 # TOCTOU guard: what was copied is what the receipt names
 for f in $FILES; do
-  want="$(printf '%s\n' "$parsed" | sed -n "s/^$(printf '%s' "$f" | sed 's/[.]/\\./g') \\([0-9a-f]\\{64\\}\\)\$/\\1/p")"
-  [ "$(sha_of "$PREFIX/.$f$TMP_SUFFIX")" = "$want" ] || die "the copy of $f changed while installing: aborting before replacing anything"
+  want="$(printf '%s\n' "$parsed" | sed -n "s|^$(printf '%s' "$f" | sed 's/[.]/\\./g') \\([0-9a-f]\\{64\\}\\)\$|\\1|p")"
+  [ "$(sha_of "$PREFIX/$f$TMP_SUFFIX")" = "$want" ] || die "the copy of $f changed while installing: aborting before replacing anything"
 done
 chmod 644 "$APPS/.new.$$.$DESKTOP"
 
-for f in $FILES receipt.json; do mv -f "$PREFIX/.$f$TMP_SUFFIX" "$PREFIX/$f"; done
+for f in $FILES receipt.json; do mv -f "$PREFIX/$f$TMP_SUFFIX" "$PREFIX/$f"; done
 mv -f "$APPS/.new.$$.$DESKTOP" "$APPS/$DESKTOP"
 refresh_desktop_db
 

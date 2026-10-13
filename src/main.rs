@@ -86,6 +86,7 @@ fn quit_clean(app: &AppHandle) {
     hotkeyhost::stop(app); // release the X11 grab before leaving
     settingshost::stop(app);
     close_transport(app);
+    app.state::<abito_island::daemonhost::HostSlot>().stop();
     app.exit(0);
 }
 
@@ -117,10 +118,12 @@ fn spawn_shutdown_watcher(app: AppHandle) {
         if QUITTING.swap(true, Ordering::SeqCst) {
             // A normal quit is already running: give it a moment, then leave.
             std::thread::sleep(Duration::from_millis(500));
+            app.state::<abito_island::daemonhost::HostSlot>().stop();
             std::process::exit(0);
         }
         approval::abort_lane(&app.state::<AppState>().approval);
         close_transport(&app);
+        app.state::<abito_island::daemonhost::HostSlot>().stop();
         // Release the single-instance name before a hard exit (probe does the
         // same), so a later launch is never mistaken for a live one.
         tauri_plugin_single_instance::destroy(&app);
@@ -1470,6 +1473,7 @@ fn main() {
         }))
         .plugin(navigation_lock())
         .manage(state)
+        .manage(abito_island::daemonhost::HostSlot::default())
         .invoke_handler(tauri::generate_handler![
             drag_press,
             drag_move,
@@ -1562,6 +1566,9 @@ fn main() {
             // starts before the probe so the probe can use its endpoint).
             start_transport(&handle);
             install_shutdown_handlers();
+            // Only the first instance reaches setup. Failure is optional and
+            // never tears down the island; runtime errors reach agent:state.
+            handle.state::<abito_island::daemonhost::HostSlot>().start();
             spawn_shutdown_watcher(handle.clone());
             // M3: approval lane — install the publish/context/log hooks,
             // then start the bridge (mode 'jar', mint, first poll, 10 s
@@ -1581,6 +1588,13 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running abito island");
+        .build(tauri::generate_context!())
+        .expect("error while building abito island")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<abito_island::daemonhost::HostSlot>().stop();
+                settingshost::stop(app);
+                close_transport(app);
+            }
+        });
 }

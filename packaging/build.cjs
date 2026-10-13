@@ -14,7 +14,8 @@ const args = process.argv.slice(2);
 const outIdx = args.indexOf('--out');
 const outRoot = path.resolve(outIdx >= 0 ? args[outIdx + 1] : path.join(crate, 'dist'));
 
-const prov = L.requireClean(crate); // fail BEFORE building when the tree has uncommitted product changes
+const prov = L.requireClean(crate);
+L.requireClean(path.join(crate, '..', 'desktop-daemon')); // shipped host bytes are product inputs too // fail BEFORE building when the tree has uncommitted product changes
 const r6 = L.checkR6(crate);
 L.checkFrontend(crate);
 const cfg = L.checkConfig(crate);
@@ -47,6 +48,13 @@ fs.copyFileSync(path.join(crate, 'icons', 'icon.png'), path.join(stage, 'abito-i
 fs.chmodSync(path.join(stage, 'abito-island.png'), 0o644);
 fs.writeFileSync(path.join(stage, 'abito-island-launcher'), L.launcherText(), { mode: 0o755 });
 fs.writeFileSync(path.join(stage, `${L.IDENTIFIER}.desktop`), L.desktopText(), { mode: 0o644 });
+
+for (const name of L.DAEMON_FILES) {
+  const dest = path.join(stage, 'desktop-daemon', name);
+  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o755 });
+  fs.copyFileSync(path.join(crate, '..', 'desktop-daemon', name), dest);
+  fs.chmodSync(dest, 0o644);
+}
 
 const rustc = cp.spawnSync('rustc', ['--version'], { encoding: 'utf8' }).stdout.trim();
 const files = {};

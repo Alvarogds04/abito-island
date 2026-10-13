@@ -53,9 +53,15 @@ function fakeStage({ crateDir = crate } = {}) {
   fs.writeFileSync(path.join(dir, 'abito-island-launcher'), L.launcherText(), { mode: 0o755 });
   fs.writeFileSync(path.join(dir, `${L.IDENTIFIER}.desktop`), L.desktopText(), { mode: 0o644 });
   fs.writeFileSync(path.join(dir, 'abito-island.png'), 'png', { mode: 0o644 });
+  for (const n of L.DAEMON_FILES) {
+    const file = path.join(dir, 'desktop-daemon', n);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+    fs.copyFileSync(path.join(crate, '..', 'desktop-daemon', n), file);
+    fs.chmodSync(file, 0o644);
+  }
   const files = {};
   for (const n of L.STAGED) files[n] = L.sha256File(path.join(dir, n));
-  fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, r6_sha256: L.checkR6(crate), provenance: { head: 'a'.repeat(40), clean: true }, files }));
+  fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, r6_sha256: L.checkR6(crate), provenance: { head: 'a'.repeat(40), clean: true }, files }), { mode: 0o644 });
   return dir;
 }
 test('verify: a pristine stage passes; tampering is caught without launching anything', () => {

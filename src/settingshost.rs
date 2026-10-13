@@ -112,6 +112,10 @@ pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<
         let is_view_or_refresh = payload.get("action").and_then(Value::as_str).is_some_and(|a| a == "view" || a == "refresh");
         let connected = conn.view().get("connection").and_then(Value::as_str) == Some("connected");
         if !connected && is_view_or_refresh {
+            if let Some(reason) = handle.state::<abito_island::daemonhost::HostSlot>().failure() {
+                conn.startup_failed(reason);
+                return Ok(conn.view());
+            }
             let root = island_root(std::env::var("ABITO_ISLAND_DIR").ok().as_deref(), std::env::var("HOME").ok().as_deref());
             match root {
                 Some(root) => conn.connect(&root),

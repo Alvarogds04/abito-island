@@ -1,0 +1,149 @@
+//! App-owned island host. No host restart loop; only the daemon supervises Pi.
+//! Linux has kernel parent-death protection. Other platforms fail closed until
+//! an equivalent, independently verified lifetime mechanism exists.
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartupFailure { NodeMissing, PiMissing, HostMissing, SpawnFailed, Unsupported }
+impl StartupFailure {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NodeMissing => "node_missing", Self::PiMissing => "pi_missing",
+            Self::HostMissing => "host_missing", Self::SpawnFailed => "host_spawn_failed",
+            Self::Unsupported => "host_platform_unsupported",
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct HostSlot {
+    #[cfg(target_os = "linux")]
+    child: Mutex<Option<Host>>,
+    failure: Mutex<Option<StartupFailure>>,
+}
+impl HostSlot {
+    pub fn start(&self) {
+        #[cfg(target_os = "linux")]
+        let result = start();
+        #[cfg(not(target_os = "linux"))]
+        let result: Result<(), StartupFailure> = Err(StartupFailure::Unsupported);
+        match result {
+            #[cfg(target_os = "linux")]
+            Ok(child) => { *self.child.lock().expect("host child lock") = Some(child); }
+            #[cfg(not(target_os = "linux"))]
+            Ok(()) => {}
+            Err(reason) => {
+                eprintln!("island host: no_daemon ({})", reason.code());
+                *self.failure.lock().expect("host failure lock") = Some(reason);
+            }
+        }
+    }
+    pub fn failure(&self) -> Option<StartupFailure> { *self.failure.lock().expect("host failure lock") }
+    pub fn stop(&self) {
+        #[cfg(target_os = "linux")]
+        drop(self.child.lock().expect("host child lock").take());
+    }
+}
+
+/// Session PATH first; only these canonical locations are tried afterwards.
+/// Empty/relative PATH components are ignored: no working-directory execution.
+pub fn discover(name: &str, path: Option<&OsStr>, home: Option<&OsStr>) -> Result<PathBuf, String> {
+    let mut candidates: Vec<PathBuf> = path.map(std::env::split_paths).into_iter().flatten()
+        .filter(|p| p.is_absolute()).map(|p| p.join(name)).collect();
+    match name {
+        "node" => candidates.extend([PathBuf::from("/usr/local/bin/node"), PathBuf::from("/usr/bin/node")]),
+        "pi" => {
+            if let Some(home) = home.map(Path::new).filter(|h| h.is_absolute()) { candidates.push(home.join(".local/bin/pi")); }
+            candidates.extend([PathBuf::from("/usr/local/bin/pi"), PathBuf::from("/usr/bin/pi")]);
+        }
+        _ => {}
+    }
+    candidates.into_iter().find(|p| executable(p)).ok_or_else(|| format!("{name} missing (PATH and canonical locations)"))
+}
+fn executable(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else { return false };
+    #[cfg(unix)]
+    { use std::os::unix::fs::PermissionsExt; meta.is_file() && meta.permissions().mode() & 0o111 != 0 }
+    #[cfg(not(unix))]
+    { meta.is_file() }
+}
+
+/// Use the same absolute-only PATH search for Pi/SDK subprocesses as discovery.
+/// Keeping a relative entry here would undo discover()'s no-CWD-execution rule.
+pub fn runtime_path(path: Option<&OsStr>, node: &Path, pi: &Path) -> Result<std::ffi::OsString, std::env::JoinPathsError> {
+    let mut dirs: Vec<PathBuf> = path.map(std::env::split_paths).into_iter().flatten()
+        .filter(|p| p.is_absolute()).collect();
+    for runtime in [node, pi] {
+        if let Some(dir) = runtime.parent() { if !dirs.iter().any(|d| d == dir) { dirs.push(dir.to_owned()); } }
+    }
+    std::env::join_paths(dirs)
+}
+
+#[cfg(target_os = "linux")]
+fn start() -> Result<Host, StartupFailure> {
+    let path = std::env::var_os("PATH"); let home = std::env::var_os("HOME");
+    let node = discover("node", path.as_deref(), home.as_deref()).map_err(|_| StartupFailure::NodeMissing)?;
+    let pi = discover("pi", path.as_deref(), home.as_deref()).map_err(|_| StartupFailure::PiMissing)?;
+    let exe = std::env::current_exe().map_err(|_| StartupFailure::HostMissing)?;
+    let mut cli = exe.parent().ok_or(StartupFailure::HostMissing)?.join("desktop-daemon/src/cli.cjs");
+    #[cfg(debug_assertions)]
+    if !cli.is_file() { cli = Path::new(env!("CARGO_MANIFEST_DIR")).join("../desktop-daemon/src/cli.cjs"); }
+    if !cli.is_file() { return Err(StartupFailure::HostMissing) }
+    let child_path = runtime_path(path.as_deref(), &node, &pi).map_err(|_| StartupFailure::SpawnFailed)?;
+    let mut command = std::process::Command::new(node);
+    command.arg(cli).args(["run", "--app-owned"]).env("PATH", child_path);
+    Host::spawn_command(command).map_err(|_| StartupFailure::SpawnFailed)
+}
+
+#[cfg(target_os = "linux")]
+pub struct Host { child: std::process::Child }
+#[cfg(target_os = "linux")]
+impl Host {
+    /// Private process group for owned cleanup, plus kernel death signal. No shell.
+    pub fn spawn_command(mut command: std::process::Command) -> std::io::Result<Self> {
+        use std::os::unix::process::CommandExt;
+        let parent = std::process::id() as libc::pid_t;
+        command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::inherit());
+        unsafe {
+            command.pre_exec(move || {
+                if libc::setpgid(0, 0) != 0 { return Err(std::io::Error::last_os_error()) }
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 { return Err(std::io::Error::last_os_error()) }
+                // Parent may have died between fork and prctl. Never escape that race.
+                if libc::getppid() != parent { return Err(std::io::Error::other("app exited before host spawn")) }
+                Ok(())
+            });
+        }
+        command.spawn().map(|child| Self { child })
+    }
+    pub fn pid(&self) -> u32 { self.child.id() }
+    pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> { self.child.try_wait() }
+}
+#[cfg(target_os = "linux")]
+impl Drop for Host {
+    fn drop(&mut self) {
+        // Never signal a reused process/group id after the child was already reaped.
+        if self.child.try_wait().ok().flatten().is_some() { return }
+        drop(self.child.stdin.take()); // EOF lease allows graceful shutdown
+        let pid = self.child.id() as libc::pid_t;
+        unsafe { libc::kill(-pid, libc::SIGTERM); }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if self.child.try_wait().ok().flatten().is_some() { return }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        unsafe { libc::kill(-pid, libc::SIGKILL); }
+        // A child can move out of its original group. Target our unreaped
+        // direct child as well; its PID cannot be reused while we still own it.
+        let _ = self.child.kill();
+        let reap_deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < reap_deadline {
+            if self.child.try_wait().ok().flatten().is_some() { return }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // Never block app exit in wait(). In an uninterruptible kernel wait,
+        // PDEATHSIG remains the final backstop when this app process exits.
+        eprintln!("island host: bounded reap expired; kernel parent-death protection remains active");
+    }
+}
