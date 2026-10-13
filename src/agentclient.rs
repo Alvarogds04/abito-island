@@ -355,6 +355,12 @@ impl ClientState {
         })
     }
 
+    /// Local startup diagnostic in the existing error channel; never free text,
+    /// paths, credentials or daemon wire errors. Connection stays `no_daemon`.
+    pub fn note_startup_failure(&mut self, reason: crate::daemonhost::StartupFailure) {
+        self.last_error = json!({"code": reason.code(), "n": 1});
+    }
+
     pub fn note_connectors_error(&mut self, code: &str) {
         let state = if code == "unavailable" { "unavailable" } else { "failed" };
         self.connectors = json!({"state": state, "items": []});

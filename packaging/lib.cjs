@@ -117,11 +117,52 @@ StartupWMClass=Abito-island
 }
 
 // ---- receipt verification (no launch) -------------------------------------
-const STAGED = ['abito-island', 'abito-island-launcher', 'abito-island.png', `${IDENTIFIER}.desktop`];
+const DAEMON_FILES = ['package.json', 'identity.md', 'THIRD-PARTY-NOTICES.md',
+  'src/agents.cjs', 'src/auth.cjs', 'src/cli.cjs', 'src/config.cjs',
+  'src/connectors.cjs', 'src/daemon.cjs', 'src/isolation.cjs', 'src/profiles.cjs',
+  'src/protocol.cjs', 'src/runtime.cjs', 'src/sdk-helper.mjs', 'src/server.cjs'];
+const STAGED = ['abito-island', 'abito-island-launcher', 'abito-island.png', `${IDENTIFIER}.desktop`,
+  ...DAEMON_FILES.map(f => `desktop-daemon/${f}`)];
+const STAGED_DIRS = ['desktop-daemon', 'desktop-daemon/src'];
+// Enumerate the complete tree without following links, including empty directories.
+function stageEntries(dir, problems, prefix = '') {
+  const files = [], dirs = [];
+  for (const name of fs.readdirSync(dir)) {
+    const rel = prefix + name;
+    const stat = fs.lstatSync(path.join(dir, name));
+    if (stat.isSymbolicLink()) { problems.push(`${rel} is a symlink`); continue; }
+    if (stat.mode & 0o022) problems.push(`${rel} is group/world writable`);
+    if (stat.isDirectory()) {
+      dirs.push(rel);
+      const nested = stageEntries(path.join(dir, name), problems, rel + '/');
+      files.push(...nested.files); dirs.push(...nested.dirs);
+    } else if (stat.isFile()) files.push(rel);
+    else problems.push(`${rel} is not a regular file or directory`);
+  }
+  return { files: files.sort(), dirs: dirs.sort() };
+}
+function checkInstalledLayout(dir) {
+  const problems = [];
+  // Do not write through a symlink anywhere in the destination's ancestor chain.
+  for (let p = path.resolve(dir); ; p = path.dirname(p)) {
+    if (fs.existsSync(p) || (() => { try { fs.lstatSync(p); return true; } catch { return false; } })()) {
+      const stat = fs.lstatSync(p);
+      if (stat.isSymbolicLink()) problems.push(`${p} is a symlink`);
+      else if (!stat.isDirectory()) problems.push(`${p} is not a directory`);
+    }
+    if (path.dirname(p) === p) break;
+  }
+  if (problems.length || !fs.existsSync(dir)) return problems;
+  const entries = stageEntries(dir, problems);
+  for (const file of entries.files) if (![...STAGED, 'receipt.json'].includes(file)) problems.push(`unexpected installed file: ${file}`);
+  for (const sub of entries.dirs) if (!STAGED_DIRS.includes(sub)) problems.push(`unexpected installed directory: ${sub}`);
+  return problems;
+}
 function verifyStage(dir, { sourceCrate } = {}) {
   const problems = [];
   const receiptPath = path.join(dir, 'receipt.json');
   if (!fs.existsSync(receiptPath)) return ['receipt.json missing'];
+  if (fs.lstatSync(receiptPath).isSymbolicLink()) return ['receipt.json is a symlink'];
   let receipt;
   try { receipt = readJson(receiptPath); } catch (e) { return [e.message]; }
   if (receipt.identifier !== IDENTIFIER) problems.push('receipt identifier mismatch');
@@ -129,8 +170,11 @@ function verifyStage(dir, { sourceCrate } = {}) {
   const prov = receipt.provenance || {};
   if (!/^[0-9a-f]{40}$/.test(prov.head || '')) problems.push('receipt has no git HEAD');
   if (prov.clean !== true) problems.push('receipt does not attest a clean tree');
-  const entries = fs.readdirSync(dir).filter(f => f !== 'receipt.json').sort();
-  if (JSON.stringify(entries) !== JSON.stringify([...STAGED].sort())) problems.push(`unexpected stage entries: ${entries}`);
+  const entries = stageEntries(dir, problems);
+  if (JSON.stringify(entries.files.filter(f => f !== 'receipt.json')) !== JSON.stringify([...STAGED].sort()) ||
+      JSON.stringify(entries.dirs) !== JSON.stringify([...STAGED_DIRS].sort())) problems.push(`unexpected stage entries: ${entries.files}; directories: ${entries.dirs}`);
+  if (JSON.stringify(Object.keys(receipt.files || {}).sort()) !== JSON.stringify([...STAGED].sort())) problems.push('receipt lists a different set of files');
+  if (problems.some(p => /symlink/.test(p))) return problems; // never read through a linked ancestor
   for (const name of STAGED) {
     const file = path.join(dir, name);
     if (!fs.existsSync(file)) { problems.push(`${name} missing`); continue; }
@@ -172,5 +216,5 @@ function requireClean(crate) {
   return p;
 }
 
-module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, ALLOWED_ABITO, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, STAGED, sha256, sha256File,
+module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, ALLOWED_ABITO, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, DAEMON_FILES, STAGED, STAGED_DIRS, checkInstalledLayout, sha256, sha256File,
   checkR6, checkFrontend, checkConfig, launcherText, desktopText, verifyStage };

@@ -68,6 +68,12 @@ impl AgentConn {
         }
     }
 
+    pub fn startup_failed(&self, reason: crate::daemonhost::StartupFailure) {
+        let mut state = ClientState::disconnected(Reason::NoDaemon);
+        state.note_startup_failure(reason);
+        self.set(state);
+    }
+
     pub fn view(&self) -> Value {
         serde_json::to_value(&*self.state.lock().expect("agent state lock")).unwrap_or(Value::Null)
     }
