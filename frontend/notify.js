@@ -97,9 +97,21 @@
     }
   }
 
+  // Flash fix V2: the auto-return is a CROSS-fade. The overview layers normally enter after a 160ms delay
+  // (the island grows first); right after an outcome that delay left a dark gap, so `data-crossfade`
+  // cancels it for one enter duration (read from the --dur-view-in token, never a literal).
+  let outcomeOnScreen = false, crossfadeTimer = 0;
+  function crossfade() {
+    const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-view-in'));
+    capsule.dataset.crossfade = 'true';
+    clearTimeout(crossfadeTimer);
+    crossfadeTimer = setTimeout(() => { delete capsule.dataset.crossfade; }, (Number.isFinite(raw) ? raw : 400) + 100);
+  }
   function render() {
     const view = current();
     const n = view.notification || null;
+    if (outcomeOnScreen && view.kind !== 'outcome' && !n) crossfade();
+    outcomeOnScreen = view.kind === 'outcome';
     const showing = !!n && onScreen();
     const outcome = view.outcome || null;
     root.inert = !(showing || (outcome && capsule.dataset.view === 'overview'));

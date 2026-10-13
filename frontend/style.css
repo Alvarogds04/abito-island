@@ -773,7 +773,8 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 .q-option { flex: 0 1 auto; min-width: 0; gap: 6px; padding: 0 10px 0 6px; font-size: var(--fs-label); }
 .q-key { width: 22px; height: 22px; }
 .q-label { min-width: 0; }
-#capsule[data-question="outcome"]:not([data-card]) #question { top: 44px; bottom: auto; height: 72px; padding: 0 20px; justify-content: center; }
+/* the outcome keeps the question card's box (no layout to animate): same frame, centred content */
+#capsule[data-question="outcome"]:not([data-card]) #question { padding: 0 20px; justify-content: center; }
 #capsule[data-question="outcome"] #question-head { grid-template-areas: "expiry"; grid-template-columns: 1fr; align-items: center; }
 #capsule[data-question="outcome"] #question-body, #capsule[data-question="outcome"] #question-asker, #capsule[data-question="outcome"] #question-options { display: none; }
 #question-state { font-size: var(--fs-title); font-weight: 600; gap: 10px; }
@@ -819,3 +820,44 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 .smethod { padding: 14px 16px; gap: 6px; }
 .smethod span { font-size: var(--fs-label); }
 .sbtn { font-size: var(--fs-body); }
+
+/* ==========================================================================
+   Flash fix V2 (installed-build report: flicker while the island compresses/expands).
+   Frame evidence: VISUAL-AUDIT.md "Flash investigation". Two frontend causes, both fixed here:
+   (1) #overview-view had NO transition, so its card popped in/out while the notices pane faded
+       on a 160ms delay (three layers out of step on expand, collapse and the outcome auto-return);
+   (2) overview layers were anchored to the island's EDGES, so they stretched (chat open) and
+       squeezed (collapse) with the animated island instead of keeping their layout.
+   Layers are pinned to the 640x160 overview box centred on the island, and the island clips
+   them (a clean wipe). Only existing --dur-* / --ease-* tokens; geometry numbers unchanged.
+   ========================================================================== */
+#island { overflow: hidden; }
+#overview-view {
+  transition: opacity var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
+}
+#capsule[data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-question="pending"]):not([data-question="expired"]):not([data-question="outcome"]) #overview-view {
+  transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), visibility 0s;
+}
+html[data-motion="reduce"] #overview-view { transition: none !important; }
+/* top+height (left+width) over-constrain the box, so bottom (right) are ignored by CSS; they stay numeric
+   because the overview contract checks read them. */
+#island-header { left: calc(50% + 256px); right: 8px; bottom: 10px; height: 140px; }
+#overview-view { left: calc(50% - 310px); right: 72px; width: 558px; bottom: 10px; height: 140px; }
+#notices { left: calc(50% + 18px); right: 72px; width: 230px; bottom: 10px; height: 140px; }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices { left: calc(50% - 212px); right: 72px; width: 460px; }
+#question, #permission { left: calc(50% - 216px); right: 72px; width: 464px; bottom: 8px; height: 144px; }
+
+/* outcome -> overview is a cross-fade (no delay); the island ring eases instead of cutting */
+#capsule[data-crossfade][data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-question="pending"]):not([data-question="expired"]):not([data-question="outcome"]) #overview-view {
+  transition: opacity var(--dur-state) var(--ease-out), visibility 0s;
+}
+#capsule[data-crossfade][data-phase="expanded"] #notices {
+  transition: opacity var(--dur-state) var(--ease-out), transform var(--dur-view-in) var(--spring), visibility 0s;
+}
+#island { transition: box-shadow var(--dur-state) var(--ease-out); }
+html[data-motion="reduce"] #island { transition: none; }
+/* the view rail enters with the cards (same --dur-view-delay), not 130ms ahead of them */
+#capsule[data-phase="expanded"]:not([data-view="chat"]) #island-header {
+  transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), visibility 0s;
+}
+html[data-motion="reduce"] #capsule #island-header { transition: none; }
