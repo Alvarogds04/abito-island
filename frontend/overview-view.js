@@ -93,6 +93,14 @@
       fraction: Math.max(0, Math.min(1, left / NOTICE_WINDOW_MS)), aria: full };
   }
 
+  // Native-confirmed notice navigation. The event is presentation-only: neither
+  // a finished notice nor a question is a backend approval-card selection.
+  function noticeOpenView(payload) {
+    if (!payload || typeof payload.id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.id)) return null;
+    return payload.kind === 'question' ? 'question' : payload.kind === 'finished' ? 'notices' : null;
+  }
+
   // R6 gesture after the human's click. A SENT decision is NOT a confirmed
   // result (§1.1, C23): «Enviada»/«Sin confirmar» keep the character at REST;
   // lifting/smiling (confirm) or shaking (reject) may only come from a real
@@ -212,5 +220,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

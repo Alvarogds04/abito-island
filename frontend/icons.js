@@ -35,7 +35,7 @@
     'load-off': `<path d="M10 3v8M6.5 8L10 11.5 13.5 8M3 13v3h14v-3"/><path d="${SLASH}"/>`, // loading needed (Abito never loads)
     'eye': EYE,
     'arrow-down': '<path d="M10 4v12M5 11l5 5 5-5"/>',
-    'gear': '<circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/>',
+    'gear': '<path d="M8.4 4.1L8.8 2.2L11.2 2.2L11.6 4.1L13.1 4.7L14.6 3.6L16.4 5.4L15.3 6.9L15.9 8.4L17.8 8.8L17.8 11.2L15.9 11.6L15.3 13.0L16.4 14.6L14.6 16.4L13.0 15.3L11.6 15.9L11.2 17.8L8.8 17.8L8.4 15.9L7.0 15.3L5.4 16.4L3.6 14.6L4.7 13.1L4.1 11.6L2.2 11.2L2.2 8.8L4.1 8.4L4.7 6.9L3.6 5.4L5.4 3.6L6.9 4.7z"/><circle cx="10" cy="10" r="2.6"/>', // settings cog: 8-tooth outline + hub (stroke only, 20px grid)
     'user': '<circle cx="10" cy="7" r="3"/><path d="M4 17c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/>', // #310 Cuentas
     'ring': '<path d="M10 2a8 8 0 1 0 8 8"/>', // open arc; the page spins it
   });

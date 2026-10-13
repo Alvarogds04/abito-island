@@ -60,6 +60,13 @@ pub fn with_pending<T>(state: &AppState, operation: impl FnOnce(bool) -> T) -> T
         None => operation(false),
     }
 }
+/// Click-only atomic matching/navigation transaction. Lock order stays host
+/// transport → questions → core/phase; publication/native work follows unlock.
+pub fn with_question_click<T>(state: &AppState, id: &str, operation: impl FnOnce() -> T) -> Result<T, BridgeError> {
+    let transport = state.transport.lock().expect("transport lock");
+    let t = transport.as_ref().ok_or_else(|| BridgeError::denied("notice is not current"))?;
+    t.with_question_click(id, operation)
+}
 /// Run on the main thread, never from inside with_pending. The transport
 /// establishes its barrier before invoking actual runtime resize work.
 pub fn compact_resize_request(

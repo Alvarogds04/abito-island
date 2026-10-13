@@ -12,12 +12,20 @@
    - Reads the motion override through the window.desktop facade (M1b):
      `animateAnyway` forces motion even under prefers-reduced-motion;
      everything else fails CLOSED to accessibility (M1a behaviour).
+   - #266: an incoming question or NEW notice opens a RESTING COMPACT island
+     through the host's own `expand` verb — the human decision that overrides
+     the old no-reveal-on-notice rule. Native geometry, the hidden-state
+     policy and the spring stay Rust's/contract's; the reveal never focuses,
+     never answers and never replays boot history.
    No sounds, no Coucou assets. */
 (() => {
   const $ = id => document.getElementById(id);
   const capsule = $('capsule');
   const island = $('island');
   const clayEl = $('clay');
+  let current = null;
+  // Native-confirmed notice lane is separate from approval-card selection.
+  let noticeLane = null;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)'); // the SYSTEM value: informative only (#304)
   // #304: Abito's own motion state. Default «full»: the system preference is honored
   // only when the human opted in (snapshot.motionOverride === false). Every snap /
@@ -38,7 +46,7 @@
   const COMPACT = { w: 66, h: 66, r: 33, gap: 6, clay: 54, drop: 2 };
   // UI.1: R6 is 128px at the left of the plain overview and 72px while the
   // approval card is shown (only scale/position; the engine is frozen).
-  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 0, clayX: 82 };
+  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 10, clayX: 82 }; // drop 10: the drawn blob (not the box) is centred in the 140px card
   const OVERVIEW_CARD = { clay: 80, clayX: 62 };
   // The engine draws its body ~112 viewBox units wide inside its 200x160
   // canvas (measured from the captures), so a box of 128px shows a ~70px
@@ -52,7 +60,7 @@
   // only the pre-first-push default and must match geometry::CHAT_COLUMN_W / CHAT_PREFERRED_H.
   // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
   // (128 units show ~112) a 46px box shows ~40px.
-  const CHAT = { w: 400, h: 640, r: 22, clay: 46, clayLeft: 34, clayTop: 3 };
+  const CHAT = { w: 400, h: 640, r: 22, clay: 46, clayLeft: 52, clayTop: 3 };
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -150,7 +158,9 @@
     const h = lerp(COMPACT.h, lerp(OVERVIEW.h, CHAT.h, q.x), p);
     const r = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
-    const ov = (cardShown || questionShown) ? OVERVIEW_CARD : OVERVIEW;
+    const ovBase = (cardShown || questionShown) ? OVERVIEW_CARD : OVERVIEW;
+    // the confirmed finished-notice lane (pane starts at x=108) uses the small R6 too, or the 128px blob covers the pane
+    const ov = (noticeLane && noticeLane.view === 'notices') ? OVERVIEW_CARD : ovBase;
     const cs = lerp(COMPACT.clay, ov.clay, p);
     const drop = lerp(COMPACT.drop, OVERVIEW.drop, p);
     island.style.width = w + 'px';
@@ -174,9 +184,14 @@
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';
     clayEl.style.left = lerp(lerp(w / 2, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
-    clayEl.style.top = lerp(overviewTop, CHAT.clayTop, q.x) + 'px';
+    // Coucou companion follows the live composer, not a demo success pose.
+    clayEl.style.top = lerp(overviewTop, CHAT.h - 76, q.x) + 'px';
     capsule.dataset.edge = edge;
-    capsule.dataset.view = q.target === 1 ? 'chat' : 'overview';
+    capsule.dataset.view = q.target === 1 ? 'chat' : noticeLane && noticeLane.view === 'notices' ? 'notices' : 'overview';
+    const home = $('home-tab');
+    if (home) home.setAttribute('aria-pressed', q.target === 0 && !noticeLane ? 'true' : 'false');
+    const chatTab = $('open-chat');
+    if (chatTab) chatTab.setAttribute('aria-pressed', q.target === 1 ? 'true' : 'false');
     // M1 semantics unchanged: expanded as soon as the island reached it
     // (spring overshoot included); the chat is a VIEW of the expanded phase.
     let phase = 'collapsing';
@@ -251,7 +266,11 @@
     const t = phase === 'overview' ? 1 : 0;
     target = t;
     // A collapse always leaves the chat view (Rust resets it too).
-    if (t === 0) moveView(0);
+    if (t === 0) {
+      noticeLane = null; delete capsule.dataset.noticeView; moveView(0);
+      // a collapse leaves the chat view: panels (models/settings) close with it, or they pin the dot's character out of place
+      document.dispatchEvent(new CustomEvent('island:view', { detail: 'overview' }));
+    }
     if (motionReduced() || Math.abs(t - p) < 1e-9) {
       p = t; v = 0; mode = 'idle'; render();
       if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
@@ -266,6 +285,8 @@
   // U1: called from Rust (chathost::apply_view) with the chat height from
   // geometry::CHAT_VISIBLE — the frontend never owns that number.
   window.__islandSetView = (view, vw, vh) => {
+    noticeLane = null;
+    delete capsule.dataset.noticeView;
     if (Number.isInteger(vw) && Number.isInteger(vh) && vw > 0 && vh > 0) { CHAT.w = vw; CHAT.h = vh; }
     moveView(view === 'chat' ? 1 : 0);
     render();
@@ -359,8 +380,32 @@
   const noticePill = $('notice-pill');
   const noticeInfo = $('notice-info');
   const O = window.AbitoOverview;
+  const NV = window.AbitoNotify;
   const ICONS = window.AbitoIcons;
   const icon = name => (ICONS ? ICONS.svg(name) : '');
+  // #266: incoming-event reveal (Sileo-style). The pure gates in notify-view.js
+  // decide WHICH snapshots are events (boot replays and churn are not); the pure
+  // revealAction decides whether this capsule may act: a resting compact island
+  // and a HIDDEN one expand, through the host's own verb — Rust owns the native
+  // geometry, the existing contract spring animates the reveal, and the M1
+  // reduced-motion policy snaps it instantly (deliberately preserved). #266 S2
+  // Path B: `expand` reveals from Hidden too (src/desktop.rs), and the host
+  // shows the window WITHOUT focus (src/main.rs: unminimize+show, never
+  // set_focus; a stale expanded core is shown in place, never toggle-collapsed).
+  // Only genuinely new events reach this: boot/cached/duplicate snapshots never
+  // call the verb, so nothing restores on start-up.
+  const revealGate = NV && NV.createRevealGate ? NV.createRevealGate() : null;
+  let revealFlight = false;
+  function revealIsland() {
+    if (!NV || typeof NV.revealAction !== 'function' || revealFlight) return;
+    if (NV.revealAction({ state: current && current.state, phase: capsule.dataset.phase }) !== 'expand') return;
+    if (!window.desktop || typeof window.desktop.expand !== 'function') return;
+    revealFlight = true; // one host call at a time; the spring itself is interruptible
+    window.desktop.expand().then(snap => {
+      revealFlight = false;
+      if (snap) { current = snap; syncToggle(snap.state); }
+    }, () => { revealFlight = false; });
+  }
   // Static own icons: closed registry, never data.
   for (const el of document.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
 
@@ -403,7 +448,11 @@
     const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
     announceNotice(notices);
     soundCue('observeNotices', notices); // #313: only a NEW top notice sounds, never the ones already there at start-up
+    if (revealGate && revealGate.notice(notices)) revealIsland(); // #266: a NEW notice opens the resting island once
     const conn = O.connectionView(snapshot);
+    const overviewStatus = $('overview-status'), overviewDetail = $('overview-detail');
+    if (overviewStatus) overviewStatus.textContent = conn.word || 'Conexión local';
+    if (overviewDetail) overviewDetail.textContent = conn.detail;
     connectionEl.dataset.tone = conn.tone;
     connectionEl.setAttribute('aria-label', conn.aria);
     $('connection-icon').innerHTML = icon(conn.icon);
@@ -418,6 +467,11 @@
       $('bridge-word').textContent = bridge.word;
     }
     const first = notices[0] || null;
+    const opener = $('notice-open');
+    if (opener) {
+      opener.disabled = !NV || !NV.openPayload({ isTrusted: true }, first, 'finished');
+      opener.setAttribute('aria-label', first ? `Abrir aviso: ${first.title}` : 'Sin avisos');
+    }
     const view = paintRing(notices);
     noticePill.hidden = !view;
     if (view) {
@@ -474,6 +528,30 @@
     const listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
     if (listen) listen('hotkey:state', event => paintHotkey(event && event.payload)).catch(() => {});
   }
+  const noticeOpen = $('notice-open');
+  if (noticeOpen) noticeOpen.addEventListener('click', event => {
+    event.preventDefault();
+    const first = current && Array.isArray(current.notices) ? current.notices[0] : null;
+    const payload = NV && NV.openPayload(event, first, 'finished');
+    if (!payload || !window.desktop || typeof window.desktop.click !== 'function') return;
+    // Never switch optimistically or fall back to Expand: native liveness/expiry
+    // and ambiguity checks must complete before desktop:notice-open is emitted.
+    try { window.desktop.click(payload).catch(() => {}); } catch { /* fail closed */ }
+  });
+  const listenNotice = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  if (listenNotice) listenNotice('desktop:notice-open', event => {
+    const payload = event && event.payload;
+    const view = O && O.noticeOpenView(payload);
+    if (!view) return;
+    noticeLane = { id: payload.id, view };
+    capsule.dataset.noticeView = view;
+    moveView(0);
+    renderCard();
+    render();
+    if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
+    // The existing question controller rerenders through its public view event.
+    document.dispatchEvent(new CustomEvent('island:view', { detail: capsule.dataset.view }));
+  }).catch(() => {});
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {
       event.preventDefault();
@@ -491,7 +569,6 @@
   // reaches the host, and controls are locked while a decision is in
   // flight. Ported guards from the legacy renderer.js (validCard shape +
   // calendar, cardFeedback reasons, isTrusted + flight lock).
-  let current = null;
   let cardFlight = null;
   let cardFailure = null;
 
@@ -511,6 +588,7 @@
   }
   function cardKey(card) { return JSON.stringify([card.operation, card.expires_at]); }
   function cardFeedback(card) {
+    if (noticeLane) return 'Abrí la tarjeta para decidir.';
     if (card.state === 'inert') return card.reason;
     if (Date.now() >= Date.parse(card.expires_at)) return 'Propuesta vencida.';
     if (cardFlight) return 'Decisión en curso.';
@@ -551,14 +629,16 @@
     soundCue('observeCard', valid && card.state === 'pending' && typeof card.id === 'string' ? card.id : null); // #313: a card BECOMING pending
     const permission = $('permission');
     if (!permission || !O) return;
-    permission.hidden = !valid;
+    const visible = valid && !noticeLane;
+    permission.hidden = !visible;
+    permission.inert = !visible;
     for (const id of ['operation', 'expiry', 'card-status-word', 'card-reason']) { const el = $(id); if (el) el.textContent = ''; }
     $('expiry').removeAttribute('datetime');
     const allow = $('allow'), deny = $('deny');
     allow.disabled = true;
     deny.disabled = true;
-    if (cardShown !== valid) { cardShown = valid; render(); }
-    if (!valid) { delete capsule.dataset.card; delete capsule.dataset.cardTone; return; }
+    if (cardShown !== visible) { cardShown = visible; render(); }
+    if (!visible) { delete capsule.dataset.card; delete capsule.dataset.cardTone; return; }
     const reason = cardFeedback(card);
     const view = O.cardView(reason);
     $('operation').textContent = card.operation;
@@ -630,6 +710,7 @@
     const show = !!(event.detail && event.detail.show);
     if (show !== questionShown) { questionShown = show; render(); }
     paintCompactFlag();
+    if (event.detail && event.detail.reveal) revealIsland(); // #266: a genuinely new question reveals
   });
 
   // ---- Q1: keyboard control of the island itself -------------------------
@@ -673,6 +754,34 @@
     if (event.key === 'Escape' && capsule.dataset.phase === 'expanded' &&
       document.activeElement !== $('chat-input')) focusAfterPhase = 'island-toggle';
   }, true);
+
+  // Coucou home tab requests the EXISTING host-owned overview transition; it
+  // does not resize locally or bypass the pending-question collapse barrier.
+  const homeTab = $('home-tab');
+  if (homeTab) homeTab.addEventListener('click', event => {
+    if (!NV || !NV.trusted(event)) return;
+    if (capsule.dataset.view === 'chat') {
+      const back = $('chat-back');
+      if (back) back.click();
+      return;
+    }
+    noticeLane = null;
+    delete capsule.dataset.noticeView;
+    renderCard(); render();
+    document.dispatchEvent(new CustomEvent('island:view', { detail: 'overview' }));
+  });
+  // Filter the real model list only. The existing controller remains the sole
+  // owner of refresh, readiness, selection and host calls; no sample accounts.
+  const search = $('models-search'), modelList = $('models-list');
+  function filterModels() {
+    if (!search || !modelList) return;
+    const needle = String(search.value || '').trim().toLocaleLowerCase();
+    for (const row of modelList.querySelectorAll('li')) row.hidden = !!needle && !String(row.textContent || '').toLocaleLowerCase().includes(needle);
+  }
+  if (search && modelList) {
+    search.addEventListener('input', filterModels);
+    new MutationObserver(filterModels).observe(modelList, { childList: true });
+  }
 
   // ---- boot ---------------------------------------------------------------
   render();

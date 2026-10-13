@@ -27,6 +27,9 @@
       hide: () => action('hide'),
       quit: () => action('quit'),
       dismiss: () => action('dismiss'),
+      // Display-only opener. Rust validates the exact UUID/kind and current host identity.
+      /** @param {{id: string, kind: 'question' | 'finished'}} notice */
+      click: ({ id, kind }) => invoke('desktop_action', { payload: { action: 'click', id, kind } }),
       allow: () => action('allow'),
       deny: () => action('deny'),
       // The renderer sends an INDEX, never the chosen text: it is the most

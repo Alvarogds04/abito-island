@@ -199,6 +199,54 @@ pub fn validate_payload(payload: &Value) -> Result<(Action, Option<i32>), Bridge
     }
 }
 
+/// Display-only notice navigation. Deliberately separate from the legacy
+/// argument-free action set: a fieldless click can never reach dispatch_verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickKind { Question, Finished }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Click { pub id: String, pub kind: ClickKind }
+
+/// Exact new boundary. Legacy validate_payload is unchanged. Reuse the
+/// canonical question ID validator without executing any question command.
+pub fn parse_click(payload: &Value) -> Result<Click, BridgeError> {
+    if serde_json::to_vec(payload).unwrap_or_default().len() > MAX_ACTION_BYTES {
+        return Err(BridgeError::denied("payload too large"));
+    }
+    let map = payload.as_object().ok_or_else(|| BridgeError::denied("click must be an object"))?;
+    if map.len() != 3 || map.get("action").and_then(Value::as_str) != Some("click")
+        || !map.contains_key("id") || !map.contains_key("kind") {
+        return Err(BridgeError::denied("click requires exactly action, id, kind"));
+    }
+    let kind = match map["kind"].as_str() {
+        Some("question") => ClickKind::Question,
+        Some("finished") => ClickKind::Finished,
+        _ => return Err(BridgeError::denied("unknown notice kind")),
+    };
+    let id = map["id"].as_str().ok_or_else(|| BridgeError::denied("invalid notice id"))?;
+    crate::questioncmd::parse_command(&serde_json::json!({"action":"decline","id":id}))
+        .map_err(|_| BridgeError::denied("invalid notice id"))?;
+    Ok(Click { id: id.into(), kind })
+}
+
+/// Resolve a fresh host projection only; never use renderer metadata as
+/// authority. Finished is the store discriminator (not a wire kind). First-only
+/// routing and ambiguous cross-session IDs fail closed. Does not mutate data.
+/// The native question path instead holds the active-slot guard atomically.
+pub fn route_click(click: &Click, question: &Value, notices: &Value, now: u64) -> Result<ClickKind, BridgeError> {
+    let live = match click.kind {
+        ClickKind::Question => question.get("pending").is_some_and(|p|
+            p["id"].as_str() == Some(&click.id)
+                && matches!(p["kind"].as_str(), Some("question" | "approval"))
+                && p["expires_at"].as_u64().is_some_and(|expiry| expiry > now)),
+        ClickKind::Finished => notices.as_array().is_some_and(|entries|
+            entries.first().is_some_and(|n| n["id"].as_str() == Some(&click.id)
+                && n["expiresAt"].as_u64().is_some_and(|expiry| expiry > now))
+                && entries.iter().filter(|n| n["id"].as_str() == Some(&click.id)).count() == 1),
+    };
+    if live { Ok(click.kind) } else { Err(BridgeError::denied("notice is not current")) }
+}
+
 /// Sender half of `core.cjs validateIPC` + the origin rule of `security.cjs`:
 /// only the main window, loaded on the exact local app page, may call the
 /// host. The label and URL are read from the live webview by the command, so

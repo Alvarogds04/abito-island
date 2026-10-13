@@ -38,17 +38,23 @@ impl IslandState {
     }
 }
 
-/// `core.cjs transition(state, action)`, ported exactly:
-/// - `hide` always hides,
+/// `core.cjs transition(state, action)`, ported from Electron with the
+/// #266 S2 Path B extension:
+/// - `hide` always hides (immediate, unchanged: hotkey contract #305),
 /// - `restore` always lands compact,
-/// - `expand` only opens from compact, `close` only closes from expanded,
-/// - everything else is a no-op (a notice or a decision can never open or
-///   restore the capsule by itself).
+/// - `expand` opens from compact AND now reveals from hidden — page-driven,
+///   only for genuinely new questions/notices (the event gate is the
+///   frontend's reveal gate); the host still never opens anything on its own,
+/// - `close` only closes from expanded,
+/// - everything else is a no-op (a notice or a decision can never name a verb
+///   and can never restore the capsule by itself).
 pub fn transition(state: IslandState, action: &str) -> IslandState {
     match action {
         "hide" => IslandState::Hidden,
         "restore" => IslandState::Compact,
-        "expand" if state == IslandState::Compact => IslandState::Expanded,
+        "expand" if matches!(state, IslandState::Compact | IslandState::Hidden) => {
+            IslandState::Expanded
+        }
         "close" if state == IslandState::Expanded => IslandState::Compact,
         _ => state,
     }
@@ -178,6 +184,53 @@ pub fn motion_override_from_config(text: Option<&str>) -> bool {
         .unwrap_or(true)
 }
 
+/// #266 S2 Path B: what the Expand dispatch must do when the capsule was
+/// Hidden. Pure so the invariant "a reveal never collapses" is deterministic
+/// without a window system. The native `core.expanded` flag survives a hide
+/// (hide is only `window.hide()`), so it can disagree with the resting
+/// expectation:
+/// - hidden from compact → run the normal toggle funnel (grow, then show);
+/// - hidden while the core still says expanded → the native rect already
+///   carries the overview geometry; a blind toggle would emit a COLLAPSE plan
+///   and leave phase Expanded over a compact window. Show in place instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenReveal {
+    GrowThenShow,
+    ShowInPlace,
+}
+
+pub fn hidden_reveal(core_expanded: bool) -> HiddenReveal {
+    if core_expanded {
+        HiddenReveal::ShowInPlace
+    } else {
+        HiddenReveal::GrowThenShow
+    }
+}
+
+/// Click is OPEN-ONLY, never legacy Expand's promotion/toggle funnel.
+/// Call with captured measurements only, under the admitted identity guard.
+#[derive(Debug)]
+pub enum ClickPlan {
+    Expand(crate::core::TogglePlan),
+    Overview(crate::core::ViewPlan),
+    Show(crate::geometry::Edge),
+}
+pub fn plan_click_open(core: &mut crate::core::Core, phase: &mut IslandState,
+    measured: &dyn crate::core::WindowIo, area: crate::geometry::Rect) -> ClickPlan {
+    let plan = if !core.expanded {
+        ClickPlan::Expand(core.toggle(measured, area))
+    } else if let Some(view) = core.plan_view(measured, area, false) {
+        ClickPlan::Overview(view)
+    } else { ClickPlan::Show(core.edge) };
+    *phase = IslandState::Expanded;
+    plan
+}
+/// A reserved commit token fences native application/deferred work. Hide's
+/// phase fence also rejects a newer Hide that did not increment generation.
+pub fn click_plan_is_current(token: u64, generation: u64, phase: IslandState) -> bool {
+    token == generation && phase == IslandState::Expanded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,7 +248,10 @@ mod tests {
 
     #[test]
     fn transition_matrix_is_the_electron_one() {
-        // ported verbatim from legacy test/core.test.cjs
+        // ported from legacy test/core.test.cjs; #266 S2 Path B extends it:
+        // the host `expand` verb may now ALSO reveal a Hidden island
+        // (page-driven, only for genuinely new questions/notices — the event
+        // gate lives in the frontend; the host never opens on its own).
         assert_eq!(
             transition(IslandState::Compact, "expand"),
             IslandState::Expanded
@@ -210,7 +266,8 @@ mod tests {
         );
         assert_eq!(
             transition(IslandState::Hidden, "notice"),
-            IslandState::Hidden
+            IslandState::Hidden,
+            "a notice itself is still never a verb: only an explicit expand reveals"
         );
         assert_eq!(
             transition(IslandState::Compact, "notice"),
@@ -222,12 +279,26 @@ mod tests {
         );
         assert_eq!(
             transition(IslandState::Hidden, "expand"),
-            IslandState::Hidden
+            IslandState::Expanded,
+            "#266: expand reveals from Hidden too, visible and phase must agree"
         );
         assert_eq!(
             transition(IslandState::Expanded, "approve"),
             IslandState::Expanded
         );
+    }
+
+    #[test]
+    fn hidden_reveal_never_collapses_a_stale_expanded_core() {
+        // #266 Path B: `expand` arrives while Hidden and the phase was set to
+        // Expanded. The native `core.expanded` flag can be STALE in two
+        // directions (hidden from compact, or hidden from the overview).
+        // Running the toggle funnel blindly would emit a COLLAPSE plan for a
+        // reveal (and desync visibility from phase): the pure decision says
+        // show-in-place when the core is already expanded, grow-then-show
+        // when it is compact. The reveal must NEVER collapse.
+        assert_eq!(hidden_reveal(true), HiddenReveal::ShowInPlace);
+        assert_eq!(hidden_reveal(false), HiddenReveal::GrowThenShow);
     }
 
     #[test]

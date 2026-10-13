@@ -178,9 +178,15 @@ fn hidden_island_keeps_its_session_because_hide_is_only_a_window_hide() {
     assert_eq!(transition(IslandState::Compact, "hide"), IslandState::Hidden);
     assert_eq!(transition(IslandState::Expanded, "hide"), IslandState::Hidden);
     assert_eq!(transition(IslandState::Hidden, "restore"), IslandState::Compact);
-    // a Pi notice or an expand request never pops a hidden island by itself
+    // a Pi notice is never a verb (hotkey_tests: hide stays immediate, #305)
     assert_eq!(transition(IslandState::Hidden, "notice"), IslandState::Hidden);
-    assert_eq!(transition(IslandState::Hidden, "expand"), IslandState::Hidden);
+    // #266 S2 Path B: the page's explicit expand DOES reveal a hidden island
+    // (only for genuinely new events — the gate is the frontend's; the host
+    // still never opens the capsule on its own)
+    assert_eq!(
+        transition(IslandState::Hidden, "expand"),
+        IslandState::Expanded
+    );
 }
 
 #[test]

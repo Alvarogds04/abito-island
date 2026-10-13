@@ -51,6 +51,13 @@
 
   // ---- trusted gate + keyboard ---------------------------------------------------
   const trusted = event => !!event && event.isTrusted === true;
+  // Display-only opener. No normalization, answer, decline, or fallback expand:
+  // the native adapter alone admits the current live UUID/kind pair.
+  function openPayload(event, notice, kind) {
+    if (!trusted(event) || !notice || typeof notice.id !== 'string' || !UUID_V4.test(notice.id) ||
+      (kind !== 'question' && kind !== 'finished')) return null;
+    return { id: notice.id, kind };
+  }
   // Digit 1..N picks that option. Never while typing, never with a modifier, an
   // IME composition or a repeat, and never from a synthetic event. Enter on its
   // own picks nothing: no option is ever preselected.
@@ -140,6 +147,69 @@
     } };
   }
 
+  // ---- reveal (#266): an incoming question/notice opens a resting island -------
+  // SILEO-STYLE REVEAL, decided here as pure policy so it is deterministic:
+  // the gates say WHICH snapshots are new events, revealAction says whether the
+  // visible capsule may act on one. Boot history is never an event — the first
+  // observation of each channel is only the baseline, exactly like the sound
+  // wiring's observeNotices — so a duplicated cached snapshot or an old notice
+  // never reopens or re-animates the island. Revealing is opening and showing:
+  // it never answers, never focuses, never touches an opaque value.
+  const NOTICE_SEEN_MAX = 200; // insertion-ordered memory of notice ids already shown
+  function createRevealGate() {
+    let questionSeen; // undefined = no baseline; then the last live pending id (or null)
+    let noticeSeen;   // undefined = no baseline; then a Set of ids already observed
+    return {
+      // A live, well-formed pending question whose id differs from the last seen
+      // one fires EXACTLY once. Expired or malformed pendings are no events; a
+      // question that went away (answered/expired/cancelled/declined) frees its
+      // id, so a genuine re-issue is a new event.
+      question(snapshot, now) {
+        const n = fromPending(snapshot && snapshot.pending);
+        const id = n && !expired(n.expiresAt, now) ? n.id : null;
+        if (questionSeen === undefined) { questionSeen = id; return false; }
+        const fire = id !== null && id !== questionSeen;
+        questionSeen = id;
+        return fire;
+      },
+      // A top notice NEVER SEEN before fires. Notices already on the strip at
+      // boot are seeded silently; a dismiss that exposes an older (seen) notice
+      // is not an arrival. Seen memory is bounded (FIFO): with host-issued
+      // unique ids a pruned replay is a new event, which is the honest reading
+      // of a notice resurfacing after hundreds of arrivals.
+      notice(notices) {
+        const list = Array.isArray(notices) ? notices : [];
+        const ids = [];
+        for (const x of list) if (x && typeof x.id === 'string') ids.push(x.id);
+        const top = ids.length ? ids[0] : null;
+        if (noticeSeen === undefined) { noticeSeen = new Set(ids); return false; }
+        if (noticeSeen.size > NOTICE_SEEN_MAX) {
+          for (const old of noticeSeen) { noticeSeen.delete(old); if (noticeSeen.size <= NOTICE_SEEN_MAX / 2) break; }
+        }
+        const fire = top !== null && !noticeSeen.has(top);
+        if (top !== null) noticeSeen.add(top);
+        return fire;
+      },
+    };
+  }
+  // Only a resting compact island or a HIDDEN one expands: the reveal goes
+  // through the host's own `expand` verb (Rust owns the native geometry; the
+  // existing spring animates the reveal, and the M1 reduced-motion contract
+  // snaps it instantly — the policy is deliberately preserved). #266 S2 Path
+  // B (parent decision 2026-10-12): src/desktop.rs now lets `expand` reveal
+  // from Hidden too, and src/main.rs SHOWS the window without ever requesting
+  // focus, normalizing a stale expanded core instead of toggle-collapsing it.
+  // While hidden the local phase attribute can be stale from before the hide,
+  // so the host state wins; the host owns the geometry either way. A visible
+  // mid-animation island is never double-poked (interruptible by design).
+  function revealAction(capsule) {
+    const c = capsule || {};
+    if (c.state === 'hidden') return 'expand';
+    if (c.phase !== 'compact') return 'none';
+    if (c.state === 'expanded') return 'none';
+    return 'expand';
+  }
+
   // ---- free text -----------------------------------------------------------------------
   const utf8Bytes = text => {
     let n = 0;
@@ -153,6 +223,6 @@
   // The host's byte budget is authoritative: no answer yet, or «not allowed», means no send.
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
-  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, agentLabel, trusted, onScreen, optionForKey, expired, expiryWord, fraction,
-    outcomeView, phase, soundFor, createCueLimiter, utf8Bytes, textWord, canSendText };
+  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+    outcomeView, phase, soundFor, createCueLimiter, createRevealGate, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

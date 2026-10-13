@@ -475,6 +475,18 @@ impl Transport {
         let q = self.inner.questions.lock().expect("questions lock");
         crate::questioncmd::text_budget(&q.slot, id, text, now_ms())
     }
+    /// Click-only navigation guard. Fresh clock sampled AFTER admission lock;
+    /// no prune/delivery/persistence changes. Callback may commit core/phase,
+    /// but MUST NOT publish, reenter transport or call native/window methods.
+    pub fn with_question_click<T>(&self, id: &str, operation: impl FnOnce() -> T) -> Result<T, crate::bridge::BridgeError> {
+        let q = self.inner.questions.lock().expect("questions lock");
+        let now = now_ms();
+        if !q.slot.active().is_some_and(|active|
+            active.question().id() == id && active.question().expires_at() > now) {
+            return Err(crate::bridge::BridgeError::denied("notice is not current"));
+        }
+        Ok(operation())
+    }
     /// Host geometry transaction: admission cannot race the pending check and
     /// inline runtime resize call. This does not await queued backend/WM work.
     /// The closure MUST NOT reenter transport or publish questions.

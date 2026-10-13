@@ -9,7 +9,11 @@
      does. Escape only leaves the free-text field; it never declines.
    - Plain text only (textContent). Nothing is persisted in the page.
    - SILENCE: no audio exists. Sound cues are pure ids (N.soundFor) and stay
-     unplayed until the human enables sound in a future setting. */
+     unplayed until the human enables sound in a future setting.
+   - #266: a NEW question is a reveal event dispatched through `abito:question`
+     (the gate is the pure N.createRevealGate); a boot replay of the same
+     pending is history and never reveals. Revealing opens the island — it is
+     never an answer and never touches the trusted-input rules above. */
 (() => {
   const N = window.AbitoNotify;
   const ICONS = window.AbitoIcons;
@@ -34,6 +38,7 @@
   const live = $('question-live');
   const expiryEl = $('question-expiry');
   const stateEl = $('question-state');
+  const askerEl = $('question-asker');
 
   let snapshot = null;
   let previous = null;
@@ -42,11 +47,35 @@
   let budgetSeq = 0;
   let renderedId = null;
   const limiter = N.createCueLimiter();
+  const revealGate = N.createRevealGate ? N.createRevealGate() : null;
 
   const say = text => { if (text) { live.textContent = ''; requestAnimationFrame(() => { live.textContent = text; }); } };
   const el = (tag, className, text) => { const n = document.createElement(tag); if (className) n.className = className; if (text) n.textContent = text; return n; };
 
-  function current() { return N.phase(snapshot, { inFlight, now: Date.now() }); }
+  // D1 (human ruling): a finished question outcome is a CONFIRMATION, not a state. It shows for
+  // OUTCOME_MS (3 s; 4 s for the problem outcomes the host marks persistent) and then the island
+  // returns to its previous view by itself. The host keeps `notice` in its snapshot; only a NEW
+  // outcome (a question that was pending is gone, or the notice word changed) restarts the clock.
+  const OUTCOME_MS = 3000, OUTCOME_PROBLEM_MS = 4000;
+  let outcomeKey = null, outcomeUntil = 0, outcomeTimer = 0;
+  function trackOutcome(prev, next) {
+    const view = N.phase(next, { inFlight: false, now: Date.now() });
+    if (view.kind !== 'outcome') { outcomeKey = null; outcomeUntil = 0; return; }
+    const word = view.outcome.outcome;
+    const before = prev ? N.fromPending(prev.pending) : null;
+    const fresh = !!before || (prev && prev.notice !== next.notice) || (outcomeKey !== null && outcomeKey !== word);
+    if (fresh) {
+      outcomeKey = word;
+      outcomeUntil = Date.now() + (view.outcome.persistent ? OUTCOME_PROBLEM_MS : OUTCOME_MS);
+      clearTimeout(outcomeTimer);
+      outcomeTimer = setTimeout(() => render(), outcomeUntil - Date.now() + 30);
+    } else if (outcomeKey === null) { outcomeKey = word; outcomeUntil = 0; } // boot replay: history, never shown
+  }
+  function current() {
+    const view = N.phase(snapshot, { inFlight, now: Date.now() });
+    if (view.kind === 'outcome' && Date.now() >= outcomeUntil) return { kind: 'none', controlsEnabled: false };
+    return view;
+  }
   // Every answering path (click, key, text, skip) requires the notification to be
   // visible: expanded + overview + no covering card. Hidden never answers.
   const onScreen = () => N.onScreen({ phase: capsule.dataset.phase, view: capsule.dataset.view, card: capsule.dataset.card });
@@ -62,6 +91,7 @@
       if (o.description) b.append(el('span', 'q-desc', o.description));
       b.setAttribute('aria-label', o.description ? `${o.label}. ${o.description}` : o.label);
       b.setAttribute('aria-keyshortcuts', o.key);
+      b.title = o.label; // the full label stays reachable when a narrow row cuts it
       b.addEventListener('click', event => choose(event, o.index));
       optionsEl.append(b);
     }
@@ -77,6 +107,9 @@
     if (n) {
       if (renderedId !== n.id) { renderedId = n.id; textEl.value = ''; budget = null; renderOptions(n, view.controlsEnabled); say(`${N.askedBy(n)}: ${n.text}`); }
       body.textContent = n.text;
+      // #266 S2: the visible asker, slug-derived via textContent only; display-only,
+      // so a page without the chip must still answer (same guard style as island.js).
+      if (askerEl) askerEl.textContent = N.askedBy(n);
       body.title = n.text; // the full text stays reachable when the view cuts it to two lines
       for (const b of optionsEl.querySelectorAll('button')) b.disabled = !view.controlsEnabled;
       freeform.hidden = !n.allowFreeText;
@@ -86,7 +119,7 @@
       expiryEl.setAttribute('aria-label', `Vence en ${N.expiryWord(n.expiresAt, Date.now())}`);
       expiryEl.dataset.tone = view.kind === 'expired' ? 'faint' : 'sun';
     } else {
-      renderedId = null; body.textContent = ''; optionsEl.textContent = ''; freeform.hidden = true; expiryEl.hidden = true; skipEl.disabled = true;
+      renderedId = null; body.textContent = ''; if (askerEl) askerEl.textContent = ''; optionsEl.textContent = ''; freeform.hidden = true; expiryEl.hidden = true; skipEl.disabled = true;
     }
     skipEl.hidden = !n; // no pending notification: nothing to skip (outcome states show only icon + word)
     paintState(view);
@@ -172,13 +205,17 @@
   function apply(next) {
     if (!next || typeof next !== 'object') return;
     previous = snapshot; snapshot = next;
+    trackOutcome(previous, next);
     // Cue ids go to the sound engine through the page event (see sound-wiring.js).
     const cue = N.soundFor(previous, snapshot);
     // #313: the gate is the sound ENGINE (off until the human enables it, silent until ready), not a constant
     if (cue && limiter.allow(cue, Date.now())) document.dispatchEvent(new CustomEvent('abito:cue', { detail: cue }));
     render();
     // a pending question is also a compact signal (sun dot): island.js reads capsule.dataset.question
-    document.dispatchEvent(new CustomEvent('abito:question', { detail: { pending: !!(N.fromPending(snapshot.pending)), show: !!capsule.dataset.question } }));
+    // #266: a genuinely NEW live question additionally asks the island to reveal itself;
+    // the pure gate says which snapshots are events (boot replays and churn are not).
+    const reveal = revealGate ? revealGate.question(snapshot, Date.now()) : false;
+    document.dispatchEvent(new CustomEvent('abito:question', { detail: { pending: !!(N.fromPending(snapshot.pending)), show: !!capsule.dataset.question, reveal } }));
   }
   document.addEventListener('island:view', render);
   new MutationObserver(render).observe(capsule, { attributes: true, attributeFilter: ['data-card', 'data-view', 'data-phase'] });

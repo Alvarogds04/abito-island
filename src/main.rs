@@ -49,6 +49,8 @@ use abito_island::chat::ChatError;
 use abito_island::chatlane::{self, Target};
 use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
 use abito_island::desktop::{self, IslandState};
+#[cfg(unix)]
+use abito_island::hotkey;
 use abito_island::geometry::{self, Edge, Rect};
 #[cfg(any(debug_assertions, feature = "probe"))]
 use abito_island::fakebridge;
@@ -844,6 +846,24 @@ async fn desktop_action(
 ) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
+    if payload.get("action").and_then(Value::as_str) == Some("click") {
+        let click = bridge::parse_click(&payload).map_err(log_click_denied)?;
+        state.rate.lock().expect("rate lock").check(now_ms())?;
+        // Serialize this click's planning/application on the native thread. No
+        // transport guard is carried across scheduling or response waiting.
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let state = handle.state::<AppState>();
+            let result = dispatch_click(&handle, &state, click).map_err(log_click_denied);
+            let _ = send.send(result);
+        })
+        .map_err(|_| BridgeError::denied("click scheduling failed"))?;
+        return tauri::async_runtime::spawn_blocking(move || receive.recv())
+            .await
+            .map_err(|_| BridgeError::denied("click aborted"))?
+            .map_err(|_| BridgeError::denied("click aborted"))?;
+    }
     let (action, index) = bridge::validate_payload(&payload)?;
     state.rate.lock().expect("rate lock").check(now_ms())?;
     match action {
@@ -866,6 +886,126 @@ async fn desktop_action(
         }
         _ => dispatch_verb(&app, &state, action, index),
     }
+}
+
+/// Invalid click logs never contain caller-provided IDs, text or payloads.
+fn log_click_denied(error: BridgeError) -> BridgeError {
+    eprintln!("desktop click dropped: {}", error.message);
+    error
+}
+
+/// Captured native getters only: planning under host guards performs no native I/O.
+struct ClickMeasurements {
+    position: (i32, i32),
+    size: (i32, i32),
+    scale: f64,
+}
+impl WindowIo for ClickMeasurements {
+    fn outer_position(&self) -> (i32, i32) { self.position }
+    fn size(&self) -> (i32, i32) { self.size }
+    fn scale(&self) -> f64 { self.scale }
+    fn set_outer_position(&self, _: i32, _: i32) {
+        unreachable!("click planning must not write native state")
+    }
+}
+
+/// Display-only identity transaction. Never call the legacy Expand arm: it
+/// promotes approval selection. This function runs on the native main thread.
+fn dispatch_click(app: &AppHandle, state: &AppState, click: bridge::Click) -> Result<Value, BridgeError> {
+    let win = main_window(app);
+    let io = TauriIo(&win);
+    let measured = ClickMeasurements {
+        position: io.outer_position(), size: io.size(), scale: io.scale(),
+    };
+    let area = *state.work_area.lock().expect("work area lock");
+    let plan = || {
+        let mut core = state.core.lock().expect("core lock");
+        let mut phase = state.phase.lock().expect("phase lock");
+        let plan = desktop::plan_click_open(&mut core, &mut phase, &measured, area);
+        let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        (plan, generation)
+    };
+    let (plan, generation) = match click.kind {
+        bridge::ClickKind::Question => {
+            let question = questionhost::question_view(state);
+            bridge::route_click(&click, &question, &Value::Null, now_ms() as u64)?;
+            // Snapshot validation is NOT the atomic liveness guard. Recheck ID
+            // and expiry under transport → questions → core/phase, no reentry.
+            questionhost::with_question_click(state, &click.id, plan)?
+        }
+        bridge::ClickKind::Finished => {
+            let mut store = state.notices.lock().expect("notices lock");
+            let now = now_ms() as u64;
+            let notices = serde_json::to_value(store.snapshot(now)).unwrap_or(Value::Null);
+            bridge::route_click(&click, &Value::Null, &notices, now)?;
+            // Current-first validation and planning stay under the same store
+            // guard; a concurrent dismissal/arrival cannot select another ID.
+            plan()
+        }
+    };
+    // All identity guards have released before native application/publication.
+    if !click_native_current(state, generation) {
+        return Err(BridgeError::denied("click superseded"));
+    }
+    match plan {
+        desktop::ClickPlan::Expand(plan) => {
+            let (w, h) = plan.size();
+            let r = plan.rect();
+            store_requested(state, "expand", Some((r.x, r.y)), Some((w, h)));
+            io.set_size(w, h);
+            io.set_outer_position(r.x, r.y);
+            push_phase(app, "overview", plan.edge());
+        }
+        desktop::ClickPlan::Overview(plan) => {
+            let (w, h) = plan.size;
+            let r = plan.rect;
+            let stage = plan.stage;
+            let (vw, vh) = plan.visible;
+            store_requested(state, "overview", Some((r.x, r.y)), Some((w, h)));
+            io.set_size(stage.w, stage.h);
+            io.set_outer_position(stage.x, stage.y);
+            let _ = win.eval(format!(
+                "window.__islandSetView && window.__islandSetView('overview',{vw},{vh});"
+            ));
+            push_phase(app, "overview", plan.edge);
+            let handle = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(COLLAPSE_RESIZE_DELAY_MS));
+                let scheduler = handle.clone();
+                let _ = scheduler.run_on_main_thread(move || {
+                    let state = handle.state::<AppState>();
+                    if click_native_current(&state, generation) {
+                        let win = main_window(&handle);
+                        TauriIo(&win).set_size(w, h);
+                        TauriIo(&win).set_outer_position(r.x, r.y);
+                    }
+                });
+            });
+        }
+        desktop::ClickPlan::Show(edge) => push_phase(app, "overview", edge),
+    }
+    let _ = win.unminimize();
+    let _ = win.show(); // no set_focus: focus handback is not an acceptance gate
+    chathost::publish_chat(app);
+    publish(app, state);
+    // Successful, guarded open only; the renderer selects the matched lane.
+    // This is presentation intent, never a question/approval action.
+    app.emit("desktop:notice-open", serde_json::json!({
+        "id": click.id,
+        "kind": match click.kind {
+            bridge::ClickKind::Question => "question",
+            bridge::ClickKind::Finished => "finished",
+        },
+    })).map_err(|_| BridgeError::denied("click view emit failed"))?;
+    Ok(build_snapshot(app, state))
+}
+
+fn click_native_current(state: &AppState, generation: u64) -> bool {
+    !QUITTING.load(Ordering::SeqCst) && desktop::click_plan_is_current(
+        generation,
+        state.generation.load(Ordering::SeqCst),
+        *state.phase.lock().expect("phase lock"),
+    )
 }
 
 /// The publish/context/log callbacks installed in `setup`.
@@ -914,14 +1054,15 @@ fn dispatch_action(
             } else {
                 "close"
             };
-            let next = {
+            let (next, was_hidden) = {
                 let mut phase = state.phase.lock().expect("phase lock");
+                let was_hidden = *phase == IslandState::Hidden;
                 let next = desktop::transition(*phase, verb);
                 if next == *phase {
-                    None // no-op, exactly like Electron's transition()
+                    (None, was_hidden) // no-op, exactly like Electron's transition()
                 } else {
                     *phase = next;
-                    Some(next)
+                    (Some(next), was_hidden)
                 }
             };
             if let Some(next) = next {
@@ -935,11 +1076,73 @@ fn dispatch_action(
                 let area = refresh_work_area(app, state);
                 let win = main_window(app);
                 let io = TauriIo(&win);
-                let plan = {
-                    let mut core = state.core.lock().expect("core lock");
-                    core.toggle(&io, area)
-                };
-                apply_plan(app, state, plan);
+                if was_hidden && next == IslandState::Expanded {
+                    // #266 S2 Path B: reveal from Hidden through the EXISTING
+                    // expand verb. Visibility and phase must agree, a reveal
+                    // must NEVER collapse (desktop::hidden_reveal), and the
+                    // window shows WITHOUT ever requesting focus (Q1: the
+                    // island must not take the keyboard from the app the human
+                    // is typing in). Boot/cached/duplicate snapshots never get
+                    // here: only the page's reveal gates name this verb, and
+                    // they fire solely on genuinely new events.
+                    // WM focus-on-map hand-back: the show never REQUESTS the
+                    // keyboard, but a WM may focus the new map anyway. Same
+                    // three pieces the hotkey Show path already uses (capture
+                    // BEFORE the show, pure GiveBack rule after a 250ms
+                    // settle, best-effort return). Known limit, inherited from
+                    // that pattern: a deliberate human click INTO the island
+                    // within the 250ms window is indistinguishable from the
+                    // WM's own focus-on-map, and the keyboard would be handed
+                    // back. The Windows hotkey host has no twin for this and
+                    // neither does the reveal there: cfg(unix) only.
+                    #[cfg(unix)]
+                    let reveal_before = hotkey::x11::active_window(None);
+                    let (stale_expanded, edge) = {
+                        let core = state.core.lock().expect("core lock");
+                        (core.expanded, core.edge)
+                    };
+                    match desktop::hidden_reveal(stale_expanded) {
+                        desktop::HiddenReveal::ShowInPlace => {
+                            // Hidden while the core still says expanded: the
+                            // native rect already carries the overview
+                            // geometry — a toggle would emit a COLLAPSE plan.
+                            // Show in place; the chat view is NOT switched.
+                            let _ = win.unminimize();
+                            let _ = win.show();
+                            push_phase(app, "overview", edge);
+                            chathost::publish_chat(app);
+                        }
+                        desktop::HiddenReveal::GrowThenShow => {
+                            let plan = {
+                                let mut core = state.core.lock().expect("core lock");
+                                core.toggle(&io, area)
+                            };
+                            apply_plan(app, state, plan);
+                            let _ = win.unminimize();
+                            let _ = win.show();
+                        }
+                    }
+                    #[cfg(unix)]
+                    {
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            let focused = win.is_focused().unwrap_or(false);
+                            if hotkey::focus_after_show(focused, false)
+                                == hotkey::FocusAction::GiveBack
+                            {
+                                if let Some(previous) = reveal_before {
+                                    let _ = hotkey::x11::give_focus_back(None, previous);
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    let plan = {
+                        let mut core = state.core.lock().expect("core lock");
+                        core.toggle(&io, area)
+                    };
+                    apply_plan(app, state, plan);
+                }
                 publish(app, state);
             }
             Ok(build_snapshot(app, state))

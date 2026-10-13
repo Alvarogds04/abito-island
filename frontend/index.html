@@ -44,8 +44,19 @@
            aria-label; long sentences live behind the «i» buttons. -->
       <!-- U1: the overview's primary control. Opens the chat view of THIS
            island (no other window). Enter in the overview does the same. -->
-      <button id="open-chat" type="button" aria-label="Conversar con Abito" aria-describedby="open-chat-hint"><span class="ico" data-icon="bubble"></span></button>
-      <button id="open-settings" type="button" aria-label="Ajustes"><span class="ico" data-icon="gear"></span></button>
+      <header id="island-header" class="hdr" aria-label="Vistas de Abito">
+        <div class="tabs" role="group" aria-label="Vistas">
+          <button id="home-tab" class="tab on" type="button" aria-label="Vista general" aria-pressed="true"><span class="ico"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.25 7.1 8 2.5l5.75 4.6M4 6.1v7h8v-7M6.5 13.1V9h3v4.1"/></svg></span></button>
+          <button id="open-chat" class="tab" type="button" aria-label="Conversar con Abito" aria-describedby="open-chat-hint" aria-pressed="false"><span class="ico" data-icon="bubble"></span></button>
+        </div>
+        <button id="open-settings" class="hdr-action" type="button" aria-label="Ajustes"><span class="ico" data-icon="gear"></span></button>
+      </header>
+      <section id="overview-view" aria-label="Vista general">
+        <div class="card card-left">
+          <div class="agentline"><strong>Abito</strong><span id="overview-status" class="source"></span></div>
+          <p id="overview-detail" class="overview-detail"></p>
+        </div>
+      </section>
       <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
       <!-- M2: Sileo-style notice, display only (own code, silence).
            A notice never decides or approves anything. -->
@@ -57,9 +68,11 @@
           <button id="notice-info" class="icon-btn" type="button" aria-label="Ver detalle de la conexión" aria-expanded="false" aria-controls="notice-detail"><span class="ico" data-icon="info"></span></button>
         </div>
         <div id="notice-pill" role="group" hidden>
-          <span id="notice-ring"></span>
-          <strong id="notice-title"></strong>
-          <span id="notice-count"></span>
+          <button id="notice-open" type="button" aria-label="Abrir aviso en Abito" aria-describedby="notice-title notice-detail">
+            <span id="notice-ring"></span>
+            <strong id="notice-title"></strong>
+            <span id="notice-count"></span>
+          </button>
           <button id="notice-dismiss" class="icon-btn" type="button" aria-label="Descartar aviso"><span class="ico" data-icon="cross"></span></button>
         </div>
         <p id="notice-detail" hidden></p>
@@ -70,7 +83,7 @@
            the human's click (`allow`/`deny`, zero arguments); Rust
            re-validates card id, expiry and payload_hash before any
            /execute. An untrusted or stale click can never approve. -->
-      <div id="permission" hidden aria-label="Decisión pendiente">
+      <div id="permission" class="card full wash" hidden aria-label="Decisión pendiente">
         <div id="card-head">
           <span id="card-status" class="chip" role="img"><span class="ico" id="card-status-icon"></span><span class="word" id="card-status-word"></span></span>
           <span id="card-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="expiry"></time></span>
@@ -90,8 +103,9 @@
            (index, text or decline); Rust validates id, scope, expiry and size.
            It is NOT an Abito approval: it authorizes nothing in the backend.
            All text is written with textContent. -->
-      <div id="question" inert aria-label="Pi pregunta">
+      <div id="question" class="card full wash" inert aria-label="Pi pregunta">
         <div id="question-head">
+          <span id="question-asker" class="chip"></span>
           <span id="question-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="question-expiry-word"></time></span>
           <span id="question-state" class="chip" role="img" hidden><span class="ico" id="question-state-icon"></span><span class="word" id="question-state-word"></span></span>
           <p id="question-body"></p>
@@ -150,6 +164,7 @@
             <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
           </div>
           <p id="models-note" class="sr-only"></p>
+          <label class="models-search-field" for="models-search"><span class="sr-only">Buscar modelos locales</span><input id="models-search" type="search" placeholder="Buscar modelos" autocomplete="off"></label>
           <ul id="models-list" aria-label="Modelos locales"></ul>
           <p id="models-resources" class="sr-only"></p>
         </div>
