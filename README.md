@@ -430,15 +430,17 @@ forgets the chat view so the next click opens the overview again.
 local model can honestly produce — native ids, duplicate client id → same
 turn, one running turn (`queue_full`), monotonic `seq` (gap/regression/
 after-terminal rejected), states `queued|thinking|streaming|waiting_approval|
-completed|cancelled|error`, safe typed errors, draft ≤8,000 scalars, cache
-≤100 turns / 256 KiB. `waiting_approval` exists in the machine but nothing
+completed|cancelled|error`, safe typed errors, draft ≤8,000 scalars, active
+context cache ≤100 turns / 256 KiB. Persisted presentation pages (#341) are
+separate and never enlarge that context budget. `waiting_approval` exists in the machine but nothing
 can enter it: **there is no Pi chat producer on the desktop yet**; the view
 says so (`producer.pi: "not_connected"`). That adapter is a marked future
 dependency, not simulated.
 
 **IPC:** one new command, `chat_action`, behind the same sender gate as
 `desktop_action`, its own 30/s rate budget, a 33 KiB payload cap and the
-closed set `view|open|back|check|submit|cancel` with exact keys — a page
+closed set `view|open|back|check|submit|cancel|new|list|restore|history`
+with exact keys — a page
 cannot name an endpoint, model, key or approval (the probe proves a
 smuggled `model` field is rejected). Events: `chat:state`. The
 `desktop:state` 13-key snapshot is unchanged; no new capability or CSP
@@ -454,6 +456,26 @@ keyboard open or a click; overview↔chat uses the contract spring/340 ms curve 
 `prefers-reduced-motion`; no audio elements, no sound. Drag never attaches
 to the transcript or composer. R6 is only scaled/positioned (sha256
 unchanged).
+
+**Local conversations (#341 / F026, OD003, OD004, GD022, GD037).** The
+new-chat button or **Ctrl+N** clears the current context and draft without
+deleting saved history. The clock button lists conversations newest first,
+with the first-message title (80 Unicode scalars plus ellipsis), creation-time
+specialist and last activity. Opening restores the newest 25 turns; scrolling
+up loads older pages while preserving the reader's position. Finish or cancel
+a running reply before switching. A deleted specialist falls back to Abito
+principal with a visible notice; no alternative model is silently selected.
+
+History uses append-only JSONL in `app_data_dir/conversations/` (Unix directory
+0700, files 0600) plus an atomic index. Malformed records are skipped and
+reported, and interrupted turns restore as cancelled without resuming inference.
+Accepted message text is persisted as written; app credentials, headers, account
+state and system/specialist instructions are not copied. Files are not encrypted.
+Probe mode is memory-only unless `ABITO_CONVERSATIONS_DATA_DIR` names an absolute
+isolated test directory. Deletion, retention limits, cloud sync and import are
+out of scope. See [Local conversations](../../docs/conversations.md) for IPC,
+paging, privacy and the **partial final verification evidence**. No live app
+verification was performed in this workstream; parent verification remains open.
 
 **The empty-chat greeting (F027 / TaskView342).** With no message yet the column shows
 what §2.3 shipped: the lock `local` + eye-off pair, centred, and the whole sentence in
