@@ -75,7 +75,8 @@ pub fn start(app: &AppHandle) {
 }
 
 fn view_prefs(p: &Prefs) -> Value {
-    json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors})
+    json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors,
+        "mainPill": p.main_pill(), "declaredPills": p.declared_pills()})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -84,18 +85,20 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
 }
 
 /// Closed preference commands: view, sound_on/off, set_sound_gain (0..=0.2),
-/// set_display_name, set/clear_avatar_color. Gain shares persistence and publication.
+/// set_display_name, set/clear_avatar_color, set_main_pill and toggle_declared_pill.
+/// Pill actions take exactly action + id; selection never installs or connects anything.
 #[tauri::command]
 pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     let command = prefs::parse_command(&payload).map_err(|_| err("invalid_schema"))?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    let mut attempted_write = false;
     let next = prefs::transact(
         &state.settings.prefs_serial,
         &state.settings.prefs,
         &command,
-        |p| persist_prefs(&app, p),
+        |p| { attempted_write = true; persist_prefs(&app, p) },
         |snapshot| {
             // Snapshot belongs to this commit. The transaction gate still holds,
             // but the state mutex is free so publish_chat may re-read the name.
@@ -104,7 +107,12 @@ pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<
                 crate::chathost::publish_chat(&app);
             }
         },
-    ).map_err(|_| err("save_failed"))?;
+    ).map_err(|_| {
+        // Stateful refusal (main toggle / fifth addition) happens inside the
+        // existing serial gate before persistence; a disk failure is different.
+        let refused = !attempted_write && matches!(command, Command::SetMainPill(_) | Command::ToggleDeclaredPill(_));
+        err(if refused { "invalid_schema" } else { "save_failed" })
+    })?;
     Ok(view_prefs(&next))
 }
 

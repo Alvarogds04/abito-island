@@ -11,6 +11,26 @@ mod tests;
 pub const FILE: &str = "prefs.json";
 pub const DISPLAY_NAME_MAX: usize = 80;
 
+// #345 immutable catalog identities, shared contract with frontend/pill-catalog.js.
+// Platform eligibility is declaration-only; it never means connected.
+pub const MAIN_PILLS: [&str; 4] = ["integration_claude", "agent_cursor", "agent_antigravity", "agent_codex"];
+pub const DEFAULT_MAIN_PILL: &str = "integration_claude";
+pub const MAX_DECLARED_PILLS: usize = 4;
+pub const DEFAULT_DECLARED_PILLS: [&str; 4] = ["integration_resend", "integration_n8n", "integration_vercel", "integration_github"];
+pub const PILL_IDS: [&str; 25] = [
+    "integration_claude", "agent_cursor", "agent_antigravity", "agent_codex",
+    "agent_gemini", "agent_copilot", "agent_muse", "agent_opencode", "agent_amp",
+    "agent_hermes", "agent_claude-desktop", "ai_anthropic", "ai_google", "ai_openai",
+    "ai_ollama", "ai_lmstudio", "integration_resend", "integration_n8n",
+    "integration_vercel", "integration_github", "integration_notion",
+    "integration_calcom", "integration_stripe", "integration_music", "integration_spotify",
+];
+pub fn pill_offered(id: &str) -> bool {
+    PILL_IDS.contains(&id) && id != "integration_music" &&
+        (id != "agent_claude-desktop" || cfg!(target_os = "windows")) &&
+        (id != "integration_spotify" || cfg!(target_os = "linux"))
+}
+
 /// The colours a human may store for an identity (#384). `green` is the principal's DEFAULT,
 /// not a prohibition: Ajustes may keep it or choose another one for any identity.
 pub const COLORS: [&str; 5] = ["green", "blue", "mint", "orange", "purple"];
@@ -40,6 +60,9 @@ pub struct Prefs {
     pub display_name: Option<String>,
     /// Canonical identity -> validated color. Orphan keys are retained, not cleaned up.
     pub avatar_colors: BTreeMap<String, String>,
+    /// Absent keys retain defaults without growing untouched v1 files.
+    pub main_pill: Option<String>,
+    pub declared_pills: Option<Vec<String>>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -86,19 +109,45 @@ fn colors_from(value: Option<&Value>) -> BTreeMap<String, String> {
 impl Prefs {
     pub fn gain(&self) -> f64 { self.gain.filter(|n| valid_gain(*n)).unwrap_or(0.12) }
 
+    pub fn main_pill(&self) -> &str {
+        self.main_pill.as_deref().filter(|id| MAIN_PILLS.contains(id)).unwrap_or(DEFAULT_MAIN_PILL)
+    }
+
+    pub fn declared_pills(&self) -> Vec<String> {
+        let defaults: Vec<String> = DEFAULT_DECLARED_PILLS.iter().map(|id| id.to_string()).collect();
+        let mut clean = Vec::new();
+        for id in self.declared_pills.as_ref().unwrap_or(&defaults) {
+            if id != self.main_pill() && pill_offered(id) && !clean.contains(id) && clean.len() < MAX_DECLARED_PILLS {
+                clean.push(id.clone());
+            }
+        }
+        clean
+    }
+
+    fn valid_pill_choices(&self) -> bool {
+        self.main_pill.as_deref().is_none_or(|id| MAIN_PILLS.contains(&id)) &&
+            self.declared_pills.as_ref().is_none_or(|ids| *ids == self.declared_pills())
+    }
+
     pub fn from_text(text: Option<&str>) -> Prefs {
         let v = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
         let Some(v) = v else { return Prefs::default() };
         if v.get("v").and_then(Value::as_u64) != Some(1) {
             return Prefs::default();
         }
-        Prefs {
+        let mut prefs = Prefs {
             sound: v.get("sound").and_then(Value::as_bool).unwrap_or(false),
             gain: v.get("gain").and_then(Value::as_f64).filter(|n| valid_gain(*n)),
             avatar_colors: colors_from(v.get(AVATAR_COLORS)),
             display_name: v.get("display_name").and_then(Value::as_str)
                 .and_then(|name| validated_name(name).ok()).flatten(),
-        }
+            main_pill: v.get("main_pill").and_then(Value::as_str)
+                .filter(|id| MAIN_PILLS.contains(id)).map(str::to_owned),
+            declared_pills: v.get("declared_pills").and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect()),
+        };
+        if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
+        prefs
     }
 
     pub fn to_text(&self) -> String {
@@ -112,6 +161,8 @@ impl Prefs {
         if !self.avatar_colors.is_empty() {
             v[AVATAR_COLORS] = json!(self.avatar_colors);
         }
+        if self.main_pill.is_some() { v["main_pill"] = json!(self.main_pill()); }
+        if self.declared_pills.is_some() { v["declared_pills"] = json!(self.declared_pills()); }
         v.to_string()
     }
 }
@@ -127,6 +178,8 @@ pub enum Command {
     SetDisplayName(String),
     SetAvatarColor { identity: String, color: String },
     ClearAvatarColor { identity: String },
+    SetMainPill(String),
+    ToggleDeclaredPill(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +188,10 @@ pub struct CommandError;
 /// Closed schema: existing actions take one key; set_display_name takes exactly
 /// action + display_name (string, <=80 scalars, no controls). Blank clears it.
 /// set_avatar_color takes exactly action + identity + color; clear_avatar_color
-/// takes exactly action + identity. All writers retain the other optional fields.
+/// takes exactly action + identity. Pill choices take exactly action + id:
+/// set_main_pill (workspace only), toggle_declared_pill (offered catalog only).
+/// apply checks main exclusion/capacity under the transaction gate. All writers
+/// retain the other known typed optional fields; unknown file keys are dropped.
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let map = payload.as_object().ok_or(CommandError)?;
     match map.get("action").and_then(Value::as_str) {
@@ -167,6 +223,16 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             }
             Ok(Command::ClearAvatarColor { identity: identity.to_string() })
         }
+        Some(action @ ("set_main_pill" | "toggle_declared_pill")) if map.len() == 2 => {
+            let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
+            if action == "set_main_pill" {
+                if !MAIN_PILLS.contains(&id) { return Err(CommandError); }
+                Ok(Command::SetMainPill(id.to_owned()))
+            } else {
+                if !pill_offered(id) { return Err(CommandError); }
+                Ok(Command::ToggleDeclaredPill(id.to_owned()))
+            }
+        }
         _ => Err(CommandError),
     }
 }
@@ -192,6 +258,25 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::ClearAvatarColor { identity } => {
             if !valid_identity(identity) { return Err(CommandError); }
             next.avatar_colors.remove(identity);
+        }
+        Command::SetMainPill(id) => {
+            if !current.valid_pill_choices() || !MAIN_PILLS.contains(&id.as_str()) { return Err(CommandError); }
+            if id != current.main_pill() {
+                next.main_pill = Some(id.clone());
+                if current.declared_pills().contains(id) {
+                    next.declared_pills = Some(current.declared_pills().into_iter().filter(|x| x != id).collect());
+                }
+            }
+        }
+        Command::ToggleDeclaredPill(id) => {
+            if !current.valid_pill_choices() || !pill_offered(id) || id == current.main_pill() { return Err(CommandError); }
+            let mut ids = current.declared_pills();
+            if ids.contains(id) { ids.retain(|x| x != id); }
+            else {
+                if ids.len() >= MAX_DECLARED_PILLS { return Err(CommandError); }
+                ids.push(id.clone());
+            }
+            next.declared_pills = Some(ids);
         }
     }
     Ok(next)
