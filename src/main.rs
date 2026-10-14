@@ -287,7 +287,7 @@ struct AppState {
     /// `ABITO_BRIDGE_BASE` was already set from outside.
     #[cfg(any(debug_assertions, feature = "probe"))]
     probe_fake: Mutex<Option<Arc<fakebridge::FakeBackend>>>,
-    /// U1: the island conversation (process memory only, never on disk).
+    /// The bounded active chat lane, backed by #341 private local history.
     chat: chatlane::SharedLane,
     /// U1: the selected LOCAL target (U2 picker writes it; `None` = no
     /// verified local model selected → Send refuses with `profile_missing`).
@@ -1599,6 +1599,7 @@ fn main() {
             hotkeyhost::start(&handle); // #305: global show/hide shortcut (config + X11 grab)
             settingshost::start(&handle); // #306: settings prefs
             specialistshost::start(&handle); // #327: the manual specialists (empty = the principal)
+            chathost::start_history(&handle); // #341: isolated private conversation store
             // M2: local notice transport + SIGINT/SIGTERM socket cleanup
             // (main.cjs creates the transport after the window loads; here it
             // starts before the probe so the probe can use its endpoint).

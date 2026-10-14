@@ -59,6 +59,14 @@
   let inFlight = false;
   let pendingId = null; // reused if the same draft is re-sent after an IPC failure
   let localProblem = '';
+  const createButton = $('chat-create');
+  const conversationsButton = $('chat-conversations');
+  const conversationsPanel = $('conversations');
+  const conversationsList = $('conversations-list');
+  let olderTurns = [];
+  let historyBefore = null;
+  let paging = false;
+  let historyGeneration = 0;
 
   function setLive(text) {
     if (!text) return;
@@ -107,7 +115,7 @@
   function renderLog() {
     const pinned = V.atBottom(log.scrollTop, log.scrollHeight, log.clientHeight);
     const before = log.scrollHeight;
-    const turns = (view && Array.isArray(view.turns)) ? view.turns : [];
+    const turns = V.mergeHistory(olderTurns, (view && Array.isArray(view.turns)) ? view.turns : []);
     const rows = [];
     for (const turn of turns) for (const row of V.turnRows(turn)) rows.push(row);
     const placeholder = log.querySelector('li.empty');
@@ -173,7 +181,15 @@
     cancel.hidden = !active;
     send.disabled = !V.canSend(view, input.value, inFlight);
     const draftIssue = input.value ? V.draftProblem(input.value) : null;
-    problem.textContent = localProblem || draftIssue || '';
+    const historyProblem = view && view.history_problem;
+    problem.textContent = localProblem || historyProblem || draftIssue || '';
+    if (createButton) createButton.disabled = active !== null || inFlight;
+    if (conversationsButton) conversationsButton.disabled = active !== null || inFlight;
+    if ($('chat-history-warning')) {
+      const warning = historyProblem || (view && view.history_skipped ? `Se omitieron ${view.history_skipped} registros dañados.` : '');
+      $('chat-history-warning').hidden = !warning;
+      $('chat-history-warning').textContent = warning;
+    }
     const availability = view && view.availability ? view.availability.state : 'unchecked';
     capsule.dataset.chatAvailability = availability;
     status.textContent = localProblem || V.statusLine(view);
@@ -196,9 +212,18 @@
 
   }
 
+  function resetHistory(next) {
+    olderTurns = []; historyBefore = next.history_before || null; historyGeneration += 1; paging = false;
+    log.textContent = ''; drawn = [];
+  }
   function apply(next) {
     if (!next || typeof next !== 'object') return;
-    const said = V.announcement(view, next);
+    const changed = !view || view.conversation_id !== next.conversation_id;
+    const said = changed ? null : V.announcement(view, next);
+    if (changed) {
+      resetHistory(next);
+      if (view) { input.value = ''; pendingId = null; localProblem = ''; autosize(); }
+    }
     view = next;
     renderTarget();
     renderLog();
@@ -206,6 +231,70 @@
     if (capsule.dataset.view === 'chat') setLive(said);
     // #313: turns and the model going down become cues by TRANSITION (history and the first snapshot are baselines)
     try { const w = window.AbitoSoundWiringInstance; if (w) w.observeChat(next); } catch { /* sound never breaks the chat */ }
+  }
+
+  // ---- #341: local conversations -----------------------------------------
+  function closeConversations() {
+    if (!conversationsPanel) return;
+    conversationsPanel.hidden = true;
+    conversationsPanel.inert = true;
+    conversationsButton.setAttribute('aria-expanded', 'false');
+    log.inert = false; form.inert = false;
+  }
+  function createConversation() {
+    if (inFlight || V.activeTurn(view)) return;
+    inFlight = true; renderControls();
+    action({ action: 'new' }).then(next => {
+      closeConversations(); apply(next); input.value = ''; pendingId = null; autosize(); input.focus();
+    }, error => { localProblem = error.message || 'No se pudo crear la conversación.'; setLive(localProblem); })
+      .finally(() => { inFlight = false; renderControls(); });
+  }
+  if (createButton) createButton.addEventListener('click', createConversation);
+  if (conversationsButton) conversationsButton.addEventListener('click', () => {
+    if (inFlight || V.activeTurn(view)) return;
+    action({ action: 'list' }).then(listing => {
+      conversationsList.replaceChildren();
+      for (const row of V.conversationRows(listing)) {
+        const li = document.createElement('li');
+        const button = document.createElement('button'); button.type = 'button';
+        button.textContent = row.text; button.setAttribute('aria-label', row.aria);
+        button.setAttribute('aria-current', row.id === (view && view.conversation_id) ? 'true' : 'false');
+        button.addEventListener('click', () => {
+          if (inFlight) return;
+          inFlight = true; renderControls();
+          action({ action: 'restore', conversation_id: row.id }).then(next => {
+            closeConversations(); resetHistory(next); input.value = ''; pendingId = null; localProblem = ''; autosize(); apply(next); log.focus();
+          }, error => { $('conversations-note').textContent = error.message || 'No se pudo abrir la conversación.'; })
+            .finally(() => { inFlight = false; renderControls(); });
+        });
+        li.append(button); conversationsList.append(li);
+      }
+      let note = listing.conversations.length ? '' : 'Todavía no hay conversaciones guardadas.';
+      if (listing.skipped) note = `Se omitieron ${listing.skipped} registros o archivos dañados.`;
+      $('conversations-note').textContent = note;
+      conversationsPanel.hidden = false; conversationsPanel.inert = false;
+      conversationsButton.setAttribute('aria-expanded', 'true'); log.inert = true; form.inert = true;
+      $('conversations-close').focus();
+    }, error => { localProblem = error.message || 'No se pudo leer el historial.'; renderControls(); setLive(localProblem); });
+  });
+  if ($('conversations-close')) $('conversations-close').addEventListener('click', () => { closeConversations(); conversationsButton.focus(); });
+  function loadOlder() {
+    if (!view || !historyBefore || paging || log.scrollTop > 8 || log.inert) return;
+    paging = true;
+    const id = view.conversation_id, generation = historyGeneration;
+    const height = log.scrollHeight, top = log.scrollTop;
+    action({ action: 'history', conversation_id: id, before: historyBefore }).then(page => {
+      if (!view || view.conversation_id !== id || generation !== historyGeneration) return;
+      olderTurns = V.mergeHistory(page.turns, olderTurns);
+      historyBefore = page.before || null;
+      if (page.skipped) view.history_skipped = page.skipped;
+      renderLog(); renderControls();
+      log.scrollTop = top + log.scrollHeight - height; // keep the same message under the reader's eye
+      newer.hidden = true;
+    }, error => {
+      if (generation !== historyGeneration) return;
+      localProblem = error.message || 'No se pudo cargar el historial anterior.'; renderControls(); setLive(localProblem);
+    }).finally(() => { if (generation === historyGeneration) paging = false; });
   }
 
   // ---- open / back --------------------------------------------------------
@@ -299,6 +388,7 @@
     newer.hidden = true;
   });
   log.addEventListener('scroll', () => {
+    loadOlder();
     if (V.atBottom(log.scrollTop, log.scrollHeight, log.clientHeight)) newer.hidden = true;
   });
 
@@ -308,7 +398,11 @@
     const expanded = capsule.dataset.phase === 'expanded';
     const inChat = capsule.dataset.view === 'chat';
     const typing = document.activeElement === input;
+    if (expanded && inChat && event.ctrlKey && !event.altKey && !event.metaKey && String(event.key).toLowerCase() === 'n') {
+      event.preventDefault(); if (!event.repeat) createConversation(); return;
+    }
     if (event.key === 'Escape') {
+      if (conversationsPanel && !conversationsPanel.hidden) { event.preventDefault(); closeConversations(); conversationsButton.focus(); return; }
       // The model panel is the innermost layer: Escape closes it first.
       if (capsule.dataset.models === 'open') { event.preventDefault(); $('models-close').click(); return; }
       if (typing) { input.blur(); log.focus(); event.preventDefault(); return; } // leave typing mode

@@ -304,5 +304,21 @@
   }
   const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
 
-  return { reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  // History pages are presentation-only; live snapshots win on matching native turn IDs.
+  function mergeHistory(older, current) {
+    const turns = new Map();
+    for (const t of [...(Array.isArray(older) ? older : []), ...(Array.isArray(current) ? current : [])]) {
+      if (t && /^t-\d+$/.test(t.turn_id)) turns.set(t.turn_id, t);
+    }
+    return Array.from(turns.values()).sort((a,b) => Number(a.turn_id.slice(2)) - Number(b.turn_id.slice(2)));
+  }
+  function conversationRows(listing) {
+    return ((listing && Array.isArray(listing.conversations)) ? listing.conversations : []).map(c => {
+      const specialist = c.specialist && c.specialist.name || 'Abito';
+      const activity = new Date(c.last_activity).toLocaleString('es-AR');
+      return { id: c.id, text: `${c.title} · ${specialist} · ${activity}`, aria: `${c.title}. ${specialist}. Última actividad: ${activity}` };
+    });
+  }
+
+  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });
