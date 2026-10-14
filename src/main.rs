@@ -168,8 +168,17 @@ fn start_transport(app: &AppHandle) {
     let state = app.state::<AppState>();
     let fail = |reason: String| {
         state.unavailable.store(true, Ordering::SeqCst);
+        // #373 OD006: the startup failure is also a persistent error notice
+        // (no retry exists — the flag stays the source of truth; dismissal
+        // hides it for good because nothing re-inserts it).
+        state
+            .notices
+            .lock()
+            .expect("notices lock")
+            .transport_failed(protocol::TransportFailure::Unavailable, now_ms() as u64);
         eprintln!("Optional local notice transport unavailable; no Pi connection was made.");
         eprintln!("transport: {reason}");
+        publish(app, &state);
     };
     if state.project.is_empty() {
         fail("canonical worktree root unavailable".into());
@@ -203,6 +212,14 @@ fn start_transport(app: &AppHandle) {
                 return;
             }
             let state = connections_app.state::<AppState>();
+            // #373 OD006: connection EDGES drive the failure notice — a drop
+            // (>0 -> 0) shows it, a reconnect clears it — and only then does
+            // the count itself land (publish dedups identical snapshots).
+            state
+                .notices
+                .lock()
+                .expect("notices lock")
+                .connections_changed(count, now_ms() as u64);
             state.connections.store(count, Ordering::SeqCst);
             publish(&connections_app, &state);
         })

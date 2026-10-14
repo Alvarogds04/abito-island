@@ -153,7 +153,7 @@ IPC path (observed 2026-10-09, this stack):
 | `close()` | `desktop_action {action:"close"}` | wired — collapses from expanded, no-op otherwise (Electron `transition`) |
 | `hide()` | `desktop_action {action:"hide"}` | wired — window hide, state `hidden` |
 | `quit()` | `desktop_action {action:"quit"}` | wired — clean exit through `RunEvent::Exit` |
-| `dismiss()` | `desktop_action {action:"dismiss"}` | wired (M2) — drops the FIRST notice (id + sessionId, `main.cjs:461` semantics), publishes and returns the fresh snapshot; a dismissal never approves or decides anything |
+| `dismiss()` | `desktop_action {action:"dismiss"}` | wired (M2) — drops the FIRST notice (id + sessionId, `main.cjs:461` semantics), publishes and returns the fresh snapshot; a dismissal never approves or decides anything. #373: while a transport-failure notice is present it leads the queue, so this dismisses exactly that failure event (see «Transport failures are notices too») |
 | `allow()` / `deny()` | `desktop_action {action:"allow"\|"deny"}` | **wired (M3)** — the explicit human choice; the lane re-validates card id/expiry/`payload_hash` host-side, then `POST /api/proposals/{id}/execute` (body `{"payload_hash":…}`) or `/reject`. Returns the fresh snapshot; the outcome lives in the sticky card reason (`Decisión enviada.` / `No se pudo confirmar la decisión.`) |
 | `choose(index)` | `desktop_action {action:"choose",index}` | **wired (M3)** — read-and-consume of the standing request in one synchronous step; no producer of requests exists yet (same as legacy), so every choice answers the typed `denied` (`no standing request`) and nothing is consumed |
 | `animateAnyway()` / `respectSystemMotion()` | `desktop_action …` | wired — one machine-wide `motionOverride`, persisted `motion.json` mode 0600, fail-closed read; the island animates only on an explicit `animateAnyway` snapshot |
@@ -304,6 +304,32 @@ and a `Descartar aviso` button wired to `dismiss`. **A notice never decides,
 approves, focuses, expands or restores anything**; a snapshot never opens the
 island by itself. Since M3, `allow`/`deny`/`choose` are wired through the
 approval lane — a notice still never decides anything.
+
+### Transport failures are notices too (#373, OD006/GD032)
+
+The notice model carries an INTERNAL `severity` (`info` | `warning` |
+`error`) and `kind` (`settled` | `transport`), single-sourced in Rust
+(`protocol::Notice`); neither ever reaches the wire. A producer's `settled`
+frame is byte-identical to before and still admits exactly one `info`
+notice; `hello`/`heartbeat` and engine-facing types (`toast`, unknown) are
+rejected at decode AND at `accept()` exactly as before. The page renders
+only the kinds Rust admits and maps severity to a tone (error → red strip,
+warning → sun, info stays neutral), announcing `Error:`/`Advertencia:` in
+the pill's aria instead of relying on color alone.
+
+A transport failure is a state-derived error notice led at the FRONT of the
+queue: a connection drop (>0 → 0) shows `Conexión caída`, which clears
+itself when a session reconnects, and a receiver that could not start
+inserts `Avisos caídos` once (no retry exists — #373 keeps the
+`unavailable` flag as the sole source of truth, so the notice persists).
+Both go through the same `dismiss` verb, per failure event: a dismissed
+event never resurfaces on its own, and the next DISTINCT drop shows a new
+one. The failure notice never expires while the failure lasts (settled
+notices keep their 60 s TTL) and survives a full queue — the oldest
+settled notice is evicted instead. Detection lives in `NoticeStore`
+(`connections_changed` / `transport_failed`), fed by exactly two `main.rs`
+call sites (the connection-edge callback and the startup `unavailable`
+path); `Snapshot`'s 13-key shape is unchanged.
 
 ### Unchanged Node producer against the Rust receiver (observed)
 

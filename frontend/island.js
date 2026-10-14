@@ -473,6 +473,9 @@
       opener.setAttribute('aria-label', first ? `Abrir aviso: ${first.title}` : 'Sin avisos');
     }
     const view = paintRing(notices);
+    // #373 GD032: the strip carries the view's severity tone (error → red,
+    // warning → sun); plain dataset writes below, never markup.
+    noticesEl.dataset.tone = (view && view.tone) || '';
     noticePill.hidden = !view;
     if (view) {
       noticePill.setAttribute('aria-label', view.aria);

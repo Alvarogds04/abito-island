@@ -82,15 +82,27 @@
     const t = String(title || '').trim();
     return KNOWN_SHORT[t] || t.split(/\s+/).slice(0, 3).join(' ');
   };
+  // #373 GD032 — severity/kind: Rust (protocol::Notice) is the SINGLE
+  // admission source; the view only renders the kinds it admits and maps the
+  // internal severity to a tone plus an announced word. Absent/unknown values
+  // fall back to `info`: never a crash, never an invented tone.
+  const NOTICE_KINDS = new Set(['settled', 'transport']);
+  const SEVERITY_TONE = { warning: 'sun', error: 'red' };
+  const SEVERITY_WORD = { info: 'Aviso', warning: 'Advertencia', error: 'Error' };
   function noticeView(notices, now) {
-    if (!Array.isArray(notices) || !notices.length) return null;
-    const first = notices[0];
+    const list = (Array.isArray(notices) ? notices : [])
+      .filter(n => n && NOTICE_KINDS.has(typeof n.kind === 'string' && n.kind ? n.kind : 'settled'));
+    if (!list.length) return null;
+    const first = list[0];
     const left = Number.isFinite(first.expiresAt) ? first.expiresAt - now : 0;
-    const n = notices.length;
-    const full = [`Aviso: ${first.title}.`, first.detail || '',
+    const n = list.length;
+    const severity = Object.prototype.hasOwnProperty.call(SEVERITY_TONE, first.severity) ? first.severity : 'info';
+    const word = SEVERITY_WORD[severity] || 'Aviso';
+    const full = [`${word}: ${first.title}.`, first.detail || '',
       `${n} aviso${n === 1 ? '' : 's'} reciente${n === 1 ? '' : 's'}; se descartan al minuto.`].filter(Boolean).join(' ');
     return { text: shortTitle(first.title), badge: n,
-      fraction: Math.max(0, Math.min(1, left / NOTICE_WINDOW_MS)), aria: full };
+      fraction: Math.max(0, Math.min(1, left / NOTICE_WINDOW_MS)), aria: full,
+      tone: SEVERITY_TONE[severity] || '' };
   }
 
   // Native-confirmed notice navigation. The event is presentation-only: neither

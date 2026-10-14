@@ -184,6 +184,10 @@ body.probe-capture-bg { background: #d8c9a3; }
 }
 #notice-ring { display: inline-grid; place-items: center; color: var(--go); }
 #notice-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
+/* #373 GD032: the strip wears the notice severity — error red, warning sun;
+   info keeps the neutral green ring (existing notices render unchanged). */
+#notices[data-tone="red"] #notice-ring, #notices[data-tone="red"] #notice-title { color: var(--red-11); }
+#notices[data-tone="sun"] #notice-ring, #notices[data-tone="sun"] #notice-title { color: var(--sun); }
 #notice-count {
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
   background: var(--go); color: #000; font: 700 12px/20px var(--font-ui); text-align: center;

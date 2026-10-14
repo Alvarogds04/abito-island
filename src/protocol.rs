@@ -405,6 +405,13 @@ pub struct Notice {
     pub title: &'static str,
     pub detail: &'static str,
     pub emotion: &'static str,
+    /// #373 GD032: INTERNAL classification, single source in Rust. It never
+    /// reaches the wire and never comes from it (the wire contract above is
+    /// byte-compatible); the UI renders exactly what this model admits.
+    pub severity: &'static str,
+    /// `settled` (a wire completion) or `transport` (the app's own failure
+    /// notice). The UI renders no other kind.
+    pub kind: &'static str,
 }
 
 pub const NOTICE_TITLE: &str = "Pi terminó su turno";
@@ -412,12 +419,66 @@ pub const NOTICE_DETAIL: &str =
     "No confirma que la tarea haya salido bien ni que las pruebas hayan pasado.";
 pub const NOTICE_EMOTION: &str = "idle";
 
+// --- #373 GD032: internal severity/kind (never on the wire) -----------------
+
+/// Closed severity set the UI classifies (info | warning | error). A wire
+/// `settled` notice is always `info`, so existing notices render unchanged.
+pub const SEVERITY_INFO: &str = "info";
+pub const SEVERITY_WARNING: &str = "warning";
+pub const SEVERITY_ERROR: &str = "error";
+
+/// The only kinds that ever enter the queue; the UI admits the same set.
+pub const KIND_SETTLED: &str = "settled";
+pub const KIND_TRANSPORT: &str = "transport";
+
+/// Synthetic session label for the transport-failure notice (a label, never
+/// a path; satisfies `session_token`).
+const TRANSPORT_SESSION: &str = "transport";
+
+/// #373 OD006 — why the local notice transport failed.
+/// `Unavailable`: the receiver could not start (main.cjs `unavailable`);
+/// no retry exists, so the notice persists until the human dismisses it.
+/// `ConnectionLost`: an established Pi connection dropped mid-run; the
+/// notice clears itself when a session reconnects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportFailure {
+    Unavailable,
+    ConnectionLost,
+}
+
+impl TransportFailure {
+    fn title(self) -> &'static str {
+        match self {
+            TransportFailure::Unavailable => "Avisos caídos",
+            TransportFailure::ConnectionLost => "Conexión caída",
+        }
+    }
+    fn detail(self) -> &'static str {
+        match self {
+            TransportFailure::Unavailable => {
+                "El canal local de avisos no pudo iniciarse; no se hizo ninguna conexión con Pi. \
+                 El aviso permanece mientras el transporte siga caído."
+            }
+            TransportFailure::ConnectionLost => {
+                "Se cortó la conexión con Pi. El transporte se restablece cuando una sesión de Pi \
+                 vuelve a conectarse; también podés descartar este aviso."
+            }
+        }
+    }
+}
+
 /// Bounded queue (8) + session-scoped dedupe (256) + one-minute expiry —
 /// ported from `core.cjs NoticeStore`.
 pub struct NoticeStore {
     project: String,
     queue: Vec<Notice>,
     seen: HashMap<(String, String), u64>,
+    /// #373 OD006: last reported connection count, to detect the DROP edge
+    /// (>0 -> 0 = failure, 0 -> >0 = recovery). 0 at boot: never connected
+    /// is not a failure.
+    connections: u32,
+    /// Distinct transport-failure events (per-event dismissal identity).
+    transport_events: u64,
 }
 
 impl NoticeStore {
@@ -426,6 +487,8 @@ impl NoticeStore {
             project: project.into(),
             queue: Vec::new(),
             seen: HashMap::new(),
+            connections: 0,
+            transport_events: 0,
         }
     }
 
@@ -469,12 +532,69 @@ impl NoticeStore {
             title: NOTICE_TITLE,
             detail: NOTICE_DETAIL,
             emotion: NOTICE_EMOTION,
+            // GD032: a wire settled completion is informational; existing
+            // notices therefore render exactly as before.
+            severity: SEVERITY_INFO,
+            kind: KIND_SETTLED,
         });
         if self.queue.len() > QUEUE {
             let excess = self.queue.len() - QUEUE;
             self.queue.drain(0..excess);
         }
         true
+    }
+
+    // --- #373 OD006: transport failure lifecycle -------------------------
+
+    /// Surface ONE transport failure: a state-derived error notice at the
+    /// FRONT of the queue (the existing `dismiss` verb acts on the queue
+    /// head, so dismissal works per failure event), never expiring while the
+    /// failure lasts. Only a NEW event inserts a new id: once the human
+    /// dismisses it, plain snapshots never bring it back.
+    pub fn transport_failed(&mut self, failure: TransportFailure, now: u64) {
+        self.transport_events += 1;
+        // one failure notice at a time: replace any previous one
+        self.queue.retain(|entry| entry.kind != KIND_TRANSPORT);
+        self.queue.insert(0, Notice {
+            id: format!("transport-{}", self.transport_events),
+            session_id: TRANSPORT_SESSION.to_string(),
+            at: now as i64,
+            // state-derived: it lives as long as the failure does
+            expires_at: i64::MAX,
+            title: failure.title(),
+            detail: failure.detail(),
+            emotion: "error",
+            severity: SEVERITY_ERROR,
+            kind: KIND_TRANSPORT,
+        });
+        // Still bounded by QUEUE — but the failure leads and is never the
+        // victim: drop the OLDEST admitted notice instead (the legacy
+        // front-drain would delete the failure itself, at the front).
+        while self.queue.len() > QUEUE {
+            match self.queue.iter().position(|entry| entry.kind != KIND_TRANSPORT) {
+                Some(index) => {
+                    self.queue.remove(index);
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// The transport recovered: the failure notice clears itself.
+    pub fn transport_recovered(&mut self) {
+        self.queue.retain(|entry| entry.kind != KIND_TRANSPORT);
+    }
+
+    /// Connection count edges (main.cjs `connections`): a DROP (>0 -> 0)
+    /// surfaces the failure, a reconnect (0 -> >0) clears it. The first
+    /// report is no event at all — no Pi yet is not a failure.
+    pub fn connections_changed(&mut self, count: u32, now: u64) {
+        if count == 0 && self.connections > 0 {
+            self.transport_failed(TransportFailure::ConnectionLost, now);
+        } else if count > 0 && self.connections == 0 {
+            self.transport_recovered();
+        }
+        self.connections = count;
     }
 
     /// Pruned copy of the queue, oldest first (main.cjs snapshot order).
@@ -758,6 +878,212 @@ mod tests {
         let framed = framer.push(&vec![b'e'; 6]).expect("exactly at the cap");
         assert!(framed.frames.is_empty());
         assert_eq!(framed.fatal, Some(FramingError::OversizedTail));
+    }
+
+    // --- #373 OD006/GD032: internal severity model + transport failure ---
+
+    // The wire format is a contract other producers rely on: a `settled`
+    // frame must decode and re-encode to the exact same bytes, and severity/
+    // kind are INTERNAL fields of the in-app Notice that never reach (nor
+    // come from) the wire.
+    #[test]
+    fn settled_wire_frames_round_trip_byte_identically() {
+        let project = project();
+        let identity = identity_of(&project);
+        let frame = format!(
+            r#"{{"v":1,"type":"settled","project":"{project}","sessionId":"session-1","at":{NOW},"id":"event-1"}}"#
+        );
+        let message = decode(frame.as_bytes(), &project, Some(&identity), NOW).expect("settled");
+        assert_eq!(
+            serde_json::to_string(&message).expect("re-encode"),
+            frame,
+            "the settled wire frame is byte-identical before and after"
+        );
+        // and the internal fields are not part of the wire message at all
+        let wire = serde_json::to_string(&message).expect("re-encode");
+        assert!(!wire.contains("severity"));
+        assert!(!wire.contains("kind"));
+    }
+
+    // accept() rejects exactly what it rejected before: every kind other
+    // than `settled`, at decode AND at the store boundary (defense in depth).
+    #[test]
+    fn admission_rejects_exactly_the_same_frames_as_before() {
+        let project = project();
+        let identity = identity_of(&project);
+        let mut store = NoticeStore::new(project.clone());
+        // Engine-facing / unknown types: rejected at decode in BOTH phases
+        // (with and without the handshake) and at the store boundary.
+        for kind in ["toast", "message_delta", "nope", "tests_passed"] {
+            let frame = format!(
+                r#"{{"v":1,"type":"{kind}","project":"{project}","sessionId":"session-1","at":{NOW}}}"#
+            );
+            assert!(
+                decode(frame.as_bytes(), &project, Some(&identity), NOW).is_err(),
+                "decode must reject {kind}"
+            );
+            assert!(
+                decode(frame.as_bytes(), &project, None, NOW).is_err(),
+                "decode without handshake must reject {kind}"
+            );
+            let message = Message {
+                v: 1,
+                kind: kind.to_string(),
+                project: project.clone(),
+                session_id: "session-1".to_string(),
+                at: NOW as i64,
+                id: None,
+            };
+            assert!(!store.accept(&message, NOW), "accept must reject {kind}");
+        }
+        // hello and heartbeat stay legal WIRE frames (handshake / keepalive)
+        // — decode accepts them in their own phase, exactly as before —
+        // but neither is ever admitted as a notice.
+        let hello = parse(&hello_value(&project), &project, None, NOW).expect("hello decodes");
+        let heartbeat_value = json!({"v":1, "type":"heartbeat", "project":project,
+                                     "sessionId":"session-1", "at":NOW});
+        let heartbeat = parse(&heartbeat_value, &project, Some(&identity), NOW)
+            .expect("heartbeat decodes after the handshake");
+        assert!(!store.accept(&hello, NOW), "a hello is never a notice");
+        assert!(!store.accept(&heartbeat, NOW), "a heartbeat is never a notice");
+        // a stowaway `id` on a non-settled type is still a schema error
+        let toast_with_id = format!(
+            r#"{{"v":1,"type":"toast","project":"{project}","sessionId":"session-1","at":{NOW},"id":"event-1"}}"#
+        );
+        assert!(decode(toast_with_id.as_bytes(), &project, Some(&identity), NOW).is_err());
+        // the settled happy path still admits exactly one notice
+        let settled = parse(&settled_value(&project), &project, Some(&identity), NOW).expect("settled");
+        assert!(store.accept(&settled, NOW));
+        assert_eq!(store.snapshot(NOW).len(), 1);
+    }
+
+    // GD032: severity/kind live on the notice model, single source in Rust.
+    // A wire `settled` notice defaults to severity `info` / kind `settled`
+    // (existing notices render unchanged); the UI only renders what this
+    // model admits.
+    #[test]
+    fn notice_model_carries_internal_severity_and_kind() {
+        let project = project();
+        let identity = identity_of(&project);
+        let event = parse(&settled_value(&project), &project, Some(&identity), NOW).expect("settled");
+        let mut store = NoticeStore::new(project.clone());
+        assert!(store.accept(&event, NOW));
+        let notice = store.snapshot(NOW).into_iter().next().expect("one notice");
+        assert_eq!(notice.severity, "info", "existing settled notices are informational");
+        assert_eq!(notice.kind, "settled");
+        let value = serde_json::to_value(&notice).expect("serializes");
+        assert_eq!(value["severity"], "info");
+        assert_eq!(value["kind"], "settled");
+        // the closed severity set the UI classifies
+        for severity in [SEVERITY_INFO, SEVERITY_WARNING, SEVERITY_ERROR] {
+            assert!(matches!(severity, "info" | "warning" | "error"));
+        }
+    }
+
+    // OD006: a transport failure is a STATE-DERIVED error notice at the FRONT
+    // of the queue: it appears on a drop (>0 -> 0), clears itself when the
+    // transport recovers, never expires while the failure lasts, and a human
+    // dismissal hides it until the NEXT distinct failure event.
+    #[test]
+    fn transport_failure_notice_appears_clears_and_is_dismissible_per_event() {
+        let project = project();
+        let identity = identity_of(&project);
+        let event = parse(&settled_value(&project), &project, Some(&identity), NOW).expect("settled");
+        let mut store = NoticeStore::new(project.clone());
+        assert!(store.accept(&event, NOW));
+        // boot with no Pi is not a failure; connecting is not a failure
+        store.connections_changed(0, NOW);
+        store.connections_changed(1, NOW);
+        {
+            let list = store.snapshot(NOW);
+            assert_eq!(list.len(), 1, "only the settled notice");
+            assert_eq!(list[0].kind, "settled");
+        }
+        // a DROP: the error notice is FIRST, severity error, never expires
+        store.connections_changed(0, NOW + 1);
+        let failure;
+        {
+            let list = store.snapshot(NOW + 1);
+            assert_eq!(list.len(), 2, "failure + settled");
+            assert_eq!(list[0].kind, "transport", "the failure leads the strip");
+            assert_eq!(list[0].severity, "error");
+            assert_eq!(list[1].kind, "settled", "existing notices stay queued behind");
+            failure = list[0].clone();
+        }
+        // while the failure lasts it never ages out (the settled one does)
+        {
+            let list = store.snapshot(NOW + EXPIRY_MS + 2);
+            assert_eq!(list.len(), 1, "the settled notice expired, the failure did not");
+            assert_eq!(list[0].kind, "transport");
+        }
+        // dismissal: exact (id + session), the settled notice is untouched
+        store.connections_changed(1, NOW + 3); // recovery first: clears it
+        assert!(store.snapshot(NOW + 3).iter().all(|n| n.kind != "transport"),
+            "recovery clears the failure notice by itself");
+        store.connections_changed(0, NOW + 4); // drop again: a NEW distinct event
+        let second;
+        {
+            let list = store.snapshot(NOW + 4);
+            assert_eq!(list[0].kind, "transport");
+            second = list[0].clone();
+        }
+        assert_ne!(second.id, failure.id, "a later distinct drop is a new event id");
+        store.dismiss(&second.id, &second.session_id, NOW + 5);
+        assert!(store.snapshot(NOW + 5).iter().all(|n| n.kind != "transport"),
+            "the human dismissed this failure event");
+        // still down: snapshots never re-insert a dismissed event
+        assert!(store.snapshot(NOW + 6).iter().all(|n| n.kind != "transport"),
+            "a dismissed failure event stays dismissed while the state is unchanged");
+        store.connections_changed(1, NOW + 7); // recovery
+        store.connections_changed(0, NOW + 8); // the NEXT distinct drop shows again
+        let third = store.snapshot(NOW + 8).into_iter().next().expect("notice");
+        assert_eq!(third.kind, "transport");
+        assert_ne!(third.id, second.id, "a later distinct drop shows again");
+    }
+
+    // OD006: the startup receiver failure (main.cjs `unavailable = true`).
+    // No retry exists (out of scope for #373), so the notice is inserted once
+    // and persists; dismissal hides it and nothing re-inserts it.
+    #[test]
+    fn unavailable_transport_inserts_one_persistent_notice() {
+        let project = project();
+        let mut store = NoticeStore::new(project.clone());
+        store.transport_failed(TransportFailure::Unavailable, NOW);
+        let first;
+        {
+            let list = store.snapshot(NOW + EXPIRY_MS + 1);
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].severity, "error");
+            assert_eq!(list[0].kind, "transport");
+            assert_eq!(list[0].title, "Avisos caídos");
+            first = list[0].clone();
+        }
+        store.dismiss(&first.id, &first.session_id, NOW + 2);
+        assert!(store.snapshot(NOW + 3).is_empty(), "dismissed and never re-inserted");
+    }
+
+    // The failure notice must survive a full queue without ever evicting
+    // itself: the legacy front-drain would delete it (it sits at the front).
+    #[test]
+    fn a_full_queue_keeps_the_failure_and_drops_the_oldest_settled() {
+        let project = project();
+        let identity = identity_of(&project);
+        let mut store = NoticeStore::new(project.clone());
+        for i in 0..QUEUE {
+            let value = json!({"v":1, "type":"settled", "project":project,
+                               "sessionId":"session-1", "at":NOW, "id":format!("id-{i}")});
+            let message = decode(value.to_string().as_bytes(), &project, Some(&identity), NOW)
+                .expect("valid settled");
+            assert!(store.accept(&message, NOW));
+        }
+        assert_eq!(store.snapshot(NOW).len(), QUEUE);
+        store.connections_changed(1, NOW);
+        store.connections_changed(0, NOW + 1);
+        let list = store.snapshot(NOW + 1);
+        assert_eq!(list.len(), QUEUE, "still bounded at QUEUE");
+        assert_eq!(list[0].kind, "transport", "the failure leads and survives");
+        assert_eq!(list[1].id, "id-1", "the OLDEST settled notice was evicted, exactly as before");
+        assert_eq!(list.last().expect("last").id, "id-7");
     }
 
     // ported from legacy transport.cjs:73-75

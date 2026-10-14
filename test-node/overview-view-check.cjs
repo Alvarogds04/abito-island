@@ -171,6 +171,61 @@ test('notice pill: unknown titles are cut to 3 words; plural; ring clamps', () =
   assert.equal(O.noticeView([], NOW), null);
 });
 
+// ---- #373 GD032: severity/kind (Rust is the single admission source) ------
+test('existing settled notices render identically (regression: info severity changes nothing)', () => {
+  const n = [{ id: 'a', title: 'Pi terminó su turno', detail: 'No confirma que la tarea haya salido bien.', at: NOW - 15000, expiresAt: NOW + 45000 }];
+  assert.deepEqual(O.noticeView(n, NOW), {
+    text: 'Pi terminó',
+    badge: 1,
+    fraction: 0.75,
+    aria: 'Aviso: Pi terminó su turno. No confirma que la tarea haya salido bien. 1 aviso reciente; se descartan al minuto.',
+    tone: '',
+  });
+  // the Rust model now labels it explicitly: same rendering
+  assert.deepEqual(O.noticeView([{ ...n[0], severity: 'info', kind: 'settled' }], NOW), O.noticeView(n, NOW));
+});
+
+test('severity classification: error renders red, warning sun, info neutral', () => {
+  const failure = [{
+    id: 'transport-1', kind: 'transport', severity: 'error',
+    title: 'Conexión caída', detail: 'Se cortó la conexión con Pi.',
+    at: NOW - 1000, expiresAt: NOW + 60000,
+  }];
+  const v = O.noticeView(failure, NOW);
+  assert.equal(v.tone, 'red', 'an error notice is never neutral');
+  assert.equal(v.text, 'Conexión caída');
+  assert.match(v.aria, /^Error:/, 'the severity is announced, not only colored');
+  assert.match(v.aria, /Conexión caída/);
+  const warn = O.noticeView([{ id: 'w', kind: 'settled', severity: 'warning', title: 'Aviso', expiresAt: NOW + 60000 }], NOW);
+  assert.equal(warn.tone, 'sun');
+  assert.match(warn.aria, /^Advertencia:/);
+  // an unknown/absent severity is never a crash and never invents a tone
+  assert.equal(O.noticeView([{ id: 'x', title: 'Pi terminó su turno', expiresAt: NOW }], NOW).tone, '');
+  assert.equal(O.noticeView([{ id: 'x', severity: 'loud', kind: 'settled', title: 'Pi terminó su turno', expiresAt: NOW }], NOW).tone, '');
+});
+
+test('filtered kinds never show: only what Rust admits (settled|transport) reaches the strip', () => {
+  const engine = [{ id: 't', kind: 'toast', severity: 'info', title: 'engine toast', expiresAt: NOW + 60000 }];
+  assert.equal(O.noticeView(engine, NOW), null, 'an engine-facing toast is never rendered');
+  const mixed = [
+    { id: 'e', kind: 'engine', title: 'internal', expiresAt: NOW + 60000 },
+    { id: 'k', kind: 'heartbeat', title: 'hb', expiresAt: NOW + 60000 },
+    { id: 'a', kind: 'settled', severity: 'info', title: 'Pi terminó su turno', expiresAt: NOW + 60000 },
+  ];
+  const v = O.noticeView(mixed, NOW);
+  assert.equal(v.badge, 1, 'only the admitted notice counts');
+  assert.equal(v.text, 'Pi terminó');
+  // an admitted transport failure renders on its own
+  assert.equal(O.noticeView([{ id: 'transport-2', kind: 'transport', severity: 'error', title: 'Conexión caída', expiresAt: NOW + 60000 }], NOW).badge, 1);
+});
+
+// ---- #373 wiring: the strip paints the view's tone --------------------------
+test('island.js paints the notice strip tone from the view (textContent only)', () => {
+  const src = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  assert.match(src, /noticesEl\.dataset\.tone\s*=/, 'the strip carries the view tone');
+  assert.doesNotMatch(src, /noticesEl\.innerHTML/, 'the strip never writes markup');
+});
+
 // ---- markup contract -----------------------------------------------------
 test('every icon-only control in index.html has an aria-label', () => {
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
@@ -527,7 +582,12 @@ test('CSS structure: braces balance (no stray «}» swallowing the next rule) an
 });
 
 test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = geometry::LOGICAL_COMPACT), so there is no 304x44 transparent flash with the disc clipped', () => {
-  const conf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tauri.conf.json'), 'utf8')).app.windows[0];
+  let conf;
+  try {
+    conf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tauri.conf.json'), 'utf8')).app.windows[0];
+  } catch (error) {
+    assert.fail(`tauri.conf.json unreadable: ${error}`);
+  }
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
   const dot = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
   assert.deepEqual([conf.width, conf.height], [dot + 12, dot + 12]);
