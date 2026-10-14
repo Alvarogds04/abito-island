@@ -547,3 +547,130 @@ fn f055_gain_defaults_direct_validation_and_concurrent_existing_writers() {
     assert_eq!(Prefs::from_text(Some(&bytes.lock().unwrap())),final_view);
     assert_eq!(events.lock().unwrap().len(),4); assert_eq!(*events.lock().unwrap(),*writes.lock().unwrap());
 }
+
+// ---- #264 / GD049: the remembered desktop position (optional v1 field) -----
+
+#[test]
+fn a_dragged_position_round_trips_as_an_optional_v1_field() {
+    let saved = Prefs { position: Some((910, 1002)), ..Prefs::default() };
+    let text = saved.to_text();
+    assert!(!text.contains('\n'), "the file stays one line: {text}");
+    let wire: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(wire["position"]["x"], 910);
+    assert_eq!(wire["position"]["y"], 1002);
+    assert_eq!(wire["v"], 1, "the file stays v1");
+    assert_eq!(Prefs::from_text(Some(&text)), saved);
+    // a position left of the origin (a monitor to the left) is a real position
+    let west = Prefs { position: Some((-300, 40)), ..Prefs::default() };
+    assert_eq!(Prefs::from_text(Some(&west.to_text())), west);
+}
+
+#[test]
+fn the_position_is_native_only_and_never_reaches_the_webview_schema() {
+    // parse_command is the WebView's closed schema; the position is written by
+    // the native drag path only, so no payload can set or clear it.
+    for payload in [
+        json!({"action":"set_position","x":910,"y":1002}),
+        json!({"action":"set_position"}),
+        json!({"action":"clear_position"}),
+        json!({"action":"position","x":910,"y":1002}),
+        json!({"action":"set_position","x":910,"y":1002,"z":0}),
+    ] {
+        assert_eq!(parse_command(&payload), Err(CommandError), "{payload}");
+    }
+    // and the native command itself refuses a coordinate no desktop has
+    let current = Prefs { position: Some((910, 1002)), ..Prefs::default() };
+    for bad in [
+        Command::SetPosition(2_000_000, 0),
+        Command::SetPosition(0, -2_000_000),
+        Command::SetPosition(i32::MAX, i32::MIN),
+    ] {
+        assert_eq!(apply(&current, &bad), Err(CommandError), "{bad:?}");
+    }
+    assert_eq!(current.position, Some((910, 1002)), "a rejected write never mutates state");
+    let moved = apply(&current, &Command::SetPosition(100, 1002)).unwrap();
+    assert_eq!(moved.position, Some((100, 1002)));
+    assert_eq!(moved.sound, current.sound, "the position never touches another field");
+}
+
+#[test]
+fn an_old_prefs_file_without_a_position_reads_and_writes_back_the_same_bytes() {
+    // Regression: a file written before #264 keeps EXACTLY its bytes when this
+    // build reads and rewrites it, and its every field still loads.
+    let old = r#"{"avatar_colors":{"abito":"purple"},"display_name":"Ana","gain":0.12,"sound":true,"v":1}"#;
+    let p = Prefs::from_text(Some(old));
+    assert_eq!(p.position, None, "nobody has dragged the island yet");
+    assert!(p.sound);
+    assert_eq!(p.display_name.as_deref(), Some("Ana"));
+    assert_eq!(p.gain(), 0.12);
+    assert_eq!(p.avatar_colors["abito"], "purple");
+    assert_eq!(p.to_text(), old, "the position key must not change an untouched file");
+    // the same promise the #384 test pins for colours
+    let minimal = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#)).to_text();
+    assert!(!minimal.contains("position"), "{minimal}");
+    assert!(minimal.contains(r#""sound":true"#), "{minimal}");
+}
+
+#[test]
+fn a_settings_change_after_a_drag_never_drops_the_saved_position() {
+    use std::sync::Mutex;
+    let serial = Mutex::new(());
+    let state = Mutex::new(Prefs::default());
+    let disk = Mutex::new(Prefs::default().to_text());
+    // 1. the drag release commits its position through the SAME gate and file
+    transact(&serial, &state, &Command::SetPosition(910, 1002), |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    // 2. a later settings change must not erase it (lost-update regression)
+    let rename = parse_command(&json!({"action":"set_display_name","display_name":"Ana"})).unwrap();
+    transact(&serial, &state, &rename, |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    let sound = parse_command(&json!({"action":"sound_on"})).unwrap();
+    transact(&serial, &state, &sound, |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    // 3. and a later drag overwrites only the position
+    transact(&serial, &state, &Command::SetPosition(100, 32), |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    let reloaded = Prefs::from_text(Some(&disk.lock().unwrap()));
+    assert_eq!(reloaded.position, Some((100, 32)));
+    assert_eq!(reloaded.display_name.as_deref(), Some("Ana"));
+    assert!(reloaded.sound);
+    assert_eq!(*state.lock().unwrap(), reloaded, "memory and disk agree after every commit");
+    // a no-op release (same coordinates) writes nothing at all
+    let bytes = disk.lock().unwrap().clone();
+    transact(&serial, &state, &Command::SetPosition(100, 32), |_| panic!("no-op write"), |_| panic!("no-op event")).unwrap();
+    assert_eq!(*disk.lock().unwrap(), bytes);
+    // a rejected position never reaches the disk either
+    assert_eq!(transact(&serial, &state, &Command::SetPosition(5_000_000, 0), |_| panic!("invalid write"), |_| panic!("invalid event")), Err(CommandError));
+    assert_eq!(*disk.lock().unwrap(), bytes);
+}
+
+#[test]
+fn a_damaged_position_never_panics_and_never_costs_the_other_preferences() {
+    for bad in [
+        r#"{"v":1,"sound":true,"position":42}"#,
+        r#"{"v":1,"sound":true,"position":"910,1002"}"#,
+        r#"{"v":1,"sound":true,"position":[]}"#,
+        r#"{"v":1,"sound":true,"position":null}"#,
+        r#"{"v":1,"sound":true,"position":{}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910}}"#,
+        r#"{"v":1,"sound":true,"position":{"y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":"910","y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910.5,"y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910,"y":1002.5}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":99999999999,"y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":-910,"y":-99999999999}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":99999999999,"y":99999999999}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910,"y":1002,"z":0}}"#,
+    ] {
+        let p = Prefs::from_text(Some(bad));
+        assert_eq!(p.position, None, "{bad}: a damaged position reads as no position");
+        assert!(p.sound, "{bad}: the sound preference must survive");
+        assert_eq!(p.display_name, None);
+        assert!(p.avatar_colors.is_empty());
+        // writing the surviving preferences back adds no position key
+        assert!(!p.to_text().contains("position"), "{bad} -> {}", p.to_text());
+    }
+    // a truncated file is still just the defaults, never a panic
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1,"sound":true,"position":{"x":9"#)), Prefs::default());
+    assert_eq!(Prefs::from_text(Some("\u{0}\u{1}")), Prefs::default());
+    // only a complete, bounded pair survives
+    let ok = Prefs::from_text(Some(r#"{"v":1,"sound":true,"position":{"x":-300,"y":40}}"#));
+    assert_eq!(ok.position, Some((-300, 40)));
+    assert!(ok.sound);
+}

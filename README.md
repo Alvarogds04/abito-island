@@ -932,6 +932,68 @@ commits, rejected/no-op commands and failed rename without false publication. Do
 are not integrated/native acceptance. T2 connects identity colors, T3 handles native validation,
 and T4 owns independent integrated review. No real model calls belong to T1 checks.
 
+## #264 — the remembered position (GD049, "Persist panel position")
+
+Inventory GD049: *"Load and save the assistant's desktop position across launches."*
+
+- **Saved on release.** The one event that decides where the island lives is a drag
+  release: `drag_release` → `ReleaseOutcome::Snapped` → `settingshost::save_position`,
+  so only that outcome is persisted. A short click (toggle), a cancelled release and
+  the periodic re-clamps write nothing — they never decided a placement.
+- **Restored on launch.** `setup` loads `prefs.json` *before* the first geometry
+  decision (`settingshost::start` runs first), then asks `geometry::restore_position`:
+  if the saved origin still lies fully inside the **current** work area it is used
+  verbatim; otherwise the existing M1a default (top-centre) is used. The docked
+  `core.edge` is derived from the restored rectangle, so an island restored at the
+  bottom still grows upward when it expands. The post-load geometry pin
+  (`record_frontend_evidence`) re-pins to the same restored origin instead of
+  snapping the island back to top-centre.
+- **Never off-screen, never fatal.** A monitor removal, a resolution change or any
+  origin outside the work area falls back to the default placement (`clamp_rect`
+  equality is the "fully inside" test, so nothing half-restored is ever placed).
+  Corrupt, truncated, over-bounded or wrongly typed `position` data reads as
+  *no position* (→ default) and costs no other preference; a hostile value cannot
+  panic (`unsigned_abs` bounds, `i32::try_from`).
+- **Where it lives.** `prefs.json` stays **v1**; `position` is a new *optional*
+  field (`{"x":..,"y":..}`, physical px), written only by the native drag path
+  through the same `prefs::transact` gate and atomic writer as every other
+  preference — so a settings change after a drag cannot drop the position and a
+  drag cannot drop a settings change. A file written before #264 loads and writes
+  back **byte-for-byte unchanged**.
+- **Not exposed to the WebView.** `prefs::parse_command` is untouched: no payload
+  can set or clear the position. `prefs::Command::SetPosition` is reachable only
+  from `drag_release`, and rejects coordinates outside ±1 000 000 px.
+
+**Verification (test-first: RED → GREEN).** RED: `cargo test --offline --locked` did not
+compile — 30 errors naming exactly the API that did not exist yet (`Prefs::position`,
+`Command::SetPosition`, `geometry::restore_position`, `ReleaseOutcome::saved_position`).
+GREEN, same command with `CARGO_TARGET_DIR=$PWD/target`:
+
+```sh
+CARGO_TARGET_DIR="$PWD/target" cargo test --offline --locked --no-fail-fast
+#   503 passed · 32 failed · 6 ignored, over 30 targets
+#   lib 346 -> 356 (10 new: 5 prefs position + 4 geometry restore + 1 core save-on-release)
+#   main (bin) 34, agent_daemon 14, approval_bridge 17, chat_local_model 15, daemonhost 7,
+#   fixture_leaf 8, frontend_* 10, hotkey_portal 11, hotkey_x11 12, install_root 7,
+#   install_script 1, models_selection 5, notice_click 4, own_window_no_wm 1,
+#   packaging 1, tmpdirs 1, native_window_normal/question_producer 6 ignored, doc-tests 0
+#
+#   The 32 failures are PRE-EXISTING in this worktree, not from #264: question_receiver
+#   (24) and transport_receiver (8) bind a Unix socket below `target/tmp`, whose path here
+#   is 94 bytes against sockaddr_un's 107 -> PathTooLong / "path must be shorter than
+#   SUN_LEN". Proven by re-running BOTH binaries with the #264 changes STASHED: the same
+#   24 + 8 failures on the base commit e8065d4.
+node test-node/*-check.cjs
+#   15 of 16 exit 0; producer-check.cjs exits 2 on its usage line because it is a harness
+#   (endpoint, runtime, cwd) driven by tests/transport_receiver.rs, not a standalone check
+node tests/composer-ime-check.cjs   # 10 passed, 0 failed
+```
+
+Not verified here: the app was never launched on the desktop (the parent does that), so
+the live drag → relaunch restore path is proven by the unit chain
+(`core::release` → `saved_position` → `prefs::transact` → `geometry::restore_position`),
+not by a real second launch.
+
 ## Layout
 
 ```

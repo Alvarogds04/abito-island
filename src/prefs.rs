@@ -1,5 +1,6 @@
 //! Non-secret island preferences, stored as v1. Missing or invalid fields use
-//! their own defaults: sound OFF, no display name and no color overrides. Names are explicit input,
+//! their own defaults: sound OFF, no display name, no color overrides and no remembered
+//! island position. Names are explicit input,
 //! never obtained from accounts, the OS, or another profile.
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -18,6 +19,15 @@ pub const COLORS: [&str; 5] = ["green", "blue", "mint", "orange", "purple"];
 /// The optional colour map. It is absent from a file nobody customised, so an untouched
 /// `prefs.json` keeps exactly the bytes it had before #384.
 const AVATAR_COLORS: &str = "avatar_colors";
+
+/// #264 (GD049): the optional remembered island position (physical px). Absent from a
+/// file nobody has dragged, so an untouched `prefs.json` keeps exactly the bytes it had
+/// before #264 as well.
+const POSITION: &str = "position";
+
+/// A plausible virtual-desktop coordinate in physical px: no real monitor
+/// arrangement reaches this, so a larger value is corrupt data, never a desktop.
+const POSITION_LIMIT: u32 = 1_000_000;
 
 /// Identities are the same closed slug shape the frontend enforces (avatar-colors.js
 /// `IDENTITY`): bounded, lowercase, no path or control characters.
@@ -40,6 +50,9 @@ pub struct Prefs {
     pub display_name: Option<String>,
     /// Canonical identity -> validated color. Orphan keys are retained, not cleaned up.
     pub avatar_colors: BTreeMap<String, String>,
+    /// #264: the origin the human last dragged the island to, physical px. Written by
+    /// the native drag path only (see [`Command::SetPosition`]), never from the WebView.
+    pub position: Option<(i32, i32)>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -67,6 +80,25 @@ fn valid_identity(identity: &str) -> bool {
         return false;
     }
     bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'_' || b == b'-')
+}
+
+/// `unsigned_abs` instead of `abs`: `i32::MIN.abs()` overflows, and a damaged file
+/// must never panic the island.
+fn valid_position(x: i32, y: i32) -> bool {
+    x.unsigned_abs() <= POSITION_LIMIT && y.unsigned_abs() <= POSITION_LIMIT
+}
+
+/// The stored position, accepted only as a complete, bounded `{"x":..,"y":..}` pair —
+/// a closed shape, like the IPC schema, so a padded, truncated or wrongly typed object
+/// reads as *no position* (the default placement) instead of a guess.
+fn position_from(value: Option<&Value>) -> Option<(i32, i32)> {
+    let map = value?.as_object()?;
+    if map.len() != 2 {
+        return None;
+    }
+    let x = i32::try_from(map.get("x")?.as_i64()?).ok()?;
+    let y = i32::try_from(map.get("y")?.as_i64()?).ok()?;
+    valid_position(x, y).then_some((x, y))
 }
 
 /// The stored colours that survive validation. Everything else is dropped, and nothing here can
@@ -98,6 +130,7 @@ impl Prefs {
             avatar_colors: colors_from(v.get(AVATAR_COLORS)),
             display_name: v.get("display_name").and_then(Value::as_str)
                 .and_then(|name| validated_name(name).ok()).flatten(),
+            position: position_from(v.get(POSITION)),
         }
     }
 
@@ -111,6 +144,9 @@ impl Prefs {
         }
         if !self.avatar_colors.is_empty() {
             v[AVATAR_COLORS] = json!(self.avatar_colors);
+        }
+        if let Some((x, y)) = self.position.filter(|(x, y)| valid_position(*x, *y)) {
+            v[POSITION] = json!({"x": x, "y": y});
         }
         v.to_string()
     }
@@ -127,6 +163,10 @@ pub enum Command {
     SetDisplayName(String),
     SetAvatarColor { identity: String, color: String },
     ClearAvatarColor { identity: String },
+    /// #264: the native drag path remembers where the island was released. Deliberately
+    /// NOT produced by [`parse_command`]: the WebView can read neither the position nor
+    /// the fact that one is stored.
+    SetPosition(i32, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +232,10 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::ClearAvatarColor { identity } => {
             if !valid_identity(identity) { return Err(CommandError); }
             next.avatar_colors.remove(identity);
+        }
+        Command::SetPosition(x, y) => {
+            if !valid_position(*x, *y) { return Err(CommandError); }
+            next.position = Some((*x, *y));
         }
     }
     Ok(next)
