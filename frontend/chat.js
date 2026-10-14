@@ -248,6 +248,13 @@
   }
   input.addEventListener('input', () => { localProblem = ''; autosize(); renderControls(); });
   input.addEventListener('keydown', event => {
+    // IME owns the key: `isComposing` while it composes, and the legacy 229 sentinel for
+    // the keydown that confirms a candidate where the engine delivers it after
+    // `compositionend` (WebKit bug 165004; 229 is what that keydown carries on Safari 26).
+    // Where such a keydown arrives with a plain 13 there is NO signal that tells it apart
+    // from an intentional Enter, so it sends: Enter always sends, and the README records
+    // that gap rather than papering over it with a time window, which swallows real
+    // Enters (TaskView #372, parent decision 2026-10-13).
     if (event.isComposing || event.keyCode === 229) return; // IME owns the key
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();

@@ -446,9 +446,11 @@ origin was added (the WebView never talks HTTP; Rust does).
 
 **Accessibility/motion/silence:** named controls ≥44 px (probe-measured),
 text status independent of R6, polite live region once per state change or
-finished answer (never per token), plain text via `textContent`, IME-safe
-Enter, focus moves to the composer only on a deliberate keyboard open or a
-click; overview↔chat uses the contract spring/340 ms curve and snaps under
+finished answer (never per token), plain text via `textContent`, the
+composer's Enter guard consumes only the identity signals an IME exposes
+(`isComposing` and the legacy 229 sentinel) and its known gap is written out
+in «Verifying U1» below, focus moves to the composer only on a deliberate
+keyboard open or a click; overview↔chat uses the contract spring/340 ms curve and snaps under
 `prefers-reduced-motion`; no audio elements, no sound. Drag never attaches
 to the transcript or composer. R6 is only scaled/positioned (sha256
 unchanged).
@@ -518,7 +520,21 @@ cargo test --manifest-path apps/desktop-tauri/Cargo.toml
 #   lib 147 (+chat 30, localmodel 13, chatlane 9, geometry 3, core 4)
 #   chat_local_model 14 (in-process fake router; 1 opt-in real smoke)
 #   frontend_chat_view 1 (runs test-node/chat-view-check.cjs, 8 checks)
+#   frontend_chat_composer 1 (runs tests/composer-ime-check.cjs, 10 checks + limits probe)
 node apps/desktop-tauri/test-node/chat-view-check.cjs
+
+# composer keyboard contract (#372): drives the REAL frontend/chat.js over a fake DOM
+# with plain node (no browser, no npm, no network). Proves Enter sends (one submit with
+# the draft, cleared), Shift+Enter keeps the textarea's own newline and sends nothing,
+# `isComposing` sends nothing, the legacy 229 sentinel sends nothing, and an intentional
+# Enter shortly after a composition still sends. It then PRINTS a limits probe: where the
+# engine delivers the candidate-confirming keydown AFTER `compositionend` with a plain
+# `keyCode` 13 (WebKit bug 165004, older reports), that keydown carries no signal that
+# tells it apart from an intentional Enter, so it sends — this is a known gap, not an
+# IME-safety guarantee. A time window is deliberately NOT used for it: it swallows real
+# Enters (TaskView #372, parent decision 2026-10-13). Real WebKitGTK/IME ordering is NOT
+# exercised here: no IME, no engine drive, no browser.
+node apps/desktop-tauri/tests/composer-ime-check.cjs
 
 # opt-in: one short real turn against 127.0.0.1:11002 (local, free)
 ABITO_REAL_LOCAL_MODEL=1 cargo test --manifest-path apps/desktop-tauri/Cargo.toml \
