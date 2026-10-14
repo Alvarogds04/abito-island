@@ -27,6 +27,10 @@ test('F025 adds exactly its two assets to the closed shipped list', () => {
   assert.equal(new Set(L.FRONTEND_FILES).size, L.FRONTEND_FILES.length);
 });
 
+test('F031 pure catalog/model files are shipped without weakening the curated gate', () => {
+  for (const file of ['pill-catalog.js', 'pills.js']) assert.ok(L.FRONTEND_FILES.includes(file), file);
+});
+
 function copyCrate() {
   const dir = T.make('abito-pkg-');
   for (const f of ['tauri.conf.json', 'Cargo.toml']) fs.copyFileSync(path.join(crate, f), path.join(dir, f));
