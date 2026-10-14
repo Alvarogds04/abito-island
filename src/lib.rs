@@ -24,6 +24,7 @@ pub mod bridge;
 pub mod card;
 pub mod chat;
 pub mod chatlane;
+pub mod conversations;
 pub mod core;
 pub mod desktop;
 pub mod daemonhost;
