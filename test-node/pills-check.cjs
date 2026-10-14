@@ -8,7 +8,10 @@ const { test } = require('node:test');
 const frontend = path.join(__dirname, '../frontend');
 const M = require(path.join(frontend, 'pills.js'));
 const read = file => fs.readFileSync(path.join(frontend, file), 'utf8');
-const clone = value => JSON.parse(JSON.stringify(value));
+const clone = value => {
+  try { return JSON.parse(JSON.stringify(value)); }
+  catch (cause) { throw new Error('test fixture must be JSON serializable', { cause }); }
+};
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 function boot({ prefs = {}, failView = false, deferView = false } = {}) {
@@ -50,7 +53,7 @@ function boot({ prefs = {}, failView = false, deferView = false } = {}) {
     createElement: tag => new Element(tag), importNode: node => node,
     addEventListener(type, fn) { (events[type] ||= []).push(fn); },
     dispatchEvent(event) { for (const fn of events[event.type] || []) fn(event); }, querySelectorAll: () => [] };
-  const backend = { prefs: { sound: false, gain: 0.12, avatarColors: {}, ...M.normalize(prefs) }, rejectNext: false, pendingView: null };
+  const backend = { prefs: { sound: false, gain: 0.12, avatarColors: {}, ...M.normalize(prefs) }, rejectNext: false, pendingView: null, writes: 0, publications: 0 };
   const window = { addEventListener() {}, __TAURI__: {
     core: { invoke(cmd, { payload }) {
       calls.push({ cmd, payload: clone(payload) });
@@ -60,6 +63,7 @@ function boot({ prefs = {}, failView = false, deferView = false } = {}) {
           return failView ? Promise.reject(new Error('no ipc')) : Promise.resolve(clone(backend.prefs));
         }
         if (backend.rejectNext) { backend.rejectNext = false; return Promise.reject(new Error('save_failed')); }
+        const before = JSON.stringify(backend.prefs);
         const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : null;
         if (next) Object.assign(backend.prefs, next);
         else if (payload.action === 'sound_on') backend.prefs.sound = true;
@@ -68,6 +72,11 @@ function boot({ prefs = {}, failView = false, deferView = false } = {}) {
         else if (payload.action === 'set_display_name') backend.prefs.displayName = payload.display_name.trim();
         else if (payload.action === 'set_avatar_color') backend.prefs.avatarColors[payload.identity] = payload.color;
         else return Promise.reject(new Error('invalid_schema'));
+        if (JSON.stringify(backend.prefs) !== before) {
+          backend.writes++; backend.publications++;
+          const snapshot = clone(backend.prefs);
+          queueMicrotask(() => { for (const fn of native['prefs:state'] || []) fn({ payload: snapshot }); });
+        }
         return Promise.resolve(clone(backend.prefs));
       }
       if (cmd === 'agent_action' && payload.action === 'view') return Promise.resolve({ connection: 'no_daemon' });
@@ -157,4 +166,98 @@ test('S6 initial prefs read cannot overwrite a newer pushed choice snapshot', as
   b.backend.pendingView(M.normalize({})); await flush();
   assert.equal(b.get('pill-name').textContent, 'Codex');
   assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_codex', 'agent_amp']);
+});
+
+
+async function settingsBoot(options) {
+  const b = boot(options); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  return b;
+}
+const writes = b => b.calls.filter(x => x.cmd === 'prefs_action' && x.payload.action !== 'view');
+
+test('S3/S4 actual Ajustes render25 catalog rows, four main choices, defaults and platform refusals', async () => {
+  const b = await settingsBoot();
+  assert.equal(b.get('pill-main-setting').value, M.DEFAULT_MAIN);
+  assert.deepEqual(b.get('pill-main-setting').children.map(x => x.value), ['integration_claude', 'agent_cursor', 'agent_antigravity', 'agent_codex']);
+  assert.match(b.get('pill-slot-count').textContent, /4\/4/);
+  assert.equal(b.get('pill-settings-rows').querySelectorAll('button').length, 25);
+  for (const id of [M.DEFAULT_MAIN, 'agent_claude-desktop', 'integration_music', 'ai_google']) assert.equal(b.get('pill-toggle-' + id).disabled, true, id);
+  for (const id of M.DEFAULT_DECLARED) {
+    const button = b.get('pill-toggle-' + id);
+    assert.equal(button.disabled, false); assert.equal(button.getAttribute('aria-pressed'), 'true'); assert.ok(button.getAttribute('aria-label'));
+  }
+  assert.deepEqual(writes(b), []); assert.equal(b.backend.writes, 0);
+  const scripts=[...read('index.html').matchAll(/src="([^"]+\.js)"/g)].map(x=>x[1]);
+  assert.ok(scripts.indexOf('pills.js') < scripts.indexOf('pill-settings.js'));
+  assert.ok(scripts.indexOf('pill-settings.js') < scripts.indexOf('settings.js'));
+});
+
+test('S4 actual settings can remove at capacity then add; fifth/main/unsupported additions never dispatch', async () => {
+  const b = await settingsBoot(); const before = clone(b.backend.prefs);
+  for (const id of ['ai_google', M.DEFAULT_MAIN, 'agent_claude-desktop', 'integration_music']) b.click('pill-toggle-' + id);
+  await flush(); assert.deepEqual(writes(b), []); assert.deepEqual(b.backend.prefs, before);
+  assert.equal(b.backend.writes, 0); assert.equal(b.backend.publications, 0);
+  b.click('pill-toggle-integration_n8n'); await flush();
+  assert.match(b.get('pill-slot-count').textContent, /3\/4/);
+  b.click('pill-toggle-ai_google'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'toggle_declared_pill', id: 'integration_n8n' },
+    { action: 'toggle_declared_pill', id: 'ai_google' },
+  ]);
+  assert.deepEqual(b.backend.prefs.declaredPills, ['integration_resend', 'integration_vercel', 'integration_github', 'ai_google']);
+  assert.deepEqual(b.get('pill-choices').children.map(x=>x.dataset.pillId), [M.DEFAULT_MAIN,'ai_google','integration_resend','integration_vercel','integration_github']);
+  assert.equal(b.backend.writes,2); assert.equal(b.backend.publications,2);
+});
+
+test('S4 actual main change removes new-main declaration only and preserves legacy values', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor','ai_google'] } });
+  b.backend.prefs.sound=true; b.backend.prefs.gain=0.2; b.backend.prefs.displayName='Ana'; b.backend.prefs.avatarColors={abito:'purple'};
+  const main=b.get('pill-main-setting'); main.value='agent_cursor'; main.fire('change'); await flush();
+  assert.deepEqual(writes(b).map(x=>x.payload),[{action:'set_main_pill',id:'agent_cursor'}]);
+  assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']); assert.equal(b.backend.prefs.mainPill,'agent_cursor');
+  assert.equal(b.backend.prefs.sound,true); assert.equal(b.backend.prefs.gain,0.2);
+  assert.equal(b.backend.prefs.displayName,'Ana'); assert.deepEqual(b.backend.prefs.avatarColors,{abito:'purple'});
+  assert.equal(b.get('pill-name').textContent,'Cursor'); assert.equal(b.get('pill-main-setting').value,'agent_cursor');
+});
+
+test('S6 settings rejects synthetic/unknown/main-repeat/closed-panel input without writes', async () => {
+  const b=await settingsBoot({prefs:{declaredPills:[]}});
+  const main=b.get('pill-main-setting'); main.value='agent_cursor'; main.fire('change',{isTrusted:false});
+  main.value='unknown'; main.fire('change');
+  main.value=M.DEFAULT_MAIN; main.fire('change');
+  b.click('pill-toggle-ai_google',{isTrusted:false});
+  const old=b.get('pill-toggle-ai_google');
+  b.click('settings-close'); old.fire('click'); await flush();
+  assert.deepEqual(writes(b),[]); assert.equal(b.backend.writes,0); assert.equal(b.backend.publications,0);
+  assert.equal(b.get('pill-name').textContent,'VS Code');
+});
+
+test('S6 failed main save keeps previous snapshot and focus; explicit retry succeeds', async () => {
+  const b=await settingsBoot(); const before=clone(b.backend.prefs);
+  b.backend.rejectNext=true;
+  const main=b.get('pill-main-setting'); main.focus(); main.value='agent_cursor'; main.fire('change'); await flush();
+  assert.deepEqual(b.backend.prefs,before); assert.equal(b.backend.writes,0); assert.equal(b.backend.publications,0);
+  assert.equal(b.get('pill-main-setting').value,M.DEFAULT_MAIN);
+  assert.equal(b.get('pill-name').textContent,'VS Code');
+  assert.equal(b.get('pill-settings-error').textContent,'No se pudo guardar la pill; se mantuvo la elección anterior.');
+  assert.equal(b.doc.activeElement.id,'pill-main-setting');
+  const retry=b.get('pill-main-setting'); retry.value='agent_cursor'; retry.fire('change'); await flush();
+  assert.equal(b.get('pill-settings-error').textContent,'');
+  assert.equal(b.get('pill-name').textContent,'Cursor'); assert.equal(b.backend.writes,1);
+});
+
+test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices', async () => {
+  const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}});
+  b.click('sw-sound'); await flush(); assert.equal(b.backend.prefs.sound,true);
+  const gain=b.get('settings-sound-gain'); gain.value='0.2'; gain.fire('input'); gain.parentNode.fire('submit'); await flush();
+  assert.equal(b.backend.prefs.gain,0.2);
+  const name=b.get('settings-display-name'); name.value='Bea'; name.fire('input'); name.parentNode.fire('submit'); await flush();
+  assert.equal(b.backend.prefs.displayName,'Bea');
+  b.click('dot-color-abito-blue'); await flush(); assert.equal(b.backend.prefs.avatarColors.abito,'blue');
+  assert.equal(b.backend.prefs.mainPill,'agent_codex'); assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']);
+  assert.deepEqual(writes(b).map(x=>x.payload.action),['sound_on','set_sound_gain','set_display_name','set_avatar_color']);
+  assert.equal(b.get('pill-name').textContent,'Codex');
+  assert.ok(b.get('open-screen-accounts')); assert.ok(b.get('open-screen-connectors'));
 });

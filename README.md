@@ -30,7 +30,11 @@ The [pill model](../../docs/pills.md) contains 25 stable identities, one main
 workspace choice and up to four declarations. Choices are local, explicitly
 **not connections**; services remain unavailable without a real producer.
 Run `node apps/desktop-tauri/test-node/pill-catalog-check.cjs` from the repo root
-for the offline model checks. #346 color overrides are separate.
+for the offline model checks; `node apps/desktop-tauri/test-node/pills-check.cjs`
+executes the actual overview/settings scripts against a local fake DOM/IPC.
+Use **Ajustes → Pills** to set the main and declare/remove choices. The overview
+shows main plus declarations in catalog order and keeps its existing host
+connection, notices and decision controls. #346 color overrides are separate.
 
 ## Run
 

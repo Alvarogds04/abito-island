@@ -28,7 +28,7 @@ test('F025 adds exactly its two assets to the closed shipped list', () => {
 });
 
 test('F031 pure catalog/model files are shipped without weakening the curated gate', () => {
-  for (const file of ['pill-catalog.js', 'pills.js', 'pills-view.js']) assert.ok(L.FRONTEND_FILES.includes(file), file);
+  for (const file of ['pill-catalog.js', 'pill-settings.js', 'pills.js', 'pills-view.js']) assert.ok(L.FRONTEND_FILES.includes(file), file);
 });
 
 function copyCrate() {
