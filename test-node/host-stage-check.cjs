@@ -36,4 +36,40 @@ try {
   process.stdout.write(result.stdout); process.stderr.write(result.stderr);
   assert.equal(result.status, 0);
   console.log('verify_exit=' + result.status);
+
+  // Exercise the public CLI from the shipped tree, not the source checkout. A valid
+  // receipt alone cannot prove that every transitively required module was shipped.
+  const island = path.join(stage, 'missing-island');
+  const status = () => cp.spawnSync(process.execPath, [path.join(stage, 'desktop-daemon/src/cli.cjs'), 'status'], {
+    cwd: stage, encoding: 'utf8', timeout: 10000,
+    env: { PATH: '/usr/bin:/bin', HOME: stage, ABITO_ISLAND_DIR: island },
+  });
+  const baseline = status();
+  assert.equal(baseline.error, undefined);
+  assert.equal(baseline.signal, null);
+  assert.equal(baseline.status, 3, baseline.stderr);
+  assert.equal(baseline.stdout, '');
+  assert.equal(baseline.stderr, 'abito-island-daemon: not running\n');
+  assert.equal(fs.existsSync(island), false, 'status must not create or start an island');
+  assert.deepEqual(L.verifyStage(stage), [], 'status must leave every shipped byte unchanged');
+
+  // Each connector-host module is required even when no host binary is configured.
+  // Removing either file from this disposable stage must fail, never use a checkout
+  // fallback or quietly change the CLI's not-running baseline.
+  for (const name of ['connector-host.cjs', 'connector-host-client.cjs']) {
+    const file = path.join(stage, 'desktop-daemon/src', name);
+    const contents = fs.readFileSync(file);
+    try {
+      fs.unlinkSync(file);
+      const missing = status();
+      assert.equal(missing.error, undefined);
+      assert.equal(missing.signal, null);
+      assert.equal(missing.status, 1);
+      assert.equal(missing.stdout, '');
+      assert.ok(missing.stderr.includes(`Error: Cannot find module './${name}'`), missing.stderr);
+      assert.equal(fs.existsSync(island), false, 'missing module must not create an island');
+    } finally { fs.writeFileSync(file, contents, { mode: 0o644 }); }
+    assert.deepEqual(L.verifyStage(stage), [], 'omission probe must restore the exact staged files');
+  }
+  console.log('staged-cli: status baseline + 2 module-omission regressions passed');
 } finally { fs.rmSync(stage, { recursive: true, force: true }); }
