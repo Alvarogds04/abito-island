@@ -10,7 +10,7 @@ const path = require('node:path');
 const R6_PREFIX = 'e2dc5db3';
 const IDENTIFIER = 'com.abitog.AbitoTauri';
 const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop', 'abito-desktop-preview'];
-const FRONTEND_FILES = ['avatar-colors.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'icons.js', 'index.html',
+const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'icons.js', 'index.html',
   'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
 // Inverted logic: EVERY ABITO_* variable is refused except the one the
