@@ -41,9 +41,13 @@ fn submit(lane: &SharedLane, text: &str, id: &str) -> String {
 }
 
 fn run(lane: &SharedLane, turn: &str, t: &Target, d: Deadlines) -> u32 {
+    run_with_system(lane, turn, t, chatlane::SYSTEM_PROMPT, d)
+}
+
+fn run_with_system(lane: &SharedLane, turn: &str, t: &Target, system: &str, d: Deadlines) -> u32 {
     let publishes = Arc::new(AtomicU32::new(0));
     let p = Arc::clone(&publishes);
-    chatlane::run_turn(lane, turn, t, d, &move || {
+    chatlane::run_turn(lane, turn, t, system, d, &move || {
         p.fetch_add(1, Ordering::SeqCst);
     });
     publishes.load(Ordering::SeqCst)
@@ -86,6 +90,35 @@ fn local_model_answer_is_streamed_and_completed() {
     // preflight was metadata only, and preceded the single POST
     let paths: Vec<&str> = seen.iter().map(|s| s.path.as_str()).collect();
     assert_eq!(paths, ["/health", "/props", "/slots", "/v1/models", "/v1/chat/completions"]);
+}
+
+/// #327: a turn sends the system message its caller FROZE at submit — the base policy plus the
+/// specialist chosen then — and never re-reads a role later. With no specialist the base message is
+/// byte for byte the one Abito always sent.
+#[test]
+fn the_turn_sends_the_system_message_the_caller_froze_at_submit() {
+    const FROZEN: &str = "Sos Abito, el compañero de escritorio.\n\nAhora hablás como «Investigador»: buscá fuentes y citá.";
+    let fake = FakeModel::start(FakeModelConfig::default());
+    let lane = Lane::new("c-327");
+    let turn = submit(&lane, "¿quién sos?", "req-0000000001");
+    run_with_system(&lane, &turn, &target(&fake.origin()), FROZEN, DEFAULT_DEADLINES);
+    let (s, _, err, _) = state(&lane, &turn);
+    assert_eq!(s, TurnState::Completed);
+    assert_eq!(err, None);
+    let seen = fake.seen();
+    let post = seen.iter().find(|s| s.path == "/v1/chat/completions").unwrap();
+    let body: serde_json::Value = serde_json::from_str(&post.body).unwrap();
+    assert_eq!(body["messages"][0]["role"], "system");
+    assert_eq!(body["messages"][0]["content"], FROZEN, "the role frozen at submit is what the local model sees");
+    assert_ne!(body["messages"][0]["content"], chatlane::SYSTEM_PROMPT);
+
+    // the NEXT turn, with no specialist, is the base message again: the principal is unchanged
+    let turn2 = submit(&lane, "¿y ahora?", "req-0000000002");
+    run_with_system(&lane, &turn2, &target(&fake.origin()), chatlane::SYSTEM_PROMPT, DEFAULT_DEADLINES);
+    let seen = fake.seen();
+    let post = seen.iter().filter(|s| s.path == "/v1/chat/completions").next_back().unwrap();
+    let body: serde_json::Value = serde_json::from_str(&post.body).unwrap();
+    assert_eq!(body["messages"][0]["content"], chatlane::SYSTEM_PROMPT);
 }
 
 #[test]

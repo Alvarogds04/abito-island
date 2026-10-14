@@ -47,8 +47,18 @@
       doc.addEventListener('abito:cue', e => { request(e && e.detail); });
     }
 
-    // ---- 2) the human's preference: ONLY an exact {v:1, sound:true} turns sound on ---------------------------------
-    const applyPrefs = payload => { try { engine.applyPrefs(payload); } catch { /* the engine stays as it was */ } };
+    // The host DTO is deliberately unversioned; adapt only this seam, not other consumers.
+    // Explicit versions still fail closed unless v1. Gain uses the engine's separate API.
+    const applyPrefs = payload => {
+      try {
+        const valid = payload && typeof payload === 'object' && !Array.isArray(payload)
+          && (payload.v === undefined || payload.v === 1);
+        const gain = valid && typeof payload.gain === 'number' && Number.isFinite(payload.gain)
+          && payload.gain >= 0 && payload.gain <= 0.2 ? payload.gain : 0.12;
+        engine.setGain(gain);
+        engine.applyPrefs({ v: 1, sound: !!valid && payload.sound === true });
+      } catch { /* no audio capability: silence */ }
+    };
     if (listen) {
       try { listen('prefs:state', e => applyPrefs(e && e.payload)); } catch { /* no event bus: stays silent */ }
     }

@@ -117,6 +117,35 @@
 
   const atBottom = (scrollTop, scrollHeight, clientHeight) => scrollHeight - scrollTop - clientHeight <= 8;
 
+  // ---- F027: the empty-conversation greeting ---------------------------------
+  // The one explicit source of a person's name is the field the page receives
+  // (`display_name`), from the explicit optional local preference in prefs.json
+  // v1. Nothing here guesses a name from the OS, an account, another profile,
+  // a provider or the branding: no explicit field, no greeting (S2).
+  const DISPLAY_NAME_MAX = 80; // mirrors prefs.rs DISPLAY_NAME_MAX
+  const EMPTY_ICONS = Object.freeze(['lock', 'eye-off']);
+  const EMPTY_ARIA = 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.';
+
+  // A name is text the person typed: never markup. A non-string is absent (fail
+  // closed), control characters become spaces, the length is bounded in Unicode
+  // scalars (never splitting a surrogate pair) and blank reads as absent. The
+  // page writes the result with textContent only, never into HTML (S4).
+  function cleanDisplayName(value) {
+    if (typeof value !== 'string') return '';
+    const plain = value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ');
+    return Array.from(plain).slice(0, DISPLAY_NAME_MAX).join('').trim();
+  }
+
+  // What the empty conversation shows: the shipped sentence, byte for byte, when
+  // no explicit name is present (the neutral state stays icon-only), and
+  // «Hola, <nombre>.» in front of it when one is. `greeting` is the visible line
+  // ('' = nothing visible) and `aria` is what the whole row is announced as.
+  function emptyGreeting(view) {
+    const name = cleanDisplayName(view && view.display_name);
+    if (!name) return { greeting: '', aria: EMPTY_ARIA, icons: EMPTY_ICONS };
+    return { greeting: `Hola, ${name}.`, aria: `Hola, ${name}. ${EMPTY_ARIA}`, icons: EMPTY_ICONS };
+  }
+
   function newRequestId(bytes) {
     return 'req-' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   }
@@ -275,5 +304,5 @@
   }
   const activates = e => !!e && !e.isComposing && !e.repeat && (e.key === 'Enter' || e.key === ' ');
 
-  return { reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  return { reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
 });

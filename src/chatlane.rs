@@ -272,11 +272,15 @@ pub fn cancel(lane: &SharedLane, turn_id: &str) -> bool {
 }
 
 /// Run one accepted turn to its end on the CURRENT thread (callers spawn a
-/// thread). `publish` is called after every visible change.
+/// thread). `system` is the effective system message of THIS turn — the base
+/// policy plus the specialist the human chose when there is one — already
+/// frozen by the caller at submit; `publish` is called after every visible
+/// change.
 pub fn run_turn(
     lane: &SharedLane,
     turn_id: &str,
     target: &Target,
+    system: &str,
     deadlines: Deadlines,
     publish: &(dyn Fn() + Send + Sync),
 ) {
@@ -333,7 +337,7 @@ pub fn run_turn(
         let mut l = lane.lock().expect("chat lane lock");
         l.convo.prompt_for(
             turn_id,
-            SYSTEM_PROMPT,
+            system,
             ready.context_limit,
             target.max_output,
         )

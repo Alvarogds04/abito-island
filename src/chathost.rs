@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
-    main_window, now_ms, publish, refresh_work_area, store_requested, AppState, TauriIo,
+    main_window, now_ms, publish, refresh_work_area, specialistshost, store_requested, AppState, TauriIo,
     CHAT_SETTLE_DELAY_MS, COLLAPSE_RESIZE_DELAY_MS, QUITTING,
 };
 
@@ -33,10 +33,11 @@ fn chat_error(e: chat::ChatError) -> BridgeError {
     }
 }
 
-/// The selected local target. U2 replaces the source of this value with
-/// the model picker; the turn freezes a copy at submit.
+/// The selected local target of ONE turn. U2 fills the picker's selection; #327 overrides it with
+/// the active specialist's own model when that role names one, and refuses the send (instead of
+/// substituting another model) when the named one is no longer selectable.
 pub fn current_target(state: &AppState) -> Option<Target> {
-    state.chat_target.lock().expect("chat target lock").clone()
+    specialistshost::effective_target(state).ok().flatten()
 }
 
 /// `chat:state` payload: the conversation projection, the current view, the
@@ -45,6 +46,7 @@ pub fn current_target(state: &AppState) -> Option<Target> {
 pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     let _ = app;
     let mut v = state.chat.lock().expect("chat lane lock").view();
+    v["display_name"] = json!(crate::settingshost::display_name(&state.settings));
     let chat_open = state.core.lock().expect("core lock").chat
         && *state.phase.lock().expect("phase lock") == IslandState::Expanded;
     v["view"] = json!(if chat_open { "chat" } else { "overview" });
@@ -171,7 +173,10 @@ pub fn submit(
     if let Some(dup) = lane.lock().expect("chat lane lock").convo.lookup(client_request_id) {
         return Ok(serde_json::to_value(dup).unwrap_or(Value::Null)); // same turn, no new job
     }
-    let target = current_target(state).ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
+    // #327: one role snapshot supplies both model and system. Later changes affect the next turn.
+    let (target, system) = specialistshost::turn_configuration(state, chatlane::SYSTEM_PROMPT)
+        .map_err(chat_error)?;
+    let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
     let gate = crate::model_gate(state, &target);
     if let Err(e) = gate {
         return Err(chat_error(e));
@@ -190,7 +195,7 @@ pub fn submit(
         std::thread::spawn(move || {
             let publish_app = app.clone();
             let publish = move || publish_chat(&publish_app);
-            chatlane::run_turn(&lane, &turn, &target, deadlines, &publish);
+            chatlane::run_turn(&lane, &turn, &target, &system, deadlines, &publish);
         });
     }
     Ok(serde_json::to_value(accepted).unwrap_or(Value::Null))

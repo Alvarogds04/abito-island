@@ -55,13 +55,28 @@ function rig(extra = {}) {
   const bus = { listen: (n, f) => { (listeners['tauri:' + n] = listeners['tauri:' + n] || []).push(f); return Promise.resolve(() => {}); }, fire: (n, payload) => { for (const f of listeners['tauri:' + n] || []) f({ payload }); } };
   const calls = [];
   // the engine is frozen: a thin wrapper that records every `play` the wiring asks for and delegates the rest
-  const spy = { play: id => { calls.push(id); return engine.play(id); }, applyPrefs: p => engine.applyPrefs(p), ready: () => engine.ready(), quiet: ms => engine.quiet(ms),
+  const spy = { play: id => { calls.push(id); return engine.play(id); }, applyPrefs: p => engine.applyPrefs(p), setGain: n => engine.setGain(n), ready: () => engine.ready(), quiet: ms => engine.quiet(ms),
     resetTransitions: () => engine.resetTransitions(), transition: (k, a, id) => engine.transition(k, a, id), state: () => engine.state() };
   const lines = [];
   const wiring = Wiring.wire({ engine: spy, document: doc, listen: bus.listen, now: time.now, log: l => lines.push(l) });
   const settle = async id => { const p = engine.play(id); time.advance(30); return p; };
   return { engine, time, ctxs, doc, bus, wiring, calls, lines, settle };
 }
+
+test('F055 actual public host DTO enables sound and carries zero gain', async () => {
+  const host = fs.readFileSync(path.join(__dirname, '..', 'src', 'settingshost.rs'), 'utf8');
+  const expression = host.match(/fn view_prefs\(p: &Prefs\) -> Value \{\s*json!\(([^\n]+)\)/)[1];
+  let dto;
+  try {
+    dto = JSON.parse(expression.replace(/p\.sound/g, 'true').replace(/p\.display_name/g, 'null').replace(/p\.avatar_colors/g, '{}').replace(/p\.gain(?:\(\))?/g, '0'));
+  } catch (error) { assert.fail(`Host DTO fixture extraction failed: ${error.message}`); }
+  const r = rig(); r.wiring.applyPrefs(dto);
+  assert.equal(r.engine.isEnabled(), true, 'actual host DTO must enable the engine');
+  assert.equal(r.engine.state().gain, 0);
+  r.wiring.firstSnapshotRendered(); r.time.advance(5000);
+  assert.equal((await r.settle('snd.notice')).reason, 'disabled');
+  assert.equal(r.ctxs.length, 0, 'gain zero never creates audio');
+});
 
 test('wiring: nothing sounds until BOTH applyPrefs({v:1,sound:true}) and ready() happened', async () => {
   const r = rig();
@@ -85,10 +100,10 @@ test('wiring: the `abito:cue` page event reaches engine.play and never throws on
   for (const junk of [undefined, null, 7, {}, '__proto__', 'snd.nope', ['snd.notice']]) assert.doesNotThrow(() => r.doc.dispatchEvent({ type: 'abito:cue', detail: junk }));
 });
 
-test('prefs: only an exact {v:1,sound:true} turns sound ON; anything else is OFF, and turning it off stops new cues', async () => {
+test('prefs: host DTO or explicit v1 requires exact sound:true; invalid versions fail closed and mute stops new cues', async () => {
   const r = rig();
   r.wiring.firstSnapshotRendered(); r.time.advance(5000);
-  for (const bad of [null, undefined, {}, { sound: true }, { v: 2, sound: true }, { v: 1, sound: 'yes' }, { v: 1, sound: 1 }, 'on', [], { v: 1 }]) {
+  for (const bad of [null, undefined, {}, { v: 2, sound: true }, { v: 1, sound: 'yes' }, { v: 1, sound: 1 }, 'on', [], { v: 1 }]) {
     r.bus.fire('prefs:state', bad);
     assert.equal(r.engine.isEnabled(), false, JSON.stringify(bad));
   }

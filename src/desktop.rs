@@ -231,6 +231,41 @@ pub fn click_plan_is_current(token: u64, generation: u64, phase: IslandState) ->
     token == generation && phase == IslandState::Expanded
 }
 
+/// F025: closed URL payload. Tauri re-exports the existing url crate's real
+/// parser; controls/credentials are refused before normalization.
+pub fn validated_web_url(payload: &Value) -> Result<String, crate::bridge::BridgeError> {
+    use crate::bridge::BridgeError;
+    let map = payload.as_object().ok_or_else(|| BridgeError::denied("URL payload must be an object"))?;
+    if map.len() != 1 { return Err(BridgeError::denied("URL payload carries only url")); }
+    let raw = map.get("url").and_then(Value::as_str)
+        .ok_or_else(|| BridgeError::denied("URL must be a string"))?;
+    if raw.is_empty() || raw.len() > 2000 || raw.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(BridgeError::denied("invalid web URL"));
+    }
+    let url = tauri::Url::parse(raw).map_err(|_| BridgeError::denied("invalid web URL"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+        || !url.username().is_empty() || url.password().is_some() {
+        return Err(BridgeError::denied("only credential-free http/https URLs are allowed"));
+    }
+    Ok(url.to_string())
+}
+
+/// Sender -> validation -> existing rate guard -> opener. Invalid calls spend
+/// no rate budget and cannot reach the injected effect (mocked in tests).
+pub fn open_web_url<F>(label: &str, origin: &str, payload: &Value,
+    rate: &mut crate::bridge::RateLimiter, now: u128, opener: F,
+) -> Result<(), crate::bridge::BridgeError>
+where F: FnOnce(&str) -> Result<(), crate::bridge::BridgeError> {
+    crate::bridge::sender_ok(label, origin)?;
+    let url = validated_web_url(payload)?;
+    rate.check(now)?;
+    opener(&url)
+}
+
+#[cfg(test)]
+#[path = "open_url_tests.rs"]
+mod open_url_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,8 +6,9 @@
    window.desktop verbs for system motion. It never sees the agent's token or socket.
    - Plain text only (textContent). No innerHTML anywhere: icons are DOM nodes built from the
      closed own registry (DOMParser), so no data can ever become markup.
-   - A key is typed into a MASKED field, sent once as `auth_reply`, and the field is
-     cleared at once: nothing is kept in the page, nothing is logged or stored.
+   - A key is typed into a MASKED field and sent once through auth_reply (daemon)
+     or abito_account_* (local store). The field clears before IPC; keys are never
+     placed in snapshots, persistent page drafts, logs or browser storage.
    - Only trusted gestures (event.isTrusted) change anything. */
 (() => {
   const V = window.AbitoSettings;
@@ -46,8 +47,30 @@
   let agentsAsk = null;   // { at: engine error counter when agents_list was sent, timer, timedOut }
   let pendingLogin = null; // a login that waits for the account it just asked the engine to create
   let agentState = null;
+  let ownedAccounts = null; // masked host projection only, independent of daemon pushes
+  let accountForm = null;
+  let accountSaving = false;
+  let accountError = '';
+  let accountGeneration = 0;
+  function discardAccountForm() {
+    const secret = accountForm && accountForm.querySelector('#account-secret');
+    if (secret) secret.value = '';
+    accountForm = null; accountError = ''; accountGeneration += 1;
+  }
   let prefs = { sound: false };
+  let gainDraft = null;
+  let gainSaving = false;
+  let gainError = '';
+  let nameDraft = null; // null follows saved prefs; edited text survives state pushes
+  let nameSaving = false;
+  let nameError = '';
   let hotkey = null;
+  // #327 owns the sole role cache; Settings reads only its immutable id/name projection.
+  const AVATAR = window.AbitoAvatarColors;
+  const specialistIdentities = () => window.AbitoSpecialistsPanel?.identityView() || { kind: 'loading', identities: [] };
+  document.addEventListener('abito:specialist-identities', () => render());
+  // F1: feedback belongs to its identity and survives renders/retries until a save succeeds.
+  const colorErrors = Object.create(null);
   let motionOverride = true;
   let capturing = false;
   let pendingOpen = false;
@@ -80,11 +103,78 @@
     return c;
   }
 
+  // #384: the Dot's colour, one row per identity the human can colour. The swatches are a
+  // radiogroup of real buttons (keyboard reachable, each with its own name) and the CURRENT
+  // colour is also written as a word: the meaning never rides on colour alone
+  // (docs/desktop-visual-language.md §1.1 C5).
+  const avatarName = id => (AVATAR && AVATAR.isPrincipal(id) ? 'Abito' : specialistIdentities().identities.find(identity => identity.id === id)?.name || String(id));
+  function colorRow(row) {
+    const line = el('div', 'srow scolors');
+    line.dataset.identity = row.id;
+    line.dataset.color = row.color;
+    line.append(el('span', 'srow-title', row.name));
+    const options = el('span', 'sdot-options');
+    options.setAttribute('role', 'radiogroup');
+    options.setAttribute('aria-label', `Color de ${avatarName(row.id)}`);
+    for (const option of row.options) {
+      const b = el('button', 'sdot');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+      b.setAttribute('aria-label', option.aria);
+      b.dataset.color = option.color;
+      // render() restores focused IDs on both invoke responses and prefs:state events.
+      b.id = `dot-color-${row.id}-${option.color}`;
+      b.tabIndex = option.selected ? 0 : -1;
+      b.append(el('span', 'sdot-swatch'));
+      b.append(el('span', 'sdot-label', option.label));
+      b.addEventListener('keydown', e => {
+        if (e.isTrusted !== true || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+        e.preventDefault();
+        const buttons = [...options.querySelectorAll('[role="radio"]')];
+        const at = buttons.indexOf(b);
+        let next = (at + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length;
+        if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = buttons.length - 1;
+        buttons.forEach((button, i) => { button.tabIndex = i === next ? 0 : -1; });
+        buttons[next].focus();
+        chooseColor(row.id, buttons[next].dataset.color);
+      });
+      b.addEventListener('click', e => { if (e.isTrusted === true) chooseColor(row.id, option.color); });
+      options.append(b);
+    }
+    line.append(options);
+    line.append(chipNode({ tone: 'faint', icon: 'check', word: row.label, aria: row.aria }));
+    if (colorErrors[row.id]) {
+      const error = el('span', 'sdot-error', colorErrors[row.id]);
+      error.id = `dot-color-error-${row.id}`;
+      options.setAttribute('aria-describedby', error.id);
+      error.setAttribute('role', 'status');
+      line.append(error);
+    }
+    return line;
+  }
+  // The engine and the file are the truth: a failed save says so and keeps the previous colour.
+  function chooseColor(identity, color) {
+    call('prefs_action', { action: 'set_avatar_color', identity, color }).then(
+      p => {
+        const saved = AVATAR.resolveColor(identity, p.avatarColors);
+        delete colorErrors[identity];
+        prefs = p; render();
+        say(`Color de ${avatarName(identity)}: ${AVATAR.label(saved)}.`);
+      },
+      () => {
+        colorErrors[identity] = 'No se pudo guardar el color; se mantuvo el anterior.';
+        render();
+        say(colorErrors[identity]);
+      });
+  }
+
   // ---- open / close ---------------------------------------------------------------------------------------
   // gentle-dot: one header button per screen; a screen covers the chat body; opening one replaces the other.
   function showScreen(id) {
     screen = id;
-    if (id !== 'accounts') { method = null; filter = ''; }
+    if (id !== 'accounts') { method = null; filter = ''; discardAccountForm(); }
     const def = V.screenById(id);
     $('settings-title').textContent = def.title;
     $('settings-hint').textContent = def.hint;
@@ -119,6 +209,7 @@
     capturing = false; method = null; filter = ''; pendingLogin = null;
     if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
+    discardAccountForm();
     drafts.reset(); // a half-typed key never outlives the panel
     if (waiting) { clearTimeout(waiting.timer); waiting = null; }
     // the panel lives in the chat view: focus returns to the chat input
@@ -175,7 +266,14 @@
     call('hotkey_action', { action: 'view' }).then(h => { hotkey = h; render(); }, () => {});
     if (window.desktop) window.desktop.snapshot().then(s => { motionOverride = s.motionOverride !== false; render(); }, () => {});
   }
-  function applyAgent(next) { if (next && typeof next === 'object') { agentState = next; settle(next); render(); } }
+  function applyAgent(next) {
+    if (next && typeof next === 'object') {
+      if (Object.hasOwn(next, 'ownedAccounts')) ownedAccounts = next.ownedAccounts === null ? null : { accounts: V.ownedAccounts(next.ownedAccounts) };
+      // Partial local snapshots cannot erase the independent OAuth/connector state.
+      agentState = Object.assign({}, agentState || {}, next);
+      settle(agentState); render();
+    }
+  }
   if (listen) {
     listen('agent:state', e => applyAgent(e && e.payload)).catch(() => {});
     listen('prefs:state', e => { if (e && e.payload) { prefs = e.payload; render(); } }).catch(() => {});
@@ -240,7 +338,20 @@
     if (conn) { chip.dataset.tone = conn.tone; chip.setAttribute('aria-label', conn.aria); putIcon($('settings-conn-icon'), conn.icon); $('settings-conn-word').textContent = conn.word; }
     if (screen === 'accounts') renderAccounts();
     else if (screen === 'connectors') renderConnectors();
-    else renderGeneral();
+    else {
+      renderGeneral();
+      // #327: the specialists live inside Ajustes (no new screen, no new icon): the human creates a
+      // role, chooses it and goes back to the principal from here.
+      const panel = window.AbitoSpecialistsPanel;
+      if (panel) {
+        const host = el('div');
+        host.id = 'specialists-section';
+        body.append(host);
+        panel.renderSection(host);
+      } else {
+        body.append(el('p', 'snote', 'Los especialistas no están disponibles en esta compilación.'));
+      }
+    }
     body.scrollTop = keep;
     if (focused && $(focused) && body.contains($(focused))) {
       $(focused).focus();
@@ -248,9 +359,126 @@
     }
   }
 
+  // #308: Abito-owned configuration, not a daemon login or a readiness claim.
+  function accountTarget(node) {
+    node.style.minHeight = '44px'; node.style.minWidth = '44px';
+    node.style.maxWidth = '100%'; node.style.boxSizing = 'border-box';
+    return node;
+  }
+  function renderOwnedAccounts() {
+    const section = el('section', 'ssec'); section.id = 'owned-accounts';
+    section.append(sectionTitle('Configuración de proveedores'));
+    section.append(el('p', 'snote', 'Guardado local en Abito. Conexión no probada; no cambia el modelo del chat.'));
+    if (ownedAccounts === null) {
+      section.append(el('p', 'snote', 'El almacén de cuentas no está disponible. No se modificó ninguna cuenta.'));
+    } else if (accountForm) {
+      // Keep the same masked DOM field across unrelated daemon/prefs pushes; never copy its value into drafts.
+      section.append(accountForm);
+    } else {
+      for (const account of ownedAccounts.accounts) {
+        const row = el('div', 'srow'); row.style.flexWrap = 'wrap';
+        const title = el('b', 'srow-title', account.config.nombre); title.style.overflowWrap = 'anywhere';
+        row.append(title, el('span', 'snote', account.hasCredential ? 'Clave guardada' : 'Sin clave'));
+        row.append(accountTarget(wordBtn('Editar', () => { accountForm = makeAccountForm(account); render(); }, { disabled: accountSaving, aria: `Editar ${account.config.nombre}` })));
+        section.append(row);
+      }
+      const add = accountTarget(wordBtn('Configurar proveedor', () => { accountForm = makeAccountForm(null); render(); }, { disabled: accountSaving }));
+      add.id = 'account-add'; section.append(add);
+    }
+    if (accountError) { const error = el('p', 'snote', accountError); error.setAttribute('role', 'alert'); section.append(error); }
+    body.append(section);
+  }
+  function makeAccountForm(saved) {
+    accountError = '';
+    const form = el('form', 'sform'); form.id = 'account-form'; form.autocomplete = 'off';
+    // Existing sform is horizontal for short auth replies; configuration needs a single narrow column.
+    form.style.display = 'flex'; form.style.flexDirection = 'column'; form.style.flexWrap = 'nowrap';
+    form.style.alignItems = 'stretch'; form.style.gap = '8px'; form.style.minWidth = '0';
+    const field = (id, title, kind, value) => {
+      const label = el('label', 'snote', title); label.htmlFor = id;
+      const node = accountTarget(el(kind === 'select' ? 'select' : 'input', 'sfield'));
+      // Neutralize the auth form's text-input order/flex rule only inside this editor.
+      node.id = id; node.style.width = '100%'; node.style.order = '0'; node.style.flex = 'none'; node.autocomplete = 'off';
+      if (kind !== 'select') { node.type = kind; node.value = value || ''; node.maxLength = 2048; }
+      form.append(label, node); return node;
+    };
+    const option = (select, value, text) => { const node = el('option', '', text); node.value = value; select.append(node); };
+    const provider = field('account-provider', 'Proveedor', 'select');
+    const presets = [
+      ['anthropic', 'Anthropic', 'https://api.anthropic.com/v1', 'anthropic-messages'],
+      ['google', 'Google', 'https://generativelanguage.googleapis.com/v1beta', 'google-generative-ai'],
+      ['openai', 'OpenAI', 'https://api.openai.com/v1', 'openai-completions'],
+      ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions'],
+      ['ollama', 'Ollama (local)', 'http://127.0.0.1:11434/v1', 'openai-completions'],
+      ['lmstudio', 'LM Studio (local)', 'http://127.0.0.1:1234/v1', 'openai-completions'],
+      ['custom', 'Endpoint personalizado (HTTPS)', '', 'openai-completions'],
+    ];
+    for (const [id, title] of presets) option(provider, id, title);
+    if (saved && !presets.some(p => p[0] === saved.provider)) option(provider, saved.provider, saved.provider);
+    provider.value = saved ? saved.provider : 'openai'; provider.disabled = !!saved;
+    const config = saved ? saved.config : {};
+    const name = field('account-name', 'Nombre de la cuenta', 'text', config.nombre || 'OpenAI'); name.maxLength = 80;
+    const url = field('account-url', 'URL base (HTTPS remota / HTTP de loopback local)', 'text', config.baseUrl || 'https://api.openai.com/v1');
+    const api = field('account-api', 'API', 'select');
+    for (const id of ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai']) option(api, id, id);
+    api.value = config.api || 'openai-completions';
+    const models = field('account-models', 'Modelos (separados por comas)', 'text', (config.models || []).join(', '));
+    const defaultModel = field('account-default', 'Modelo predeterminado de esta cuenta', 'text', config.defaultModel); defaultModel.maxLength = 200;
+    const credential = field('account-credential', saved && saved.hasCredential ? 'Clave guardada' : 'Sin clave guardada', 'select');
+    option(credential, 'keep', 'Conservar'); option(credential, 'set', 'Establecer clave'); option(credential, 'clear', 'Borrar clave');
+    const secret = field('account-secret', 'Clave (oculta; nunca se recupera del almacén)', 'password');
+    secret.maxLength = 4096; secret.spellcheck = false; secret.disabled = true;
+    secret.setAttribute('autocapitalize', 'off'); secret.setAttribute('autocomplete', 'new-password');
+    credential.addEventListener('change', e => { if (e.isTrusted === true) { secret.value = ''; secret.disabled = credential.value !== 'set'; } });
+    provider.addEventListener('change', e => {
+      if (e.isTrusted !== true) return;
+      const preset = presets.find(p => p[0] === provider.value);
+      if (preset) { name.value = preset[1]; url.value = preset[2]; api.value = preset[3]; }
+      secret.value = ''; credential.value = 'keep'; secret.disabled = true;
+    });
+    const controls = el('div', 'srow-actions'); controls.style.flexWrap = 'wrap'; controls.style.gap = '8px';
+    const save = accountTarget(wordBtn('Guardar configuración', () => {}, { primary: true })); save.type = 'submit'; save.id = 'account-save';
+    controls.append(save);
+    if (saved) {
+      const endpoint = accountTarget(wordBtn('Guardar endpoint', () => submit('abito_account_endpoint_set')));
+      endpoint.id = 'account-endpoint'; controls.append(endpoint);
+    }
+    controls.append(accountTarget(wordBtn('Cancelar', () => { discardAccountForm(); render(); })));
+    form.append(controls);
+    form.addEventListener('submit', e => {
+      e.preventDefault(); if (e.isTrusted === true) submit(saved ? 'abito_account_save' : 'abito_account_create');
+    });
+    function submit(action) {
+      if (accountSaving) return;
+      const value = { nombre: name.value, baseUrl: url.value, api: api.value, compat: config.compat || {},
+        models: models.value.split(',').map(x => x.trim()).filter(Boolean), defaultModel: defaultModel.value };
+      if (credential.value === 'set') value.apiKey = secret.value;
+      else if (credential.value === 'clear') value.apiKey = null;
+      secret.value = ''; // clear BEFORE IPC, including on failure; never keep a retry credential
+      const payload = { action, accountId: saved ? saved.accountId : `account-${Date.now().toString(36)}`, provider: provider.value, config: value };
+      accountSaving = true; accountError = '';
+      const generation = accountGeneration;
+      const buttons = [...controls.querySelectorAll('button')]; buttons.forEach(b => { b.disabled = true; });
+      agent(payload).then(next => {
+        accountSaving = false;
+        if (generation === accountGeneration) discardAccountForm();
+        applyAgent(next); say('Configuración guardada. Conexión no probada.');
+      }, () => {
+        accountSaving = false;
+        if (generation !== accountGeneration) return;
+        buttons.forEach(b => { b.disabled = false; });
+        accountError = 'No se pudo guardar. Revisá la URL, los modelos y los permisos. Se mantuvo la configuración anterior; volvé a ingresar la clave si corresponde.';
+        render(); say(accountError);
+      });
+      // Payload is only retained by the one IPC invocation, never in the page's persistent draft state.
+    }
+    return form;
+  }
+
   // ---- Cuentas (gentle-dot AccountsPanel): Conectadas → dos tarjetas de método → lista de proveedores con buscador ----
   function sectionTitle(text) { return el('h3', 'ssection', text); }
   function renderAccounts() {
+    renderOwnedAccounts();
     const st = agentState || { connection: 'connecting', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
     const auth = st.auth || {};
     const prompt = V.promptView(auth.prompt);
@@ -417,7 +645,7 @@
   }
   // ---- Ajustes (gentle-dot SettingsPanel): «Atajo de teclado» first, then the rest, each under its own heading -----------
   function renderGeneral() {
-    const g = V.generalView({ sound: prefs.sound, motionOverride, hotkey });
+    const g = V.generalView({ sound: prefs.sound, gain: prefs.gain, motionOverride, hotkey });
     const group = (title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); body.append(sec); return sec; };
     if (g.hotkey) {
       const sec = group('Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
@@ -434,12 +662,95 @@
       sec.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
       if (h.note) sec.append(el('p', 'snote', h.note));
     }
+    const personal = group('Saludo', 'Sólo para saludarte en el chat vacío. Dejalo en blanco para un saludo sin nombre.');
+    const nameForm = el('form', 'sname-form'); nameForm.noValidate = true;
+    const label = el('label', 'srow-title', 'Tu nombre (opcional)'); label.htmlFor = 'settings-display-name';
+    const nameInput = el('input', 'sfield'); nameInput.type = 'text'; nameInput.id = 'settings-display-name';
+    nameInput.autocomplete = 'off'; nameInput.spellcheck = false;
+    nameInput.value = nameDraft === null ? (prefs.displayName || '') : nameDraft;
+    nameInput.setAttribute('aria-describedby', 'settings-name-help settings-name-error');
+    const hint = el('p', 'snote', 'Hasta 80 caracteres. Borrá el nombre y guardá para volver al saludo anónimo.'); hint.id = 'settings-name-help';
+    const error = el('p', 'snote'); error.id = 'settings-name-error'; error.setAttribute('role', 'status');
+    const save = el('button', 'sbtn primary', nameSaving ? 'Guardando…' : 'Guardar nombre'); save.type = 'submit';
+    const paint = () => {
+      const issue = V.displayNameProblem(nameInput.value);
+      error.textContent = nameError || issue;
+      nameInput.setAttribute('aria-invalid', issue ? 'true' : 'false');
+      save.disabled = nameSaving || !!issue;
+    };
+    nameInput.addEventListener('input', () => { nameDraft = nameInput.value; nameError = ''; paint(); });
+    nameForm.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!e.isTrusted || nameSaving || V.displayNameProblem(nameInput.value)) return;
+      const typed = nameInput.value;
+      nameDraft = typed; nameError = ''; nameSaving = true; paint(); save.textContent = 'Guardando…';
+      call('prefs_action', { action: 'set_display_name', display_name: typed }).then(p => {
+        nameSaving = false; prefs = p;
+        if (nameDraft === typed) nameDraft = null;
+        render(); say(p.displayName ? 'Nombre guardado.' : 'Saludo sin nombre guardado.');
+        const field = $('settings-display-name'); if (field) field.focus();
+      }, () => {
+        nameSaving = false; nameError = 'No se pudo guardar. Tu nombre sigue sin cambios; probá de nuevo.';
+        render();
+        const field = $('settings-display-name'); if (field) field.focus();
+      });
+    });
+    nameForm.append(label, nameInput, hint, error, save); personal.append(nameForm); paint();
     const sound = group('Sonido', 'Avisos sonoros de la isla. Empieza apagado.');
     sound.append(toggleRow('sw-sound', 'Sonido', g.sound.on, () => call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); }, () => {})));
+    const gainForm = el('form', 'sname-form'); gainForm.noValidate = true;
+    const gainLabel = el('label', 'srow-title', 'Volumen'); gainLabel.htmlFor = 'settings-sound-gain';
+    const gainInput = el('input', 'sfield'); gainInput.type = 'number'; gainInput.id = 'settings-sound-gain';
+    gainInput.min = '0'; gainInput.max = '0.2'; gainInput.step = 'any';
+    gainInput.value = gainDraft === null ? String(g.sound.gain) : gainDraft;
+    gainInput.setAttribute('aria-describedby', 'settings-gain-help settings-gain-error');
+    const gainHint = el('p', 'snote', 'De 0 a 0,2. El valor inicial es 0,12. En 0 no suena.'); gainHint.id = 'settings-gain-help';
+    const gainIssue = el('p', 'snote'); gainIssue.id = 'settings-gain-error'; gainIssue.setAttribute('role', 'status');
+    const gainSave = el('button', 'sbtn primary', gainSaving ? 'Guardando…' : 'Guardar volumen'); gainSave.type = 'submit';
+    const paintGain = () => {
+      const problem = V.soundGainProblem(gainInput.value);
+      gainIssue.textContent = gainError || problem;
+      gainInput.setAttribute('aria-invalid', problem ? 'true' : 'false');
+      gainSave.disabled = gainSaving || !!problem;
+    };
+    gainInput.addEventListener('input', e => {
+      if (!e.isTrusted) return;
+      gainDraft = gainInput.value; gainError = ''; paintGain();
+    });
+    gainForm.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!e.isTrusted || gainSaving || V.soundGainProblem(gainInput.value)) return;
+      const typed = gainInput.value;
+      gainDraft = typed; gainError = ''; gainSaving = true; paintGain(); gainSave.textContent = 'Guardando…';
+      call('prefs_action', { action: 'set_sound_gain', gain: Number(typed) }).then(p => {
+        gainSaving = false; prefs = p;
+        if (gainDraft === typed) gainDraft = null;
+        render(); say('Volumen guardado.');
+        const field = $('settings-sound-gain'); if (field) field.focus();
+      }, () => {
+        gainSaving = false; gainError = 'No se pudo guardar. El volumen sigue sin cambios; probá de nuevo.';
+        render();
+        const field = $('settings-sound-gain'); if (field) field.focus();
+      });
+    });
+    gainForm.append(gainLabel, gainInput, gainHint, gainIssue, gainSave); sound.append(gainForm); paintGain();
     const motion = group('Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
     motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
+    // #384: the colour of the Dot. Green is the default and this choice is the ONLY input to it:
+    // nothing on screen (a pose, an agent, a notice) repaints it. Sub-Abito rows appear when real
+    // identities exist — the list above is the single place they will come from.
+    const identities = specialistIdentities();
+    const rows = V.colorRows(prefs, AVATAR ? [{ id: AVATAR.PRINCIPAL_ID, name: 'Abito' }, ...identities.identities] : [], AVATAR);
+    if (rows.length) {
+      const color = group('Color', 'Abito mantiene su color en la isla. El especialista muestra el suyo en su indicador; los colores pueden repetirse.');
+      for (const row of rows) color.append(colorRow(row));
+      if (identities.kind !== 'ready') {
+        const notice = el('p', 'snote', identities.kind === 'loading' ? 'Leyendo los colores de tus especialistas…' : 'Colores de especialistas no disponibles: no se pudieron cargar sus identidades.');
+        notice.id = 'specialist-colors-status'; notice.setAttribute('role', 'status'); color.append(notice);
+      }
+    }
   }
 })();

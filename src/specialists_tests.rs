@@ -1,0 +1,410 @@
+//! #327 — the pure contracts of the specialists store. Written before the implementation
+//! (RED → GREEN): identity, bounds, fail-closed parsing, the closed command set, «invalid input
+//! never mutates», the effective system prompt and the private persistence.
+use super::*;
+use serde_json::json;
+use std::path::PathBuf;
+
+fn spec(id: &str) -> Specialist {
+    Specialist {
+        id: id.to_string(),
+        name: "Investigador".to_string(),
+        instructions: "Buscá fuentes y citá.".to_string(),
+        model: Some("local-abito-gpt".to_string()),
+    }
+}
+
+fn store() -> Store {
+    let mut s = Store::default();
+    s.items.push(spec("esp-0011223344556677"));
+    s.items.push(Specialist {
+        id: "esp-8899aabbccddeeff".to_string(),
+        name: "Editor".to_string(),
+        instructions: "Corregí sin cambiar el sentido.".to_string(),
+        model: None,
+    });
+    s
+}
+
+fn tmpdir(tag: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("abito-specialists-{}-{tag}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // a config dir is PRIVATE: the store refuses a group/world-writable one, so the fixture is one
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    dir
+}
+
+// ---- identity ---------------------------------------------------------------------------------
+
+#[test]
+fn an_id_is_opaque_lowercase_ascii_and_never_a_reserved_identity() {
+    assert!(valid_id("esp-0011223344556677"));
+    assert!(valid_id("a"));
+    assert!(valid_id(&"a".repeat(ID_MAX_LEN)));
+    assert!(!valid_id(&"a".repeat(ID_MAX_LEN + 1)), "the avatar contract caps the id at 32 characters");
+    for bad in ["", "A", "Esp-x", "esp x", "-esp", ".esp", "_esp", "esp\u{e1}", "esp/1", "esp:1"] {
+        assert!(!valid_id(bad), "{bad:?} must not be a valid id");
+    }
+    // the avatar contract allows `.`, `_` and `-` anywhere after the first character
+    assert!(valid_id("esp-0011223344556677.x"));
+    // the principal and the engine CLIs: a specialist can never take those identities
+    for bad in ["abito", "pi", "claude-code", "codex", "opencode", "__proto__", "prototype", "constructor"] {
+        assert!(!valid_id(bad), "{bad:?} is reserved");
+    }
+}
+
+#[test]
+fn name_and_instructions_are_bounded_and_refuse_dangerous_controls() {
+    assert!(valid_name("Investigador"));
+    assert!(valid_name(&"x".repeat(MAX_NAME_CHARS)));
+    assert!(!valid_name(&"x".repeat(MAX_NAME_CHARS + 1)));
+    assert!(valid_name(&format!("  {}  ", "x".repeat(MAX_NAME_CHARS))), "the limit is on the trimmed name");
+    for bad in ["", "   ", "x\u{0}", "x\u{7}", "x\u{1b}", "x\u{7f}", "x\u{9f}", "x\n", "x\t", "x\r"] {
+        assert!(!valid_name(bad), "{bad:?} must not be a valid name");
+    }
+    assert!(valid_instructions("Primero leé.\nDespués resumí.\n\tCon sangría."), "normal line breaks and tabs are fine");
+    assert!(valid_instructions(&"x".repeat(MAX_INSTRUCTIONS_CHARS)));
+    assert!(!valid_instructions(&"x".repeat(MAX_INSTRUCTIONS_CHARS + 1)));
+    for bad in ["", "  ", "x\u{0}", "x\u{7}", "x\u{1b}", "x\u{b}", "x\u{c}", "x\u{d}", "x\u{7f}", "x\u{9f}"] {
+        assert!(!valid_instructions(bad), "{bad:?} must not be valid instructions");
+    }
+}
+
+// ---- store ------------------------------------------------------------------------------------
+
+#[test]
+fn the_store_fails_closed_and_round_trips() {
+    assert_eq!(Store::from_text(None), Store::default(), "an absent file is an empty store, not an error");
+    for bad in ["", "not json", "{}", "[]", "null", r#"{"v":2,"specialists":[]}"#, r#"{"v":1}"#, r#"{"v":1,"specialists":{}}"#, r#"{"v":1,"active":null,"specialists":"x"}"#] {
+        assert_eq!(Store::from_text(Some(bad)), Store::default(), "{bad:?} must read as an empty store");
+    }
+    let s = store();
+    assert_eq!(Store::from_text(Some(&s.to_text())), s, "a full round trip keeps every field");
+    assert!(!s.to_text().contains('\n'), "one line, no surprises");
+    assert_eq!(store().find("esp-8899aabbccddeeff").unwrap().name, "Editor");
+    assert!(store().find("esp-ffffffffffffffff").is_none());
+}
+
+#[test]
+fn bad_records_and_unknown_active_ids_are_dropped_without_taking_the_store_down() {
+    let text = json!({"v":1,"active":"esp-ffffffffffffffff","specialists":[
+        {"id":"abito","name":"Principal falso","instructions":"x","model":null},
+        {"id":"ESP-MAYUS","name":"Mayúsculas","instructions":"x","model":null},
+        {"id":"esp-0011223344556677","name":"  ","instructions":"x","model":null},
+        {"id":"esp-8899aabbccddeeff","name":"Editor","instructions":"x","model":"NUBE"},
+        {"id":"esp-ffeeddccbbaa9988","name":"Válido","instructions":"ok","model":null},
+        {"id":"esp-ffeeddccbbaa9988","name":"Duplicado","instructions":"ok","model":null}
+    ]}).to_string();
+    let s = Store::from_text(Some(&text));
+    assert_eq!(s.items.len(), 1, "one valid, deduplicated record survives");
+    assert_eq!(s.items[0].name, "Válido");
+    assert_eq!(s.active, None, "an active id with no surviving record is no role");
+}
+
+#[test]
+fn the_store_is_capped_and_a_valid_active_role_is_kept() {
+    let items: Vec<Specialist> = (0..MAX_SPECIALISTS + 5)
+        .map(|n| Specialist { id: format!("esp-{n:016x}"), name: format!("Rol {n}"), instructions: "ok".into(), model: None })
+        .collect();
+    let text = json!({"v":1,"active":"esp-0000000000000001","specialists": items.iter().map(|s| json!({
+        "id": s.id, "name": s.name, "instructions": s.instructions, "model": s.model })).collect::<Vec<_>>() }).to_string();
+    let s = Store::from_text(Some(&text));
+    assert_eq!(s.items.len(), MAX_SPECIALISTS);
+    assert_eq!(s.active.as_deref(), Some("esp-0000000000000001"));
+}
+
+#[test]
+fn the_command_set_is_closed_and_exact() {
+    assert_eq!(parse_command(&json!({"action":"view"})), Ok(Command::View));
+    let create = json!({"action":"create","id":"esp-0011223344556677","name":"Investigador","instructions":"Buscá","model":"local-abito-gpt"});
+    assert_eq!(parse_command(&create), Ok(Command::Create {
+        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(), model: Some("local-abito-gpt".into()) }));
+    let null_model = json!({"action":"create","id":"esp-0011223344556677","name":"Investigador","instructions":"Buscá","model":null});
+    assert_eq!(parse_command(&null_model), Ok(Command::Create {
+        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(), model: None }));
+    assert_eq!(parse_command(&json!({"action":"select","id":null})), Ok(Command::Select { id: None }));
+    assert_eq!(parse_command(&json!({"action":"select","id":"esp-0011223344556677"})), Ok(Command::Select { id: Some("esp-0011223344556677".into()) }));
+    assert_eq!(parse_command(&json!({"action":"delete","id":"esp-0011223344556677"})), Ok(Command::Delete { id: "esp-0011223344556677".into() }));
+    for bad in [
+        json!(null), json!([]), json!("view"), json!({}), json!({"action":1}), json!({"action":"view","x":1}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i"}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"extra":1}),
+        json!({"action":"create","id":1,"name":"n","instructions":"i","model":null}),
+        json!({"action":"create","id":"esp-0011223344556677","name":1,"instructions":"i","model":null}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":7}),
+        json!({"action":"update","id":"esp-0011223344556677","name":"n","instructions":"i"}),
+        json!({"action":"delete"}),
+        json!({"action":"delete","id":1}),
+        json!({"action":"select"}),
+        json!({"action":"select","id":1}),
+        json!({"action":"select","id":"esp-0011223344556677","extra":1}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad} must be refused");
+    }
+}
+
+// ---- mutations: fail closed, never partially applied ------------------------------------------
+
+#[test]
+fn create_needs_a_fresh_valid_id_and_never_activates_by_itself() {
+    let before = store();
+    let after = create(&before, spec("esp-ffeeddccbbaa9988")).unwrap();
+    assert_eq!(after.items.len(), 3);
+    assert_eq!(after.active, None, "creating is not choosing");
+    assert_eq!(after.find("esp-ffeeddccbbaa9988").unwrap().name, "Investigador");
+    assert_eq!(before.items.len(), 2, "the previous store is untouched");
+    // every refusal leaves the store EXACTLY as it was
+    for bad in [spec("esp-0011223344556677"), spec("abito"), spec("ESP-1"), spec("")] {
+        assert_eq!(create(&before, bad).unwrap_err(), CommandError);
+        assert_eq!(before, store());
+    }
+    let mut nameless = spec("esp-ffeeddccbbaa9988");
+    nameless.name = "  ".into();
+    assert_eq!(create(&before, nameless), Err(CommandError));
+    let mut wordy = spec("esp-ffeeddccbbaa9988");
+    wordy.instructions = "x".repeat(MAX_INSTRUCTIONS_CHARS + 1);
+    assert_eq!(create(&before, wordy), Err(CommandError));
+    let mut invented = spec("esp-ffeeddccbbaa9988");
+    invented.model = Some("NUBE-gpt".into());
+    assert_eq!(create(&before, invented), Err(CommandError), "an unverified model id is refused");
+    assert_eq!(before, store());
+}
+
+#[test]
+fn create_refuses_a_full_store() {
+    let mut s = Store::default();
+    for n in 0..MAX_SPECIALISTS {
+        s.items.push(Specialist { id: format!("esp-{n:016x}"), name: format!("Rol {n}"), instructions: "ok".into(), model: None });
+    }
+    assert_eq!(create(&s, spec("esp-ffeeddccbbaa9988")), Err(CommandError));
+    assert_eq!(s.items.len(), MAX_SPECIALISTS);
+}
+
+#[test]
+fn update_keeps_the_id_and_the_active_role() {
+    let mut before = store();
+    before.active = Some("esp-0011223344556677".to_string());
+    let after = update(&before, "esp-0011223344556677", "Investigador serio", "Buscá y citá.\nSin adornos.", Some("local-abito-gpt".to_string())).unwrap();
+    assert_eq!(after.find("esp-0011223344556677").unwrap().id, "esp-0011223344556677", "renaming never moves the id");
+    assert_eq!(after.find("esp-0011223344556677").unwrap().name, "Investigador serio");
+    assert_eq!(after.active, before.active);
+    assert_eq!(after.items.len(), 2);
+    for (id, name, instructions, model) in [
+        ("esp-ffffffffffffffff", "n", "i", None),
+        ("esp-0011223344556677", "  ", "i", None),
+        ("esp-0011223344556677", "n", "", None),
+        ("esp-0011223344556677", "n", "i", Some("NUBE".to_string())),
+    ] {
+        assert_eq!(update(&before, id, name, instructions, model), Err(CommandError), "{id}/{name}");
+        assert_eq!(before, store_with_active(), "a refused update changes nothing");
+    }
+}
+
+fn store_with_active() -> Store {
+    let mut s = store();
+    s.active = Some("esp-0011223344556677".to_string());
+    s
+}
+
+#[test]
+fn delete_and_select_move_the_active_role_coherently() {
+    let before = store_with_active();
+    let after = remove(&before, "esp-0011223344556677").unwrap();
+    assert_eq!(after.items.len(), 1);
+    assert_eq!(after.active, None, "deleting the role in use returns to the principal");
+    assert_eq!(remove(&before, "esp-ffffffffffffffff"), Err(CommandError));
+    assert_eq!(before, store_with_active());
+    let chosen = select(&before, Some("esp-8899aabbccddeeff")).unwrap();
+    assert_eq!(chosen.active.as_deref(), Some("esp-8899aabbccddeeff"));
+    assert_eq!(select(&before, Some("esp-ffffffffffffffff")), Err(CommandError), "an unknown role is not a role");
+    assert_eq!(before, store_with_active());
+    assert_eq!(select(&before, None).unwrap().active, None, "going back to the principal is explicit");
+    assert_eq!(select(&before, Some("abito")), Err(CommandError));
+}
+
+// ---- the role's effect on a turn ---------------------------------------------------------------
+
+#[test]
+fn the_principal_prompt_is_unchanged_and_a_role_is_added_around_it() {
+    const BASE: &str = "Sos Abito, el compañero de escritorio. No podés aprobar ni ejecutar nada.";
+    assert_eq!(system_prompt(BASE, None), BASE, "without a specialist the principal's prompt is byte for byte the same");
+    let role = spec("esp-0011223344556677");
+    let with_role = system_prompt(BASE, Some(&role));
+    assert!(with_role.starts_with(BASE), "the base policy comes first and is never replaced");
+    assert!(with_role.contains("Investigador"), "the visible name is in the prompt");
+    assert!(with_role.contains("Buscá fuentes y citá."), "the instructions are in the prompt");
+    assert!(with_role.contains("aprobar"), "the base guard rails are restated, not dropped");
+    assert!(with_role.ends_with('\n') || with_role.len() > BASE.len());
+    assert!(with_role.len() < 4096, "the effective prompt stays bounded");
+}
+
+// ---- persistence ------------------------------------------------------------------------------
+
+#[test]
+fn full_unicode_capacity_survives_restart_with_every_field_and_active_role() {
+    let dir = tmpdir("unicode-capacity");
+    let mut expected = Store::default();
+    for n in 0..MAX_SPECIALISTS {
+        let payload = json!({"action":"create", "id":format!("e{n:031x}"),
+            "name":"🦀".repeat(MAX_NAME_CHARS),
+            "instructions":"🦀".repeat(MAX_INSTRUCTIONS_CHARS), "model":"m".repeat(64)});
+        let Command::Create { id, name, instructions, model } = parse_command(&payload).unwrap() else { panic!() };
+        expected = create(&expected, Specialist { id, name, instructions, model }).unwrap();
+    }
+    expected = select(&expected, Some(&expected.items[23].id)).unwrap();
+    assert_eq!(expected.to_text().len(), MAX_FILE_BYTES, "maximum UTF-8 fields and IDs saturate the derived bound");
+    write_file(&dir, &expected).unwrap();
+    let restored = read_file(&dir).unwrap();
+    eprintln!("accepted={} saved_bytes={} restored={}", expected.items.len(), std::fs::metadata(dir.join(FILE)).unwrap().len(), restored.items.len());
+    assert_eq!(restored, expected, "all IDs, text, models and active must survive restart");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+
+#[test]
+fn json_escaped_fields_roundtrip_and_one_byte_above_the_file_bound_is_refused() {
+    let dir = tmpdir("escaped-boundary");
+    let mut expected = Store::default();
+    for n in 0..MAX_SPECIALISTS {
+        expected = create(&expected, Specialist {
+            id: format!("e{n:031x}"), name: "\"\\".repeat(20),
+            instructions: format!("{}\"", "\"\\\n\t".repeat(500)).chars().skip(1).collect(),
+            model: Some("m".repeat(64)),
+        }).unwrap();
+    }
+    expected = select(&expected, Some(&expected.items[0].id)).unwrap();
+    write_file(&dir, &expected).unwrap();
+    assert_eq!(read_file(&dir).unwrap(), expected);
+    let path = dir.join(FILE);
+    let mut bytes = expected.to_text().into_bytes();
+    bytes.resize(MAX_FILE_BYTES, b' ');
+    std::fs::write(&path, &bytes).unwrap();
+    assert_eq!(read_file(&dir).unwrap(), expected, "exact file bound accepts valid JSON");
+    bytes.push(b' ');
+    std::fs::write(&path, &bytes).unwrap();
+    assert_eq!(read_file(&dir), Err(LoadError), "one byte beyond cap is refused even for valid JSON");
+    assert!(write_file(&dir, &Store::default()).is_err(), "a failed load cannot authorize overwrite");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn invalid_existing_data_is_not_silently_sanitized_or_overwritten() {
+    let dir = tmpdir("invalid-load");
+    let path = dir.join(FILE);
+    write_file(&dir, &store()).unwrap();
+    let invalid = [
+        b"not json".to_vec(), vec![0xff],
+        br#"{"v":2,"active":null,"specialists":[]}"#.to_vec(),
+        br#"{"v":1,"active":null,"specialists":[{}]}"#.to_vec(),
+        br#"{"v":1,"active":"unknown","specialists":[]}"#.to_vec(),
+    ];
+    for bytes in invalid {
+        std::fs::write(&path, &bytes).unwrap();
+        assert_eq!(read_file(&dir), Err(LoadError));
+        assert!(write_file(&dir, &Store::default()).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn an_oversized_write_preserves_disk_memory_and_persistence_failure() {
+    use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
+    let dir = tmpdir("oversized-write");
+    let before = store_with_active();
+    write_file(&dir, &before).unwrap();
+    let bytes = std::fs::read(dir.join(FILE)).unwrap();
+    let current = Mutex::new(before.clone());
+    let persisted = AtomicBool::new(true);
+    let mut oversized = before.clone();
+    oversized.items[0].instructions = "x".repeat(1024 * 1024);
+    assert!(commit(&current, &persisted, Some(&dir), oversized).is_err());
+    assert_eq!(std::fs::read(dir.join(FILE)).unwrap(), bytes);
+    assert_eq!(*current.lock().unwrap(), before);
+    assert!(!persisted.load(Ordering::SeqCst));
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn the_saved_file_is_private_and_a_restart_reads_what_was_written() {
+    let dir = tmpdir("store");
+    let mut s = store();
+    s.active = Some("esp-8899aabbccddeeff".to_string());
+    write_file(&dir, &s).unwrap();
+    let path = dir.join(FILE);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the store is private to the human");
+    }
+    assert_eq!(read_file(&dir).unwrap(), s, "a restart sees the same roles and the same active role");
+    // a corrupt or hostile file fails closed: no roles, no crash
+    std::fs::write(&path, b"{not json").unwrap();
+    assert_eq!(read_file(&dir), Err(LoadError));
+    std::fs::write(&path, b"{}").unwrap();
+    assert_eq!(read_file(&dir), Err(LoadError));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(read_file(&dir), Err(LoadError), "a world-readable store is not trusted");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_absent_file_is_not_an_error_and_a_symlink_is_refused() {
+    let dir = tmpdir("absent");
+    assert_eq!(read_file(&dir), Ok(Store::default()));
+    #[cfg(unix)]
+    {
+        let target = dir.join("elsewhere.json");
+        std::fs::write(&target, store().to_text()).unwrap();
+        std::os::unix::fs::symlink(&target, dir.join(FILE)).unwrap();
+        assert_eq!(read_file(&dir), Err(LoadError), "a symlinked store is never followed");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_write_keeps_the_previous_role_and_never_claims_a_saved_one() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+    let before = store_with_active();
+    let current = Mutex::new(before.clone());
+    let persisted = AtomicBool::new(true);
+    // a group/world-writable directory is refused: the store must stay exactly as it was
+    let bad = tmpdir("writefail");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o777)).unwrap();
+    }
+    assert!(commit(&current, &persisted, Some(&bad), store()).is_err());
+    assert_eq!(*current.lock().unwrap(), before, "a refused write changes nothing in memory");
+    assert!(!persisted.load(Ordering::SeqCst), "and it is not advertised as saved");
+    let _ = std::fs::remove_dir_all(&bad);
+
+    // a private directory: the file is written first and the memory follows
+    let good = tmpdir("writeok");
+    let next = store();
+    commit(&current, &persisted, Some(&good), next.clone()).unwrap();
+    assert_eq!(*current.lock().unwrap(), next);
+    assert!(persisted.load(Ordering::SeqCst));
+    assert_eq!(read_file(&good).unwrap(), next, "what the panel shows is what a restart reads");
+    let _ = std::fs::remove_dir_all(&good);
+
+    // nowhere to persist (the probe): the change lives in memory and says it was not saved
+    commit(&current, &persisted, None, store_with_active()).unwrap();
+    assert_eq!(*current.lock().unwrap(), store_with_active());
+    assert!(!persisted.load(Ordering::SeqCst));
+}

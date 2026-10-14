@@ -31,6 +31,8 @@ mod hotkeyhost;
 #[path = "hotkeyhost_windows.rs"]
 mod hotkeyhost;
 mod settingshost;
+mod specialists;
+mod specialistshost;
 mod modelshost;
 #[cfg(unix)]
 mod nativeaudit;
@@ -296,6 +298,9 @@ struct AppState {
     hotkey: hotkeyhost::HotkeyHost,
     /// #306: the settings panel's host state (agent connection + prefs).
     settings: settingshost::SettingsHost,
+    /// #327: the manual specialists (roles the human creates and chooses). `active: None` = the
+    /// principal; the store persists in `specialists.json` (0600) and never holds a colour.
+    specialists: specialistshost::SpecialistsHost,
     /// U1: per-turn deadlines (the probe shortens them for its fake).
     chat_deadlines: Mutex<abito_island::localmodel::Deadlines>,
     /// U1 probe only: evidence lines the webview reports for the chat step.
@@ -829,6 +834,35 @@ fn drag_release(app: AppHandle, state: State<AppState>, x: f64, y: f64, cancelle
             ReleaseOutcome::Cancelled => "cancelled".to_string(),
         }
     })
+}
+
+/// F025: only a trusted local sender may ask the host to open a parsed web
+/// URL. xdg-open receives exactly one URL argument, never a shell command.
+#[tauri::command]
+async fn open_chat_url(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<(), BridgeError> {
+    let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    let mut child = None;
+    {
+        let mut rate = state.rate.lock().expect("rate lock");
+        desktop::open_web_url(webview.label(), &origin, &payload, &mut rate, now_ms(), |url| {
+            child = Some(std::process::Command::new("xdg-open")
+                .arg(url)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn().map_err(|_| BridgeError::denied("external opener unavailable"))?);
+            Ok(())
+        })?;
+    } // Release shared rate guard before waiting, and reap only our own child.
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = child.expect("validated opener spawned").wait()
+            .map_err(|_| BridgeError::denied("external opener failed"))?;
+        if status.success() { Ok(()) } else { Err(BridgeError::denied("external opener failed")) }
+    }).await.map_err(|_| BridgeError::denied("external opener aborted"))?
 }
 
 /// The single IPC entry point behind `window.desktop.*` — Electron's
@@ -1449,6 +1483,7 @@ fn main() {
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
         hotkey: hotkeyhost::HotkeyHost::default(),
         settings: settingshost::SettingsHost::default(),
+        specialists: specialistshost::SpecialistsHost::default(),
         chat_deadlines: Mutex::new(chathost::default_deadlines()),
         chat_probe: Mutex::new(Vec::new()),
         models_registry: Mutex::new(abito_island::models::REGISTRY.to_vec()),
@@ -1479,12 +1514,14 @@ fn main() {
             drag_move,
             drag_release,
             desktop_action,
+            open_chat_url,
             chathost::chat_action,
             modelshost::models_action,
             questionhost::question_action,
             hotkeyhost::hotkey_action,
             settingshost::agent_action,
             settingshost::prefs_action,
+            specialistshost::specialists_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence
@@ -1561,6 +1598,7 @@ fn main() {
             spawn_publish_ticker(handle.clone());
             hotkeyhost::start(&handle); // #305: global show/hide shortcut (config + X11 grab)
             settingshost::start(&handle); // #306: settings prefs
+            specialistshost::start(&handle); // #327: the manual specialists (empty = the principal)
             // M2: local notice transport + SIGINT/SIGTERM socket cleanup
             // (main.cjs creates the transport after the window loads; here it
             // starts before the probe so the probe can use its endpoint).

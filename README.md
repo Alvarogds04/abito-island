@@ -453,6 +453,64 @@ click; overview↔chat uses the contract spring/340 ms curve and snaps under
 to the transcript or composer. R6 is only scaled/positioned (sha256
 unchanged).
 
+**The empty-chat greeting (F027 / TaskView342).** With no message yet the column shows
+what §2.3 shipped: the lock `local` + eye-off pair, centred, and the whole sentence in
+`aria` (*«Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla
+ni ejecuta nada.»*). An **explicit** display name in the `chat:state` payload
+(`display_name`, a string) adds one visible line under the pair — **«Hola, <nombre>.»** —
+and prefixes the same sentence in `aria`. The name is never guessed: no OS user, no
+account, no provider, no branding, no profile lookup. It is text the person typed, so it
+is cleaned and bounded in `chat-view.js` (`emptyGreeting` / `cleanDisplayName`): a
+non-string or a blank/control-characters-only value reads as **no name**, control
+characters become spaces, and the value is cut to **80 Unicode scalars** (never splitting
+a surrogate pair) — the same bound as the local preference validator. Absent or blank keeps
+the shipped state **byte for byte** (icons only, sentence in `aria`), and the row is
+redrawn when a name arrives on a later push instead of staying stale. The greeting is
+written with `textContent`; the greeting renderer has no HTML write. Existing
+closed-registry icon writes elsewhere are unchanged.
+
+**Explicit local preference (v1, no onboarding/profile inference).** `prefs_action`
+accepts exactly `{"action":"set_display_name","display_name":"Ana"}`. The string must
+contain at most 80 Unicode scalars and no control characters; leading/trailing
+whitespace is trimmed, and an empty/whitespace-only string clears it. Extra keys,
+non-strings, controls and overlength values return `invalid_schema`. The persisted
+`prefs.json` stays **v1** with optional `display_name`, omitted when anonymous.
+Missing/invalid name on load defaults to anonymous without losing `sound`.
+Sound toggles clone current preferences and change only sound; setting/clearing the
+name changes only the name. No-op/view commands do not write. A failed save returns
+`save_failed` without installing or publishing the requested value. Settings responses
+and `prefs:state` carry `displayName` (string or null); `chathost.rs::chat_view` supplies
+`display_name` to chat, including startup reads and pushes after successful changes.
+`prefs::transact` holds a shared command gate through persistence, installation and
+publication: the next preference command cannot overtake the current event. The
+state mutex is released before publication, so chat can re-read the committed name.
+Publish callbacks must not recursively call `transact`. The response/event uses the
+committed snapshot rather than an unlocked later read. This orders preference-command
+publications, not every unrelated chat producer in the application.
+
+Reproduce concurrent **real fields** (`sound` and `display_name`) and failed-save
+checks without a display or provider call:
+
+```sh
+CARGO_TARGET_DIR="$PWD/evidence/integration-327-342-384/cargo-target" \
+  cargo test --offline --locked --manifest-path apps/desktop-tauri/Cargo.toml \
+  --lib prefs::tests::concurrent
+```
+
+These tests use the public transaction seam used by `settingshost`, concurrent
+threads released by a barrier, serialized JSON readback and publication callbacks.
+They assert the gate remains held until publication, the state mutex is released,
+event order equals commit order, both fields survive, and failed persistence neither
+replaces the prior name nor emits an event. Persistence failure is injected at the
+callback boundary; this is not an OS write-failure or live Tauri event-delivery test.
+
+**Optional name in Ajustes:** under Saludo, **Tu nombre (opcional)** explains the
+80-character limit and anonymous fallback. **Guardar nombre** (or Enter) sends the
+explicit preference command. Clear the input and save to return to anonymous. The
+form validates scalar count and controls, preserves drafts across preference pushes,
+and retains the text, focus and an actionable error after a failed save. It announces
+success only after IPC resolves; the backend remains validation authority.
+
 ### Verifying U1
 
 ```sh
@@ -530,6 +588,101 @@ cargo test --manifest-path apps/desktop-tauri/Cargo.toml
 # probe: models_evidence — rows rendered with 44 px buttons, gates
 #   ready/unknown/unavailable, select diag/unknown refused, set_key and
 #   smuggled origin refused, selection effective, fake router saw only GETs
+```
+
+## #327 — manual specialists (roles the human creates and chooses)
+
+A specialist is a role the human creates by hand and picks explicitly: a
+display name, the instructions that specialise it and, optionally, one of the
+verified LOCAL models. It never delegates, spawns, schedules, widens a
+permission or reaches another backend: choosing a role only changes what the
+NEXT turn asks for and which local model answers it.
+
+**Store:** `<app config dir>/specialists.json` = `
+{"v":1,"active":<id|null>,"specialists":[{"id","name","instructions","model"}]}`
+(dir 0700, file 0600, atomic temp+rename, read with `O_NOFOLLOW` + owner/mode
+tests). Only a genuinely absent file loads as a healthy empty store. Existing
+corrupt, unreadable, wrongly versioned, oversized or invalid-record data returns
+an explicit load failure. No partial list is advertised as successfully loaded.
+The host latches `load_error: true`, sets `persisted: false` and rejects **all**
+mutations with code `load_error` and message
+`No se pudieron cargar los especialistas; no se cambió nada.`
+`view` still returns state with that flag, without paths or stored content.
+No success event, auto-reset, repair, quarantine or overwrite occurs; recovery
+is outside this feature and requires an explicit decision. Moving a bad file
+after startup does not clear the latch. `active: null` IS the principal (Abito).
+`ABITO_SPECIALISTS_CONFIG_DIR=<abs dir>` overrides; without that override,
+the probe keeps it in memory only. Unix permissions/owner checks are not a
+verified Windows security guarantee.
+
+**Identity:** the id is opaque, lowercase ASCII,
+`^[a-z0-9][a-z0-9._-]{0,31}$`, generated ONCE at creation and stable across
+renames — never derived from the name, the provider or a CLI id. The reserved
+identities (`abito` the principal, `pi`/`claude-code`/`codex`/`opencode`, the
+prototype keys) are refused, so a specialist can never impersonate the
+principal. **No colour lives here:** the avatar panel resolves it for the SAME
+id (`avatar_colors` owns assignment and overrides).
+
+**Bounds:** name 1..40 and instructions 1..2000 characters. Instructions keep
+normal line breaks and tabs (a prompt section is genuinely multiline); other
+C0/C1 controls and DEL are refused, in the raw text, before trimming.
+Capacity remains **24 roles**. The persisted byte bound is derived from the
+maximum compact v1 JSON: outer syntax + active ID (32 ASCII bytes), 24 records
+(each including syntax, ID32, model64, name40×4 and instructions2000×4 bytes),
+and 23 separating commas. UTF-8 uses at most4 bytes per scalar; the permitted
+JSON escapes use at most2. Reads check both metadata and the final bounded
+buffer; writes reject oversized or non-round-trippable candidates before any
+filesystem mutation and refuse to replace an unreadable existing store.
+
+**IPC:** `specialists_action` with the closed set
+`view | create{id,name,instructions,model} | update{…} | delete{id} | select{id|null}`
+(same sender gate + rate limit as the rest of the island). A named model must
+be a SELECTABLE entry of the verified local registry — today exactly one
+(`local-abito-gpt`), which the section says out loud instead of pretending to
+choose. Creating is not choosing: a new role does not become the active one.
+
+**Coherence:** one transaction lock serializes read/validate/write/commit/event
+publication. The file is written FIRST and memory is committed only when the
+write succeeded; a failed save leaves the previous roles (and the role in use)
+exactly as they were and reports it, so the panel can never announce a role
+that was not saved. Nowhere to persist (probe) is a memory-only change that
+says so.
+
+**One turn:** the effective system message is the base `chatlane::SYSTEM_PROMPT`
+plus the role (base policy first, guard rails restated, no capability gained);
+the effective target is the role's model when it names one, else the model
+picker's selection — and a role whose model is no longer selectable REFUSES the
+send instead of substituting another model. Both are frozen at submit, so
+choosing another specialist while a turn runs changes the next turn, never the
+one in flight. With `active: null` the system message is byte for byte the base
+one.
+
+**UI:** a section inside Ajustes (no new screen, no new icon) where the human
+creates, edits, chooses and goes back to the principal, plus a display-only
+role chip in the chat header. Plain text only; only trusted gestures change
+anything. Arrow keys (wrapping), Home and End choose through the same selection
+path after a trusted keydown, never a synthetic click; focus returns after the
+IPC result. Save failures retain the draft/error until successful retry.
+`load_error` shows a persistent unavailability notice, hides healthy role choices
+and disables mutations; no reset is offered. A draft already open is retained.
+Isolated Chromium/CDP with explicit mock IPC checks these paths; it is not native
+Tauri proof. UI/native acceptance remains with the parent. Scripted `dispatchEvent`
+cannot replace trusted input. Do not bypass the gesture guard.
+
+### Verifying #327
+
+```sh
+cargo test --manifest-path apps/desktop-tauri/Cargo.toml --bin abito-island specialists
+#   Store/host contracts: opaque/reserved ids, bounds and controls, fail-closed
+#   store, closed command set, invalid input never mutates, principal prompt
+#   unchanged, 0600/O_NOFOLLOW/atomic file, failed write keeps the store,
+#   concurrent update/event ordering, stale model rejection, coherent frozen role,
+#   maximum Unicode+IDs+models roundtrip, escaped JSON and exact/over-limit bytes,
+#   corrupt/oversized startup mutation block, original bytes preserved, absence
+cargo test --manifest-path apps/desktop-tauri/Cargo.toml --test frontend_specialists
+node apps/desktop-tauri/test-node/specialists-view-check.cjs   # 21 checks
+# Previous visual probe produced neither settings_section evidence nor PNGs.
+# It was stopped; visual acceptance belongs to the frontend review.
 ```
 
 ## Q1 — island accessibility (observed)
@@ -691,6 +844,77 @@ Without X11/XWayland the island cannot dock to a chosen edge, cannot be kept
 above other windows, and cannot be clamped to the usable work area. The
 `GDK_BACKEND=x11` launcher and the in-`main()` fallback are therefore load
 bearing, not cosmetic.
+
+## #384 — the Dot's avatar colours (frontend candidate)
+
+`frontend/avatar-colors.js` is the pure contract for the Dot's colour, from the human
+
+> «colores en ajustes por si alguien lo quiere cambiar, pero fijo el verde y los sub abitos especializados de difrentes colores»
+
+- **The principal Abito is green by default.** No pose, activity, host condition, connected agent,
+  notice or card is an input: `resolveColor(identity, overrides)` takes exactly those two arguments and
+  ignores anything else a caller passes. An explicit human choice in Ajustes is the only thing that
+  changes it — an explicit preference is not an identity and not an active agent, so refusing it would
+  be inventing a prohibition nobody asked for. The default green is the frozen R6 engine's own skin
+  gradient; the module never touches the engine, the island markup, CSS geometry or transparency.
+- **A specialised sub-Abito has a stable identity color** over blue/mint/orange/purple:
+  `defaultColor(identity)` uses FNV-1a/32 over the canonical id, independent of set membership.
+  Adding or removing another specialist never repaints it. Repeated defaults and overrides are
+  valid; names distinguish identities. There is no four-specialist cap or duplicate warning.
+- **Each Settings option has a visible color name before selection and a 44px minimum target.**
+  Radio semantics, one tab stop, arrow keys, Home/End and Space support keyboard use; selection
+  and visible focus have separate rings. A successful save restores focus after rerender.
+- **The Ajustes overrides are a validated closed schema** (`sanitizeOverrides`): only a customizable
+  identity (the principal, or a real sub-Abito) may be keyed, and only the five palette colours may be
+  values. Everything else — a provider/CLI slug, `__proto__`/`constructor`, a wrong type, an unknown
+  colour name — is dropped: never applied, never thrown.
+- **No specialist list is invented.** `settingsRows` returns no specialist row while no real sub-Abito
+  exists, and `pi`/`claude-code`/`codex`/`opencode` are the connectors/providers the island already
+  names, never sub-Abito identities.
+- Checks: `node test-node/avatar-colors-check.cjs` (18), also run by `cargo test` through
+  `tests/frontend_avatar_colors.rs`; the panel's model is covered by `test-node/settings-view-check.cjs`.
+
+**How a choice reaches the Dot.** Ajustes writes it through the existing preferences command
+(`prefs_action {action:"set_avatar_color",identity,color}`, validated in `src/prefs.rs` and applied by
+`src/settingshost.rs` through the shared `prefs::transact` gate), `prefs.json` keeps `v: 1` and its `sound` untouched, and
+the Settings controls and principal island consumer read it at boot and on every `prefs:state`.
+The parent-authorized 16-line `island.js` transplant resolves only the principal preference,
+never the active specialist. It sets `data-dot-color` for non-green overrides; CSS tints
+only the three skin stops, retaining R6 bytes, poses and geometry. T2 reads the sole
+specialist owner's immutable `identityView()` projection (`kind`, stable `id`, display `name`)
+and its `abito:specialist-identities` notification; Settings never fetches/copies role
+instructions or models. Actual role rows and the existing chat user icon show each identity's
+color. Loading/unavailable identities have an explicit notice, not a healthy-empty claim.
+Only while the specialist chip is visible, the header gives identity labels a second row
+and retains all five named 44px controls in the first row at 400px and 320px. Settings
+starts below both rows; principal-only header layout, island geometry and R6 stay unchanged.
+A failed write is
+reported beside the color controls with visible inline text and the existing aria-live announcement;
+it keeps the previous colour (`save_failed`). The explanation survives rerenders, rejected retries and
+pending retries, and clears only after a successful save response. The panel never announces a stored
+choice it did not store.
+
+**Verification boundary.** T2 specialist rows use the actual #327 owner projection; absent
+identities are not rendered and their stored overrides remain untouched. Focus, caret and
+drafts survive unrelated owner/prefs pushes. T2 checks and whole-layout screenshots are in
+`evidence/integration-327-342-384/t2/` (run `node .../identity-check.cjs` and
+`node .../browser-check.cjs <evidence-label>` from this worktree). The separate
+`header-check.cjs <unique-label>` preserves the prior 9/10 failure and captures
+320/400px top/middle/bottom before asserting containment. Its chat mock returns
+`display_name`; real shipped greeting DOM is checked before and after page reload. The browser fixture serves
+shipped markup/CSS and Settings/specialists modules at the default 400×640 chat geometry;
+it loads all shipped scripts, opens the existing host seam with
+`__islandSetState('overview')` / `__islandSetView('chat',400,640)`, and supplies IPC mocks
+and trusted CDP input, not an application endpoint or model call. Reload storage is the
+fixture's isolated `sessionStorage` adapter, not production `prefs.json` proof.
+Chromium/CDP evidence uses an explicitly mocked IPC host,
+not native Tauri/WebKitGTK or CSP proof. T1 integrates #342's preference serial gate with sound, display_name and avatar_colors.
+Combined command and extracted production disk-helper checks are under
+`evidence/integration-327-342-384/`; the latter adapt only AppHandle/path resolution, not
+Tauri IPC or native delivery. They cover name→sound→color→reload, concurrent three-field
+commits, rejected/no-op commands and failed rename without false publication. Donor browser outcomes
+are not integrated/native acceptance. T2 connects identity colors, T3 handles native validation,
+and T4 owns independent integrated review. No real model calls belong to T1 checks.
 
 ## Layout
 

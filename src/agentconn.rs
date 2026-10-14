@@ -170,6 +170,7 @@ impl AgentConn {
         let lines = match cmd {
             UiCommand::Refresh => cmd.refresh_lines(),
             UiCommand::View => return Ok(()),
+            UiCommand::Account(_) => return Err(CommandError), // local store only, never daemon wire
             other => vec![other.line()],
         };
         let mut guard = self.writer.lock().expect("agent writer lock");

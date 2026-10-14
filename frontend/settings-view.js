@@ -155,7 +155,7 @@
         : h.portal_note === 'unsupported' ? 'El portal del sistema no respondió o no pudo registrarlo.' : '',
     };
     return {
-      sound: { on: i.sound === true },
+      sound: { on: i.sound === true, gain: typeof i.gain === 'number' && Number.isFinite(i.gain) && i.gain >= 0 && i.gain <= 0.2 ? i.gain : 0.12 },
       // motionOverride true (the default) = animate: the system preference is NOT honored
       motion: { respectSystem: i.motionOverride === false },
       hotkey,
@@ -374,6 +374,55 @@
     };
   }
 
-  return { commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  // ---- #384: the Dot's colour, chosen by the human (avatar-colors.js owns the contract) ------------------------------
+  // Pure: the palette, the defaults, the validation all come from the injected
+  // contract (`AbitoAvatarColors`); this only shapes rows the panel can render. With no real sub-Abito there
+  // are no specialist rows: the panel never invents an identity, and a missing contract yields no control
+  // rather than a broken one.
+  function colorRows(prefs, identities, colors) {
+    if (!colors || typeof colors.settingsRows !== 'function' || !Array.isArray(colors.PALETTE)) return [];
+    const stored = prefs && typeof prefs === 'object' && prefs.avatarColors && typeof prefs.avatarColors === 'object'
+      ? prefs.avatarColors : {};
+    let entries = [];
+    if (Array.isArray(identities)) {
+      entries = identities.map(identity => typeof identity === 'string' ? { id: identity, name: identity } : identity)
+        .filter(identity => identity && typeof identity.id === 'string');
+    }
+    return colors.settingsRows(entries.map(identity => identity.id), stored).map(row => {
+      const identity = entries.find(identity => identity.id === row.id);
+      const name = typeof identity.name === 'string' && identity.name ? identity.name : row.id;
+      return { id: row.id, name, color: row.color, label: row.label, aria: `Color de ${name}: ${row.label}`,
+        options: colors.PALETTE.map(color => ({
+          color, label: colors.label(color), selected: color === row.color, aria: `${colors.label(color)} para ${name}`,
+        })),
+      };
+    });
+  }
+
+  // Explicit public projection: never spread account/config objects containing private fields.
+  function ownedAccounts(snapshot) {
+    if (!snapshot || !Array.isArray(snapshot.accounts)) return [];
+    return snapshot.accounts.filter(a => a && typeof a.accountId === 'string' && a.config).map(a => ({
+      accountId: a.accountId, provider: a.provider, hasCredential: a.hasCredential === true,
+      config: { nombre: a.config.nombre, baseUrl: a.config.baseUrl, api: a.config.api,
+        compat: Object.fromEntries(Object.entries(a.config.compat || {}).filter(([, v]) => typeof v === 'boolean')),
+        models: Array.isArray(a.config.models) ? a.config.models.filter(m => typeof m === 'string') : [],
+        defaultModel: a.config.defaultModel },
+    }));
+  }
+
+  function soundGainProblem(text) {
+    const n = Number(text);
+    return String(text).trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 0.2
+      ? '' : 'Ingresá un volumen entre 0 y 0,2.';
+  }
+
+  function displayNameProblem(text) {
+    if (Array.from(text).length > 80) return 'Usá hasta 80 caracteres.';
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(text)) return 'El nombre contiene caracteres de control.';
+    return '';
+  }
+
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
 });

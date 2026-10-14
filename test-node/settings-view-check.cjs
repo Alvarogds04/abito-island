@@ -12,6 +12,15 @@ const S = require(path.join(frontend, 'settings-view.js'));
 let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
 
+test('F055 general volume uses default and inclusive boundaries without coercion', () => {
+  assert.equal(S.generalView({}).sound.gain, 0.12);
+  for (const gain of [0, 0.12, 0.2]) assert.equal(S.generalView({ gain }).sound.gain, gain);
+  for (const gain of [-0.1, 0.21, NaN, Infinity, '0.1', null]) assert.equal(S.generalView({ gain }).sound.gain, 0.12);
+  assert.equal(S.soundGainProblem(''), 'Ingresá un volumen entre 0 y 0,2.');
+  for (const value of ['0', '0.12', '0.2']) assert.equal(S.soundGainProblem(value), '');
+  for (const value of ['-0.01', '0.201', 'Infinity', 'NaN', 'junk']) assert.ok(S.soundGainProblem(value));
+});
+
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
 test('three screens in gentle-dot order — Cuentas, Conectores, Ajustes — each with title, icon and a one-line hint', () => {
   assert.deepEqual(S.SCREENS.map(x => x.id), ['accounts', 'connectors', 'settings']);
@@ -650,4 +659,99 @@ test('wiring: the plan summary is drawn above the button and the trust hint is i
   assert.match(css, /\.splan\s*\{/); assert.match(css, /\.strust\s*\{/);
 });
 
+test('display name validates scalars and controls, blank clears and markup is text', () => {
+  assert.equal(S.displayNameProblem(''), '');
+  assert.equal(S.displayNameProblem('   '), '');
+  assert.equal(S.displayNameProblem('😀'.repeat(80)), '');
+  assert.match(S.displayNameProblem('😀'.repeat(81)), /80/);
+  assert.match(S.displayNameProblem('A\nB'), /control/);
+  assert.match(S.displayNameProblem('A\u007fB'), /control/);
+  assert.equal(S.displayNameProblem('<img src=x onerror=alert(1)>'), '');
+});
+
+// ---- #384: the Dot's colour, chosen by the human (avatar-colors.js owns the contract) -------------
+const A = require(path.join(frontend, 'avatar-colors.js'));
+
+test('#384 colourRows: the principal is always offered, with the five choices and the current one selected', () => {
+  const rows = S.colorRows({}, ['abito'], A);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.deepEqual([row.id, row.color, row.label], ['abito', 'green', 'Verde']);
+  assert.deepEqual(row.options.map(o => o.color), ['green', 'blue', 'mint', 'orange', 'purple']);
+  assert.deepEqual(row.options.map(o => o.label), ['Verde', 'Azul', 'Menta', 'Naranja', 'Púrpura']);
+  assert.deepEqual(row.options.filter(o => o.selected).map(o => o.color), ['green']);
+  assert.match(row.aria, /Verde/);
+  for (const o of row.options) assert.match(o.aria, new RegExp(`${o.label} para abito`));
+});
+
+test('#384 colourRows: a stored choice is the selected one, and it survives a reload of the prefs view', () => {
+  // exactly the shape the host hands back from `prefs_action {action:'view'}`
+  const prefs = { sound: false, avatarColors: { abito: 'purple' } };
+  const row = S.colorRows(prefs, ['abito'], A)[0];
+  assert.deepEqual([row.color, row.label], ['purple', 'Púrpura']);
+  assert.deepEqual(row.options.filter(o => o.selected).map(o => o.color), ['purple']);
+  assert.ok(row.options.every(o => typeof o.aria === 'string' && o.aria.length > 0), 'every choice has a name');
+});
+
+test('#384 colourRows: no sub-Abito list is invented, and an ignored value is never shown as applied', () => {
+  assert.equal(S.colorRows({ avatarColors: { abito: 'chartreuse' } }, ['abito'], A)[0].color, 'green');
+  assert.deepEqual(S.colorRows({ avatarColors: { codex: 'blue' } }, ['abito', 'pi', 'codex'], A).map(r => r.id), ['abito'],
+    'connectors are not colour rows, even if a file names one');
+  assert.deepEqual(S.colorRows({}, [], A), []);
+  assert.deepEqual(S.colorRows({}, null, A), []);
+  assert.deepEqual(S.colorRows({}, undefined, A), []);
+  assert.deepEqual(S.colorRows({}, ['abito'], null), [], 'a missing contract is not a broken control');
+  assert.deepEqual(S.colorRows({}, ['abito'], {}), []);
+});
+
+test('#384 colourRows: repeated colors are valid, with no warning', () => {
+  const rows = S.colorRows({ avatarColors: { abito: 'mint' } }, ['abito', 'sub-abito-uno'], A);
+  assert.deepEqual(rows.map(r => r.id), ['abito', 'sub-abito-uno']);
+  assert.ok(rows.every(r => !Object.hasOwn(r, 'duplicate')));
+  assert.doesNotMatch(JSON.stringify(rows), /secret|token|password/i);
+  for (const r of rows) assert.equal(r.options.length, A.PALETTE.length);
+});
+
+test('#384 controls: every option has visible text, a 44px target and radio keyboard wiring', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(src, /sdot-label', option.label/);
+  assert.match(src, /ArrowRight/);
+  assert.match(src, /ArrowLeft/);
+  assert.match(src, /b.tabIndex = option.selected/);
+  assert.match(src, /b.id = `dot-color-\$\{row.id\}-\$\{option.color\}`/, 'existing render restores stable color IDs after prefs events');
+  assert.match(css, /\.sdot \{[^}]*min-width: 44px/);
+  assert.match(css, /\.sdot \{[^}]*min-height: 44px/);
+});
+
+test('#384 F1: failed color save has inline visible feedback and retains the live region', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(src, /sdot-error/);
+  assert.match(src, /aria-describedby/);
+  assert.match(src, /colorErrors\[identity\] =/);
+  assert.match(src, /delete colorErrors\[identity\]/);
+  assert.match(src, /say\(colorErrors\[identity\]\)/);
+  const rule = css.match(/\.sdot-error \{([^}]*)\}/);
+  assert.ok(rule, 'visible error style');
+  assert.doesNotMatch(rule[1], /clip|hidden|display:\s*none/);
+});
+
+test('#308 owned account snapshots whitelist fields and reveal presence only', () => {
+  const input = { accounts: [{ accountId: 'example', provider: 'openai', hasCredential: true,
+    config: { nombre: 'Example', baseUrl: 'https://example.com/v1', api: 'openai-completions', compat: {}, models: ['m'], defaultModel: 'm', apiKey: String.fromCharCode(97,98,99) } }] };
+  const rows = S.ownedAccounts(input);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hasCredential, true);
+  assert.equal(rows[0].config.defaultModel, 'm');
+  assert.equal(Object.hasOwn(rows[0].config, 'apiKey'), false);
+  assert.equal(S.ownedAccounts(null).length, 0);
+});
+test('#308 configuration is not connection readiness and commands are namespaced', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  for (const action of ['abito_account_save', 'abito_account_create', 'abito_account_endpoint_set']) assert.ok(src.includes(action));
+  assert.match(src, /Conexión no probada/);
+  assert.match(src, /account-secret/);
+  assert.match(src, /accountError/);
+});
 console.log(`settings-view-check: ${passed} passed`);

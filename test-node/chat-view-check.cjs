@@ -519,4 +519,58 @@ test('flicker: renderLog uses the reconciler and never empties the log while tur
   assert.match(fn, /classList\.add\('enter'\)/, 'only NEW rows animate');
 });
 
+// ---- F027 / TaskView342: the personalized empty-chat greeting -----------------
+// The neutral sentence is shipped copy: it may not drift when a name is absent.
+const NEUTRAL_EMPTY_ARIA = 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.';
+
+test('greeting: an explicit name yields «Hola, <nombre>.», absent or blank keeps the shipped neutral sentence', () => {
+  const named = V.emptyGreeting({ display_name: 'Ana' });
+  assert.equal(named.greeting, 'Hola, Ana.');
+  assert.equal(named.aria, `Hola, Ana. ${NEUTRAL_EMPTY_ARIA}`);
+  assert.deepEqual(named.icons, ['lock', 'eye-off'], 'the lock + eye-off icons of §2.3 are untouched');
+  for (const view of [undefined, null, {}, { display_name: null }, { display_name: '' },
+    { display_name: '   ' }, { display_name: '\n\t ' }, { display_name: '\u0000\u001f' }]) {
+    assert.deepEqual(V.emptyGreeting(view), { greeting: '', aria: NEUTRAL_EMPTY_ARIA, icons: ['lock', 'eye-off'] },
+      JSON.stringify(view));
+  }
+});
+
+test('greeting: a non-string display_name is absent, never coerced (fail closed)', () => {
+  for (const value of [42, true, {}, [], () => {}, Symbol('x')]) {
+    assert.equal(V.emptyGreeting({ display_name: value }).greeting, '', String(typeof value));
+    assert.equal(V.cleanDisplayName(value), '');
+  }
+});
+
+test('greeting: the name is plain text — markup, quotes and ampersands stay text, control characters become spaces', () => {
+  const markup = '<img src=x onerror=alert(1)>';
+  assert.equal(V.emptyGreeting({ display_name: markup }).greeting, `Hola, ${markup}.`);
+  assert.equal(V.emptyGreeting({ display_name: '"' }).greeting, 'Hola, ".');
+  assert.equal(V.emptyGreeting({ display_name: '"&<>&' }).greeting, 'Hola, "&<>&.');
+  assert.equal(V.emptyGreeting({ display_name: 'Ana\nMaría' }).greeting, 'Hola, Ana María.');
+  assert.equal(V.emptyGreeting({ display_name: '  Ana  ' }).greeting, 'Hola, Ana.');
+  assert.equal(V.emptyGreeting({ display_name: 'A\u0000B\u007fC' }).greeting, 'Hola, A B C.');
+  assert.equal(V.emptyGreeting({ display_name: '<script>alert(1)</script>' }).greeting, 'Hola, <script>alert(1)</script>.');
+});
+
+test('greeting: the name is bounded to 80 Unicode scalars, never splitting a surrogate pair', () => {
+  assert.equal(V.cleanDisplayName('a'.repeat(120)), 'a'.repeat(80));
+  // the bound counts scalars, like the onboarding validator (len(name) <= 80 in Python)
+  assert.equal(Array.from(V.cleanDisplayName('😀'.repeat(81))).length, 80);
+  assert.equal(V.cleanDisplayName('😀'.repeat(81)), '😀'.repeat(80));
+  assert.equal(V.emptyGreeting({ display_name: '😀'.repeat(81) }).greeting, `Hola, ${'😀'.repeat(80)}.`);
+  assert.equal(V.cleanDisplayName('😀'.repeat(80)), '😀'.repeat(80), 'a name at the bound is untouched');
+});
+
+test('greeting: the page writes the greeting with textContent and never puts the name into HTML', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  const fn = src.slice(src.indexOf('function renderLog'), src.indexOf('function renderControls'));
+  assert.match(fn, /V\.emptyGreeting\(/, 'the empty state comes from the frozen helper');
+  assert.match(fn, /textContent = g\.greeting/, 'the greeting is written as text');
+  // Only the empty-state path is in scope; existing closed-registry icon writes
+  // elsewhere retain their previous implementation.
+  const code = fn.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(code, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, 'no markup sink in the greeting renderer');
+});
+
 console.log(`chat-view-check: ${passed} passed`);

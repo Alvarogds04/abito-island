@@ -22,6 +22,11 @@ test('source gates pass on the real crate (R6 pin, curated frontend, config, cap
   assert.equal(cfg.identifier, 'com.abitog.AbitoTauri');
 });
 
+test('F025 adds exactly its two assets to the closed shipped list', () => {
+  assert.deepEqual(L.FRONTEND_FILES.filter(f => f.startsWith('chat-markdown.')).sort(), ['chat-markdown.css', 'chat-markdown.js']);
+  assert.equal(new Set(L.FRONTEND_FILES).size, L.FRONTEND_FILES.length);
+});
+
 function copyCrate() {
   const dir = T.make('abito-pkg-');
   for (const f of ['tauri.conf.json', 'Cargo.toml']) fs.copyFileSync(path.join(crate, f), path.join(dir, f));

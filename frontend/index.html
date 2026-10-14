@@ -7,12 +7,16 @@
        unsafe-eval, no inline script/style (this file carries none). -->
   <title>Abito</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="chat-markdown.css">
   <!-- Frozen R6, copied byte-for-byte (sha256 e2dc5db3…): SVG-DOM, never redrawn. -->
   <script defer src="clay-engine.js"></script>
   <!-- window.desktop facade must exist before the island boots. -->
   <script defer src="desktop.js"></script>
   <!-- UI.1: own icons + pure overview view-model, before the island boots. -->
   <script defer src="icons.js"></script>
+  <!-- #384: the Dot's colour contract (pure) — loaded before the island and the settings panel,
+       the two places that consume it. -->
+  <script defer src="avatar-colors.js"></script>
   <script defer src="overview-view.js"></script>
   <!-- N6: notification with 1..N reply options (Pi questions QP/1 are one case). -->
   <script defer src="notify-view.js"></script>
@@ -20,12 +24,16 @@
   <script defer src="sound-wiring.js"></script>
   <script defer src="island.js"></script>
   <!-- U1: pure chat view helpers + the chat surface (same island). -->
+  <script defer src="chat-markdown.js"></script>
   <script defer src="chat-view.js"></script>
   <script defer src="chat.js"></script>
   <script defer src="models.js"></script>
   <!-- #306: settings panel (providers, connectors, general). -->
   <script defer src="settings-view.js"></script>
   <script defer src="settings.js"></script>
+  <!-- #327: manual specialists — the pure view-model first, then its section in Ajustes. -->
+  <script defer src="specialists-view.js"></script>
+  <script defer src="specialists.js"></script>
   <script defer src="notify.js"></script>
 </head>
 <body>
@@ -126,6 +134,9 @@
         <header id="chat-header">
           <span id="chat-target-chip" class="chip" role="img"><span class="ico" data-icon="lock"></span><span class="word">local</span></span>
           <span id="chat-target" class="sr-only"></span>
+          <!-- #327: the role in use, when the human chose one. Status only: the role itself is
+               chosen in Ajustes -> Especialistas, and a role never appears here by itself. -->
+          <span id="chat-specialist" class="chip" role="img" hidden><span class="ico" id="chat-specialist-icon" data-icon="user"></span><span class="word" id="chat-specialist-word"></span></span>
           <p id="chat-status" class="sr-only"></p>
           <button id="open-screen-accounts" class="icon-btn" type="button" aria-label="Cuentas" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="user"></span></button>
           <button id="open-screen-connectors" class="icon-btn" type="button" aria-label="Conectores" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="plug"></span></button>

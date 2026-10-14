@@ -1,6 +1,7 @@
 //! #306 — client of the island agent protocol `island-agent/1` (the daemon of
 //! `apps/desktop-daemon`), PURE part: session handoff, frame codec, the closed set
-//! of commands the settings UI may issue, and the allowlisted view state.
+//! of commands the settings UI may issue, the allowlisted view state, and the
+//! explicit Abito-owned account store (local filesystem only).
 //!
 //! Security model (the reason this lives in Rust, not in the WebView):
 //! - the per-launch TOKEN and the socket ENDPOINT never leave this module: `Session`
@@ -9,8 +10,9 @@
 //! - the UI can only send the commands of [`parse_ui_command`] (no `send`, no `abort`,
 //!   no `settings_set`, no `local_account_create`: nothing that reaches the chat or
 //!   the engine);
-//! - API keys travel ONLY as `auth_reply` values, are validated, never stored in the
-//!   state, never echoed, and redacted from `Debug`;
+//! - daemon API keys travel as `auth_reply` values only; local `abito_account_*`
+//!   commands persist validated keys in Abito's private config file. Neither path
+//!   echoes credentials in public state or Debug, or forwards local keys to the daemon;
 //! - server frames are folded into allowlisted fields; unknown or malformed frames are
 //!   ignored (never forwarded raw).
 use serde::Serialize;
@@ -20,6 +22,10 @@ use std::fmt;
 #[cfg(test)]
 #[path = "agentclient_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "provider_accounts_tests.rs"]
+mod provider_accounts_tests;
 
 pub const PROTOCOL: &str = "island-agent/1";
 pub const MAX_SESSION_BYTES: usize = 4096;
@@ -131,6 +137,8 @@ pub struct CommandError;
 pub enum UiCommand {
     /// Local: read the current state.
     View,
+    /// Local-only Abito account configuration, never daemon wire.
+    Account(AccountCommand),
     /// Local: ask the daemon for every list again.
     Refresh,
     Wire(String),
@@ -142,6 +150,7 @@ impl fmt::Debug for UiCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             UiCommand::View => f.write_str("View"),
+            UiCommand::Account(_) => f.write_str("Account(<redacted>)"),
             UiCommand::Refresh => f.write_str("Refresh"),
             UiCommand::Wire(w) => f.debug_tuple("Wire").field(w).finish(),
             UiCommand::AuthReply { flow_id, prompt_id, .. } => f
@@ -189,6 +198,7 @@ pub fn parse_ui_command(payload: &Value) -> Result<UiCommand, CommandError> {
     let exact = |n: usize| if map.len() == n { Ok(()) } else { Err(CommandError) };
     let wire = |fields: &[(&str, &str)]| Ok(UiCommand::Wire(ordered(fields)));
     match action {
+        "abito_account_save" | "abito_account_create" | "abito_account_endpoint_set" => parse_account(payload).map(UiCommand::Account),
         "view" => exact(1).map(|_| UiCommand::View),
         "refresh" => exact(1).map(|_| UiCommand::Refresh),
         // #310: one click connects a code agent. The id is an allowlist, so nothing the page sends can
@@ -493,4 +503,193 @@ fn account_view(a: &Value) -> Value {
         v["local"] = json!(true);
     }
     v
+}
+
+// ---- Abito-owned accounts (never daemon frames) ---------------------------------------
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct AccountConfig {
+    nombre: String,
+    base_url: String,
+    api: String,
+    compat: std::collections::BTreeMap<String, bool>,
+    models: Vec<String>,
+    default_model: String,
+    api_key: Option<String>,
+}
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct AccountRecord { account_id: String, provider: String, config: AccountConfig }
+
+pub struct AccountCommand { action: String, record: AccountRecord, keep_key: bool }
+impl fmt::Debug for AccountCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("AccountCommand(<redacted>)") }
+}
+
+pub fn is_account_action(payload: &Value) -> bool {
+    matches!(payload.get("action").and_then(Value::as_str), Some("abito_account_save" | "abito_account_create" | "abito_account_endpoint_set"))
+}
+
+fn account_url(raw: &str, local: bool) -> bool {
+    // Reject before URL normalization: Unicode/IDN, encoded authority, credentials,
+    // whitespace, backslashes and browser-specific host spellings are never repaired.
+    if raw.len() > 2048 || !raw.is_ascii() || raw.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+        || raw.contains(['\\', '@', '?', '#']) { return false; }
+    let prefix = if local { "http://" } else { "https://" };
+    let Some(rest) = raw.strip_prefix(prefix) else { return false };
+    let authority = rest.split('/').next().unwrap_or("");
+    if authority.is_empty() || authority.contains('%') { return false; }
+    let Ok(url) = tauri::Url::parse(raw) else { return false };
+    let Some(host) = url.host_str() else { return false };
+    if !url.username().is_empty() || url.password().is_some() || url.port() == Some(0) { return false; }
+    // A canonical authority prevents numeric shorthand, trailing dots and empty ports.
+    let canonical = match url.port() { Some(p) => format!("{host}:{p}"), None => host.to_string() };
+    let default_port = if local { ":80" } else { ":443" };
+    if authority != canonical && !(url.port().is_none() && authority == format!("{host}{default_port}")) { return false; }
+    if local { return matches!(host, "localhost" | "127.0.0.1" | "[::1]"); }
+    if host == "localhost" || host.ends_with(".localhost") { return false; }
+    if let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        // IPv6 classification does not unwrap IPv4-mapped loopback/unspecified addresses.
+        let ip = match ip {
+            std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped().map(std::net::IpAddr::V4).unwrap_or(ip),
+            other => other,
+        };
+        return !ip.is_loopback() && !ip.is_unspecified();
+    }
+    host.len() <= 253 && host.split('.').all(|label| {
+        !label.is_empty() && label.len() <= 63 && !label.starts_with("xn--")
+            && !label.starts_with('-') && !label.ends_with('-')
+            && label.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+    })
+}
+
+fn parse_account(payload: &Value) -> Result<AccountCommand, CommandError> {
+    let map = payload.as_object().ok_or(CommandError)?;
+    if map.len() != 4 || !is_account_action(payload) { return Err(CommandError); }
+    let account_id = map.get("accountId").and_then(Value::as_str).filter(|s| strict_id(s)).ok_or(CommandError)?;
+    let provider = map.get("provider").and_then(Value::as_str).filter(|s| strict_id(s)).ok_or(CommandError)?;
+    let config = map.get("config").and_then(Value::as_object).ok_or(CommandError)?;
+    let keep_key = !config.contains_key("apiKey");
+    let config: AccountConfig = serde_json::from_value(Value::Object(config.clone())).map_err(|_| CommandError)?;
+    let local = matches!(provider, "ollama" | "lmstudio");
+    if !label_ok(&config.nombre) || !account_url(&config.base_url, local)
+        || !matches!(config.api.as_str(), "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai")
+        || config.compat.len() > 16 || config.compat.keys().any(|s| s.is_empty() || s.len() > 64 || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+        || config.models.is_empty() || config.models.len() > 64
+        || config.models.iter().any(|s| s.is_empty() || s.len() > 200 || s.trim() != s || has_control(s))
+        || !config.models.contains(&config.default_model)
+        || config.api_key.as_ref().is_some_and(|s| s.is_empty() || s.len() > 4096 || s.chars().any(char::is_whitespace) || has_control(s)) {
+        return Err(CommandError);
+    }
+    let unique: std::collections::HashSet<_> = config.models.iter().collect();
+    if unique.len() != config.models.len() { return Err(CommandError); }
+    Ok(AccountCommand { action: map["action"].as_str().unwrap().into(),
+        record: AccountRecord { account_id: account_id.into(), provider: provider.into(), config }, keep_key })
+}
+
+/// Single host-owned store, protected by SettingsHost's transaction mutex.
+/// The disk representation is deliberately NOT Debug or a public response.
+pub struct AccountStore { path: std::path::PathBuf, records: Vec<AccountRecord> }
+impl AccountStore {
+    pub fn load(path: std::path::PathBuf) -> Result<Self, crate::bridge::BridgeError> {
+        use std::io::Read;
+        let mut records = Vec::new();
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(_) => return Err(account_error("store_unavailable")),
+            Ok(meta) => {
+                if !private_account_file(&meta) { return Err(account_error("store_unavailable")); }
+                let mut options = std::fs::OpenOptions::new(); options.read(true);
+                #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.custom_flags(libc::O_NOFOLLOW); }
+                let file = options.open(&path).map_err(|_| account_error("store_unavailable"))?;
+                if !file.metadata().is_ok_and(|m| private_account_file(&m)) { return Err(account_error("store_unavailable")); }
+                let mut bytes = Vec::new();
+                file.take(1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|_| account_error("store_unavailable"))?;
+                if bytes.len() > 1024 * 1024 { return Err(account_error("store_unavailable")); }
+                let disk: AccountDisk = serde_json::from_slice(&bytes).map_err(|_| account_error("store_unavailable"))?;
+                if disk.version != 1 || disk.accounts.len() > 64 { return Err(account_error("store_unavailable")); }
+                let mut ids = std::collections::HashSet::new();
+                for record in disk.accounts {
+                    let payload = json!({"action":"abito_account_create", "accountId":record.account_id,
+                        "provider":record.provider,"config":record.config});
+                    let parsed = parse_account(&payload).map_err(|_| account_error("store_unavailable"))?;
+                    if !ids.insert(parsed.record.account_id.clone()) { return Err(account_error("store_unavailable")); }
+                    records.push(parsed.record);
+                }
+            }
+        }
+        Ok(Self { path, records })
+    }
+    pub fn view(&self) -> Value {
+        let accounts: Vec<_> = self.records.iter().map(|r| json!({
+            "accountId":r.account_id,"provider":r.provider,"hasCredential":r.config.api_key.is_some(),
+            "config":{"nombre":r.config.nombre,"baseUrl":r.config.base_url,"api":r.config.api,
+                "compat":r.config.compat,"models":r.config.models,"defaultModel":r.config.default_model}
+        })).collect();
+        json!({"accounts":accounts})
+    }
+    pub fn command(&mut self, payload: &Value, publish: impl FnOnce(Value)) -> Result<Value, crate::bridge::BridgeError> {
+        let mut command = parse_account(payload).map_err(|_| account_error("invalid_account"))?;
+        let at = self.records.iter().position(|r| r.account_id == command.record.account_id);
+        if command.action == "abito_account_create" && at.is_some() { return Err(account_error("account_exists")); }
+        if command.action != "abito_account_create" && at.is_none() { return Err(account_error("account_missing")); }
+        if at.is_none() && self.records.len() >= 64 { return Err(account_error("account_limit")); }
+        if let Some(at) = at {
+            if self.records[at].provider != command.record.provider { return Err(account_error("account_identity")); }
+            if command.keep_key { command.record.config.api_key = self.records[at].config.api_key.clone(); }
+        }
+        let mut next = self.records.clone();
+        match at { Some(at) => next[at] = command.record, None => next.push(command.record) }
+        self.persist(&next).map_err(|_| account_error("save_failed"))?;
+        self.records = next;
+        let snapshot = self.view();
+        publish(snapshot.clone());
+        Ok(snapshot)
+    }
+    fn persist(&self, records: &[AccountRecord]) -> std::io::Result<()> {
+        use std::io::{Error, ErrorKind, Write};
+        let denied = || Error::new(ErrorKind::PermissionDenied, "account store unavailable");
+        let parent = self.path.parent().ok_or_else(denied)?;
+        std::fs::create_dir_all(parent)?;
+        let dir_meta = std::fs::symlink_metadata(parent)?;
+        if !dir_meta.is_dir() || dir_meta.file_type().is_symlink() { return Err(denied()); }
+        match std::fs::symlink_metadata(&self.path) {
+            Ok(meta) if !private_account_file(&meta) => return Err(denied()),
+            Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
+            _ => {},
+        }
+        let bytes = serde_json::to_vec(&AccountDisk { version: 1, accounts: records.to_vec() }).map_err(|_| denied())?;
+        if bytes.len() > 1024 * 1024 { return Err(denied()); }
+        let tmp = parent.join(".accounts.json.pending");
+        let mut options = std::fs::OpenOptions::new(); options.write(true).create_new(true);
+        #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600).custom_flags(libc::O_NOFOLLOW); }
+        // Non-Unix has no reviewed restrictive ACL implementation yet: fail closed.
+        #[cfg(not(unix))] { return Err(denied()); }
+        let mut file = options.open(&tmp)?; // never delete another writer's obstruction
+        let result = (|| {
+            if !private_account_file(&file.metadata()?) { return Err(denied()); }
+            file.write_all(&bytes)?; file.sync_all()?;
+            std::fs::rename(&tmp, &self.path)
+        })();
+        if result.is_err() { let _ = std::fs::remove_file(&tmp); }
+        result
+    }
+    pub fn guard(label: &str, url: &str, rate: &mut crate::bridge::RateLimiter, now: u128) -> Result<(), crate::bridge::BridgeError> {
+        crate::bridge::sender_ok(label, url)?;
+        rate.check(now)
+    }
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountDisk { version: u32, accounts: Vec<AccountRecord> }
+fn private_account_file(meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)] {
+        use std::os::unix::fs::MetadataExt;
+        meta.is_file() && !meta.file_type().is_symlink() && meta.mode() & 0o777 == 0o600
+            && meta.uid() == unsafe { libc::geteuid() } && meta.nlink() == 1
+    }
+    #[cfg(not(unix))] { let _ = meta; false }
+}
+fn account_error(code: &str) -> crate::bridge::BridgeError {
+    crate::bridge::BridgeError { code: code.into(), message: "No se pudo guardar la cuenta. Revisá los datos y la URL (HTTPS remota o HTTP de loopback local).".into() }
 }

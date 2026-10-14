@@ -3,7 +3,9 @@
    - Talks to Rust ONLY through `chat_action` with the closed command set
      (view/open/back/check/submit/cancel). It never names an endpoint, a
      model, a key or an approval: Rust owns the local target.
-   - Renders plain text only (textContent), never HTML; links are not links.
+   - Message rows use the small F025 markdown DOM renderer (text nodes only).
+     Safe web links use open_chat_url, which independently validates in Rust.
+     Greeting, notifications and error/system text retain their plain handlers.
    - Focus moves to the composer only on a deliberate typing intent (the
      human clicks it, or opens the chat from the keyboard). Escape first
      leaves the composer, a second Escape collapses the island; the draft is
@@ -13,6 +15,7 @@
    - Motion is island.js's (contract spring/curve, reduced-motion snaps). */
 (() => {
   const V = window.AbitoChatView;
+  const M = window.AbitoChatMarkdown;
   const $ = id => document.getElementById(id);
   const capsule = $('capsule');
   const chat = $('chat');
@@ -32,7 +35,18 @@
   const draftWord = $('chat-draft-word');
   const ICONS = window.AbitoIcons;
   const icon = name => (ICONS ? ICONS.svg(name) : '');
-  for (const el of chat.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
+  // Parse only the closed, trusted icon registry, never message bytes.
+  // Greeting and message content are constructed separately as text nodes.
+  const svgParser = new DOMParser();
+  function iconNode(name) {
+    const doc = svgParser.parseFromString(icon(name), 'image/svg+xml');
+    return doc.documentElement && doc.documentElement.nodeName === 'svg'
+      ? document.importNode(doc.documentElement, true) : null;
+  }
+  for (const el of chat.querySelectorAll('[data-icon]')) {
+    const node = iconNode(el.dataset.icon);
+    el.replaceChildren(...(node ? [node] : []));
+  }
   if (!V || !chat || !input) return;
 
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -69,11 +83,25 @@
     if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
       li.setAttribute('aria-label', row.text);
       const i = document.createElement('span');
-      i.className = 'ico'; i.innerHTML = icon(row.icon);
+      i.className = 'ico';
+      const node = iconNode(row.icon); if (node) i.append(node);
       const w = document.createElement('span');
       w.className = 'word'; w.textContent = row.kind === 'error' ? row.text : row.short;
       li.append(i, w);
       if (row.kind === 'error') li.dataset.tone = 'red';
+    } else if (M && (row.kind === 'assistant' || row.kind === 'user')) {
+      M.render(li, row.text, {
+        openUrl: url => (invoke ? invoke('open_chat_url', { payload: { url } }) : Promise.reject(new Error('no ipc')))
+          .catch(() => { setLive('No se pudo abrir el enlace.'); }),
+        copyCode: text => {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            setLive('No se pudo copiar el código.'); return Promise.reject(new Error('clipboard unavailable'));
+          }
+          return navigator.clipboard.writeText(text).then(() => { setLive('Código copiado.'); }, () => {
+            setLive('No se pudo copiar el código.'); throw new Error('clipboard refused');
+          });
+        },
+      });
     } else li.textContent = row.text;
   }
   function renderLog() {
@@ -83,15 +111,36 @@
     const rows = [];
     for (const turn of turns) for (const row of V.turnRows(turn)) rows.push(row);
     const placeholder = log.querySelector('li.empty');
+    const g = turns.length ? null : V.emptyGreeting(view);
     if (!turns.length) {
-      if (!placeholder) {
+      // §2.3: lock «local» + eye-off, centred; the whole sentence is aria.
+      // F027: an explicit display name adds «Hola, <nombre>.» as visible text. The
+      // name arrives with a later state push, so the row is redrawn whenever the
+      // sentence it must announce changed — never emptied while turns exist. The
+      // name is text: textContent only, never into HTML.
+      if (!placeholder || placeholder.getAttribute('aria-label') !== g.aria) {
+        if (placeholder) placeholder.remove();
         log.textContent = '';
         const li = document.createElement('li');
         li.className = 'empty';
-        // §2.3: lock «local» + eye-off, centred; the whole sentence is aria.
         li.setAttribute('role', 'img');
-        li.setAttribute('aria-label', 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.');
-        li.innerHTML = `<span class="ico">${icon('lock')}</span><span class="ico">${icon('eye-off')}</span>`;
+        li.setAttribute('aria-label', g.aria);
+        const icons = document.createElement('span');
+        icons.className = 'empty-icons';
+        for (const name of g.icons) {
+          const i = document.createElement('span');
+          i.className = 'ico';
+          const node = iconNode(name);
+          if (node) i.append(node);
+          icons.append(i);
+        }
+        li.append(icons);
+        if (g.greeting) {
+          const word = document.createElement('p');
+          word.className = 'empty-greeting';
+          word.textContent = g.greeting;
+          li.append(word);
+        }
         log.appendChild(li);
       }
       drawn = [];
@@ -132,7 +181,9 @@
     stateChip.dataset.tone = sv.tone;
     stateChip.dataset.kind = sv.kind;
     stateChip.setAttribute('aria-label', localProblem || sv.aria);
-    $('chat-state-icon').innerHTML = sv.icon ? icon(sv.icon) : '<span class="dot ' + (sv.kind === 'ready' ? 'go' : '') + '"></span>';
+    const stateIcon = sv.icon ? iconNode(sv.icon) : document.createElement('span');
+    if (!sv.icon) stateIcon.className = `dot ${sv.kind === 'ready' ? 'go' : ''}`;
+    $('chat-state-icon').replaceChildren(...(stateIcon ? [stateIcon] : []));
     $('chat-state-word').textContent = sv.word;
     const dw = input.value ? V.draftWord(input.value) : '';
     draftWord.hidden = !dw;
