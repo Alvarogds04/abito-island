@@ -64,7 +64,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
         }
         if (backend.rejectNext) { backend.rejectNext = false; return Promise.reject(new Error('save_failed')); }
         const before = JSON.stringify(backend.prefs);
-        const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : null;
+        const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : payload.action === 'set_pill_color' ? M.setColor(backend.prefs, payload.id, payload.color) : payload.action === 'clear_pill_color' ? M.clearColor(backend.prefs, payload.id) : null;
         if (next) Object.assign(backend.prefs, next);
         else if (payload.action === 'sound_on') backend.prefs.sound = true;
         else if (payload.action === 'sound_off') backend.prefs.sound = false;
@@ -92,7 +92,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
     requestAnimationFrame: fn => fn(), setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } }, console });
   const load = file => vm.runInContext(read(file), ctx, { filename: file });
-  for (const file of ['pill-catalog.js', 'pills.js', 'icons.js', 'pills-view.js']) load(file);
+  for (const file of ['pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js']) load(file);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
   return { get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
@@ -108,8 +108,9 @@ test('S3/S4 actual shipped overview starts with main+four default choices and na
   for (const button of buttons) { assert.equal(button.tagName, 'BUTTON'); assert.ok(button.getAttribute('aria-label')); }
   assert.deepEqual(b.calls, [{ cmd: 'prefs_action', payload: { action: 'view' } }]);
   const scripts = [...read('index.html').matchAll(/src="([^"]+\.js)"/g)].map(x => x[1]);
-  for (const file of ['pill-catalog.js', 'pills.js', 'pills-view.js']) assert.ok(scripts.includes(file));
+  for (const file of ['pill-catalog.js', 'avatar-colors.js', 'pills.js', 'pills-view.js']) assert.ok(scripts.includes(file));
   assert.ok(scripts.indexOf('pill-catalog.js') < scripts.indexOf('pills.js'));
+  assert.ok(scripts.indexOf('avatar-colors.js') < scripts.indexOf('pills.js'), 'the closed palette module loads before the pill model reads it');
   assert.ok(scripts.indexOf('icons.js') < scripts.indexOf('pills-view.js'));
 });
 
@@ -473,4 +474,52 @@ test('#410 the credential state is an icon chip from the closed registry (same w
   const cleared = findWhere(c.get('owned-accounts'), n => String(n.className || '').split(/\s+/).includes('chip'));
   assert.equal(allText(cleared), 'Sin clave', 'the cleared state keeps its exact word');
   assert.ok(findWhere(cleared, n => String(n.className || '').split(/\s+/).includes('ico') && n.children.length), 'registry icon for «Sin clave»');
+});
+
+// #346 F033 — per-pill colours at the DOM/event boundary: validated name in, painted name out.
+test('#346 overview paints dataset.color only with an already-validated palette name', async () => {
+  const b = boot({ prefs: { pillColors: { integration_claude: 'blue', integration_n8n: 'mint', integration_vercel: '<img src=x>', integration_github: 'MINT' } } });
+  await flush();
+  assert.equal(b.get('pill-choice-integration_claude').dataset.color, 'blue');
+  assert.equal(b.get('pill-choice-integration_n8n').dataset.color, 'mint');
+  assert.equal(b.get('pill-choice-integration_vercel').dataset.color, undefined, 'a hostile stored value never paints');
+  assert.equal(b.get('pill-choice-integration_github').dataset.color, undefined, 'an off-set value never paints');
+  b.emit({ pillColors: JSON.parse('{"integration_resend":"expression(alert(1))","integration_claude":"purple"}') });
+  assert.equal(b.get('pill-choice-integration_resend').dataset.color, undefined, 'a hostile pushed value never paints');
+  assert.equal(b.get('pill-choice-integration_claude').dataset.color, 'purple', 'the validated name repaints');
+  assert.equal(b.get('pill-choices').textContent.includes('<img'), false);
+});
+
+test('#346 Ajustes offers the closed palette plus «Sin color», writes set/clear and keeps every other preference', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'], pillColors: { agent_cursor: 'blue' } } });
+  const rows = () => b.get('pill-settings-rows').children.flatMap(section => section.children).filter(n => n.dataset.pillId);
+  const row = id => rows().find(n => n.dataset.pillId === id);
+  const pick = b.get('pill-color-agent_cursor');
+  assert.ok(pick, 'an offered pill row has a colour control');
+  assert.deepEqual(pick.children.map(x => x.value), ['', 'green', 'blue', 'mint', 'orange', 'purple'], 'closed set + selectable «Sin color»');
+  assert.deepEqual(pick.children.map(x => x.textContent), ['Sin color', 'Verde', 'Azul', 'Menta', 'Naranja', 'Púrpura']);
+  assert.equal(pick.value, 'blue', 'the stored colour is the selected option');
+  assert.equal(row('agent_cursor').dataset.color, 'blue', 'the row wears the validated name');
+  assert.equal(b.get('pill-color-integration_music'), null, 'a refused pill never gets a colour control');
+  assert.equal(b.get('pill-color-agent_claude-desktop'), null, 'an unsupported-on-this-host pill never gets a colour control');
+  b.backend.prefs.sound = true; b.backend.prefs.gain = 0.2; b.backend.prefs.displayName = 'Ana'; b.backend.prefs.avatarColors = { abito: 'purple' };
+  pick.value = 'mint'; pick.fire('change'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_pill_color', id: 'agent_cursor', color: 'mint' }]);
+  assert.equal(b.backend.prefs.pillColors.agent_cursor, 'mint');
+  assert.equal(row('agent_cursor').dataset.color, 'mint', 'the row repaints from the saved projection');
+  assert.equal(b.backend.prefs.sound, true); assert.equal(b.backend.prefs.gain, 0.2);
+  assert.equal(b.backend.prefs.displayName, 'Ana');
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'purple' });
+  assert.deepEqual(b.backend.prefs.declaredPills, ['agent_cursor', 'ai_google'], 'the catalogue is untouched');
+  // «Sin color» is selectable: it sends the closed clear and the row goes neutral.
+  const current = b.get('pill-color-agent_cursor');
+  current.value = ''; current.fire('change'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'set_pill_color', id: 'agent_cursor', color: 'mint' },
+    { action: 'clear_pill_color', id: 'agent_cursor' },
+  ]);
+  assert.equal(b.backend.prefs.pillColors.agent_cursor, undefined, 'the projection carries no colour after clear');
+  assert.equal(row('agent_cursor').dataset.color, undefined, 'the chip is neutral after clear');
+  assert.equal(b.get('pill-color-agent_cursor').value, '', 'the control reads back neutral');
+  assert.equal(b.backend.prefs.sound, true, 'clear touches nothing else');
 });

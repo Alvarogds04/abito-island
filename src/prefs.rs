@@ -111,6 +111,9 @@ pub struct Prefs {
     /// Absent keys retain defaults without growing untouched v1 files.
     pub main_pill: Option<String>,
     pub declared_pills: Option<Vec<String>>,
+    /// #346 F033: canonical pill id -> validated palette colour (one of COLORS).
+    /// Unknown ids and non-palette values are dropped on load; empty is never written.
+    pub pill_colors: BTreeMap<String, String>,
     /// #380 optional theme mode. `None` means the default (`system`) and is never written,
     /// so an untouched or unknown-valued file keeps the bytes it had.
     pub theme: Option<Theme>,
@@ -176,6 +179,21 @@ fn colors_from(value: Option<&Value>) -> BTreeMap<String, String> {
     out
 }
 
+/// #346: pill colours are stricter than the avatar map — only a real catalog id with a
+/// palette name survives, so an unknown pill or an off-set colour reads as *no colour*
+/// and never grows the stored catalogue (the `main_pill` reading rule, mirrored).
+fn pill_colors_from(value: Option<&Value>) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let Some(map) = value.and_then(Value::as_object) else { return out };
+    for (id, color) in map {
+        let Some(color) = color.as_str() else { continue };
+        if PILL_IDS.contains(&id.as_str()) && COLORS.contains(&color) {
+            out.insert(id.clone(), color.to_string());
+        }
+    }
+    out
+}
+
 impl Prefs {
     pub fn gain(&self) -> f64 { self.gain.filter(|n| valid_gain(*n)).unwrap_or(0.12) }
 
@@ -218,6 +236,7 @@ impl Prefs {
                 .filter(|id| MAIN_PILLS.contains(id)).map(str::to_owned),
             declared_pills: v.get("declared_pills").and_then(Value::as_array)
                 .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect()),
+            pill_colors: pill_colors_from(v.get("pill_colors")),
             theme: v.get(THEME).and_then(Value::as_str).and_then(Theme::parse),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
@@ -240,6 +259,7 @@ impl Prefs {
         }
         if self.main_pill.is_some() { v["main_pill"] = json!(self.main_pill()); }
         if self.declared_pills.is_some() { v["declared_pills"] = json!(self.declared_pills()); }
+        if !self.pill_colors.is_empty() { v["pill_colors"] = json!(self.pill_colors); }
         if let Some(theme) = self.theme {
             v[THEME] = json!(theme.as_str());
         }
@@ -264,6 +284,9 @@ pub enum Command {
     SetPosition(i32, i32),
     SetMainPill(String),
     ToggleDeclaredPill(String),
+    /// #346 F033: colour of one offered pill, or its removal (palette name in, key out).
+    SetPillColor { id: String, color: String },
+    ClearPillColor(String),
     SetTheme(Theme),
 }
 
@@ -275,6 +298,8 @@ pub struct CommandError;
 /// set_avatar_color takes exactly action + identity + color; clear_avatar_color
 /// takes exactly action + identity. Pill choices take exactly action + id:
 /// set_main_pill (workspace only), toggle_declared_pill (offered catalog only).
+/// set_pill_color takes exactly action + id + color (a COLORS name, offered catalog only),
+/// clear_pill_color exactly action + id (same gate).
 /// apply checks main exclusion/capacity under the transaction gate. All writers
 /// apply checks main exclusion/capacity under the transaction gate. set_theme takes exactly
 /// action + theme with one of the three closed modes. All writers retain the other known
@@ -319,6 +344,21 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
                 if !pill_offered(id) { return Err(CommandError); }
                 Ok(Command::ToggleDeclaredPill(id.to_owned()))
             }
+        }
+        Some("set_pill_color") if map.len() == 3 => {
+            let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
+            let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
+            if !pill_offered(id) || !COLORS.contains(&color) {
+                return Err(CommandError);
+            }
+            Ok(Command::SetPillColor { id: id.to_owned(), color: color.to_owned() })
+        }
+        Some("clear_pill_color") if map.len() == 2 => {
+            let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
+            if !pill_offered(id) {
+                return Err(CommandError);
+            }
+            Ok(Command::ClearPillColor(id.to_owned()))
         }
         Some("set_theme") if map.len() == 2 => {
             let theme = map.get("theme").and_then(Value::as_str).ok_or(CommandError)?;
@@ -374,6 +414,16 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             next.declared_pills = Some(ids);
         }
         Command::SetTheme(theme) => next.theme = Some(*theme),
+        Command::SetPillColor { id, color } => {
+            if !pill_offered(id) || !COLORS.contains(&color.as_str()) {
+                return Err(CommandError);
+            }
+            next.pill_colors.insert(id.clone(), color.clone());
+        }
+        Command::ClearPillColor(id) => {
+            if !pill_offered(id) { return Err(CommandError); }
+            next.pill_colors.remove(id);
+        }
     }
     Ok(next)
 }

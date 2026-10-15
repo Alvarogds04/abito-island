@@ -932,12 +932,16 @@
           if (pillSaving || !isOpen() || screen !== 'pills') return;
           const current = model.normalize(prefs);
           const next = payload.action === 'set_main_pill' ? model.chooseMain(current, payload.id)
-            : payload.action === 'toggle_declared_pill' ? model.toggle(current, payload.id) : null;
+            : payload.action === 'toggle_declared_pill' ? model.toggle(current, payload.id)
+            : payload.action === 'set_pill_color' ? model.setColor(current, payload.id, payload.color)
+            : payload.action === 'clear_pill_color' ? model.clearColor(current, payload.id) : null;
           if (!next || (payload.action === 'set_main_pill' && payload.id === current.mainPill)) return;
           pillSaving = true; pillError = ''; render();
           call('prefs_action', payload).then(saved => {
             pillSaving = false; prefs = saved; render();
-            say('Pill guardada. Elegir no conecta el servicio.');
+            say(payload.action === 'set_pill_color' ? 'Color de pill guardado.'
+              : payload.action === 'clear_pill_color' ? 'Color de pill quitado.'
+              : 'Pill guardada. Elegir no conecta el servicio.');
           }, () => {
             pillSaving = false;
             pillError = 'No se pudo guardar la pill; se mantuvo la elección anterior.';

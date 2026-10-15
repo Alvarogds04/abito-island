@@ -2,8 +2,8 @@
 // #345: real Ajustes controls, rendered with existing row/button language.
 // Data goes through textContent and the closed catalog, never HTML or credentials.
 (function (root) {
-  const C = root.AbitoPillCatalog, P = root.AbitoPills;
-  if (!C || !P) return;
+  const C = root.AbitoPillCatalog, P = root.AbitoPills, A = root.AbitoAvatarColors;
+  if (!C || !P || !A) return;
   function render(host, raw, options) {
     const prefs = P.normalize(raw), o = options || {};
     const doc = host.ownerDocument || document;
@@ -52,6 +52,29 @@
           o.onCommand({ action: 'toggle_declared_pill', id: def.id });
         });
         line.append(button);
+        // #346 F033: colour of this pill — closed palette + «Sin color» (clear), offered
+        // rows only (the same gate as the write commands). The row wears only a name
+        // normalize already validated.
+        const color = P.colorOf(prefs, def.id);
+        if (color) line.dataset.color = color;
+        if (detail.offered) {
+          const pick = el('select', 'sfield pill-color');
+          pick.id = `pill-color-${def.id}`;
+          pick.setAttribute('aria-label', `Color de ${def.name}`);
+          pick.disabled = !!o.saving;
+          const none = el('option', '', 'Sin color'); none.value = '';
+          pick.append(none);
+          for (const name of A.PALETTE) {
+            const option = el('option', '', A.label(name)); option.value = name; pick.append(option);
+          }
+          pick.value = color;
+          pick.addEventListener('change', event => {
+            if (event.isTrusted !== true || o.saving || pick.value === color) return;
+            if (!pick.value) o.onCommand({ action: 'clear_pill_color', id: def.id });
+            else o.onCommand({ action: 'set_pill_color', id: def.id, color: pick.value });
+          });
+          line.append(pick);
+        }
         if (!detail.offered) line.append(el('p', 'snote', detail.detail));
         group.append(line);
       }
