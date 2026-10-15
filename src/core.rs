@@ -47,6 +47,21 @@ pub enum ReleaseOutcome {
     Cancelled,
 }
 
+impl ReleaseOutcome {
+    /// #264 (GD049): the origin this release decided for the island, when it
+    /// decided one at all — that is, a deliberate drag release and nothing
+    /// else. A short click only toggles (the dot never moved), a cancelled
+    /// release reconciles to the edge without a placement, and a release with
+    /// no press behind it is not the human putting the island anywhere.
+    /// This is the ONLY value the host persists across launches.
+    pub fn saved_position(&self) -> Option<(i32, i32)> {
+        match self {
+            ReleaseOutcome::Snapped { rect, .. } => Some((rect.x, rect.y)),
+            ReleaseOutcome::Toggle(_) | ReleaseOutcome::Cancelled => None,
+        }
+    }
+}
+
 /// Size + position for a compact<->overview switch, already anchored and clamped.
 #[derive(Debug, PartialEq)]
 pub enum TogglePlan {
@@ -613,5 +628,32 @@ mod tests {
         let again = core.toggle(&io, area());
         assert_eq!(again.size(), LOGICAL_OVERVIEW);
         assert!(!core.chat);
+    }
+
+    // --- #264 (GD049): only a deliberate drag release decides what the next
+    // --- launch remembers ------------------------------------------------------
+
+    #[test]
+    fn only_a_drag_release_carries_the_position_to_persist() {
+        let io = FakeIo::compact_top();
+        let mut core = Core::new();
+        // drag to the bottom-right and release: this is the placement to save
+        core.press(&io, (50.0, 20.0));
+        core.drag(&io, area(), (152.0, 1008.0));
+        let dragged = core.release(&io, area(), (50.0, 20.0), false);
+        assert!(matches!(dragged, ReleaseOutcome::Snapped { .. }));
+        assert_eq!(dragged.saved_position(), Some((910, 32 + 1048 - LOGICAL_COMPACT.1)));
+        // a short click toggles the island; it does not re-place it
+        core.press(&io, (50.0, 20.0));
+        let clicked = core.release(&io, area(), (50.0, 20.0), false);
+        assert!(matches!(clicked, ReleaseOutcome::Toggle(_)));
+        assert_eq!(clicked.saved_position(), None);
+        // a cancelled release reconciles to the edge but is no deliberate placement
+        core.press(&io, (50.0, 20.0));
+        let cancelled = core.release(&io, area(), (50.0, 20.0), true);
+        assert_eq!(cancelled, ReleaseOutcome::Cancelled);
+        assert_eq!(cancelled.saved_position(), None);
+        // no press at all: nothing to remember either
+        assert_eq!(core.release(&io, area(), (50.0, 20.0), false).saved_position(), None);
     }
 }

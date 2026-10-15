@@ -83,6 +83,32 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()
 }
 
+/// #264 (GD049): the position the human last dragged the island to, read for the
+/// FIRST geometry decision of a launch (before the window is placed) and for the
+/// post-load pin. Read-only; the WebView never receives it.
+pub fn saved_position(app: &AppHandle) -> Option<(i32, i32)> {
+    let state = app.state::<AppState>();
+    // the guard must drop before `state`: a tail expression would hold the borrow
+    let position = state.settings.prefs.lock().expect("prefs lock").position;
+    position
+}
+
+/// #264: commit the origin a drag release decided, through the SAME `prefs::transact`
+/// gate, file and atomic writer as every other preference — so a settings change
+/// after a drag can never drop this, and this write can never drop a settings change.
+/// No publication: the position is not part of the settings view the WebView reads.
+/// Failure leaves the previous position in memory (and on disk) for this launch.
+pub fn save_position(app: &AppHandle, x: i32, y: i32) -> bool {
+    let state = app.state::<AppState>();
+    prefs::transact(
+        &state.settings.prefs_serial,
+        &state.settings.prefs,
+        &prefs::Command::SetPosition(x, y),
+        |p| persist_prefs(app, p),
+        |_| {},
+    ).is_ok()
+}
+
 /// Closed preference commands: view, sound_on/off, set_sound_gain (0..=0.2),
 /// set_display_name, set/clear_avatar_color. Gain shares persistence and publication.
 #[tauri::command]
