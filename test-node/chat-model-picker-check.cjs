@@ -391,6 +391,42 @@ async function main() {
     }
   });
 
+  await check('R2: the row follows the target and the availability — turn, down target, no target, unchecked', async () => {
+    const page = await loadPage();
+    assert.equal(page.btn().disabled, false, 'ready + chosen target + no turn: interactive');
+    await page.pushChat({ availability: { state: 'unavailable', message: 'Modelo local caído.' } });
+    assert.equal(page.btn().disabled, true, 'a CHOSEN target that is down disables the row (the same refusal Send shows)');
+    await page.pushChat({ availability: { state: 'blocked', message: 'El modelo local está dormido.' } });
+    assert.equal(page.btn().disabled, true, 'a CHOSEN blocked target disables the row too');
+    await page.pushChat({ target: null, availability: { state: 'blocked', message: 'No hay un modelo local elegido.' } });
+    assert.equal(page.btn().disabled, false, 'no target chosen: opening the row is what lets the human choose (no dead end)');
+    await page.pushChat({ target: TARGET, availability: { state: 'unchecked', message: 'Todavía no se comprobó el modelo local.' } });
+    assert.equal(page.btn().disabled, false, 'no preflight verdict yet: nothing to protect');
+    await page.pushChat({
+      active_turn: 't-9',
+      turns: [{ turn_id: 't-9', state: 'queued', seq: 1, request_id: 'req-y', user_text: 'hola',
+        reply: '', finish_reason: null, error: null, trimmed_turns: 0,
+        profile_id: 'local-abito-gpt', profile_revision: 1 }],
+    });
+    assert.equal(page.btn().disabled, true, 'a running turn freezes the row');
+  });
+
+  await check('contract: chat.js may invoke chat_action, open_chat_url, models_action {list,select} and specialists_action {view} — nothing else', async () => {
+    const src = fs.readFileSync(path.join(FRONTEND, 'chat.js'), 'utf8');
+    const invoked = new Set();
+    for (const m of src.matchAll(/\b(?:call|invoke)\('([a-z_]+)'/g)) invoked.add(m[1]);
+    assert.deepEqual([...invoked].sort(), ['chat_action', 'models_action', 'open_chat_url', 'specialists_action'],
+      'the closed set of commands this file may put on the wire');
+    const actionsOf = name => {
+      const sites = src.match(new RegExp(`\\b${name}\\(`, 'g')) || [];
+      const literals = [...src.matchAll(new RegExp(`\\b${name}\\(\\{\\s*action:\\s*'([a-z_]+)'[^}]*\\}`, 'g'))].map(m => m[1]).sort();
+      assert.equal(literals.length, sites.length, `every ${name} call site must be a literal { action: … } object, not a variable`);
+      return literals;
+    };
+    assert.deepEqual(actionsOf('modelsAction'), ['list', 'select'], 'models_action may only list and select (the Ajustes → Modelos verbs)');
+    assert.deepEqual(actionsOf('specialistsAction'), ['view'], 'specialists_action may only read the role');
+  });
+
   console.log(`chat-model-picker-check: ${passed} passed, ${failures.length} failed`);
   if (failures.length) {
     for (const f of failures) console.log(`FAILED: ${f.name}: ${(f.err && f.err.message) || f.err}`);
