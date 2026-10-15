@@ -824,7 +824,19 @@
   const characterListen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
   let questionStreamSeen = false, chatStreamSeen = false;
   const characterQuestion = snap => { character.question(snap); };
+  // #347 mini-bots: only in the overview; leaving it (or the page) releases every instance.
+  let characterView = null;
+  const minisEl = $('minibots');
+  const minis = minisEl && window.AbitoMinis && typeof AbitoClay !== 'undefined'
+    ? AbitoMinis.create({ container: minisEl, doc: document, makeClay: (svg, seed) => AbitoClay.create(svg, { seed, viewBox: '36 32 128 128', shadow: false }) }) : null;
+  const syncMinis = () => {
+    if (!minis) return;
+    if (capsule.dataset.phase === 'expanded' && capsule.dataset.view === 'overview') minis.sync(characterView); else minis.clear();
+  };
+  new MutationObserver(syncMinis).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view'] });
   const characterChat = view => {
+    characterView = view;
+    syncMinis();
     characterTurnBusy = !!(view && view.active_turn && Array.isArray(view.turns) &&
       view.turns.some(t => t.turn_id === view.active_turn && ['queued', 'thinking', 'streaming', 'waiting_approval'].includes(t.state)));
     characterBusy();
@@ -837,7 +849,7 @@
     invoke('question_action', { payload: { action: 'view' } }).then(snap => { if (!questionStreamSeen) characterQuestion(snap); }, () => {});
     invoke('chat_action', { payload: { action: 'view' } }).then(view => { if (!chatStreamSeen) characterChat(view); }, () => {});
   }
-  window.addEventListener('pagehide', () => character.destroy());
+  window.addEventListener('pagehide', () => { character.destroy(); if (minis) minis.clear(); });
   // ---- boot ---------------------------------------------------------------
   if (typeof AbitoClay !== 'undefined') AbitoClay.onChange(() => character.motionChanged());
   character.activity();

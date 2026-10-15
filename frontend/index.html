@@ -21,6 +21,7 @@
   <!-- N6: notification with 1..N reply options (Pi questions QP/1 are one case). -->
   <script defer src="notify-view.js"></script>
   <script defer src="character-motion.js"></script>
+  <script defer src="character-minibots.js"></script>
   <script defer src="sound-engine.js"></script>
   <script defer src="sound-wiring.js"></script>
   <script defer src="island.js"></script>
@@ -65,6 +66,7 @@
           <div class="agentline"><strong>Abito</strong><span id="overview-status" class="source"></span></div>
           <p id="overview-detail" class="overview-detail"></p>
         </div>
+        <ul id="minibots" aria-label="Turnos activos" hidden></ul>
       </section>
       <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
       <!-- M2: Sileo-style notice, display only (own code, silence).

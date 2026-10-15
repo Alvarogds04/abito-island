@@ -26,6 +26,10 @@ test('R7 character controller is explicitly in the closed shipped list', () => {
   assert.equal(L.FRONTEND_FILES.filter(f => f === 'character-motion.js').length, 1);
 });
 
+test('mini-bot module is explicitly in the closed shipped list', () => {
+  assert.equal(L.FRONTEND_FILES.filter(f => f === 'character-minibots.js').length, 1);
+});
+
 test('F025 adds exactly its two assets to the closed shipped list', () => {
   assert.deepEqual(L.FRONTEND_FILES.filter(f => f.startsWith('chat-markdown.')).sort(), ['chat-markdown.css', 'chat-markdown.js']);
   assert.equal(new Set(L.FRONTEND_FILES).size, L.FRONTEND_FILES.length);

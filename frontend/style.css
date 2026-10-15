@@ -965,3 +965,9 @@ html[data-motion="reduce"] #island { transition: none; }
   transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), visibility 0s;
 }
 html[data-motion="reduce"] #capsule #island-header { transition: none; }
+
+/* #347 mini-bots: noninteractive strip of neutral mini-Abitos, one per active chat turn (overview only). */
+#minibots { position: absolute; left: 148px; right: 14px; bottom: 6px; margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 10px; pointer-events: none; }
+#minibots[hidden] { display: none; }
+.minibot { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--fs-label); line-height: 18px; }
+.minibot svg { width: 24px; height: 24px; flex: 0 0 24px; }
