@@ -20,7 +20,9 @@ pub const ENTRY_FILE_NAME: &str = "abito-island.desktop";
 /// answer; `Io` carries the OS reason verbatim.
 #[derive(Debug)]
 pub enum AutostartError {
-    /// The platform has no supported autostart mechanism in this build.
+    // Constructed only by the non-Unix stub (honest "not supported" answer);
+    // on Unix builds the match arm exists for the same contract.
+    #[cfg_attr(unix, allow(dead_code))]
     Unsupported,
     /// The binary path cannot cross a .desktop value (relative, control chars).
     InvalidPath,

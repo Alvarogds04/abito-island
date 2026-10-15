@@ -1311,3 +1311,31 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 - **Deleting an account:** «Quitar conexión» on the owned-account row (`abito_account_remove`) deletes the account and its key from `accounts.json`. Failure changes nothing and says so: «No se pudo quitar la conexión. No se cambió nada.»
 - **No copy from Pi (#409):** there is no import of Pi's `nan` connection; the key is entered by hand in the UI. The daemon, its protocol and `desktop-daemon/src/auth.cjs` are unchanged and still never read the user's Pi credentials.
 - **Tests:** `test-node/pills-check.cjs` and `settings-view-check.cjs` (no Pi card, no Pi IPC command, the owned-account row).
+
+## #315 — Autostart + tray with states
+
+- **Tray (Linux first):** a `tray-icon` tray (`src/trayhost.rs`) shows one of four
+  shape-distinct glyphs (`src/tray.rs`, 32×32 RGBA drawn by pure pixel rules —
+  clean ring / dashed ring / ring + badge dot / dimmed ring + slash, in the
+  §1.1 tokens `--go`, `--island-live`, `--sun`, `--faint`). The state derives
+  from the same snapshot facts the page sees (`docs/desktop-visual-language.md`
+  §10.3): a pending approval card or question → *Espera tu sí*; a connection
+  that is not `connected`/`working` (or a failed transport) → *No disponible*
+  (unknown names fail closed); `working` → *En curso*; otherwise *Listo*.
+- **Menu:** Mostrar Abito · Ocultar (the `Action::Hide` funnel) · Arrancar al
+  iniciar sesión (the #315 autostart toggle) · Salir (`quit_clean`). Every
+  step fails soft: a host without a working tray service runs tray-less and
+  says why on stderr. Non-Unix builds compile honest no-op stubs.
+- **Autostart (user-local XDG):** `src/autostart.rs` installs or removes
+  `autostart/abito-island.desktop` under `$XDG_CONFIG_HOME` (default
+  `$HOME/.config`), mirroring the packaging `.desktop` template (quoted
+  `Exec`, unquoted `Icon`). The entry file IS the toggle's state — no
+  parallel preference store; enabling is idempotent (temp file + rename,
+  0644) and replaces a corrupt entry. A failed change leaves the check mark
+  synced to the file system, never to the wish.
+- **Tests:** `src/tray_tests.rs` (state matrix, priority, fail-closed names,
+  glyph determinism and pairwise shape distinctness) and
+  `src/autostart_tests.rs` (closed template, quoting/refusal rules, path
+  fallback, round-trip in temp dirs, corrupt replacement, missing dir
+  creation). Cargo.lock is untouched (the `tray-icon` tauri feature adds no
+  packages).

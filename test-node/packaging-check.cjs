@@ -59,7 +59,9 @@ test('each gate FAILS when its rule is broken', () => {
   edit('tauri.conf.json', s => s.replace("script-src 'self'", "script-src 'self' 'unsafe-eval'"), /CSP/);
   edit('tauri.conf.json', s => s.replace('com.abitog.AbitoTauri', 'com.abitog.Abito.Preview'), /identifier/);
   edit('capabilities/main.json', s => s.replace('"core:event:allow-unlisten"', '"core:event:allow-unlisten", "core:window:allow-close"'), /capabilities drifted/);
-  edit('Cargo.toml', s => s.replace('tauri = { version = "2", features = [] }', 'tauri = { version = "2", features = ["devtools"] }'), /devtools/);
+  // #315: the closed tauri line now carries "tray-icon"; the gate under test
+  // (devtools must stay off) is proven against the current template.
+  edit('Cargo.toml', s => s.replace('tauri = { version = "2", features = ["tray-icon"] }', 'tauri = { version = "2", features = ["tray-icon", "devtools"] }'), /devtools/);
   const d = copyCrate(); fs.writeFileSync(path.join(d, 'frontend', 'extra.js'), '1');
   assert.throws(() => L.checkFrontend(d), /curated list/); fs.rmSync(d, { recursive: true });
 });
