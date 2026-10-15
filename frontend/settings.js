@@ -54,6 +54,7 @@
   let accountForm = null;
   let accountSaving = false;
   let accountError = '';
+  let accountNote = null; // #409 T2: outcome of the last removal attempt, in words we own
   let accountGeneration = 0;
   function discardAccountForm() {
     const secret = accountForm && accountForm.querySelector('#account-secret');
@@ -271,7 +272,7 @@
     if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
-    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null;
+    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null; accountNote = null;
     if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
     discardAccountForm();
@@ -443,13 +444,27 @@
         const title = el('b', 'srow-title', account.config.nombre); title.style.overflowWrap = 'anywhere';
         row.append(title, el('span', 'snote', account.hasCredential ? 'Clave guardada' : 'Sin clave'));
         row.append(accountTarget(wordBtn('Editar', () => { accountForm = makeAccountForm(account); render(); }, { disabled: accountSaving, aria: `Editar ${account.config.nombre}` })));
+        // #409 T2 / S5: deletion stays reachable now that the Pi card is gone (same sentences, same non-mutation).
+        row.append(accountTarget(wordBtn('Quitar conexión', () => removeAccount(account.accountId), { icon: 'plug-off', disabled: accountSaving, aria: `Quitar conexión: ${account.config.nombre}` })));
         section.append(row);
       }
       const add = accountTarget(wordBtn('Configurar proveedor', () => { accountForm = makeAccountForm(null); render(); }, { disabled: accountSaving }));
       add.id = 'account-add'; section.append(add);
     }
+    if (accountNote) { const n = el('p', accountNote.tone === 'red' ? 'snote sproblem' : 'snote', accountNote.say); n.setAttribute('role', accountNote.tone === 'red' ? 'alert' : 'status'); section.append(n); }
     if (accountError) { const error = el('p', 'snote', accountError); error.setAttribute('role', 'alert'); section.append(error); }
     body.append(section);
+  }
+  // #409 T2: removing an owned account from its row. Success updates the masked snapshot from the
+  // reply; failure changes nothing and says so. The verb and sentences are the ones of the removed card.
+  function removeAccount(accountId) {
+    if (accountSaving) return;
+    accountSaving = true; accountNote = null; render();
+    agent({ action: 'abito_account_remove', accountId }).then(r => {
+      accountSaving = false;
+      if (r && Object.hasOwn(r, "ownedAccounts") && r.ownedAccounts) ownedAccounts = { accounts: V.ownedAccounts(r.ownedAccounts) };
+      accountNote = { tone: 'go', say: 'Conexión quitada. La clave se borró del almacén de Abito.' }; render(); say(accountNote.say);
+    }, () => { accountSaving = false; accountNote = { tone: 'red', say: 'No se pudo quitar la conexión. No se cambió nada.' }; render(); });
   }
   function makeAccountForm(saved) {
     accountError = '';

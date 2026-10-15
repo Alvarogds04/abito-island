@@ -79,6 +79,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
         }
         return Promise.resolve(clone(backend.prefs));
       }
+      if (cmd === 'agent_action' && payload.action === 'abito_account_remove' && store) return store.remove(payload.accountId);
       if (cmd === 'agent_action' && payload.action === 'view') return Promise.resolve({ connection: 'no_daemon', ownedAccounts: store ? store.view() : undefined });
       if (cmd === 'hotkey_action' && payload.action === 'view') return Promise.resolve({ enabled: false });
       return Promise.reject(new Error('unexpected IPC'));
@@ -309,9 +310,16 @@ test('#408 S8 Conexiones holds providers, agents and services together; the old 
 });
 
 // #409: the Abito-owned account store only — nothing reads Pi's files any more.
-function fakeStore({ accounts = [] } = {}) {
-  const view = () => ({ accounts: accounts.map(a => clone(a)) });
-  return { view };
+function fakeStore({ accounts = [], failRemove = false } = {}) {
+  let owned = accounts.map(a => clone(a));
+  const view = () => ({ accounts: owned.map(a => clone(a)) });
+  return { view, removes: [],
+    remove(accountId) {
+      this.removes.push(accountId);
+      if (failRemove) return Promise.reject({ code: 'save_failed' });
+      owned = owned.filter(a => a.accountId !== accountId);
+      return Promise.resolve({ ownedAccounts: view() });
+    } };
 }
 const allText = node => node.textContent || '';
 
@@ -326,4 +334,28 @@ test('#409 T1 «Sacarlo»: Conexiones renders no Pi card, sends no pi_connection
   assert.ok(!text.includes('Volver a copiar desde Pi'), 'no re-copy label anywhere');
   assert.ok(!b.calls.some(c => c.cmd === 'pi_connection'), 'the page never asks the host about Pi');
   assert.ok(text.includes('nan (Pi)'), 'the manual owned-account row still renders');
+});
+
+test('#409 T2 «Quitar conexión» lives on the owned-account row: exact sentences, no mutation on failure', async () => {
+  const account = { accountId: 'nan', provider: 'nan', hasCredential: true, config: { nombre: 'nan (Pi)', baseUrl: 'https://api.nan.builders/v1', api: 'openai-completions', compat: {}, models: ['m0'], defaultModel: 'm0' } };
+  const buttons = b => (b.get('owned-accounts') ? b.get('owned-accounts').querySelectorAll('button') : []).map(x => allText(x));
+  // success: the row sends the closed verb, hears back and says the existing sentence
+  const store = fakeStore({ accounts: [account] });
+  const b = boot({ store }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  assert.ok(buttons(b).includes('Quitar conexión'), 'the owned-account row offers deletion'); // RED before T2
+  b.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Quitar conexión').fire('click'); await flush();
+  assert.deepEqual(store.removes, ['nan'], 'abito_account_remove carries the accountId');
+  assert.equal(b.get('settings-live').textContent, 'Conexión quitada. La clave se borró del almacén de Abito.');
+  assert.ok(!buttons(b).includes('Quitar conexión'), 'the row is gone after a successful removal');
+  // failure: OUR sentence, the store untouched, the row still there
+  const failing = fakeStore({ accounts: [account], failRemove: true });
+  const c = boot({ store: failing }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) c.load(file);
+  c.click('open-screen-settings'); await flush();
+  c.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Quitar conexión').fire('click'); await flush();
+  assert.equal(failing.view().accounts.length, 1, 'the store did not change');
+  assert.ok(buttons(c).includes('Quitar conexión'), 'the row is still there');
+  assert.match(allText(c.get('owned-accounts')), /No se pudo quitar la conexión\. No se cambió nada\./);
 });
