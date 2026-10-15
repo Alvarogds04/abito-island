@@ -24,6 +24,7 @@
 // artifact flaw for a blind spot.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+mod autostart;
 mod chathost;
 #[cfg(unix)]
 mod hotkeyhost;
