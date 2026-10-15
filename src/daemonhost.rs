@@ -3,7 +3,12 @@
 //! an equivalent, independently verified lifetime mechanism exists.
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+/// Bounded cadence of the runtime reap poll (#390): short enough that a dead
+/// daemon is never a zombie for long, long enough to cost nothing.
+#[cfg(target_os = "linux")]
+const REAP_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartupFailure { NodeMissing, PiMissing, HostMissing, SpawnFailed, Unsupported }
@@ -20,8 +25,10 @@ impl StartupFailure {
 #[derive(Default)]
 pub struct HostSlot {
     #[cfg(target_os = "linux")]
-    child: Mutex<Option<Host>>,
+    child: Arc<Mutex<Option<Host>>>,
     failure: Mutex<Option<StartupFailure>>,
+    /// #390: the exit status of a host child that died ON ITS OWN while the app lived.
+    exited: Arc<Mutex<Option<std::process::ExitStatus>>>,
 }
 impl HostSlot {
     pub fn start(&self) {
@@ -31,7 +38,7 @@ impl HostSlot {
         let result: Result<(), StartupFailure> = Err(StartupFailure::Unsupported);
         match result {
             #[cfg(target_os = "linux")]
-            Ok(child) => { *self.child.lock().expect("host child lock") = Some(child); }
+            Ok(child) => self.adopt(child),
             #[cfg(not(target_os = "linux"))]
             Ok(()) => {}
             Err(reason) => {
@@ -41,6 +48,28 @@ impl HostSlot {
         }
     }
     pub fn failure(&self) -> Option<StartupFailure> { *self.failure.lock().expect("host failure lock") }
+    /// Exit status of a host child that died by itself (early exit, crash, external kill);
+    /// `None` while it lives or after a normal `stop()`.
+    pub fn exit_status(&self) -> Option<std::process::ExitStatus> { *self.exited.lock().expect("host exit lock") }
+    /// Take ownership of a spawned host and reap it at runtime if it exits by itself:
+    /// a bounded `try_wait` poll (no unbounded `wait`), so a dead daemon is never left
+    /// as a zombie and its early exit becomes visible via [`exit_status`].
+    #[cfg(target_os = "linux")]
+    pub fn adopt(&self, host: Host) {
+        *self.child.lock().expect("host child lock") = Some(host);
+        let (child, exited) = (Arc::clone(&self.child), Arc::clone(&self.exited));
+        std::thread::spawn(move || loop {
+            std::thread::sleep(REAP_POLL);
+            let Ok(mut slot) = child.lock() else { return };
+            let Some(host) = slot.as_mut() else { return }; // stopped: nothing left to watch
+            if let Ok(Some(status)) = host.try_wait() {
+                eprintln!("island host: daemon exited by itself ({status}); reaped");
+                if let Ok(mut out) = exited.lock() { *out = Some(status); }
+                *slot = None; // Drop sees the child already reaped: no signal to a reused pid
+                return;
+            }
+        });
+    }
     pub fn stop(&self) {
         #[cfg(target_os = "linux")]
         drop(self.child.lock().expect("host child lock").take());
