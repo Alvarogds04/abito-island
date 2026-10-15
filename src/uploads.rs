@@ -24,31 +24,12 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::chat::ChatError;
-
-/// One stored attachment: the id the page references at submit, the
-/// sanitized display name, the detected MIME type and the byte size.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct Attachment {
-    pub id: String,
-    pub name: String,
-    pub mime: String,
-    pub size: u64,
-}
+use crate::chat::{valid_attachment_id, Attachment, ChatError};
 
 /// Hard size cap for one attached file.
 pub const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
 /// Inline cap for one text file (what prompt building may read back).
 pub const MAX_TEXT_SCALARS: usize = 32_000;
-/// Attachments accepted on one turn (enforced by submit parsing in chat.rs).
-pub const MAX_ATTACHMENTS_PER_TURN: usize = 5;
-
-/// An id the page may reference: `a-` + 16 lowercase hex chars.
-pub fn valid_attachment_id(id: &str) -> bool {
-    id.len() == 18
-        && id.starts_with("a-")
-        && id[2..].bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-}
 
 /// A stored file name the page may reference: `<16hex>-<sanitized name>`.
 /// This is the ONLY name submit validation accepts, and it is only ever
@@ -173,6 +154,7 @@ pub fn attach(dir: &Path, raw_name: &str, bytes: &[u8]) -> Result<Attachment, Ch
         name,
         mime: mime.to_string(),
         size: bytes.len() as u64,
+        file: stored,
     })
 }
 
@@ -256,6 +238,95 @@ pub fn split_raw_body(body: &[u8]) -> Result<(String, &[u8]), ChatError> {
         .ok_or_else(bad)?
         .to_string();
     Ok((name, &body[line_end + 1..]))
+}
+
+// --- read-back for prompt building (#343) ------------------------------------
+
+/// Bounded read of one stored attachment: the name must pass the stored-name
+/// grammar and resolve INSIDE `dir`, the size is capped again, and the
+/// content is re-validated with the SAME rules the attach command enforced.
+fn read_stored(dir: &Path, attachment: &Attachment) -> Option<Vec<u8>> {
+    if !valid_stored_name(&attachment.file)
+        || attachment.size == 0
+        || attachment.size > MAX_FILE_BYTES as u64
+    {
+        return None;
+    }
+    let path = dir.join(&attachment.file);
+    if !path.starts_with(dir) {
+        return None;
+    }
+    let meta = fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() != attachment.size {
+        return None;
+    }
+    fs::read(&path).ok()
+}
+
+/// One text attachment's inlined content (re-validated: UTF-8, no control
+/// characters, bounded scalars). `None` = the content is not available.
+pub fn stored_text(dir: &Path, attachment: &Attachment) -> Option<String> {
+    if attachment.mime != "text/plain" {
+        return None;
+    }
+    let bytes = read_stored(dir, attachment)?;
+    if !is_plain_text(&bytes) {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// One image attachment as a `data:` URL (same allowlist, re-detected from
+/// content). `None` = the content is not available or no longer matches.
+pub fn stored_data_url(dir: &Path, attachment: &Attachment) -> Option<String> {
+    use base64::Engine as _;
+    let bytes = read_stored(dir, attachment)?;
+    let mime = detect_mime(&bytes)?;
+    if mime != attachment.mime {
+        return None;
+    }
+    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
+/// #343: turn the attachment ids a submit references into attachment
+/// metadata, resolved ONLY from the uploads directory (the page never sends
+/// names, sizes or paths). Each id must match exactly one stored file whose
+/// grammar-checked name extends it; the MIME type is re-detected from the
+/// content. A missing or ambiguous id is a safe error — nothing is changed.
+pub fn resolve_ids(dir: &Path, ids: &[String]) -> Result<Vec<Attachment>, ChatError> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        let prefix = format!("{}-", &id[2..]);
+        let mut found: Option<Attachment> = None;
+        let entries = fs::read_dir(dir)
+            .map_err(|_| ChatError::attachment_unavailable())?;
+        for entry in entries.filter_map(|e| e.ok()) {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            if !file.starts_with(&prefix) || !valid_stored_name(&file) {
+                continue;
+            }
+            if found.is_some() {
+                return Err(ChatError::attachment_unavailable()); // ambiguous
+            }
+            let meta = entry.metadata().map_err(|_| ChatError::attachment_unavailable())?;
+            if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_FILE_BYTES as u64 {
+                return Err(ChatError::attachment_unavailable());
+            }
+            let bytes = fs::read(entry.path()).map_err(|_| ChatError::attachment_unavailable())?;
+            let Some(mime) = detect_mime(&bytes) else {
+                return Err(ChatError::attachment_unavailable());
+            };
+            found = Some(Attachment {
+                id: id.clone(),
+                name: file[prefix.len()..].to_string(),
+                mime: mime.to_string(),
+                size: meta.len(),
+                file,
+            });
+        }
+        out.push(found.ok_or_else(ChatError::attachment_unavailable)?);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

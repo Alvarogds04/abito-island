@@ -69,6 +69,10 @@ pub struct Ready {
     pub context_limit: usize,
     pub busy: bool,
     pub size_bytes: Option<u64>,
+    /// #343: the router's own `/modalities/vision` (same source the model
+    /// picker chips use). `Some(true)` is the ONLY value that lets an image
+    /// attachment reach the request; anything else refuses with a safe error.
+    pub vision: Option<bool>,
 }
 
 fn model_entry<'a>(models: Option<&'a Value>, alias: &str) -> Option<&'a Value> {
@@ -140,6 +144,7 @@ pub fn assess(
         context_limit: context_limit as usize,
         busy,
         size_bytes,
+        vision: props.pointer("/modalities/vision").and_then(Value::as_bool),
     })
 }
 
@@ -302,13 +307,24 @@ impl Lane {
         }
     }
     pub fn submit(&mut self, text: &str, client: &str, profile: &ProfileRef, specialist: Option<SpecialistRef>, now: u64) -> Result<crate::chat::Accepted, ChatError> {
+        self.submit_with_attachments(text, client, profile, specialist, now, Vec::new())
+    }
+
+    /// #343 — [`submit`] with attachment metadata already resolved from the
+    /// uploads directory (chathost does the resolution; the page only sends
+    /// ids). The same refusals apply; attachments never change ids or the
+    /// duplicate rule, and the cap is re-checked here as defense in depth.
+    pub fn submit_with_attachments(&mut self, text: &str, client: &str, profile: &ProfileRef, specialist: Option<SpecialistRef>, now: u64, attachments: Vec<crate::chat::Attachment>) -> Result<crate::chat::Accepted, ChatError> {
         if let Some(accepted) = self.convo.lookup(client) { return Ok(accepted); }
         // Refused input never creates a file, advances IDs or changes the visible context.
         if !crate::chat::valid_client_request_id(client) { return Err(ChatError::invalid_input("Identificador de envío inválido.")); }
         if self.convo.active().is_some() { return Err(ChatError::queue_full()); }
         crate::chat::validate_text(text)?;
+        if attachments.len() > crate::chat::MAX_ATTACHMENTS_PER_TURN {
+            return Err(ChatError::invalid_input("Son demasiados archivos adjuntos: hasta 5 por mensaje."));
+        }
         if self.history.is_some() && self.summary.is_none() { self.new_conversation(specialist, now)?; }
-        let accepted = self.convo.submit(text, client, profile)?;
+        let accepted = self.convo.submit_with_attachments(text, client, profile, attachments)?;
         self.persist_turn(&accepted.turn_id, now);
         Ok(accepted)
     }
@@ -389,7 +405,7 @@ pub fn run_turn(
     publish: &(dyn Fn() + Send + Sync),
 ) {
     let conversation_id = lane.lock().expect("chat lane lock").convo.id().to_owned();
-    run_turn_scoped(lane, &conversation_id, turn_id, target, system, deadlines, publish);
+    run_turn_scoped_uploads(lane, &conversation_id, turn_id, target, system, deadlines, publish, None);
 }
 
 /// Frozen conversation identity prevents a cancelled worker from touching a new conversation's t-1.
@@ -397,6 +413,20 @@ pub fn run_turn(
 pub fn run_turn_scoped(
     lane: &SharedLane, conversation_id: &str, turn_id: &str, target: &Target,
     system: &str, deadlines: Deadlines, publish: &(dyn Fn() + Send + Sync),
+) {
+    run_turn_scoped_uploads(lane, conversation_id, turn_id, target, system, deadlines, publish, None);
+}
+
+/// #343 — [`run_turn_scoped`] with the island's uploads directory: image
+/// attachments need a model with the vision modality (a refusal is a safe
+/// error turn, never a silent drop) and both text and image contents are
+/// read back from the uploads directory once per prompt. `None` (no island)
+/// resolves every attachment to an honest "no disponible" note.
+#[allow(clippy::too_many_arguments)]
+pub fn run_turn_scoped_uploads(
+    lane: &SharedLane, conversation_id: &str, turn_id: &str, target: &Target,
+    system: &str, deadlines: Deadlines, publish: &(dyn Fn() + Send + Sync),
+    uploads_dir: Option<&std::path::Path>,
 ) {
     let handle = Arc::new(Cancel::new());
     {
@@ -453,14 +483,49 @@ pub fn run_turn_scoped(
         });
     }
     publish();
+    // #343: the submitted turn's image attachments need a model that can
+    // actually read them. The preflight's /modalities/vision is the only
+    // source; anything else refuses BEFORE building the prompt.
+    let wants_vision = {
+        let l = lane.lock().expect("chat lane lock");
+        if l.convo.id() != conversation_id { return; }
+        l.convo.turn(turn_id).is_some_and(|t| t.attachments.iter().any(|a| a.mime.starts_with("image/")))
+    };
+    if wants_vision && ready.vision != Some(true) {
+        apply(Event::Error(crate::chat::ChatError::vision_unsupported()));
+        return;
+    }
+    // Resolve attachment contents once per id (bounded reads INSIDE the
+    // uploads directory only; missing files become honest notes in the text).
+    let mut contents: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Some(dir) = uploads_dir {
+        let attachments: Vec<crate::chat::Attachment> = {
+            let l = lane.lock().expect("chat lane lock");
+            if l.convo.id() != conversation_id { return; }
+            l.convo.attachments()
+        };
+        for a in attachments {
+            if contents.contains_key(&a.id) { continue; }
+            let resolved = if a.mime == "text/plain" {
+                crate::uploads::stored_text(dir, &a)
+            } else if a.mime.starts_with("image/") && ready.vision == Some(true) {
+                crate::uploads::stored_data_url(dir, &a)
+            } else {
+                None
+            };
+            if let Some(content) = resolved { contents.insert(a.id.clone(), content); }
+        }
+    }
+    let resolve = |a: &crate::chat::Attachment| contents.get(&a.id).cloned();
     let prompt = {
         let mut l = lane.lock().expect("chat lane lock");
         if l.convo.id() != conversation_id { return; }
-        l.convo.prompt_for(
+        l.convo.prompt_for_resolved(
             turn_id,
             system,
             ready.context_limit,
             target.max_output,
+            &resolve,
         )
     };
     let prompt = match prompt {

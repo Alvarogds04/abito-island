@@ -52,6 +52,60 @@ struct StoredTurn {
     trimmed_turns: usize,
     profile_id: String,
     profile_revision: u64,
+    /// #343: attachment metadata (never content). Old records without the
+    /// key still load, and plain turns write NO key at all — the historical
+    /// record shape is preserved byte for byte (shape pin in the tests).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<StoredAttachment>,
+}
+/// Metadata only: the file content stays in the island's uploads directory
+/// and is re-read (re-validated) when a prompt is built.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredAttachment {
+    id: String,
+    name: String,
+    mime: String,
+    size: u64,
+    file: String,
+}
+impl StoredAttachment {
+    fn from_attachment(a: &crate::chat::Attachment) -> io::Result<Self> {
+        if !crate::chat::valid_attachment_id(&a.id)
+            || !crate::uploads::valid_stored_name(&a.file)
+            || a.file != format!("{}-{}", &a.id[2..], a.name)
+            || a.name.is_empty()
+            || a.mime.is_empty()
+            || a.size == 0
+        {
+            return Err(invalid());
+        }
+        Ok(Self {
+            id: a.id.clone(),
+            name: a.name.clone(),
+            mime: a.mime.clone(),
+            size: a.size,
+            file: a.file.clone(),
+        })
+    }
+    fn into_attachment(self) -> io::Result<crate::chat::Attachment> {
+        if !crate::chat::valid_attachment_id(&self.id)
+            || !crate::uploads::valid_stored_name(&self.file)
+            || self.file != format!("{}-{}", &self.id[2..], self.name)
+            || self.name.is_empty()
+            || self.mime.is_empty()
+            || self.size == 0
+        {
+            return Err(invalid());
+        }
+        Ok(crate::chat::Attachment {
+            id: self.id,
+            name: self.name,
+            mime: self.mime,
+            size: self.size,
+            file: self.file,
+        })
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -120,6 +174,11 @@ impl StoredTurn {
             trimmed_turns: t.trimmed_turns,
             profile_id: t.profile.profile_id.clone(),
             profile_revision: t.profile.revision,
+            attachments: t
+                .attachments
+                .iter()
+                .map(StoredAttachment::from_attachment)
+                .collect::<io::Result<Vec<_>>>()?,
         })
     }
     fn into_turn(self, id: &str) -> io::Result<Turn> {
@@ -145,6 +204,11 @@ impl StoredTurn {
             None => None,
             _ => return Err(invalid()),
         };
+        let attachments = self
+            .attachments
+            .into_iter()
+            .map(StoredAttachment::into_attachment)
+            .collect::<io::Result<Vec<_>>>()?;
         Ok(Turn {
             turn_id: format!("t-{}", self.number),
             request_id: format!("{id}/r-{}", self.number),
@@ -169,6 +233,7 @@ impl StoredTurn {
                 lane_id: "conversation".into(),
             },
             trimmed_turns: self.trimmed_turns,
+            attachments,
         })
     }
 }

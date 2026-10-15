@@ -225,3 +225,51 @@ fn split_raw_body_takes_a_bounded_header_line() {
     assert!(split_raw_body(b"{}\nbytes").is_err());
     assert!(split_raw_body(b"").is_err());
 }
+
+// --- #343: read-back and id resolution ---------------------------------------
+
+#[test]
+fn stored_text_reads_back_only_validated_text() {
+    let dir = temp_root("readback");
+    let stored = attach(&dir, "notas.txt", "hola ñandú\n".as_bytes()).unwrap();
+    assert_eq!(stored_text(&dir, &stored).as_deref(), Some("hola ñandú\n"));
+    // A different file (or a missing one) never resolves.
+    let ghost = Attachment { id: "a-ffffffffffffffff".into(), name: stored.name.clone(), mime: "text/plain".into(), size: stored.size, file: format!("ffffffffffffffff-{}", stored.name) };
+    assert_eq!(stored_text(&dir, &ghost), None);
+    // A tampered record (size changed) is refused, not read.
+    let lying = Attachment { size: stored.size + 1, ..stored.clone() };
+    assert_eq!(stored_text(&dir, &lying), None);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn stored_data_url_encodes_only_matching_images() {
+    let dir = temp_root("dataurl");
+    let stored = attach(&dir, "foto.png", PNG).unwrap();
+    let url = stored_data_url(&dir, &stored).unwrap();
+    assert!(url.starts_with("data:image/png;base64,"), "{url}");
+    // Re-detection must agree with the record: a text file labeled as an
+    // image (or the reverse) never resolves.
+    let text = attach(&dir, "nota.txt", "hola".as_bytes()).unwrap();
+    let lying = Attachment { mime: "image/png".into(), ..text.clone() };
+    assert_eq!(stored_data_url(&dir, &lying), None);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn resolve_ids_maps_ids_to_metadata_inside_the_uploads_dir() {
+    let dir = temp_root("resolve");
+    let a = attach(&dir, "uno.txt", "contenido".as_bytes()).unwrap();
+    let b = attach(&dir, "dos.png", PNG).unwrap();
+    let resolved = resolve_ids(&dir, &[a.id.clone(), b.id.clone()]).unwrap();
+    assert_eq!(resolved[0].id, a.id);
+    assert_eq!(resolved[0].name, "uno.txt");
+    assert_eq!(resolved[0].mime, "text/plain");
+    assert_eq!(resolved[0].size, "contenido".len() as u64);
+    assert_eq!(resolved[1].mime, "image/png");
+    // Unknown id, forged grammar: safe error, nothing else changes.
+    assert!(resolve_ids(&dir, &["a-ffffffffffffffff".into()]).is_err());
+    assert!(resolve_ids(&dir, &["../../etc".into()]).is_err());
+    assert_eq!(listing(&dir).len(), 2);
+    let _ = fs::remove_dir_all(&dir);
+}

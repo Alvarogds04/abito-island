@@ -98,7 +98,7 @@ fn new_clears_context_without_deleting_and_reopen_restores_prompt_and_ids() {
             .unwrap()
             .messages
             .iter()
-            .map(|m| m.content.as_str())
+            .map(|m| m.content.as_str().unwrap())
             .collect::<Vec<_>>(),
         vec!["system", "first", "answer", "second"]
     );

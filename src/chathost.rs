@@ -190,6 +190,7 @@ pub fn submit(
     state: &AppState,
     text: &str,
     client_request_id: &str,
+    attachment_ids: &[String],
 ) -> Result<Value, BridgeError> {
     let lane = Arc::clone(&state.chat);
     if let Some(dup) = lane.lock().expect("chat lane lock").convo.lookup(client_request_id) {
@@ -203,9 +204,24 @@ pub fn submit(
     if let Err(e) = gate {
         return Err(chat_error(e));
     }
+    // #343: attachment ids are resolved ONLY against the island's uploads
+    // directory — the page never sends names, sizes, MIME types or paths.
+    // A chat without attachments never touches the island: no resolution,
+    // no directory, no error path. An unusable id is a safe error and
+    // changes nothing (no turn, no ids, no files).
+    let uploads_dir = (!attachment_ids.is_empty())
+        .then(|| {
+            let island = island_root().ok_or_else(|| chat_error(chat::ChatError::attachment_unavailable()))?;
+            abito_island::uploads::attachments_dir(&island).map_err(chat_error)
+        })
+        .transpose()?;
+    let attachments = match uploads_dir.as_deref() {
+        Some(dir) => abito_island::uploads::resolve_ids(dir, attachment_ids).map_err(chat_error)?,
+        None => Vec::new(),
+    };
     let (accepted, conversation_id) = {
         let mut l = lane.lock().expect("chat lane lock");
-        let accepted = l.submit(text, client_request_id, &target.profile, specialist, chatlane::history_now()).map_err(chat_error)?;
+        let accepted = l.submit_with_attachments(text, client_request_id, &target.profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
         (accepted, l.convo.id().to_owned())
     };
     publish_chat(app);
@@ -216,7 +232,7 @@ pub fn submit(
         std::thread::spawn(move || {
             let publish_app = app.clone();
             let publish = move || publish_chat(&publish_app);
-            chatlane::run_turn_scoped(&lane, &conversation_id, &turn, &target, &system, deadlines, &publish);
+            chatlane::run_turn_scoped_uploads(&lane, &conversation_id, &turn, &target, &system, deadlines, &publish, uploads_dir.as_deref());
         });
     }
     Ok(serde_json::to_value(accepted).unwrap_or(Value::Null))
@@ -278,7 +294,8 @@ pub async fn chat_action(
         Command::Submit {
             text,
             client_request_id,
-        } => submit(&app, &state, &text, &client_request_id),
+            attachments,
+        } => submit(&app, &state, &text, &client_request_id, &attachments),
         Command::Cancel { turn_id } => {
             let cancelled = chatlane::cancel(&state.chat, &turn_id);
             publish_chat(&app);
@@ -303,7 +320,7 @@ fn attach_error(e: chat::ChatError) -> BridgeError {
 
 async fn store_attachment<F>(work: F) -> Result<Value, BridgeError>
 where
-    F: FnOnce(&std::path::Path) -> Result<abito_island::uploads::Attachment, chat::ChatError> + Send + 'static,
+    F: FnOnce(&std::path::Path) -> Result<chat::Attachment, chat::ChatError> + Send + 'static,
 {
     let island = island_root().ok_or_else(|| {
         attach_error(chat::ChatError::invalid_input(
