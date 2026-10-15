@@ -208,6 +208,37 @@ pub async fn settings_view(app: AppHandle, webview: tauri::Webview, state: State
     Ok(json!({"open": open}))
 }
 
+/// #408 T8 — `pi_connection`: `{"action":"status"}` tells the page whether Pi defines a usable `nan`
+/// provider (`{exists, models}` and nothing else); `{"action":"import"}` is the click-scoped copy of
+/// that connection into Abito's own 0600 account store (see `piimport`). Same sender gate and rate
+/// limiter as the others; Pi's files are read only inside this command, never at startup. The reply
+/// carries counts and flags, never a path, a key, its length or a prefix.
+#[tauri::command]
+pub async fn pi_connection(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    AccountStore::guard(webview.label(), &url, &mut state.chat_rate.lock().expect("chat rate lock"), now_ms())?;
+    let action = abito_island::piimport::parse_action(&payload).ok_or_else(|| err("invalid_schema"))?;
+    let dir = abito_island::piimport::default_dir(std::env::var("HOME").ok().as_deref());
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(dir) = dir else { return Err(err("no_home")) };
+        match action {
+            abito_island::piimport::PiAction::Status => Ok(json!(abito_island::piimport::status(&dir))),
+            abito_island::piimport::PiAction::Import => {
+                let state = handle.state::<AppState>();
+                let mut accounts = state.settings.accounts.lock().expect("accounts lock");
+                let store = accounts.as_mut().ok_or_else(|| err("account_store_unavailable"))?;
+                let out = store.import_pi_nan(&dir, |snapshot| {
+                    let _ = handle.emit("agent:state", json!({"ownedAccounts": snapshot}));
+                })?;
+                Ok(json!({"imported": true, "replaced": out.replaced, "models": out.models, "ownedAccounts": store.view()}))
+            }
+        }
+    })
+    .await
+    .map_err(|_| err("pi_aborted"))?
+}
+
 /// The closed payload: exactly `{"open": <bool>}`.
 pub(crate) fn parse_settings_view(payload: &Value) -> Option<bool> {
     let obj = payload.as_object()?;

@@ -14,7 +14,7 @@ const clone = value => {
 };
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-function boot({ prefs = {}, failView = false, deferView = false } = {}) {
+function boot({ prefs = {}, failView = false, deferView = false, pi = null } = {}) {
   const nodes = new Map(), events = {}, native = {}, calls = [];
   let doc;
   class Element {
@@ -79,7 +79,9 @@ function boot({ prefs = {}, failView = false, deferView = false } = {}) {
         }
         return Promise.resolve(clone(backend.prefs));
       }
-      if (cmd === 'agent_action' && payload.action === 'view') return Promise.resolve({ connection: 'no_daemon' });
+      if (pi && cmd === 'pi_connection') return pi.handle(payload);
+      if (pi && cmd === 'agent_action' && payload.action === 'abito_account_remove') return pi.remove(payload);
+      if (cmd === 'agent_action' && payload.action === 'view') return Promise.resolve({ connection: 'no_daemon', ownedAccounts: pi ? pi.view() : undefined });
       if (cmd === 'hotkey_action' && payload.action === 'view') return Promise.resolve({ enabled: false });
       return Promise.reject(new Error('unexpected IPC'));
     } },
@@ -306,4 +308,61 @@ test('#408 S8 Conexiones holds providers, agents and services together; the old 
   for (const fn of b.events['abito:settings-select'] || []) fn({ detail: 'connectors' });
   await flush();
   assert.equal(b.get('settings-tab-accounts').getAttribute('aria-selected'), 'true');
+});
+
+// The fake host for T8: status/import/remove over a masked store. The synthetic key lives only here, in the
+// "host", and the test proves it never crosses into the page (any call result or any rendered text).
+function fakePi({ exists = true, models = 4, fail = null } = {}) {
+  const KEY = ['synthetic', 'host', 'key', '0009'].join('-');
+  let owned = [];
+  const view = () => ({ accounts: owned.map(a => clone(a)) });
+  return { KEY, view, imports: 0, removes: 0,
+    handle(payload) {
+      if (payload.action === 'status') return Promise.resolve({ exists, models: exists ? models : 0 });
+      this.imports++;
+      if (fail) return Promise.reject({ code: fail, message: 'raw host text ' + KEY });
+      const replaced = owned.length > 0;
+      owned = [{ accountId: 'nan', provider: 'nan', hasCredential: true, config: { nombre: 'nan (Pi)', baseUrl: 'https://api.nan.builders/v1', api: 'openai-completions', compat: {}, models: Array.from({ length: models }, (_, i) => 'm' + i), defaultModel: 'm0' } }];
+      return Promise.resolve({ imported: true, replaced, models, ownedAccounts: view() });
+    },
+    remove() { this.removes++; owned = []; return Promise.resolve({ ownedAccounts: view() }); } };
+}
+const allText = node => node.textContent || '';
+
+test('#408 T8 «Usar la conexión de Pi»: card only if Pi has nan; one click copies; the key never reaches the page', async () => {
+  const pi = fakePi();
+  const b = boot({ pi }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  assert.ok(b.get('pi-connection'), 'card offered');
+  assert.match(allText(b.get('pi-connection')), /Usar la conexión de Pi/);
+  assert.equal(pi.imports, 0, 'status never imports: nothing was read until the click');
+  const useBtn = b.get('pi-connection').querySelectorAll('button')[0];
+  useBtn.fire('click'); await flush();
+  assert.equal(pi.imports, 1);
+  assert.match(allText(b.get('pi-connection')), /Conectado/);
+  assert.match(allText(b.get('pi-connection')), /Conexión de nan copiada desde Pi \(4 modelos\)/);
+  assert.ok(!allText(b.get('settings-body')).includes(pi.KEY), 'the key is nowhere on the page');
+  assert.ok(!JSON.stringify(b.calls).includes(pi.KEY), 'the key is in no IPC payload the page sent');
+  // second click says it replaces; remove drops the connection
+  const labels = () => b.get('pi-connection').querySelectorAll('button').map(x => allText(x));
+  assert.ok(labels().includes('Quitar conexión') && labels().includes('Cambiar clave') && labels().includes('Volver a copiar desde Pi'));
+  const remove = b.get('pi-connection').querySelectorAll('button').find(x => allText(x) === 'Quitar conexión');
+  remove.fire('click'); await flush();
+  assert.equal(pi.removes, 1);
+  assert.match(allText(b.get('pi-connection')), /Usar la conexión de Pi/, 'back to the offer');
+});
+
+test('#408 T8 no card when Pi has no nan; a refused import shows OUR sentence, never the host text', async () => {
+  const none = boot({ pi: fakePi({ exists: false }) }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) none.load(file);
+  none.click('open-screen-settings'); await flush();
+  assert.ok(!none.get('pi-connection'), 'no nan in Pi: no card');
+  const pi = fakePi({ fail: 'pi_unsafe' });
+  const b = boot({ pi }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  b.get('pi-connection').querySelectorAll('button')[0].fire('click'); await flush();
+  assert.match(allText(b.get('pi-connection')), /no son privados/);
+  assert.ok(!allText(b.get('settings-body')).includes('raw host text') && !allText(b.get('settings-body')).includes(pi.KEY));
 });

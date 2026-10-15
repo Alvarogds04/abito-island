@@ -50,6 +50,8 @@
   let loginTarget = null;  // #408: { providerId, phase: 'active'|'error'|'cancelled', sawFlow } — the login this page started
   let pendingLogin = null; // a login that waits for the account it just asked the engine to create
   let agentState = null;
+  let piStatus = null;     // #408 T8: { exists, models } from the host, nothing else
+  let piNote = null;       // our own sentence about the last import/remove
   let ownedAccounts = null; // masked host projection only, independent of daemon pushes
   let accountForm = null;
   let accountSaving = false;
@@ -263,6 +265,7 @@
     for (const b of openers) b.setAttribute('aria-expanded', 'true');
     askSize(true);
     syncRail();
+    refreshPi();
     refreshAll();
     showScreen(id || screen);
     $('settings-close').focus();
@@ -271,7 +274,7 @@
     if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
-    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null;
+    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null; piNote = null;
     if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
     discardAccountForm();
@@ -432,6 +435,8 @@
     const section = el('section', 'ssec'); section.id = 'owned-accounts';
     section.append(sectionTitle('Configuración de proveedores'));
     section.append(el('p', 'snote', 'Guardado local en Abito. Conexión no probada; no cambia el modelo del chat.'));
+    const pi = !accountForm && ownedAccounts !== null ? V.piConnection(piStatus, ownedAccounts) : null;
+    if (pi) section.append(renderPiCard(pi));
     if (ownedAccounts === null) {
       section.append(el('p', 'snote', 'El almacén de cuentas no está disponible. No se modificó ninguna cuenta.'));
     } else if (accountForm) {
@@ -450,6 +455,48 @@
     }
     if (accountError) { const error = el('p', 'snote', accountError); error.setAttribute('role', 'alert'); section.append(error); }
     body.append(section);
+  }
+  // #408 T8: «Usar la conexión de Pi». The click is the only moment Pi's files are read (host side); the key
+  // never reaches this page. «Cambiar clave» opens the existing masked, write-only editor.
+  function renderPiCard(pi) {
+    const card = el('div', 'scard'); card.id = 'pi-connection'; card.dataset.state = pi.kind;
+    const head = el('span', 'sagent-head');
+    head.append(el('b', 'srow-title', pi.name), chipNode({ tone: pi.status.tone, icon: pi.status.icon, word: pi.status.word, aria: `nan: ${pi.status.word}` }));
+    card.append(head, el('p', 'snote', pi.note));
+    if (piNote) { const n = el('p', piNote.tone === 'red' ? 'snote sproblem' : 'snote', piNote.say); n.setAttribute('role', piNote.tone === 'red' ? 'alert' : 'status'); card.append(n); }
+    const actions = el('span', 'srow-actions');
+    if (pi.action) {
+      if (pi.action.warning) card.append(el('p', 'snote', pi.action.warning));
+      actions.append(accountTarget(wordBtn(pi.action.label, () => importFromPi(), { primary: !pi.action.replace, icon: 'refresh', disabled: accountSaving })));
+    }
+    if (pi.edit) {
+      const account = ownedAccounts.accounts.find(a => a.accountId === pi.edit.accountId);
+      if (account) actions.append(accountTarget(wordBtn(pi.edit.label, () => { accountForm = makeAccountForm(account); render(); }, { disabled: accountSaving })));
+    }
+    if (pi.remove) actions.append(accountTarget(wordBtn(pi.remove.label, () => removeAccount(pi.remove.accountId), { icon: 'plug-off', disabled: accountSaving, aria: `${pi.remove.label}: ${pi.name}` })));
+    if (actions.children.length) card.append(actions);
+    return card;
+  }
+  function refreshPi() {
+    call('pi_connection', { action: 'status' }).then(r => { piStatus = r && typeof r.exists === 'boolean' ? { exists: r.exists, models: Number(r.models) || 0 } : null; if (isOpen()) render(); }, () => { piStatus = null; });
+  }
+  function importFromPi() {
+    if (accountSaving) return;
+    accountSaving = true; piNote = null; render();
+    call('pi_connection', { action: 'import' }).then(r => {
+      accountSaving = false;
+      if (r && Object.hasOwn(r, "ownedAccounts") && r.ownedAccounts) ownedAccounts = { accounts: V.ownedAccounts(r.ownedAccounts) };
+      piNote = V.piOutcome(r); render(); say(piNote.say);
+    }, error => { accountSaving = false; piNote = V.piOutcome(null, error); render(); say(piNote.say); });
+  }
+  function removeAccount(accountId) {
+    if (accountSaving) return;
+    accountSaving = true; piNote = null; render();
+    agent({ action: 'abito_account_remove', accountId }).then(r => {
+      accountSaving = false;
+      if (r && Object.hasOwn(r, "ownedAccounts") && r.ownedAccounts) ownedAccounts = { accounts: V.ownedAccounts(r.ownedAccounts) };
+      piNote = { tone: 'go', say: 'Conexión quitada. La clave se borró del almacén de Abito.' }; render(); say(piNote.say);
+    }, () => { accountSaving = false; piNote = { tone: 'red', say: 'No se pudo quitar la conexión. No se cambió nada.' }; render(); });
   }
   function makeAccountForm(saved) {
     accountError = '';
