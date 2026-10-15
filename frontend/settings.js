@@ -242,16 +242,22 @@
   // The first state normally arrives within a few ms. If it never does, stop saying «Conectando»: the engine
   // is not there, and the screen says so (the same honest word as before, just not before it was asked).
   let connectTimer = 0;
+  // #408: Ajustes asks Rust for the Settings size on open and gives it back on close. Rust owns the number
+  // (geometry::settings_visible, clamped to the work area); the page only says open/closed. A failure
+  // leaves the chat size, which still works (scrolling), so it is never fatal.
+  function askSize(openNow) { call('settings_view', { open: openNow }).catch(() => {}); }
   function open(id) {
     clearTimeout(connectTimer);
     if (agentState === null) connectTimer = setTimeout(() => { if (agentState === null) { agentState = { connection: 'no_daemon' }; if (isOpen()) render(); } }, V.CONNECT_WAIT_MS);
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
     for (const b of openers) b.setAttribute('aria-expanded', 'true');
+    askSize(true);
     refreshAll();
     showScreen(id || screen);
     $('settings-close').focus();
   }
   function close(byKeyboard) {
+    if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
     capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null;

@@ -89,6 +89,30 @@ pub fn chat_visible(area_h_phys: i32, scale: f64) -> (i32, i32) {
     (CHAT_COLUMN_W, room.clamp(CHAT_MIN_H, CHAT_PREFERRED_H))
 }
 
+/// #408 — while Ajustes is open the chat column grows to a comfortable working size. VISIBLE sizes,
+/// logical px, same window margins as every other view.
+pub const SETTINGS_W: i32 = 720;
+/// Visible height when the screen allows it.
+pub const SETTINGS_PREFERRED_H: i32 = 680;
+/// Logical px of air left on each side of a width-limited Settings view.
+pub const SETTINGS_SIDE_GAP: i32 = 16;
+
+/// Visible Settings size in logical px for a work area of `area_w_phys` x `area_h_phys` physical px:
+/// 720 wide (less on a narrow screen, never wider than the work area minus the window margins and a
+/// little air) and the chat's height rule capped at 680. Rust owns the number, as for the chat.
+pub fn settings_visible(area_w_phys: i32, area_h_phys: i32, scale: f64) -> (i32, i32) {
+    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let room_w = (area_w_phys as f64 / s).floor() as i32 - WINDOW_MARGIN.0 - 2 * SETTINGS_SIDE_GAP;
+    let room_h = logical_area_h(area_h_phys, scale) - CHAT_FAR_GAP - WINDOW_MARGIN.1;
+    (SETTINGS_W.min(room_w.max(CHAT_COLUMN_W)), room_h.clamp(CHAT_MIN_H, SETTINGS_PREFERRED_H))
+}
+
+/// Native Settings window in logical px: the visible size plus the overview's window margins.
+pub fn settings_window(area_w_phys: i32, area_h_phys: i32, scale: f64) -> (i32, i32) {
+    let (w, h) = settings_visible(area_w_phys, area_h_phys, scale);
+    (w + WINDOW_MARGIN.0, h + WINDOW_MARGIN.1)
+}
+
 /// Native chat window in logical px: the visible column plus the overview's window margins.
 pub fn chat_window(area_h_phys: i32, scale: f64) -> (i32, i32) {
     let (w, h) = chat_visible(area_h_phys, scale);

@@ -1546,6 +1546,7 @@ fn main() {
             hotkeyhost::hotkey_action,
             settingshost::agent_action,
             settingshost::prefs_action,
+            settingshost::settings_view,
             specialistshost::specialists_action,
             record_facade_evidence,
             record_chat_evidence,

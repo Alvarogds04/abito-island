@@ -274,3 +274,13 @@ test('#408 Cuentas renders the provider-cards section (and tab selection follows
   assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'true');
   assert.ok(!b.get('provider-cards'), 'only the selected tab is rendered');
 });
+
+test('#408 opening Ajustes asks Rust for the Settings size (open only, no numbers) and closing gives it back', async () => {
+  const b = await settingsBoot({}, 'general');
+  const sizes = () => b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload);
+  assert.deepEqual(sizes(), [{ open: true }]);
+  b.click('settings-close'); await flush();
+  assert.deepEqual(sizes(), [{ open: true }, { open: false }]);
+  b.click('settings-close'); await flush();
+  assert.equal(sizes().length, 2, 'closing a closed panel asks nothing');
+});
