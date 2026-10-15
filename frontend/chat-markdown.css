@@ -21,3 +21,47 @@
 #chat-log .md-copy { flex: none; font-size: 11px; }
 #chat-log :is(.md-link, .md-copy):hover { background: rgba(255,255,255,.09); }
 #chat-log :is(.md-link, .md-copy):focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
+
+/* #343: the composer's attachment strip and picker button. Both are appended
+   to the composer form by chat.js; flex `order` places the strip under the
+   draft row and the paperclip after the send button, without touching any
+   existing rule. */
+#chat-attachments {
+  order: 9;
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 2px 0;
+}
+.composer-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
+  font: 12px/1.4 system-ui, sans-serif;
+}
+.composer-attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment-size { color: var(--island-muted, rgba(255, 255, 255, .6)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.composer-attachment-remove {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.composer-attachment-remove svg { width: 13px; height: 13px; }
+.composer-attachment-remove:hover { background: rgba(255, 255, 255, .1); }
+#chat-attach { order: 10; }
+#chat-attach svg { width: 16px; height: 16px; }

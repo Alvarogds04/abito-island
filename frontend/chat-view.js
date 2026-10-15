@@ -170,6 +170,15 @@
 
   function turnRows(turn) {
     const rows = [{ kind: 'user', text: turn.user_text }];
+    // #343: what the turn carried, named — the files live in the island's
+    // uploads directory; the log names them, it never links or inlines them.
+    if (Array.isArray(turn.attachments) && turn.attachments.length) {
+      const names = turn.attachments.map(a => (a && typeof a.name === 'string') ? a.name : '?').join(', ');
+      rows.push({
+        kind: 'note', short: 'Adjuntos', icon: 'info',
+        text: `Archivos adjuntos: ${names}`,
+      });
+    }
     if (turn.trimmed_turns > 0) {
       rows.push({
         kind: 'note', short: 'Recortado', icon: 'info',
@@ -376,5 +385,18 @@
     return SENDABLE.has(state);
   }
 
-  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote };
+  // #343: a byte size as one Spanish chip label (comma decimal, kB/MB).
+  function formatSize(bytes) {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n < 0) return '';
+    const oneDecimal = value => {
+      const tenths = Math.round(value * 10);
+      return `${Math.floor(tenths / 10)},${tenths % 10}`;
+    };
+    if (n < 1024) return `${Math.round(n)} B`;
+    if (n < 1024 * 1024) return `${oneDecimal(n / 1024)} kB`;
+    return `${oneDecimal(n / (1024 * 1024))} MB`;
+  }
+
+  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

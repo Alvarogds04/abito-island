@@ -338,7 +338,7 @@
     const said = changed ? null : V.announcement(view, next);
     if (changed) {
       resetHistory(next);
-      if (view) { input.value = ''; pendingId = null; localProblem = ''; autosize(); }
+      if (view) { input.value = ''; pendingId = null; localProblem = ''; autosize(); attachments = []; renderAttachments(); }
     }
     view = next;
     renderTarget();
@@ -453,6 +453,118 @@
     input.style.height = 'auto';
     input.style.height = Math.max(MIN_INPUT, Math.min(MAX_INPUT, input.scrollHeight)) + 'px';
   }
+
+  // ---- #343: file attachments in the composer ------------------------------
+  // Dropped or picked files never become page data: Rust validates (MIME
+  // allowlist, size cap) and stores them in the island's OWN uploads
+  // directory — a dropped path goes to `chat_attach`, a picked file as raw
+  // bytes (`chat_attach_data`: one-line JSON header, LF, file bytes). The
+  // composer only holds the returned metadata; the ids ride with the next
+  // submit. A REJECTED file calls nothing, stores nothing, shows no chip.
+  const ATTACH_MAX = 5; // mirrors chat.rs MAX_ATTACHMENTS_PER_TURN
+  const PAPERCLIP_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.5 7l-5.2 5.2a1.8 1.8 0 0 0 2.5 2.5l5.7-5.7a4 4 0 0 0-5.7-5.7L5 9.1a6.2 6.2 0 0 0 8.8 8.8"/></svg>';
+  const ATTACH_TOO_MANY = 'Son demasiados archivos adjuntos: hasta 5 por mensaje.';
+  let attachments = []; // metadata only, page memory like the draft
+  const attachStrip = document.createElement('div');
+  attachStrip.id = 'chat-attachments';
+  attachStrip.className = 'composer-attachments';
+  attachStrip.setAttribute('role', 'list');
+  attachStrip.setAttribute('aria-label', 'Archivos adjuntos');
+  attachStrip.hidden = true;
+  const pickButton = document.createElement('button');
+  pickButton.type = 'button';
+  pickButton.id = 'chat-attach';
+  pickButton.className = 'round';
+  pickButton.setAttribute('aria-label', 'Adjuntar archivo');
+  // Same rule as every icon: parsed from a source constant with DOMParser,
+  // never assigned as markup.
+  {
+    const doc = svgParser.parseFromString(PAPERCLIP_SVG, 'image/svg+xml');
+    const node = doc.documentElement && doc.documentElement.nodeName === 'svg'
+      ? document.importNode(doc.documentElement, true) : null;
+    if (node) pickButton.append(node);
+  }
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.id = 'chat-attach-input';
+  fileInput.multiple = true;
+  fileInput.hidden = true;
+  fileInput.setAttribute('tabindex', '-1');
+  fileInput.setAttribute('aria-hidden', 'true');
+  form.append(attachStrip, pickButton, fileInput); // flex `order` places them
+
+  function renderAttachments() {
+    attachStrip.replaceChildren();
+    attachStrip.hidden = attachments.length === 0;
+    for (const a of attachments) {
+      const chip = document.createElement('span');
+      chip.className = 'composer-attachment';
+      chip.setAttribute('role', 'listitem');
+      const name = document.createElement('span');
+      name.className = 'composer-attachment-name';
+      name.textContent = a.name; // text, never markup
+      const size = document.createElement('span');
+      size.className = 'composer-attachment-size';
+      size.textContent = V.formatSize(a.size);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'composer-attachment-remove';
+      remove.setAttribute('aria-label', `Quitar ${a.name}`);
+      const x = iconNode('cross');
+      if (x) remove.append(x);
+      remove.addEventListener('click', () => {
+        attachments = attachments.filter(other => other.id !== a.id);
+        renderAttachments();
+      });
+      chip.append(name, size, remove);
+      attachStrip.append(chip);
+    }
+  }
+
+  function addAttachment(att) {
+    if (!att || typeof att.id !== 'string' || typeof att.name !== 'string') return;
+    if (attachments.some(other => other.id === att.id)) return;
+    attachments.push({
+      id: att.id,
+      name: att.name,
+      mime: typeof att.mime === 'string' ? att.mime : '',
+      size: att.size,
+    });
+    renderAttachments();
+    setLive(`${att.name} adjuntado. Se envía con el próximo mensaje.`);
+  }
+
+  async function attachPath(path) {
+    if (typeof path !== 'string' || !path) return;
+    if (attachments.length >= ATTACH_MAX) { setLive(ATTACH_TOO_MANY); return; }
+    try {
+      addAttachment(await call('chat_attach', { path }));
+    } catch (error) {
+      setLive((error && error.message) || 'No se pudo adjuntar el archivo.');
+    }
+  }
+
+  async function attachPicked(file) {
+    if (!file || typeof file.name !== 'string') return;
+    if (attachments.length >= ATTACH_MAX) { setLive(ATTACH_TOO_MANY); return; }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const header = new TextEncoder().encode(`${JSON.stringify({ name: file.name })}\n`);
+      const body = new Uint8Array(header.length + bytes.length);
+      body.set(header, 0);
+      body.set(bytes, header.length);
+      addAttachment(await invoke('chat_attach_data', body));
+    } catch (error) {
+      setLive((error && error.message) || 'No se pudo adjuntar el archivo.');
+    }
+  }
+
+  pickButton.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const files = Array.prototype.slice.call(fileInput.files || []);
+    fileInput.value = '';
+    for (const file of files) attachPicked(file);
+  });
   input.addEventListener('input', () => { localProblem = ''; autosize(); renderControls(); });
   input.addEventListener('keydown', event => {
     // IME owns the key: `isComposing` while it composes, and the legacy 229 sentinel for
@@ -479,11 +591,14 @@
     inFlight = true;
     localProblem = '';
     renderControls();
-    action({ action: 'submit', text, client_request_id: pendingId }).then(
+    const payload = { action: 'submit', text, client_request_id: pendingId };
+    if (attachments.length) payload.attachments = attachments.map(a => a.id);
+    action(payload).then(
       () => {
         inFlight = false;
         pendingId = null;
         if (input.value === text) { input.value = ''; autosize(); } // accepted: the draft became a turn
+        if (attachments.length) { attachments = []; renderAttachments(); } // the files went with the turn
         renderControls();
         action({ action: 'view' }).then(apply, () => {});
       },
@@ -548,6 +663,14 @@
   // ---- state stream -------------------------------------------------------------
   if (listen) {
     listen('chat:state', event => apply(event && event.payload)).catch(() => {});
+    // #343: a file dropped on the island is offered to the chat — only while
+    // the chat view is open, and only well-formed payloads reach the IPC.
+    listen('tauri://drag-drop', event => {
+      if (capsule.dataset.view !== 'chat') return;
+      const paths = event && event.payload && event.payload.paths;
+      if (!Array.isArray(paths)) return;
+      for (const path of paths) attachPath(path);
+    }).catch(() => {});
     listen('specialists:state', event => applySpecialists(event && event.payload)).catch(() => {});
     listen('models:state', event => {
       const next = event && event.payload;
