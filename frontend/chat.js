@@ -103,6 +103,15 @@
   let modelListing = null;    // `models_action list` + `models:state`
   let modelBusy = false;      // one selection in flight
   let pickerOpen = false;
+  // #414: the Ajustes → Modelos allowlist (typed pref, read-only here). The picker offers only
+  // the chosen models, falling back to all when none is chosen; the host republishes it as
+  // `prefs:state`, so a change in Ajustes reaches the row without a new command.
+  let chosenModels = null;
+  function applyChosenModels(p) {
+    if (!p || typeof p !== 'object') return;
+    chosenModels = p.chosenModels && typeof p.chosenModels === 'object' && !Array.isArray(p.chosenModels) ? p.chosenModels : {};
+    if (pickerOpen) renderPicker();
+  }
 
   function renderPicker() {
     if (!modelPicker || !modelNote) return;
@@ -114,7 +123,7 @@
     modelNote.hidden = !note;
     if (note) modelPicker.append(modelNote);
     const enabled = V.modelButtonEnabled(view);
-    for (const row of V.modelRows(modelListing)) {
+    for (const row of V.filterChosen(V.modelRows(modelListing), chosenModels)) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'picker-row';
@@ -676,9 +685,13 @@
       const next = event && event.payload;
       if (next && typeof next === 'object') { modelListing = next; if (pickerOpen) renderPicker(); }
     }).catch(() => {});
+    // #414: the allowlist arrives with the prefs stream; the host republishes it on every change.
+    listen('prefs:state', event => applyChosenModels(event && event.payload)).catch(() => {});
   }
   action({ action: 'view' }).then(apply, () => {});
   // R4 needs to know whether the ACTIVE role fixes a model: one read-only
   // `view` (the section issues the same one); the page never writes a role.
   specialistsAction({ action: 'view' }).then(applySpecialists, () => {});
+  // #414: the allowlist the row honours — one read-only view; nothing here ever writes a pref.
+  call('prefs_action', { action: 'view' }).then(applyChosenModels, () => {});
 })();

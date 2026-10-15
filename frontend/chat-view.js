@@ -237,6 +237,22 @@
     return chips;
   }
 
+  // #414: the Ajustes → Modelos allowlist (typed pref `chosen_models`). The picker offers ONLY
+  // the chosen models of the providers, falling back to ALL of them when nothing is chosen.
+  // A row the allowlist cannot vouch for (no `provider` field — today's local profiles) is never
+  // filtered out: the allowlist names provider models, not local ones.
+  function filterChosen(rows, chosen) {
+    const list = Array.isArray(rows) ? rows : [];
+    const store = chosen && typeof chosen === 'object' && !Array.isArray(chosen) ? chosen : {};
+    const ids = new Set();
+    for (const value of Object.values(store)) {
+      if (!Array.isArray(value)) continue;
+      for (const id of value) if (typeof id === 'string') ids.add(id);
+    }
+    if (!ids.size) return list;
+    return list.filter(r => !!r && typeof r === 'object' && (typeof r.provider !== 'string' || !r.provider || ids.has(r.id)));
+  }
+
   function modelRows(listing) {
     const profiles = listing && Array.isArray(listing.profiles) ? listing.profiles : [];
     return profiles.map(p => {
@@ -258,6 +274,9 @@
       return {
         id: p.profile_id || null,
         title,
+        // #414: the provenance the allowlist needs — a provider model row names its provider;
+        // local profiles carry none and are never filtered out.
+        provider: typeof p.provider === 'string' && p.provider ? p.provider : undefined,
         facts: facts.join(' · '),
         state: gateLabel(gateState),
         message,
@@ -398,5 +417,5 @@
     return `${oneDecimal(n / (1024 * 1024))} MB`;
   }
 
-  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

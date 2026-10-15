@@ -146,13 +146,17 @@ const clone = value => JSON.parse(JSON.stringify(value));
 
 /* One fresh island page per check: the production scripts are evaluated
    against a sandbox whose `window` is the sandbox itself, exactly like the page. */
-async function loadPage() {
+async function loadPage(opts) {
+  const o = opts || {};
   const dom = makeDom();
   const invocations = [];
   const listeners = {};
   const chat = clone(CHAT_VIEW);
   const listing = clone(LISTING);
   const specialists = clone(SPECIALISTS);
+  // #414: the typed prefs the host publishes (chosenModels arrives with it)
+  const prefs = Object.assign({ v: 1, sound: false }, o.prefs ? clone(o.prefs) : {});
+  if (Array.isArray(o.extraProfiles)) listing.profiles.push(...clone(o.extraProfiles));
 
   const emit = (name, payload) => { for (const cb of (listeners[name] || [])) cb({ payload: clone(payload) }); };
 
@@ -182,6 +186,7 @@ async function loadPage() {
       return Promise.resolve(clone(listing));
     }
     if (cmd === 'specialists_action') return Promise.resolve(clone(specialists));
+    if (cmd === 'prefs_action') return Promise.resolve(clone(prefs));
     return Promise.reject(new Error(`unexpected command: ${cmd}`));
   };
   const listen = (name, cb) => {
@@ -239,8 +244,14 @@ async function loadPage() {
     emit('specialists:state', specialists);
     await settle();
   };
+  const pushPrefs = async next => {
+    Object.assign(prefs, next);
+    emit('prefs:state', prefs);
+    await settle();
+  };
 
-  return { dom, invocations, byAction, settle, escape, pushChat, pushSpecialists,
+  return { dom, invocations, byAction, settle, escape, pushChat, pushSpecialists, pushPrefs,
+    V: sandbox.window.AbitoChatView,
     btn: () => dom.el('chat-model-btn'),
     name: () => dom.el('chat-model-name'),
     note: () => dom.el('chat-model-note'),
@@ -411,14 +422,55 @@ async function main() {
     assert.equal(page.btn().disabled, true, 'a running turn freezes the row');
   });
 
-  await check('contract: chat.js may invoke chat_action, open_chat_url, models_action {list,select} and specialists_action {view} — nothing else', async () => {
+  await check('#414 filterChosen: the allowlist keeps local rows and only the CHOSEN provider rows; none chosen = all', async () => {
+    const page = await loadPage();
+    const F = page.V.filterChosen;
+    const rows = [
+      { id: 'local-1', title: 'L1' },
+      { id: 'prov-a', title: 'PA', provider: 'anthropic' },
+      { id: 'prov-b', title: 'PB', provider: 'anthropic' },
+    ];
+    const ids = (out, chosen) => [...F(out, chosen)].map(r => r.id); // spread: vm-realm arrays compare by structure
+    assert.deepEqual(ids(rows, {}), ['local-1', 'prov-a', 'prov-b'], 'empty allowlist: the fallback is ALL of them');
+    assert.deepEqual(ids(rows, null), ['local-1', 'prov-a', 'prov-b']);
+    assert.deepEqual(ids(rows, 'junk'), ['local-1', 'prov-a', 'prov-b'], 'a hostile stored value reads as nothing chosen');
+    assert.deepEqual(ids(rows, { anthropic: ['prov-b'] }), ['local-1', 'prov-b'],
+      'a local row is never a provider choice; the unchosen provider row is gone');
+    assert.deepEqual(ids(rows, { anthropic: [42, null] }), ['local-1', 'prov-a', 'prov-b'], 'non-string entries choose nothing');
+    assert.deepEqual([...F(null, { anthropic: ['x'] })], []);
+  });
+
+  await check('#414 allowlist wiring: the picker offers only the chosen provider models, falling back to all when none chosen', async () => {
+    const page = await loadPage({
+      prefs: { chosenModels: { anthropic: ['claude-sonnet-4-5'] } },
+      extraProfiles: [
+        { profile_id: 'claude-sonnet-4-5', revision: 1, alias: 'Claude Sonnet', provider: 'anthropic', origin: 'https://api.anthropic.com', selectable: true, gate: { state: 'ready' } },
+        { profile_id: 'claude-opus-4-6', revision: 1, alias: 'Claude Opus', provider: 'anthropic', origin: 'https://api.anthropic.com', selectable: true, gate: { state: 'ready' } },
+      ],
+    });
+    const viewInvoked = page.byAction('prefs_action');
+    assert.ok(viewInvoked.some(p => p.action === 'view'), 'the row reads the typed prefs once, read-only');
+    page.btn().click();
+    await page.settle();
+    assert.ok(/Otro-local/.test(rowNames(pickerRows(page)).join('|')), 'sanity: the picker opened with the local rows');
+    assert.ok(rowNames(pickerRows(page)).includes('Claude Sonnet'), 'a chosen provider model is offered');
+    assert.ok(!rowNames(pickerRows(page)).includes('Claude Opus'), 'an unchosen provider model is not offered');
+    // none chosen: the fallback is ALL of them, provider rows included
+    await page.pushPrefs({ chosenModels: {} });
+    assert.ok(rowNames(pickerRows(page)).includes('Claude Opus'), 'no allowlist: every row comes back');
+    assert.ok(rowNames(pickerRows(page)).includes('Abito-gpt'), 'local rows are always offered');
+  });
+
+  await check('contract: chat.js may invoke chat_action, open_chat_url, models_action {list,select}, specialists_action {view} and prefs_action {view} — nothing else', async () => {
     const src = fs.readFileSync(path.join(FRONTEND, 'chat.js'), 'utf8');
     const invoked = new Set();
     for (const m of src.matchAll(/\b(?:call|invoke)\('([a-z_]+)'/g)) invoked.add(m[1]);
     assert.deepEqual([...invoked].sort(),
       // #343: chat_attach (dropped path) and chat_attach_data (picked bytes)
       // are part of the closed set now — same gate (sender + rate) in Rust.
-      ['chat_action', 'chat_attach', 'chat_attach_data', 'models_action', 'open_chat_url', 'specialists_action'],
+      // #414: prefs_action joins it READ-ONLY (view) so the row can honour the
+      // Ajustes → Modelos allowlist; a listen to prefs:state keeps it current.
+      ['chat_action', 'chat_attach', 'chat_attach_data', 'models_action', 'open_chat_url', 'prefs_action', 'specialists_action'],
       'the closed set of commands this file may put on the wire');
     const actionsOf = name => {
       const sites = src.match(new RegExp(`\\b${name}\\(`, 'g')) || [];
@@ -428,6 +480,9 @@ async function main() {
     };
     assert.deepEqual(actionsOf('modelsAction'), ['list', 'select'], 'models_action may only list and select (the Ajustes → Modelos verbs)');
     assert.deepEqual(actionsOf('specialistsAction'), ['view'], 'specialists_action may only read the role');
+    const prefsSites = src.match(/\bprefs_action', \{\s*action:\s*'([a-z_]+)'/g) || [];
+    assert.equal(prefsSites.length, 1, `prefs_action has exactly one call site, a literal { action: … } (got ${prefsSites.length})`);
+    assert.ok(/action:\s*'view'/.test(prefsSites[0]), 'prefs_action may only READ the prefs (view)');
   });
 
   console.log(`chat-model-picker-check: ${passed} passed, ${failures.length} failed`);

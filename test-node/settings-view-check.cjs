@@ -866,6 +866,75 @@ test('#380 theme wiring: one closed sender, no local paint, and a failed save ke
   assert.match(html, /<script defer src="theme\.js"><\/script>/);
 });
 
+// ---- #414: Ajustes → Modelos, grouped by CONNECTED provider ------------------------------
+test('#414 modelsTabView: one group per engine provider, connected ones with their models', () => {
+  const state = {
+    connection: 'connected',
+    providers: [
+      { id: 'anthropic', name: 'Anthropic', methods: ['oauth'], configured: true },
+      { id: 'openai', name: 'OpenAI', methods: ['oauth', 'api_key'], configured: false },
+      { id: 'nan', name: 'NaN', methods: ['api_key'], configured: false },
+    ],
+    accounts: [{ accountId: 'a1', provider: 'openai', configured: true }],
+    models: [
+      { provider: 'anthropic', id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', reasoning: true, contextWindow: 200000 },
+      { provider: 'anthropic', id: 'claude-opus-4-6', name: 'Claude Opus 4.6', reasoning: true, contextWindow: 200000 },
+      { provider: 'openai', id: 'gpt-5.2', name: 'GPT-5.2', reasoning: false, contextWindow: 128000 },
+      { provider: 'gone', id: 'x', name: 'X' }, // a model whose provider row disappeared is never shown
+    ],
+  };
+  const v = S.modelsTabView(state, { anthropic: ['claude-opus-4-6'] });
+  assert.equal(v.kind, 'ready');
+  assert.deepEqual(v.groups.map(g => [g.id, g.connected]), [['anthropic', true], ['openai', true], ['nan', false]], 'one group per provider, engine order');
+  const anthropic = v.groups[0];
+  assert.deepEqual(anthropic.models.map(m => [m.id, m.name, m.chosen]), [
+    ['claude-sonnet-4-5', 'Claude Sonnet 4.5', false],
+    ['claude-opus-4-6', 'Claude Opus 4.6', true],
+  ], 'the chosen one is marked, others not');
+  assert.equal(v.groups[1].models.length, 1, 'a connected provider via a configured account shows its models');
+  assert.equal(v.groups[1].models[0].id, 'gpt-5.2');
+  // disconnected: one-line hint, no models, never invented ones
+  const nan = v.groups[2];
+  assert.equal(nan.models, undefined);
+  assert.ok(nan.hint.includes('NaN') && nan.hint.includes('Conexiones'), nan.hint);
+  assert.ok(!JSON.stringify(v).includes('"x"'), 'a model of an unknown provider never leaks in');
+});
+
+test('#414 modelsTabView: the chosen map arrives only from typed prefs and never marks unknown models', () => {
+  const state = { connection: 'connected', providers: [{ id: 'p', name: 'P', methods: ['api_key'], configured: true }], models: [{ provider: 'p', id: 'm1', name: 'M1' }] };
+  const v = S.modelsTabView(state, { p: ['other', 'm1'] });
+  assert.deepEqual(v.groups[0].models.map(m => m.chosen), [true]);
+  assert.equal(S.modelsTabView(state, null).groups[0].models[0].chosen, false, 'no prefs yet = nothing chosen');
+  assert.equal(S.modelsTabView(state, 'junk').groups[0].models[0].chosen, false, 'a hostile stored value reads as nothing chosen');
+});
+
+test('#414 modelsTabView: no engine or no models yet is honest', () => {
+  for (const connection of ['no_daemon', 'lost', 'refused', 'bad_session']) {
+    const v = S.modelsTabView({ connection }, {});
+    assert.equal(v.kind, 'no_engine', connection);
+    assert.ok(v.word && v.icon, connection);
+  }
+  const waiting = S.modelsTabView(null, {});
+  assert.equal(waiting.kind, 'connecting');
+  // connected, but the engine has not answered models_list yet: groups render, models empty
+  const v = S.modelsTabView({ connection: 'connected', providers: [{ id: 'p', name: 'P', methods: ['oauth'], configured: true }] }, {});
+  assert.equal(v.kind, 'ready');
+  assert.deepEqual(v.groups[0].models, []);
+});
+
+test('#414 chosenToggle: one toggle returns the next map; the payload the page sends carries the whole list', () => {
+  const next = S.chosenToggle({ anthropic: ['a1'] }, 'anthropic', 'a2');
+  assert.deepEqual(next.anthropic, ['a1', 'a2']);
+  assert.deepEqual(S.chosenToggle(next, 'anthropic', 'a1').anthropic, ['a2'], 'a second click removes it');
+  const fresh = S.chosenToggle({}, 'openai', 'gpt-5.2');
+  assert.deepEqual(fresh.openai, ['gpt-5.2']);
+  assert.ok(!Object.hasOwn(S.chosenToggle({ anthropic: ['a1'] }, 'anthropic', 'a1'), 'anthropic'), 'clearing the last model of a provider drops its key');
+  // the wire payload: exactly the closed action, provider and its whole list
+  const payload = S.chosenModelsPayload({ anthropic: ['a1', 'a2'] }, 'anthropic');
+  assert.deepEqual(payload, { action: 'set_chosen_models', provider: 'anthropic', models: ['a1', 'a2'] });
+  assert.deepEqual(S.chosenModelsPayload({}, 'anthropic').models, [], 'a cleared provider sends the empty list');
+});
+
 console.log(`settings-view-check: ${passed} passed`);
 
 test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row only as the 400 column fallback', () => {

@@ -19,7 +19,7 @@
     Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones',
       hint: 'Proveedores de IA, agentes de código y servicios en un solo lugar. Tu inicio de sesión queda en esta computadora. Preguntá antes de enviar o cambiar algo.' }),
     Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
-      hint: 'Elegí el modelo local con el que charlás. Se usa desde el próximo mensaje.' }),
+      hint: 'Elegí qué modelos de tus proveedores conectados usa Abito. Los locales están más abajo.' }),
     Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
       hint: 'Roles manuales con sus propias instrucciones. Sólo se usan si los elegís.' }),
     Object.freeze({ id: 'pills', title: 'Pills', icon: 'ring', label: 'Pills',
@@ -363,6 +363,54 @@
     return accountRows(state).filter(r => signedIn.has(r.accountId)).map(r => Object.assign({}, r, { signedIn: !r.local }));
   }
 
+  // ---- #414: Ajustes → Modelos — one group per provider, the models of the CONNECTED ones ------------------------
+  // The engine reports the catalogue (`models` frame, folded by agentclient) and the typed pref
+  // `chosen_models` holds what the human marked. Nothing here is invented: a provider the engine
+  // does not name never renders, and a disconnected one is a hint to Conexiones, not a guess.
+  const chosenOf = chosen => (chosen && typeof chosen === 'object' && !Array.isArray(chosen)) ? chosen : {};
+  function isProviderConnected(state, providerId) {
+    const provider = providerOf(state, providerId);
+    return !!provider && (provider.configured === true || !!accountOfProvider(state, providerId));
+  }
+  function modelsTabView(state, chosen) {
+    // No engine (or not yet answered) is a wait or a problem in the same words as Conexiones.
+    const cv = connectionView(state);
+    if (cv && cv.kind !== 'connecting') return { kind: 'no_engine', word: cv.word, icon: cv.icon, tone: cv.tone, aria: cv.aria, groups: [] };
+    if (!state || state.connection !== 'connected') return { kind: 'connecting', word: 'Conectando', icon: 'ring', tone: 'live', aria: 'Conectando con el motor del agente.', groups: [] };
+    const store = chosenOf(chosen);
+    const models = Array.isArray(state.models) ? state.models : [];
+    const groups = ((state.providers) || []).map(p => {
+      const name = String(p.name || p.id);
+      if (!isProviderConnected(state, p.id)) {
+        return { id: p.id, name, connected: false, hint: `Conectá ${name} en Conexiones para ver sus modelos.` };
+      }
+      const list = Array.isArray(store[p.id]) ? store[p.id].filter(x => typeof x === 'string') : [];
+      return {
+        id: p.id, name, connected: true,
+        models: models.filter(m => m && m.provider === p.id && typeof m.id === 'string')
+          .map(m => ({ id: m.id, name: String(m.name || m.id), chosen: list.includes(m.id) })),
+      };
+    });
+    return { kind: 'ready', groups };
+  }
+  // One toggle: add the model to its provider's list, or take it out; an emptied provider drops its
+  // key (the typed pref then stores no key at all). Plain objects only: prototype keys never survive.
+  function chosenToggle(chosen, providerId, modelId) {
+    const store = chosenOf(chosen);
+    const list = Array.isArray(store[providerId]) ? store[providerId].filter(x => typeof x === 'string') : [];
+    const next = list.includes(modelId) ? list.filter(x => x !== modelId) : [...list, modelId];
+    const out = {};
+    for (const key of Object.keys(store)) if (key !== providerId && Array.isArray(store[key])) out[key] = store[key];
+    if (next.length) out[providerId] = next;
+    return out;
+  }
+  // The closed wire payload: the WHOLE list of that provider replaces what is stored.
+  function chosenModelsPayload(chosen, providerId) {
+    const store = chosenOf(chosen);
+    const list = Array.isArray(store[providerId]) ? store[providerId].filter(x => typeof x === 'string') : [];
+    return { action: 'set_chosen_models', provider: String(providerId), models: list };
+  }
+
   // ---- agents: connect Claude Code / Codex / OpenCode with ONE click (no terminal) -------------------------------------
   // The state comes from the engine's `agents` frame. Names and sentences are OURS: nothing the engine sends is
   // shown as text, only chosen from these closed tables.
@@ -554,6 +602,8 @@
   }
 
   return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+    modelsTabView, chosenToggle, chosenModelsPayload,
+    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     daemonRestartView, daemonRestartOutcome,
     THEME_MODES, THEME_LABELS, themeView };
