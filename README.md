@@ -1323,3 +1323,12 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 - **Deleting an account:** «Quitar conexión» on the owned-account row (`abito_account_remove`) deletes the account and its key from `accounts.json`. Failure changes nothing and says so: «No se pudo quitar la conexión. No se cambió nada.»
 - **No copy from Pi (#409):** there is no import of Pi's `nan` connection; the key is entered by hand in the UI. The daemon, its protocol and `desktop-daemon/src/auth.cjs` are unchanged and still never read the user's Pi credentials.
 - **Tests:** `test-node/pills-check.cjs` and `settings-view-check.cjs` (no Pi card, no Pi IPC command, the owned-account row).
+
+## #368 / F099 — closed, gated focus of terminal / agent session / editor
+
+- **One command, closed enum:** `focus_host` accepts exactly `{"target": "terminal" | "session" | "editor"}`. The payload never carries a command, a path or a window id, so a caller can only ask for a class of window the closed allowlists already accept (`src/focushost.rs`: `TERMINAL_CLASSES`, `EDITOR_CLASSES`, boundary-exact match — `codesign` never matches `code`).
+- **Gate order mirrors `open_chat_url`:** sender → payload validation → rate limiter → effect. A rejected call returns a public Spanish reason, spends no rate budget and reaches no effect.
+- **`session` semantics:** an agent-session window is a terminal-class window whose title carries the standalone agent tokens `pi` / `herdr` (token match: `pip install` is NOT a session window). A plain `terminal` ask accepts any terminal-class window; `editor` wins even when the title mentions the agent.
+- **Resolution is wmctrl/xdotool-FREE:** `_NET_CLIENT_LIST_STACKING` + `WM_CLASS` + `_NET_WM_NAME` over the existing x11rb dependency; the TOPMOST match is focused with the EWMH `_NET_ACTIVE_WINDOW` client message (`set_input_focus` fallback). No process is spawned with a caller-influenced argument. On GNOME/Wayland this sees XWayland windows only; a native-Wayland window that is not found is an honest per-target Spanish reason ("No encontré una ventana de terminal/sesión de agente/editor abierta."), never a guess; a connect or activation failure is the platform reason.
+- **Non-Linux** is an honest stub (the same Spanish platform reason); nothing is attempted.
+- **Tests:** `src/focushost_tests.rs` — closed enum, payload shapes, gate order and budget, classification table, topmost pick, and the honest no-match / failed-activation decisions.
