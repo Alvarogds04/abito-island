@@ -1125,3 +1125,9 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings[data-rail="true"] .stab { justify-content: flex-start; width: 100%; border-radius: var(--radius-xl); }
 #settings[data-rail="true"] #settings-body, #settings[data-rail="true"] #models { grid-column: 2; grid-row: 3; min-height: 0; }
 #settings[data-rail="true"] #settings-live { grid-column: 1 / -1; }
+
+/* #347 mini-bots: noninteractive strip of neutral mini-Abitos, one per active chat turn (overview only). */
+#minibots { position: absolute; left: 148px; right: 14px; bottom: 6px; margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 10px; pointer-events: none; }
+#minibots[hidden] { display: none; }
+.minibot { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--fs-label); line-height: 18px; }
+.minibot svg { width: 24px; height: 24px; flex: 0 0 24px; }

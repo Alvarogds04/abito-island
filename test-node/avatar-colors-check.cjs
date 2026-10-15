@@ -40,7 +40,7 @@ function reload(value) {
 }
 
 // The seven frozen R6 poses, re-read from the engine below so a copy cannot drift.
-const R6_ORDER = ['idle', 'listen', 'think', 'speak', 'reject', 'confirm', 'error'];
+const R6_ORDER = ['idle', 'listen', 'think', 'speak', 'reject', 'confirm', 'error', 'working', 'searching', 'approval', 'question', 'finished', 'ratelimit', 'sleeping', 'dizzy'];
 // Every visible condition the island can be in while the Dot is on screen.
 const HOST_CONDITIONS = ['compact', 'expanded', 'card-pending', 'question-pending', 'notice',
   'connected', 'no-pi', 'channel-down', 'bridge-down', 'chat', 'reduced-motion'];
