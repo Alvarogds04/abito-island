@@ -16,7 +16,7 @@ let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
 
 test('source gates pass on the real crate (R6 pin, curated frontend, config, capabilities, no devtools)', () => {
-  assert.ok(L.checkR6(crate).startsWith('6534f543'));
+  assert.ok(L.checkR6(crate).startsWith('b699ebbc'));
   assert.equal(L.checkFrontend(crate).length, L.FRONTEND_FILES.length);
   const cfg = L.checkConfig(crate);
   assert.equal(cfg.identifier, 'com.abitog.AbitoTauri');

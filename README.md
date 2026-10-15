@@ -802,7 +802,7 @@ Proven by the probe's read-back, not by intention:
   with unit tests (`cargo test`, test-first: RED → GREEN),
 - original M1a R6 rendered as SVG-DOM in WebKitGTK (historical evidence).
   #347 now pins its own R7 engine at SHA-256
-  `6534f543b34d7fce3c460f6aae65867b8e40234ac4cf15e289183c91fc9d9c52`;
+  `b699ebbc9e4d92b7a0ffbb213af32c58e0b164715f20dde25709ee14a9ccf76e`;
   that source update is not a claim of new native acceptance.
 
 Not in this unit (later sessions): `window.desktop.*` bridge (M1b),
@@ -1011,7 +1011,7 @@ node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no
 - Build: `cargo build --release --locked --offline --features tauri/custom-protocol`
   (`custom-protocol` makes Tauri a real release: without it the binary embeds
   the build-tree path as a dev build). Gates before building: engine pin (public `checkR6`, now R7)
-  (`6534f543…`), curated `frontend/` list, CSP without remote/unsafe sources,
+  (`b699ebbc…`), curated `frontend/` list, CSP without remote/unsafe sources,
   capabilities = listen/unlisten only, no `devtools`/shell/fs/http features.
 - Stage: `abito-island` (release binary), `abito-island-launcher` (no args;
   refuses the whole `LD_*` family, `GDK_DEBUG`/`GTK_*` debug, WebKit inspector vars and every `ABITO_*` knob except `ABITO_PROJECT_ROOT`; forces X11),

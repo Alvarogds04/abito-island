@@ -8,7 +8,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AbitoCharacter = Object.freeze(api);
 })(typeof self !== 'undefined' ? self : this, () => {
-  const SLEEP_MS = 60000, FINISHED_MS = 1800, YAWN_MS = 58000, HOVER_DWELL_MS = 1900, HOVER_COOLDOWN_MS = 6000;
+  const SLEEP_MS = 60000, FINISHED_MS = 1800, YAWN_MS = 58000, HOVER_DWELL_MS = 1900, HOVER_COOLDOWN_MS = 6000, GREETING_COOLDOWN_MS = 6000;
   const SHAKE_REVERSALS = 3, SHAKE_LEG_PX = 24, SHAKE_WINDOW_MS = 700, DIZZY_MS = 3300;
   function create(options) {
     const { clay, choosePose, validCard, notification } = options;
@@ -36,16 +36,19 @@
         }
       }
     }
-    let hovering = false, hoverTimer = 0, lastLove = -Infinity, yawned = false;
+    let hovering = false, hoverTimer = 0, lastLove = -Infinity, yawned = false, greeted = false, lastGreet = -Infinity;
     const emote = name => !!(clay && clay.triggerEmote && clay.triggerEmote(name));
     // Decorations only on a calm idle character; never over attention, a turn, a drag or reduced/hidden motion.
     const calm = () => !destroyed && !occupied && !blocked() && clay && clay.state === 'idle' && producer() === 'idle';
+    function greet() { if (calm() && clay.greet && clay.greet()) { lastGreet = now(); return true; } return false; }
     function clearHover() { clearTimer(hoverTimer); hoverTimer = 0; }
     function armHover() {
       clearHover();
       if (!hovering) return;
-      const wait = Math.max(HOVER_DWELL_MS, lastLove + HOVER_COOLDOWN_MS - now());
-      hoverTimer = setTimer(() => { hoverTimer = 0; if (hovering && calm() && now() - lastLove >= HOVER_COOLDOWN_MS && emote('love')) lastLove = now(); }, Math.min(2147483647, wait));
+      const wait = clay && clay.reaction === 'greeting' ? 100 : Math.max(HOVER_DWELL_MS, lastLove + HOVER_COOLDOWN_MS - now());
+      hoverTimer = setTimer(() => { hoverTimer = 0;
+        if (hovering && clay && clay.reaction === 'greeting') { armHover(); return; } // never stack on the greeting
+        if (hovering && calm() && now() - lastLove >= HOVER_COOLDOWN_MS && emote('love')) lastLove = now(); }, Math.min(2147483647, wait));
     }
     const seen = new Set();
     const noticeKey = n => n && typeof n.id === 'string' && typeof n.sessionId === 'string' &&
@@ -100,6 +103,8 @@
         if (producer() === 'idle' && !occupied && !blocked()) finishedUntil = now() + FINISHED_MS;
       }
       sync();
+      // First valid snapshot only, once: skipped (not deferred) if anything urgent or busy.
+      if (!greeted && snapshot.available !== false) { greeted = true; greet(); }
     }
     return {
       snapshot: observe,
@@ -110,17 +115,17 @@
       activity() { lastActivity = now(); finishedUntil = 0; sync(); },
       motionChanged() { lastActivity = now(); finishedUntil = 0; sync(); },
       get state() { return clay ? clay.state : producer(); },
-      dragStart(x) { resetShake(); dragging = true; extreme = x; lastActivity = now(); clearHover(); sync(); },
+      dragStart(x) { resetShake(); dragging = true; extreme = x; if (clay && clay.cancelReaction) clay.cancelReaction(); lastActivity = now(); clearHover(); sync(); },
       dragMove(x) { shakeMove(x, now()); },
       dragEnd() { resetShake(); lastActivity = now(); sync(); },
       hover(inside) {
         inside = !!inside; if (inside === hovering) return;
         hovering = inside;
-        if (inside) armHover();
+        if (inside) { if (now() - lastGreet >= GREETING_COOLDOWN_MS && greet()) lastGreet = now(); armHover(); }
         else { clearHover(); if (clay && clay.reaction === 'love' && clay.cancelReaction) clay.cancelReaction(); }
       },
       destroy() { destroyed = true; clearTimer(timer); timer = 0; clearHover(); },
     };
   }
-  return { create, SLEEP_MS, FINISHED_MS, DIZZY_MS, YAWN_MS, HOVER_DWELL_MS, HOVER_COOLDOWN_MS };
+  return { create, SLEEP_MS, FINISHED_MS, DIZZY_MS, YAWN_MS, HOVER_DWELL_MS, HOVER_COOLDOWN_MS, GREETING_COOLDOWN_MS };
 });

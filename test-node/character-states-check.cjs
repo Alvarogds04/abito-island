@@ -130,19 +130,19 @@ test('honored reduced motion, pause and hidden page refuse or cancel emotes with
   h.hide(false); assert.equal(a.sample().reaction, null);
 });
 test('hover love: 1900 ms continuous dwell, 6 s cooldown, leave cancels, never over attention or when pressed/busy', () => {
-  const { c, clay, time } = setup(); c.snapshot({ notices: [] });
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] }); clay.step(130); // launch greeting (T4) has finished
   c.hover(true); time.advance(1899); assert.equal(clay.sample().reaction, null);
   time.advance(1); assert.equal(clay.sample().reaction.name, 'love');
   c.hover(false); assert.equal(clay.sample().reaction, null, 'leave cancels');
   c.hover(true); time.advance(5999); assert.equal(clay.sample().reaction, null, 'cooldown from last love');
   time.advance(1); assert.equal(clay.sample().reaction.name, 'love'); c.hover(false);
-  time.advance(7000); c.hover(true); time.advance(1000); c.hover(false); time.advance(5000); assert.equal(clay.sample().reaction, null, 'short dwell never fires');
+  time.advance(7000); c.hover(true); time.advance(1000); c.hover(false); time.advance(5000); assert.notEqual((clay.sample().reaction || {}).name, 'love', 'short dwell never fires love'); clay.step(130);
   c.chat('think'); c.hover(true); time.advance(3000); assert.equal(clay.sample().reaction, null, 'active turn is never decorated'); c.hover(false); c.chat(null);
   c.busy(true); c.hover(true); time.advance(3000); assert.equal(clay.sample().reaction, null, 'drag/composer busy'); c.hover(false); c.busy(false);
   c.destroy(); assert.equal(time.count(), 0);
 });
 test('yawn once at 58 s idle, before the 60 s sleep; activity re-arms; urgent state cancels it', () => {
-  const { c, clay, time } = setup(); c.snapshot({ notices: [] });
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] }); clay.step(130);
   time.advance(57999); assert.equal(clay.sample().reaction, null);
   time.advance(1); assert.equal(clay.sample().reaction.name, 'yawn');
   time.advance(2000); assert.equal(clay.state, 'sleeping'); assert.equal(clay.sample().reaction, null);
@@ -197,4 +197,48 @@ test('island feeds pointer screen x to the detector and leaves native drag IPC a
   assert.match(island, /send\('drag_move', \{ x: e\.clientX, y: e\.clientY \}\)/);
   assert.match(island, /send\('drag_release', \{ x: pt\.x, y: pt\.y, cancelled \}\)/);
   assert.match(island, /send\('drag_press', \{ x: e\.clientX, y: e\.clientY \}\)/);
+});
+
+// ---- T4: launch greeting and hover replay (F063) ----
+test('engine greet(): 2 s body-only timeline, not an emote, moves the body and blinks, then leaves no residue', () => {
+  const { h, a, b } = twin(); assert.ok(!Array.from(h.api.EMOTES).includes('greeting'));
+  assert.equal(a.greet(), true); assert.equal(a.sample().reaction.name, 'greeting'); assert.equal(a.greet(), false);
+  assert.equal(a.triggerEmote('love'), false, 'never stacks with an emote');
+  let moved = false, lidClosed = false;
+  for (let i = 0; i < 120; i++) { a.step(1); b.step(1); const x = a.sample(), y = b.sample();
+    if (x.d !== y.d) moved = true; if (x.eyes.some((e, k) => e.upper > y.eyes[k].upper + .5)) lidClosed = true; }
+  assert.ok(moved && lidClosed, 'rises/sways and blinks');
+  a.step(2); b.step(2); assert.equal(a.sample().reaction, null); assert.equal(a.sample().d, b.sample().d);
+  assert.equal(h.svg.children.length, 5, 'no particles/appendages for greeting');
+});
+test('launch greeting: first valid snapshot once; skipped, never deferred, when urgent or unavailable', () => {
+  let s = setup(); s.c.snapshot({ available: false }); assert.equal(s.clay.sample().reaction, null);
+  s.c.snapshot({ notices: [] }); assert.equal(s.clay.sample().reaction.name, 'greeting');
+  s.clay.step(130); s.c.snapshot({ notices: [] }); assert.equal(s.clay.sample().reaction, null, 'once per page session'); s.c.destroy();
+  s = setup(); s.c.chat('think'); s.c.snapshot({ notices: [] }); assert.equal(s.clay.sample().reaction, null);
+  s.c.chat(null); s.time.advance(5000); assert.equal(s.clay.sample().reaction, null, 'not deferred'); s.c.destroy();
+  s = setup(); s.c.snapshot({ card: { valid: true, state: 'pending', expires_at: '1970-01-01T00:01:00Z' }, notices: [] });
+  assert.equal(s.clay.state, 'approval'); assert.equal(s.clay.sample().reaction, null); s.c.destroy();
+});
+test('hover replay: on entry to a calm idle character after 6 s cooldown; not while busy; love waits, never stacks', () => {
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] }); clay.step(130);
+  c.hover(true); assert.equal(clay.sample().reaction, null, 'inside cooldown of the launch greeting'); c.hover(false);
+  time.advance(6000); c.hover(true); assert.equal(clay.sample().reaction.name, 'greeting');
+  time.advance(1900); assert.equal(clay.sample().reaction.name, 'greeting', 'love does not interrupt or stack');
+  clay.step(130); time.advance(200); assert.equal(clay.sample().reaction.name, 'love', 'love begins after the greeting if the pointer remains');
+  c.hover(false); clay.step(130);
+  time.advance(6000); c.busy(true); c.hover(true); assert.equal(clay.sample().reaction, null); c.hover(false); c.busy(false);
+  c.chat('speak'); c.hover(true); assert.equal(clay.sample().reaction, null); c.hover(false); c.chat(null);
+  c.destroy(); assert.equal(time.count(), 0);
+});
+test('greeting is cancelled by an urgent state or a drag and never replayed afterwards', () => {
+  let s = setup(); s.c.snapshot({ notices: [] }); s.c.chat('think'); assert.equal(s.clay.sample().reaction, null);
+  s.c.chat(null); assert.equal(s.clay.sample().reaction, null); s.c.destroy();
+  s = setup(); s.c.snapshot({ notices: [] }); s.c.dragStart(0); assert.equal(s.clay.sample().reaction, null); s.c.dragEnd(); s.c.destroy();
+});
+test('honored reduced motion: no greeting at launch or on hover', () => {
+  const h = engine(true), time = clock(), clay = h.api.create(h.svg);
+  const c = require('../frontend/character-motion.js').create({ clay, now: time.now, setTimer: time.setTimer, clearTimer: time.clearTimer,
+    validCard: () => false, notification: () => null, choosePose: () => 'idle' });
+  c.snapshot({ notices: [] }); time.advance(7000); c.hover(true); assert.equal(clay.sample().reaction, null); c.destroy();
 });

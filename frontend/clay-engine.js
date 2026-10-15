@@ -67,6 +67,15 @@ const AbitoClay = (() => {
     annoyed:   { dur: .8, rise: .25, fall: .3, motes: 0, fx: e => ({ lift: 0, lean: -2 * e, eye: { uL: .3 * e, uR: .3 * e, tilt: .15 * e } }) },
   };
   const EMOTE_NAMES = Object.keys(EMOTES);
+  /* Greeting (#347 F063): a 2 s body-only timeline (rise, two sways, two lid blinks), staged as in
+     Coucou mochi/engine.ts greeting timings (lift, blinks at ~0.55 s / 1.5 s, settle by 2 s). Not an
+     emote: it is not in EMOTES and never carries particles, hands or layout changes. */
+  const bump = (p, c, w) => Math.max(0, 1 - Math.abs(p - c) / w);
+  const GREETING = { dur: 2.0, rise: .11, fall: .15, motes: 0, fx: (e, p) => {
+    const blink = Math.max(bump(p, .275, .04), bump(p, .75, .04));
+    return { lift: -3.5 * e, lean: 2.2 * e * Math.sin(Math.PI * 4 * p), eye: { uL: blink, uR: blink, l: .06 * e } };
+  } };
+  const emoteDef = name => name === 'greeting' ? GREETING : EMOTES[name];
   const smooth = x => x * x * (3 - 2 * x);
   function envelope(em, p) {
     if (p <= 0 || p >= 1) return 0;
@@ -136,7 +145,7 @@ const AbitoClay = (() => {
       motes = Array.from({ length: 4 }, () => mk('circle', { r: 2.4, fill: '#acdd96', opacity: 0, cx: 100, cy: 100 }, g));
       return motes;
     }
-    const reactionP = () => S.reaction ? (S.t - S.reaction.t0) / EMOTES[S.reaction.name].dur : 0;
+    const reactionP = () => S.reaction ? (S.t - S.reaction.t0) / emoteDef(S.reaction.name).dur : 0;
     function cancelReaction() { if (!S.reaction) return false; S.reaction = null; if (motes) motes.forEach(m => m.setAttribute('opacity', 0)); return true; }
 
     function tick(dt) {
@@ -194,8 +203,8 @@ const AbitoClay = (() => {
       for (let i = 0; i < N; i++) { let v = 1; for (let k = 1; k <= K; k++) v += c[ci(k, 0)] * CS[i][k][0] + c[ci(k, 1)] * CS[i][k][1]; r[i] = clamp(v, .7, 1.35); area += r[i] * r[i]; }
       area *= .5 * TAU / N;
       const scale = R0 * Math.sqrt(Math.PI / area) * (1 + .012 * Math.sin(TAU * t / 4.2));
-      const rp = S.reaction ? reactionP() : 0, rem = S.reaction && EMOTES[S.reaction.name];
-      const rf = rem ? rem.fx(envelope(rem, rp)) : null;
+      const rp = S.reaction ? reactionP() : 0, rem = S.reaction && emoteDef(S.reaction.name);
+      const rf = rem ? rem.fx(envelope(rem, rp), rp) : null;
       const ox = CX + S.shakeX + S.lean + (rf ? rf.lean : 0), oy = CY + S.lift + S.nodY + (rf ? rf.lift : 0);
       const pts = new Array(N);
       for (let i = 0; i < N; i++) pts[i] = [ox + scale * r[i] * CS[i][1][0], oy + scale * r[i] * CS[i][1][1]];
@@ -252,6 +261,10 @@ const AbitoClay = (() => {
         const em = EMOTES[name];
         if (!em || S.reaction || reducedNow() || G.paused || document.hidden || G.error) return false;
         S.reaction = { name, t0: S.t }; return true;
+      },
+      greet() {
+        if (S.reaction || reducedNow() || G.paused || document.hidden || G.error) return false;
+        S.reaction = { name: 'greeting', t0: S.t }; return true;
       },
       get reaction() { return S.reaction ? S.reaction.name : null; },
       sample() { const g = lastGeo || compose(); return { t: S.t, state: S.state, morph: S.morph, reaction: S.reaction ? { name: S.reaction.name, progress: reactionP() } : null, d: bodyEl.getAttribute('d'), pts: g.pts.map(p => [p[0], p[1]]), eyes: g.eyes }; },

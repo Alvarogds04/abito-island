@@ -12,7 +12,7 @@ TaskView #328 / phase #323. Uncommitted isolated candidate; no install/runtime a
 | Preview JS | d04d995a5aff76e2d928972752bbbd087806c041afd2f7ee36316c1c9af0ec76 |
 | Frozen preview DESIGN (including §43) | 3496aaaebe43c6448ec5c785eeb00bc5dd82c9bf43212978a62b19ceaa521d85 |
 | Preview tests | d541a931e1fce002cff1cda0abce4f3a392826c810e27d617f5bf68d057f317f |
-| R7 clay engine (#347 authorized extension, seven legacy poses preserved) | 6534f543b34d7fce3c460f6aae65867b8e40234ac4cf15e289183c91fc9d9c52 |
+| R7 clay engine (#347 authorized extension, seven legacy poses preserved) | b699ebbc9e4d92b7a0ffbb213af32c58e0b164715f20dde25709ee14a9ccf76e |
 
 ## R7 character amendment (#347)
 
