@@ -15,7 +15,16 @@ use abito_island::bridge::{self, BridgeError};
 use abito_island::prefs::{self, Command, Prefs};
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// #390 GD027: how long a `restart` waits for the fresh daemon to answer `ready`.
+/// The engine's own boot timeout is 60 s (desktop-daemon/src/runtime.cjs), so this
+/// bound lets the daemon reach its own verdict first; past it the answer is honestly
+/// `ready:false`, never a success. Polling is cheap (a missing session.json fails in
+/// one stat) and bounded — no unbounded wait anywhere.
+const RESTART_WAIT: Duration = Duration::from_secs(62);
+const RESTART_POLL: Duration = Duration::from_millis(200);
 
 pub struct SettingsHost {
     agent: Mutex<Option<AgentConn>>,
@@ -239,6 +248,87 @@ pub async fn pi_connection(app: AppHandle, webview: tauri::Webview, state: State
     .map_err(|_| err("pi_aborted"))?
 }
 
+/// The closed payload of `daemon_action` (#390 GD027): exactly `{"action":"status"|"restart"}`.
+pub(crate) fn parse_daemon_action(payload: &Value) -> Option<&'static str> {
+    let obj = payload.as_object()?;
+    if obj.len() != 1 {
+        return None;
+    }
+    match obj.get("action")?.as_str()? {
+        "status" => Some("status"),
+        "restart" => Some("restart"),
+        _ => None,
+    }
+}
+
+/// The truth of the daemon is the CONNECTION: lazily create the client (like
+/// `agent_action view`), connect when it is not connected, and — when `wait` is
+/// given — keep trying until it answers `ready` or the bound expires. Holds the
+/// agent slot (the same rule as `agent_action`): the state callback only emits,
+/// it never re-locks. The caller only ever gets `{ready, connection}`: no token,
+/// no pid, no path.
+fn daemon_view(handle: &AppHandle, state: &AppState, root: &std::path::Path, wait: Option<Duration>) -> Value {
+    let mut guard = state.settings.agent.lock().expect("agent lock");
+    let emitter = handle.clone();
+    let conn = guard.get_or_insert_with(|| {
+        AgentConn::new(move |view| {
+            let _ = emitter.emit("agent:state", view);
+        })
+    });
+    let connected = |c: &AgentConn| c.view().get("connection").and_then(Value::as_str) == Some("connected");
+    let deadline = wait.map(|w| Instant::now() + w);
+    loop {
+        if !connected(conn) {
+            conn.connect(root);
+        }
+        if connected(conn) {
+            break;
+        }
+        match deadline {
+            Some(end) if Instant::now() < end => std::thread::sleep(RESTART_POLL),
+            _ => break,
+        }
+    }
+    let view = conn.view();
+    let connection = view.get("connection").and_then(Value::as_str).unwrap_or("no_daemon").to_string();
+    json!({ "ready": connection == "connected", "connection": connection })
+}
+
+/// #390 GD027 — the closed daemon lifecycle command behind the Ajustes button.
+/// `status` reports the current state once; `restart` closes the old socket's reader,
+/// stops the app-owned host child (bounded TERM/KILL/reap in `daemonhost`), spawns it
+/// again and waits (bounded) for the fresh daemon to answer `ready`. The answer is
+/// `{"action","ready","connection"}` — never a token, a pid or a path.
+#[tauri::command]
+pub async fn daemon_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    bridge::sender_ok(webview.label(), &url)?;
+    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    let action = parse_daemon_action(&payload).ok_or_else(|| err("invalid_schema"))?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<AppState>();
+        let root = island_root(std::env::var("ABITO_ISLAND_DIR").ok().as_deref(), std::env::var("HOME").ok().as_deref())
+            .ok_or_else(|| err("no_island_root"))?;
+        if action == "restart" {
+            // The old socket's reader must go BEFORE its daemon does.
+            if let Some(conn) = state.settings.agent.lock().expect("agent lock").as_ref() {
+                conn.close();
+            }
+            // Bounded stop (daemonhost Drop: TERM group, KILL, reap) then a fresh spawn.
+            let slot = handle.state::<abito_island::daemonhost::HostSlot>();
+            slot.stop();
+            slot.start();
+            let view = daemon_view(&handle, &state, &root, Some(RESTART_WAIT));
+            return Ok(json!({ "action": action, "ready": view["ready"], "connection": view["connection"] }));
+        }
+        let view = daemon_view(&handle, &state, &root, None);
+        Ok(json!({ "action": action, "ready": view["ready"], "connection": view["connection"] }))
+    })
+    .await
+    .map_err(|_| err("daemon_aborted"))?
+}
+
 /// The closed payload: exactly `{"open": <bool>}`.
 pub(crate) fn parse_settings_view(payload: &Value) -> Option<bool> {
     let obj = payload.as_object()?;
@@ -258,6 +348,7 @@ pub fn stop(app: &AppHandle) {
 
 #[cfg(test)]
 mod settings_view_tests {
+    use super::parse_daemon_action;
     use super::parse_settings_view;
     use serde_json::json;
 
@@ -267,6 +358,24 @@ mod settings_view_tests {
         assert_eq!(parse_settings_view(&json!({"open": false})), Some(false));
         for bad in [json!({}), json!({"open": 1}), json!({"open": "true"}), json!({"open": true, "w": 900}), json!(true), json!(null), json!({"width": 900})] {
             assert_eq!(parse_settings_view(&bad), None, "{bad}");
+        }
+    }
+
+    /// #390 GD027: `daemon_action` is closed — exactly {"action":"status"|"restart"}.
+    #[test]
+    fn daemon_action_is_a_closed_two_action_payload() {
+        assert_eq!(parse_daemon_action(&json!({"action": "status"})), Some("status"));
+        assert_eq!(parse_daemon_action(&json!({"action": "restart"})), Some("restart"));
+        for bad in [
+            json!({}),
+            json!({"action": "nope"}),
+            json!({"action": "status", "extra": 1}),
+            json!({"action": 1}),
+            json!("restart"),
+            json!(null),
+            json!({"Action": "restart"}),
+        ] {
+            assert_eq!(parse_daemon_action(&bad), None, "{bad}");
         }
     }
 }

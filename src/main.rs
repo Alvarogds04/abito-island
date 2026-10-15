@@ -1548,6 +1548,7 @@ fn main() {
             settingshost::prefs_action,
             settingshost::settings_view,
             settingshost::pi_connection,
+            settingshost::daemon_action,
             specialistshost::specialists_action,
             record_facade_evidence,
             record_chat_evidence,

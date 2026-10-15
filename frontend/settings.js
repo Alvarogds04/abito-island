@@ -72,6 +72,9 @@
   let nameSaving = false;
   let nameError = '';
   let hotkey = null;
+  // #390 GD027: the manual restart of the daemon (Ajustes → Conexiones), one in-flight flag
+  let daemonBusy = false;
+  let daemonNote = null;
   // #327 owns the sole role cache; Settings reads only its immutable id/name projection.
   const AVATAR = window.AbitoAvatarColors;
   const specialistIdentities = () => window.AbitoSpecialistsPanel?.identityView() || { kind: 'loading', identities: [] };
@@ -587,7 +590,46 @@
 
   // ---- Cuentas (gentle-dot AccountsPanel): Conectadas → dos tarjetas de método → lista de proveedores con buscador ----
   function sectionTitle(text) { return el('h3', 'ssection', text); }
+  // #390 GD027: ONE closed command stops and relaunches the daemon (Rust owns the whole
+  // lifecycle: bounded stop, fresh spawn, bounded wait). The wording is ours; a failure is
+  // shown, never hidden; the button disables itself while a restart is in flight.
+  function renderDaemonSection() {
+    const v = V.daemonRestartView(daemonBusy);
+    const sec = el('section', 'ssec'); sec.id = 'daemon-restart';
+    sec.append(sectionTitle(v.title));
+    sec.append(el('p', 'snote', v.hint));
+    const row = el('div', 'srow');
+    row.append(el('span', 'srow-title', 'Motor'));
+    const actions = el('span', 'srow-actions');
+    actions.append(wordBtn(v.action.label, () => restartDaemon(), { icon: 'refresh', disabled: v.action.disabled, aria: v.action.aria }));
+    row.append(actions);
+    sec.append(row);
+    if (daemonNote) {
+      const note = el('p', daemonNote.tone === 'red' ? 'snote sproblem' : 'snote', daemonNote.say);
+      note.id = 'daemon-restart-note';
+      note.setAttribute('role', daemonNote.tone === 'red' ? 'alert' : 'status');
+      sec.append(note);
+    }
+    body.append(sec);
+  }
+  function restartDaemon() {
+    if (daemonBusy) return;
+    daemonBusy = true; daemonNote = null; render();
+    call('daemon_action', { action: 'restart' }).then(result => {
+      daemonBusy = false;
+      daemonNote = V.daemonRestartOutcome(result);
+      render();
+      say(daemonNote.say);
+      agent({ action: 'view' }).then(applyAgent, () => {}); // the fresh daemon's state, through the normal channel
+    }, error => {
+      daemonBusy = false;
+      daemonNote = V.daemonRestartOutcome(null, error);
+      render();
+      say(daemonNote.say);
+    });
+  }
   function renderAccounts() {
+    renderDaemonSection();
     renderOwnedAccounts();
     const st = agentState || { connection: 'connecting', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
     const auth = st.auth || {};

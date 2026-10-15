@@ -82,11 +82,74 @@ fn normal_drop_terminates_and_reaps_owned_host() {
     assert!(!Path::new(&format!("/proc/{pid}")).exists());
 }
 
+// #390 GD027 pin: what `daemon_action restart` does at the slot level — stop() then start()
+// yields a FRESH child, the old one is reaped and stays gone. Explicit bounds, no unbounded waits.
+// (Characterization of existing APIs: passes before AND after the slice-B sources — a pin, not a RED.)
+#[test]
+fn stop_then_start_yields_a_fresh_reaped_child() {
+    let root = TestDir::new().unwrap();
+    let bin = root.path().join("bin");
+    let home = root.path().join("home");
+    let pids = root.path().join("pids");
+    // fake node: record our own pid per spawn, then stand in for the daemon
+    executable(&bin.join("node"), &format!("#!/bin/sh\nprintf '%s\\n' \"$$\" >> '{}'\nexec /bin/sleep 120\n", pids.display()));
+    executable(&home.join(".local/bin/pi"), "#!/bin/sh\nexec /bin/sleep 120\n");
+    let mut app = Command::new(std::env::current_exe().unwrap()).args(["--exact", "crash_helper", "--nocapture"])
+        .env("ISLAND_HOST_TEST_HELPER", root.path()).env("ISLAND_HOST_TEST_RESTART", "1")
+        .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()))
+        .env("HOME", &home)
+        .stdout(std::process::Stdio::null()).spawn().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !root.path().join("restart.finished").exists() {
+        if std::time::Instant::now() >= deadline {
+            app.kill().unwrap(); app.wait().unwrap();
+            panic!("restart pin did not finish; pids={:?}", fs::read_to_string(&pids).unwrap_or_default());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(app.try_wait().unwrap().is_some(), "the helper must exit on its own");
+    let lines: Vec<String> = fs::read_to_string(&pids).unwrap().lines().map(str::to_string).collect();
+    assert_eq!(lines.len(), 2, "exactly one child per start: {lines:?}");
+}
+
 // A separate process is essential: SIGKILL must bypass destructors exactly as an app crash does.
 #[test]
 fn crash_helper() {
     let Some(dir) = std::env::var_os("ISLAND_HOST_TEST_HELPER") else { return };
     let dir = std::path::PathBuf::from(dir);
+    if std::env::var_os("ISLAND_HOST_TEST_RESTART").is_some() {
+        use abito_island::daemonhost::HostSlot;
+        let pids = dir.join("pids");
+        let read = || fs::read_to_string(&pids).unwrap_or_default().lines().count();
+        let wait_lines = |n: usize| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while read() < n {
+                assert!(std::time::Instant::now() < deadline, "child {n} never recorded its pid");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        let alive = |pid: &str| {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            stat.contains("(sleep") && !stat[stat.rfind(')').map(|i| i + 2).unwrap_or(0)..].starts_with('Z')
+        };
+        let slot = HostSlot::default();
+        slot.start();
+        assert_eq!(slot.failure(), None);
+        wait_lines(1);
+        let pid1 = fs::read_to_string(&pids).unwrap().lines().next().unwrap().to_string();
+        slot.stop();
+        assert!(!Path::new(&format!("/proc/{pid1}")).exists(), "stop must reap its child");
+        slot.start();
+        assert_eq!(slot.failure(), None, "the second start must spawn cleanly");
+        wait_lines(2);
+        let pid2 = fs::read_to_string(&pids).unwrap().lines().nth(1).unwrap().to_string();
+        assert!(alive(&pid2), "the fresh child is alive");
+        assert!(!Path::new(&format!("/proc/{pid1}")).exists(), "the old child stays gone");
+        slot.stop();
+        assert!(!Path::new(&format!("/proc/{pid2}")).exists(), "and the new one is reaped too");
+        fs::write(dir.join("restart.finished"), "ready").unwrap();
+        return;
+    }
     if std::env::var_os("ISLAND_HOST_TEST_PATH").is_some() {
         let slot = abito_island::daemonhost::HostSlot::default();
         slot.start(); assert_eq!(slot.failure(), None);

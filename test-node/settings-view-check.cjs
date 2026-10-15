@@ -897,3 +897,29 @@ test('#408 T8 piOutcome: only our own sentences, never an engine/host string', (
   }
   assert.match(S.piOutcome(null, { code: 'pi_unsafe' }).say, /privados/);
 });
+
+// ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
+test('#390 GD027: the restart control is one closed neutral label with honest outcomes', () => {
+  const idle = S.daemonRestartView();
+  assert.equal(idle.action.label, 'Reiniciar motor');
+  assert.equal(idle.action.disabled, false);
+  assert.ok(idle.title.length > 0, 'the section names itself');
+  assert.ok(idle.hint.length > 10, 'the human learns what a restart does');
+  const busy = S.daemonRestartView(true);
+  assert.equal(busy.action.label, 'Reiniciando…');
+  assert.equal(busy.action.disabled, true, 'one restart at a time, from the button itself');
+  const ok = S.daemonRestartOutcome({ action: 'restart', ready: true });
+  assert.deepEqual([ok.tone, ok.icon], ['go', 'check']);
+  assert.match(ok.say, /reiniciado/i);
+  const late = S.daemonRestartOutcome({ action: 'restart', ready: false });
+  assert.equal(late.tone, 'sun');
+  assert.ok(late.say.length > 5, 'a timeout is said out loud, never as success');
+  const failed = S.daemonRestartOutcome(null, { code: 'host_spawn_failed' });
+  assert.equal(failed.tone, 'red');
+  assert.ok(!failed.say.includes('host_spawn_failed'), 'no host text leaks into Ajustes');
+  // Neutral phrasing on purpose: #305's `portal_rejected` wording belongs to that worker,
+  // and neither tokens nor engine text may ever appear in this panel.
+  const all = JSON.stringify([idle, busy, ok, late, failed]);
+  assert.ok(!all.includes('portal'), 'the hotkey portal wording is not ours to write');
+  assert.ok(!all.includes('token') && !all.includes('sk-'));
+});
