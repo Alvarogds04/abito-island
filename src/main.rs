@@ -1102,6 +1102,100 @@ fn dispatch_verb(
     dispatch_action(app, state, action, index)
 }
 
+/// #336 T1b-a: admission verdict for the NEW `autoClose` verb, decided from
+/// one snapshot of live facts taken under the established lock order. Every
+/// protected fact vetoes with the single approved sentence (L15 condition ii);
+/// a protected fact wins even over an already-compact island (fail closed),
+/// and a clear compact island is an honest `Ok(false)` no-op — never a
+/// refusal, never a fake success. The legacy explicit-close denials
+/// (`questionhost::pending_error`, `collapse_allowed`) are not used here and
+/// remain untouched.
+fn auto_close_verdict(
+    pending: bool,
+    card_pending: bool,
+    standing_request: bool,
+    decision_busy: bool,
+    expanded: bool,
+) -> Result<bool, BridgeError> {
+    if pending || card_pending || standing_request || decision_busy {
+        return Err(BridgeError::denied(
+            "La isla tiene una interacción pendiente.",
+        ));
+    }
+    Ok(expanded)
+}
+
+/// #336 T1b-a: atomic admission + collapse for `autoClose`. The protected
+/// facts and the phase/core transition happen in ONE critical section under
+/// transport → approval → core → phase (approval → phase is the established
+/// `decide`/`hooks.ctx` edge, core → phase is `dispatch_click`'s), all native
+/// getters are captured BEFORE the guards (dispatch_click precedent) and
+/// every guard is released before the reentrant publication (L15 iii).
+/// Unlike the legacy `Close` arm this path never publishes under the guard.
+fn dispatch_auto_close(app: &AppHandle, state: &AppState) -> Result<Value, BridgeError> {
+    let win = main_window(app);
+    let io = TauriIo(&win);
+    let visible = win.is_visible().unwrap_or(true);
+    let now = now_ms() as i64;
+    let area = refresh_work_area(app, state);
+    let collapsed = questionhost::with_pending(state, |pending| {
+        let mut appr = state.approval.lock().expect("approval lock");
+        let verdict = {
+            let core = state.core.lock().expect("core lock");
+            let phase = *state.phase.lock().expect("phase lock");
+            let expanded = core.expanded && phase == IslandState::Expanded;
+            // Facts extracted first: a MutexGuard deref cannot be split, so
+            // the mutable `selected` borrow stands alone during projection.
+            let quitting = appr.active.is_quit();
+            let poll_busy = appr.poll_busy;
+            let mutation_busy = appr.mutation_busy;
+            let standing_request = appr.request.is_some();
+            let status = appr.status;
+            // Same projection the snapshot shows the human: a card that is
+            // merely inert (expired/quitting/busy state) is not a live claim.
+            let card = abito_island::card::project_card(
+                appr.selected.as_mut(),
+                &status,
+                quitting,
+                poll_busy,
+                mutation_busy,
+                expanded,
+                visible,
+                now,
+            );
+            let card_pending = card.get("state").and_then(Value::as_str) == Some("pending");
+            auto_close_verdict(
+                pending,
+                card_pending,
+                standing_request,
+                mutation_busy,
+                expanded,
+            )
+        }; // core + phase guards release here, still under transport → approval
+        let collapsed_now = verdict?;
+        if !collapsed_now {
+            return Ok(false);
+        }
+        // Transition right here: no question, card or request can be admitted
+        // between the check and the collapse. `bump_epoch` runs on the guard
+        // we already hold (the established `overlayEpoch++` of every phase
+        // transition); `apply_plan` takes only phase/requested/window locks,
+        // never approval or transport, and queues its compact transaction on
+        // another thread. No publication happens while any guard is held.
+        let plan = {
+            let mut core = state.core.lock().expect("core lock");
+            core.toggle(&io, area)
+        };
+        appr.bump_epoch();
+        apply_plan(app, state, plan);
+        Ok(true)
+    })?;
+    if collapsed {
+        publish(app, state);
+    }
+    Ok(build_snapshot(app, state))
+}
+
 fn dispatch_action(
     app: &AppHandle,
     state: &AppState,
@@ -1209,6 +1303,7 @@ fn dispatch_action(
             }
             Ok(build_snapshot(app, state))
         }
+        Action::AutoClose => dispatch_auto_close(app, state),
         Action::Hide => {
             let hidden = {
                 let mut phase = state.phase.lock().expect("phase lock");
@@ -1672,4 +1767,63 @@ fn main() {
                 close_transport(app);
             }
         });
+}
+
+/// #336 T1b-a (L15 conditions ii/iv): the NEW `autoClose` verb's admission
+/// verdict. Every protected fact refuses with the one approved sentence and
+/// nothing else; an already-compact island is an honest no-op, never a
+/// refusal. The legacy explicit-close denials are untouched elsewhere.
+#[cfg(test)]
+mod auto_close_tests {
+    use super::*;
+
+    const APPROVED: &str = "Denied: La isla tiene una interacción pendiente.";
+
+    #[test]
+    fn every_protected_fact_refuses_the_new_verb_with_the_one_approved_message() {
+        // question pending / approval card pending / standing request /
+        // decision in flight — each ONE fact alone vetoes the close (L8)
+        let cases = [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
+            (true, true, true, true),
+        ];
+        for (pending, card, request, decision) in cases {
+            let err = auto_close_verdict(pending, card, request, decision, true)
+                .expect_err("a protected fact must refuse the close");
+            assert_eq!(err.code, "denied");
+            assert_eq!(err.message, APPROVED, "exactly the approved refusal");
+        }
+        // a protected fact still wins over an already-compact island: the
+        // refusal is the honest answer, never a silent success
+        for expanded in [true, false] {
+            let err = auto_close_verdict(true, false, false, false, expanded)
+                .expect_err("pending always refuses");
+            assert_eq!(err.message, APPROVED);
+        }
+    }
+
+    #[test]
+    fn a_clear_expanded_island_collapses_and_a_compact_one_is_a_no_op() {
+        assert_eq!(auto_close_verdict(false, false, false, false, true), Ok(true));
+        assert_eq!(auto_close_verdict(false, false, false, false, false), Ok(false));
+    }
+
+    /// L15 condition ii: the approved sentence is carried verbatim inside the
+    /// existing `denied` shape — code and message pinned byte for byte.
+    #[test]
+    fn the_refusal_shape_is_the_existing_denied_code_with_the_exact_sentence() {
+        let err = auto_close_verdict(false, false, false, true, true).unwrap_err();
+        assert_eq!(
+            serde_json::to_value(&err).unwrap(),
+            serde_json::json!({"code": "denied", "message": APPROVED})
+        );
+        // the sentence the coordinator approved, exactly once, capitalized and punctuated
+        assert_eq!(
+            err.message.strip_prefix("Denied: ").map(str::to_string),
+            Some("La isla tiene una interacción pendiente.".to_string())
+        );
+    }
 }
