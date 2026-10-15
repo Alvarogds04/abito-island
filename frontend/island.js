@@ -333,6 +333,7 @@
   const release = (pt, cancelled) => {
     if (!pressed) return;
     pressed = false;
+    character.dragEnd();
     document.body.classList.remove('is-dragging');
     send('drag_release', { x: pt.x, y: pt.y, cancelled });
   };
@@ -344,6 +345,7 @@
     // the chat — drag never attaches to text or composer controls.
     if (e.target && e.target.closest && e.target.closest('button, textarea, input, #chat-log, #chat-composer')) return;
     pressed = true;
+    character.dragStart(e.screenX);
     lastPoint = { x: e.clientX, y: e.clientY };
     document.body.classList.add('is-dragging');
     try { if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId); }
@@ -366,6 +368,7 @@
     if (!pressed) { updateHover({ x: e.clientX, y: e.clientY }); return; }
     updateHover(null);
     lastPoint = { x: e.clientX, y: e.clientY };
+    character.dragMove(e.screenX);
     send('drag_move', { x: e.clientX, y: e.clientY });
   });
   document.addEventListener('pointerleave', () => updateHover(null));
@@ -812,7 +815,7 @@
   let characterTurnBusy = false;
   function characterBusy() {
     const field = $('chat-input');
-    character.busy(pressed || characterTurnBusy || !!(field && (field.value || document.activeElement === field)));
+    character.busy(characterTurnBusy || !!(field && (field.value || document.activeElement === field)));
   }
   for (const name of ['pointerdown', 'pointermove', 'keydown', 'input', 'focusin', 'focusout']) {
     document.addEventListener(name, () => { character.activity(); characterBusy(); });

@@ -153,3 +153,48 @@ test('island wires pointer hover to the controller', () => {
   const island = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
   assert.match(island, /character\.hover\(/);
 });
+
+// ---- T3: shake -> dizzy (F059), frontend detector only ----
+function shake(c, time, xs, step = 50) { for (const x of xs) { time.advance(step); c.dragMove(x); } }
+const zig = [0, 30, 0, 30, 0, 30]; // legs of 30 px: reversals at 0, 30, 0
+test('fast back-and-forth drag makes dizzy for 3300 ms, then returns to idle', () => {
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] });
+  c.dragStart(0); shake(c, time, zig); assert.equal(clay.state, 'dizzy');
+  c.dragEnd(); assert.equal(clay.state, 'dizzy', 'release does not cancel the wobble');
+  const fired = 250; // third reversal of zig at 50 ms/step
+  time.advance(fired + 3300 - 1 - time.now()); assert.equal(clay.state, 'dizzy'); time.advance(1); assert.equal(clay.state, 'idle');
+  c.destroy(); assert.equal(time.count(), 0);
+});
+test('slow drags, short legs, one-way drags and plain clicks never trigger dizzy', () => {
+  for (const [xs, step] of [[zig, 400], [[0, 10, 0, 10, 0, 10, 0], 50], [[0, 30, 60, 90, 120, 150], 50], [[], 50]]) {
+    const { c, clay, time } = setup(); c.snapshot({ notices: [] }); c.dragStart(0); shake(c, time, xs, step);
+    assert.notEqual(clay.state, 'dizzy'); c.dragEnd(); c.destroy();
+  }
+});
+test('detector fires once per press and re-arms on the next press', () => {
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] });
+  c.dragStart(0); shake(c, time, zig); assert.equal(clay.state, 'dizzy'); time.advance(3300); assert.equal(clay.state, 'idle');
+  shake(c, time, zig); assert.equal(clay.state, 'idle', 'same press cannot fire again'); c.dragEnd();
+  c.dragStart(0); shake(c, time, zig); assert.equal(clay.state, 'dizzy'); c.destroy();
+});
+test('pending request, active turn, busy composer and blocked motion suppress dizzy; urgent facts cancel it', () => {
+  for (const arm of [c => c.chat('think'), c => c.question({ pending: { kind: 'question', expiresAt: 999999 } }), c => c.busy(true)]) {
+    const { c, clay, time } = setup(); c.snapshot({ notices: [] }); arm(c); const before = clay.state;
+    c.dragStart(0); shake(c, time, zig); assert.equal(clay.state, before); assert.notEqual(clay.state, 'dizzy'); c.destroy();
+  }
+  const b = setup(); b.c.snapshot({ notices: [] }); b.block(true); b.c.dragStart(0); shake(b.c, b.time, zig); assert.equal(b.clay.state, 'idle'); b.c.destroy();
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] }); c.dragStart(0); shake(c, time, zig); assert.equal(clay.state, 'dizzy');
+  c.chat('speak'); assert.equal(clay.state, 'speak'); c.chat(null); assert.equal(clay.state, 'idle', 'no stale dizzy replay'); c.destroy();
+});
+test('cancelled pointer resets the detector; dragging holds off sleep', () => {
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] }); c.dragStart(0); shake(c, time, [0, 30, 0, 30]); c.dragEnd();
+  c.dragStart(0); shake(c, time, [30, 0]); assert.notEqual(clay.state, 'dizzy');
+  time.advance(70000); assert.equal(clay.state, 'idle', 'pressed drag counts as activity'); c.dragEnd(); c.destroy();
+});
+test('island feeds pointer screen x to the detector and leaves native drag IPC arguments unchanged', () => {
+  const island = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
+  assert.match(island, /character\.dragStart\(e\.screenX\)/); assert.match(island, /character\.dragMove\(e\.screenX\)/); assert.match(island, /character\.dragEnd\(\)/);
+  assert.match(island, /send\('drag_move', \{ x: e\.clientX, y: e\.clientY \}\)/);
+  assert.match(island, /send\('drag_release', \{ x: pt\.x, y: pt\.y, cancelled \}\)/);
+  assert.match(island, /send\('drag_press', \{ x: e\.clientX, y: e\.clientY \}\)/);
+});

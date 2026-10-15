@@ -9,6 +9,7 @@
   else root.AbitoCharacter = Object.freeze(api);
 })(typeof self !== 'undefined' ? self : this, () => {
   const SLEEP_MS = 60000, FINISHED_MS = 1800, YAWN_MS = 58000, HOVER_DWELL_MS = 1900, HOVER_COOLDOWN_MS = 6000;
+  const SHAKE_REVERSALS = 3, SHAKE_LEG_PX = 24, SHAKE_WINDOW_MS = 700, DIZZY_MS = 3300;
   function create(options) {
     const { clay, choosePose, validCard, notification } = options;
     const now = options.now || Date.now;
@@ -18,6 +19,23 @@
     let snapshot = null, question = null, chat = null, host = null, occupied = false;
     let lastActivity = now(), finishedUntil = 0, timer = 0, destroyed = false;
     let baseline = false;
+    // Shake: horizontal back-and-forth of a pressed drag (screen x, so the moving window does not
+    // hide it). Three reversals, each leg >= 24 px, inside 700 ms; once per press. Frontend only.
+    let dragging = false, shakeFired = false, extreme = 0, dir = 0, reversals = [], dizzyUntil = 0;
+    function resetShake() { dragging = false; shakeFired = false; dir = 0; reversals = []; }
+    function shakeMove(x, at) {
+      if (!dragging || shakeFired || !Number.isFinite(x)) return;
+      if (dir === 0) { if (Math.abs(x - extreme) >= SHAKE_LEG_PX) { dir = x > extreme ? 1 : -1; extreme = x; } return; }
+      if (dir * (x - extreme) > 0) { extreme = x; return; }
+      if (Math.abs(x - extreme) >= SHAKE_LEG_PX) {
+        dir = -dir; extreme = x; reversals.push(at);
+        reversals = reversals.filter(t => at - t <= SHAKE_WINDOW_MS);
+        if (reversals.length >= SHAKE_REVERSALS) {
+          shakeFired = true; reversals = [];
+          if (!occupied && !blocked() && producer() === 'idle') { dizzyUntil = at + DIZZY_MS; lastActivity = at; finishedUntil = 0; sync(); }
+        }
+      }
+    }
     let hovering = false, hoverTimer = 0, lastLove = -Infinity, yawned = false;
     const emote = name => !!(clay && clay.triggerEmote && clay.triggerEmote(name));
     // Decorations only on a calm idle character; never over attention, a turn, a drag or reduced/hidden motion.
@@ -46,9 +64,11 @@
       clearTimer(timer); timer = 0;
       const at = now(), source = producer(), pending = attention();
       // Urgent/active facts cancel decorations, never defer them until later.
-      if (source !== 'idle' || occupied || blocked()) { finishedUntil = 0; lastActivity = at; }
+      if (source !== 'idle' || blocked()) dizzyUntil = 0;
+      if (source !== 'idle' || occupied || dragging || blocked()) { finishedUntil = 0; lastActivity = at; }
       let state = source;
-      if (source === 'idle' && !occupied && !blocked()) {
+      if (source === 'idle' && !blocked() && dizzyUntil > at) state = 'dizzy';
+      else if (source === 'idle' && !occupied && !dragging && !blocked()) {
         if (finishedUntil > at) state = 'finished';
         else if (at - lastActivity >= SLEEP_MS) state = 'sleeping';
       }
@@ -59,6 +79,7 @@
       let due = Infinity;
       if (pending) due = pending.expiry;
       if (finishedUntil > at) due = Math.min(due, finishedUntil);
+      if (dizzyUntil > at) due = Math.min(due, dizzyUntil);
       if (source === 'idle' && !occupied && !blocked() && state !== 'sleeping') due = Math.min(due, lastActivity + (yawned ? SLEEP_MS : YAWN_MS));
       // Browsers/Node coerce delays above signed int32 to 1 ms: cap, then recheck.
       if (Number.isFinite(due)) timer = setTimer(sync, Math.min(2147483647, Math.max(1, due - at)));
@@ -89,6 +110,9 @@
       activity() { lastActivity = now(); finishedUntil = 0; sync(); },
       motionChanged() { lastActivity = now(); finishedUntil = 0; sync(); },
       get state() { return clay ? clay.state : producer(); },
+      dragStart(x) { resetShake(); dragging = true; extreme = x; lastActivity = now(); clearHover(); sync(); },
+      dragMove(x) { shakeMove(x, now()); },
+      dragEnd() { resetShake(); lastActivity = now(); sync(); },
       hover(inside) {
         inside = !!inside; if (inside === hovering) return;
         hovering = inside;
@@ -98,5 +122,5 @@
       destroy() { destroyed = true; clearTimer(timer); timer = 0; clearHover(); },
     };
   }
-  return { create, SLEEP_MS, FINISHED_MS, YAWN_MS, HOVER_DWELL_MS, HOVER_COOLDOWN_MS };
+  return { create, SLEEP_MS, FINISHED_MS, DIZZY_MS, YAWN_MS, HOVER_DWELL_MS, HOVER_COOLDOWN_MS };
 });
