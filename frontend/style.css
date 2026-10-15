@@ -1117,12 +1117,13 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 /* ---- #408: at the Settings size the tabs become a LEFT vertical rail (settings.js sets data-rail from the
    panel width); the 400 column keeps the wrapping row. */
 #settings[data-rail="true"] {
-  display: grid; grid-template-columns: 188px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 12px;
+  display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 16px;
+  padding: 20px 24px;
 }
 #settings[data-rail="true"] #settings-bar { grid-column: 1 / -1; }
 #settings[data-rail="true"] #settings-hint { grid-column: 2; grid-row: 2; }
-#settings[data-rail="true"] #settings-tabs { grid-column: 1; grid-row: 2 / 4; flex-direction: column; flex-wrap: nowrap; align-self: start; }
-#settings[data-rail="true"] .stab { justify-content: flex-start; width: 100%; border-radius: var(--radius-xl); }
+#settings[data-rail="true"] #settings-tabs { grid-column: 1; grid-row: 2 / 4; flex-direction: column; flex-wrap: nowrap; align-self: start; gap: 6px; }
+#settings[data-rail="true"] .stab { justify-content: flex-start; width: 100%; min-height: 48px; border-radius: var(--radius-xl); }
 #settings[data-rail="true"] #settings-body, #settings[data-rail="true"] #models { grid-column: 2; grid-row: 3; min-height: 0; }
 #settings[data-rail="true"] #settings-live { grid-column: 1 / -1; }
 
@@ -1131,3 +1132,15 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #minibots[hidden] { display: none; }
 .minibot { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--fs-label); line-height: 18px; }
 .minibot svg { width: 24px; height: 24px; flex: 0 0 24px; }
+
+#settings[data-rail="true"] #settings-hint { margin: 0 0 12px; }
+#settings[data-rail="true"] .ssec { margin-top: 20px; }
+#settings[data-rail="true"] .ssec:first-child { margin-top: 4px; }
+#settings[data-rail="true"] .ssection { margin-bottom: 8px; }
+#settings[data-rail="true"] .scard { padding: 16px 18px; gap: 8px; }
+#settings[data-rail="true"] .scards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+#settings[data-rail="true"] .scards > .sempty { grid-column: 1 / -1; }
+#settings[data-rail="true"] .scard .sagent-head { align-items: center; }
+#settings[data-rail="true"] .scard .srow-actions { margin-top: auto; }
+#settings[data-rail="true"] .sagent { padding: 12px 0; }
+#settings[data-rail="true"] #settings-body { padding-right: 8px; gap: 0; }

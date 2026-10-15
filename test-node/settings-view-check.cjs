@@ -22,17 +22,22 @@ test('F055 general volume uses default and inclusive boundaries without coercion
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('#408 seven sub-tabs of ONE Ajustes entry, in one table: Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General', () => {
-  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'connectors', 'models', 'specialists', 'pills', 'appearance', 'general']);
-  assert.deepEqual(S.TABS.map(x => x.title), ['Cuentas', 'Conectores', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Pills, Apariencia, General', () => {
+  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'models', 'specialists', 'pills', 'appearance', 'general']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['Conexiones', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+  // S8: the old ids still resolve (deep links), to the merged tab
+  assert.equal(S.tabAlias('connectors'), 'accounts');
+  assert.equal(S.tabAlias('accounts'), 'accounts');
+  assert.equal(S.tabAlias('models'), 'models');
+  assert.equal(S.tabAlias('nope'), null);
   for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
-  assert.equal(S.tabById('connectors').title, 'Conectores');
+  assert.equal(S.tabById('connectors'), null, 'resolved through tabAlias, not a tab of its own');
   assert.equal(S.tabById('nope'), null);
   assert.equal(S.SCREENS, undefined);
 });
 
 test('#408 tablist keyboard: arrows wrap, Home/End jump, other keys are ignored', () => {
-  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'connectors');
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'models');
   assert.equal(S.tabKeyTarget('general', 'ArrowRight'), 'accounts');
   assert.equal(S.tabKeyTarget('accounts', 'ArrowLeft'), 'general');
   assert.equal(S.tabKeyTarget('pills', 'Home'), 'accounts');
@@ -564,7 +569,7 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
   const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.tabById('connectors').hint, /Preguntá antes de enviar/);
+  assert.match(S.tabById('accounts').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 
@@ -846,4 +851,49 @@ test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row o
   const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
   assert.match(css, /#settings\[data-rail="true"\] #settings-tabs\s*\{[^}]*flex-direction:\s*column/);
   assert.match(css, /#settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/, 'the row fallback wraps');
+});
+
+test('#408 S9 spacing at the Settings size: wider rail, roomier panel and sections, 2-column cards, tall rail items', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, sel); return css.slice(i, css.indexOf('}', i)); };
+  assert.match(rule('#settings[data-rail="true"]'), /grid-template-columns:\s*200px/);
+  assert.match(rule('#settings[data-rail="true"]'), /padding:\s*20px 24px/);
+  assert.match(rule('#settings[data-rail="true"] .ssec'), /margin-top:\s*20px/);
+  assert.match(rule('#settings[data-rail="true"] #settings-tabs'), /gap:\s*6px/);
+  assert.match(rule('#settings[data-rail="true"] .stab'), /min-height:\s*48px/);
+  assert.match(rule('#settings[data-rail="true"] .scard'), /padding:\s*16px 18px/);
+  assert.match(rule('#settings[data-rail="true"] .scards'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(rule('#settings[data-rail="true"] .scards'), /gap:\s*12px/);
+  assert.match(rule('#settings[data-rail="true"] .scard .sagent-head'), /align-items:\s*center/);
+});
+
+test('#408 T8 piConnection: the card exists only when Pi has a nan provider; the page only ever sees status + counts', () => {
+  assert.equal(S.piConnection(null, null), null, 'no answer yet: no card');
+  assert.equal(S.piConnection({ exists: false, models: 0 }, null), null, 'Pi has no nan: no card');
+  const offer = S.piConnection({ exists: true, models: 4 }, null);
+  assert.deepEqual([offer.kind, offer.action.label, offer.action.replace], ['offer', 'Usar la conexión de Pi', false]);
+  assert.match(offer.note, /4 modelos/); assert.match(offer.note, /copia una sola vez/i);
+  const owned = { accounts: [{ accountId: 'nan', provider: 'nan', hasCredential: true, config: { nombre: 'nan (Pi)', models: ['a', 'b'] } }] };
+  const have = S.piConnection({ exists: true, models: 4 }, owned);
+  assert.deepEqual([have.kind, have.status.word, have.status.tone], ['connected', 'Conectado', 'go']);
+  assert.equal(have.action.label, 'Volver a copiar desde Pi'); assert.equal(have.action.replace, true);
+  assert.match(have.action.warning, /reemplaza/i, 'a second import says it replaces');
+  assert.deepEqual(have.remove, { label: 'Quitar conexión', accountId: 'nan' });
+  assert.deepEqual(have.edit, { label: 'Cambiar clave', accountId: 'nan' });
+  // an owned nan account stays manageable even when Pi no longer has the provider
+  const gone = S.piConnection({ exists: false, models: 0 }, owned);
+  assert.equal(gone.kind, 'connected'); assert.equal(gone.action, null);
+  const sans = S.piConnection({ exists: true, models: 1 }, { accounts: [{ accountId: 'nan', provider: 'nan', hasCredential: false, config: { nombre: 'nan', models: ['a'] } }] });
+  assert.equal(sans.status.word, 'Sin clave'); assert.equal(sans.status.tone, 'sun');
+});
+
+test('#408 T8 piOutcome: only our own sentences, never an engine/host string', () => {
+  assert.match(S.piOutcome({ imported: true, replaced: false, models: 2 }).say, /2 modelos/);
+  assert.match(S.piOutcome({ imported: true, replaced: true, models: 2 }).say, /reemplazó/i);
+  for (const code of ['pi_missing', 'pi_unsafe', 'pi_invalid', 'save_failed', 'whatever sk-leak']) {
+    const out = S.piOutcome(null, { code, message: 'sk-leak raw host text' });
+    assert.ok(!out.say.includes('sk-leak'), code);
+    assert.equal(out.tone, 'red');
+  }
+  assert.match(S.piOutcome(null, { code: 'pi_unsafe' }).say, /privados/);
 });
