@@ -126,6 +126,22 @@ impl ChatError {
     pub fn resource_authorization_required(safe_message: &str) -> Self {
         Self::new("resource_authorization_required", safe_message, true)
     }
+    /// #343: an attachment the page referenced no longer resolves.
+    pub fn attachment_unavailable() -> Self {
+        Self::new(
+            "attachment_unavailable",
+            "Hay un archivo adjunto que ya no está disponible. Quitálo del mensaje y volvé a enviar.",
+            false,
+        )
+    }
+    /// #343: the chosen local model cannot read images (no vision modality).
+    pub fn vision_unsupported() -> Self {
+        Self::new(
+            "attachment_vision_unsupported",
+            "El modelo elegido no puede leer imágenes. Quitá los adjuntos de imagen y volvé a enviar.",
+            false,
+        )
+    }
 }
 
 /// Validate and normalize a draft: CRLF/CR → LF, no control characters other
@@ -171,6 +187,33 @@ pub struct ProfileRef {
     pub profile_id: String,
     pub revision: u64,
     pub lane_id: String,
+}
+
+/// #343 — one file attached to a turn: the id the page references, the
+/// sanitized display name, the detected MIME type, the byte size and the
+/// generated name it was stored under in the island's uploads directory
+/// (metadata only — the content lives on disk, read back at prompt build).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Attachment {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub size: u64,
+    pub file: String,
+}
+
+/// Attachments accepted on one turn (submit parsing and the page agree).
+pub const MAX_ATTACHMENTS_PER_TURN: usize = 5;
+/// Conservative prompt cost of one image attachment: images do not tokenize
+/// like text, so the budget reserves this much per resolvable image and a
+/// turn that no longer fits errors honestly (`context_limit`).
+pub const IMAGE_TOKEN_ESTIMATE: usize = 1024;
+
+/// An attachment id the page may reference: `a-` + 16 lowercase hex chars.
+pub fn valid_attachment_id(id: &str) -> bool {
+    id.len() == 18
+        && id.starts_with("a-")
+        && id[2..].bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 /// `chat.accepted`: queued work, not completion and not approval.
@@ -226,6 +269,8 @@ pub struct Turn {
     pub profile: ProfileRef,
     /// Older turns left out of this turn's prompt (shown in the UI).
     pub trimmed_turns: usize,
+    /// #343: files attached to THIS turn (metadata; content on disk).
+    pub attachments: Vec<Attachment>,
 }
 
 impl Turn {
@@ -237,7 +282,16 @@ impl Turn {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Message {
     pub role: &'static str,
-    pub content: String,
+    /// Plain text for messages without attachments (the historical shape);
+    /// a turn with attachments sends OpenAI content parts instead:
+    /// `[{type:"text",…},{type:"image_url",…}]`.
+    pub content: Value,
+}
+
+impl Message {
+    fn text(role: &'static str, content: impl Into<String>) -> Self {
+        Message { role, content: Value::String(content.into()) }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,6 +299,44 @@ pub struct Prompt {
     pub messages: Vec<Message>,
     pub estimated_tokens: usize,
     pub trimmed_turns: usize,
+}
+
+/// Resolves one attachment's content for prompt building: text → the file's
+/// text (inlined), image → a data URL. `None` = the content is not available
+/// and the message says so honestly. The caller does the disk reads; prompt
+/// building stays pure.
+pub type ResolveAttachment<'a> = dyn Fn(&Attachment) -> Option<String> + 'a;
+
+/// One message's content and its token cost: a JSON string for turns without
+/// attachments (the historical shape) or OpenAI content parts otherwise.
+fn content_for(turn: &Turn, resolve: &ResolveAttachment) -> (Value, usize) {
+    if turn.attachments.is_empty() {
+        return (Value::String(turn.user_text.clone()), estimate_tokens(&turn.user_text));
+    }
+    const MISSING: &str = " — el archivo ya no está disponible";
+    let mut text = turn.user_text.clone();
+    let mut parts: Vec<Value> = Vec::new();
+    let mut cost = 0usize;
+    for a in &turn.attachments {
+        let resolved = resolve(a);
+        if a.mime.starts_with("image/") {
+            match resolved {
+                Some(url) => {
+                    parts.push(json!({"type": "image_url", "image_url": {"url": url}}));
+                    cost += IMAGE_TOKEN_ESTIMATE;
+                }
+                None => text.push_str(&format!("\n\n[Archivo adjunto: {}{}]", a.name, MISSING)),
+            }
+        } else {
+            match resolved {
+                Some(content) => text.push_str(&format!("\n\n[Archivo adjunto: {}]\n{}", a.name, content)),
+                None => text.push_str(&format!("\n\n[Archivo adjunto: {}{}]", a.name, MISSING)),
+            }
+        }
+    }
+    parts.insert(0, json!({"type": "text", "text": text}));
+    cost += estimate_tokens(&text);
+    (Value::Array(parts), cost)
 }
 
 /// The bounded active context of one conversation. #341 stores history separately.
@@ -305,6 +397,13 @@ impl Conversation {
         self.turns.back().filter(|t| !t.state.is_terminal())
     }
 
+    /// #343: every attachment referenced by the turns currently in memory
+    /// (bounded by the presentation cache) — used to resolve file contents
+    /// once per prompt instead of once per message.
+    pub fn attachments(&self) -> Vec<Attachment> {
+        self.turns.iter().flat_map(|t| t.attachments.iter().cloned()).collect()
+    }
+
     /// `chat.submit`: native assigns `turn_id`/`request_id`; a repeated
     /// client id returns the SAME accepted turn (never a second job); a
     /// running turn refuses a new one (`queue_full`, one turn per
@@ -314,6 +413,21 @@ impl Conversation {
         text: &str,
         client_request_id: &str,
         profile: &ProfileRef,
+    ) -> Result<Accepted, ChatError> {
+        self.submit_with_attachments(text, client_request_id, profile, Vec::new())
+    }
+
+    /// #343 — same contract as [`submit`] with file attachments: the page
+    /// references attachments by id; the metadata was already validated and
+    /// stored by the attach commands (Rust owns the files, the page never
+    /// sends content or paths). A running turn still refuses; attachments
+    /// never change ids or the duplicate rule.
+    pub fn submit_with_attachments(
+        &mut self,
+        text: &str,
+        client_request_id: &str,
+        profile: &ProfileRef,
+        attachments: Vec<Attachment>,
     ) -> Result<Accepted, ChatError> {
         if !valid_client_request_id(client_request_id) {
             return Err(ChatError::invalid_input("Identificador de envío inválido."));
@@ -342,6 +456,7 @@ impl Conversation {
             error: None,
             profile: profile.clone(),
             trimmed_turns: 0,
+            attachments,
         };
         let accepted = Self::accepted(&turn, false);
         self.turns.push_back(turn);
@@ -453,72 +568,79 @@ impl Conversation {
         }
     }
 
-    /// Build the bounded prompt for `turn_id`: system + newest history that
-    /// fits + the new user message. `context_limit - max_output` is the
-    /// input budget; older turns that do not fit are left out and counted
-    /// (shown to the human), and a message that cannot fit alone is a
-    /// `context_limit` error — never a silently larger context.
-    pub fn prompt_for(
-        &mut self,
-        turn_id: &str,
-        system: &str,
-        context_limit: usize,
-        max_output: usize,
-    ) -> Result<Prompt, ChatError> {
-        let index = self
-            .turns
-            .iter()
-            .position(|t| t.turn_id == turn_id)
-            .ok_or_else(ChatError::profile_missing)?;
-        let budget = context_limit.saturating_sub(max_output);
-        let user = self.turns[index].user_text.clone();
-        let mut used = estimate_tokens(system) + estimate_tokens(&user);
-        if used > budget {
-            return Err(ChatError::context_limit());
-        }
-        let eligible: Vec<&Turn> = self
-            .turns
-            .iter()
-            .take(index)
-            .filter(|t| {
-                !t.reply.is_empty()
-                    && matches!(t.state, TurnState::Completed | TurnState::Cancelled)
-            })
-            .collect();
-        let mut kept: Vec<&Turn> = Vec::new();
-        for t in eligible.iter().rev() {
-            let cost = estimate_tokens(&t.user_text) + estimate_tokens(&t.reply);
-            if used + cost > budget {
-                break;
-            }
-            used += cost;
-            kept.push(t);
-        }
-        let trimmed = eligible.len() - kept.len();
-        let mut messages = vec![Message {
-            role: "system",
-            content: system.to_string(),
-        }];
-        for t in kept.iter().rev() {
-            messages.push(Message {
-                role: "user",
-                content: t.user_text.clone(),
-            });
-            messages.push(Message {
-                role: "assistant",
-                content: t.reply.clone(),
-            });
-        }
-        messages.push(Message {
-            role: "user",
-            content: user,
-        });
-        self.turns[index].trimmed_turns = trimmed;
-        Ok(Prompt {
-            messages,
-            estimated_tokens: used,
-            trimmed_turns: trimmed,
-        })
+                /// Build the bounded prompt for `turn_id`: system + newest history that
+                /// fits + the new user message. `context_limit - max_output` is the
+                /// input budget; older turns that do not fit are left out and counted
+                /// (shown to the human), and a message that cannot fit alone is a
+                /// `context_limit` error — never a silently larger context.
+                pub fn prompt_for(
+                                &mut self,
+                                turn_id: &str,
+                                system: &str,
+                                context_limit: usize,
+                                max_output: usize,
+                ) -> Result<Prompt, ChatError> {
+                                self.prompt_for_resolved(turn_id, system, context_limit, max_output, &|_| None)
+                }
+
+                /// [`prompt_for`] with attachment contents. A turn WITHOUT attachments
+                /// produces byte-identical messages to before (#343 shape pin); a turn
+                /// WITH attachments sends OpenAI content parts: one text part (the
+                /// draft plus «[Archivo adjunto: nombre]» blocks) and one image_url
+                /// part per resolvable image. Unresolvable attachments become a visible
+                /// note — never a silent drop.
+                pub fn prompt_for_resolved(
+                                &mut self,
+                                turn_id: &str,
+                                system: &str,
+                                context_limit: usize,
+                                max_output: usize,
+                                resolve: &ResolveAttachment,
+                ) -> Result<Prompt, ChatError> {
+                                let index = self
+                                                .turns
+                                                .iter()
+                                                .position(|t| t.turn_id == turn_id)
+                                                .ok_or_else(ChatError::profile_missing)?;
+                                let budget = context_limit.saturating_sub(max_output);
+                                let (user_content, user_cost) = content_for(&self.turns[index], resolve);
+                                let mut used = estimate_tokens(system) + user_cost;
+                                if used > budget {
+                                                return Err(ChatError::context_limit());
+                                }
+                                let eligible: Vec<&Turn> = self
+                                                .turns
+                                                .iter()
+                                                .take(index)
+                                                .filter(|t| {
+                                                                !t.reply.is_empty()
+                                                                                && matches!(t.state, TurnState::Completed | TurnState::Cancelled)
+                                                })
+                                                .collect();
+                                let mut kept: Vec<&Turn> = Vec::new();
+                                for t in eligible.iter().rev() {
+                                                let (_, content_cost) = content_for(t, resolve);
+                                                let cost = content_cost + estimate_tokens(&t.reply);
+                                                if used + cost > budget {
+                                                                break;
+                                                }
+                                                used += cost;
+                                                kept.push(t);
+                                }
+                                let trimmed = eligible.len() - kept.len();
+                                let mut messages = vec![Message::text("system", system)];
+                                for t in kept.iter().rev() {
+                                                let (content, _) = content_for(t, resolve);
+                                                messages.push(Message { role: "user", content });
+                                                messages.push(Message::text("assistant", t.reply.clone()));
+                                }
+                                messages.push(Message { role: "user", content: user_content });
+                                self.turns[index].trimmed_turns = trimmed;
+                                Ok(Prompt {
+                                                messages,
+                                                estimated_tokens: used,
+                                                trimmed_turns: trimmed,
+                                })
     }
 
     /// Plain-data projection for the WebView (`chat:state`). The page's own
@@ -540,6 +662,7 @@ impl Conversation {
                     "trimmed_turns": t.trimmed_turns,
                     "profile_id": t.profile.profile_id,
                     "profile_revision": t.profile.revision,
+                    "attachments": t.attachments,
                 })
             })
             .collect();
@@ -581,6 +704,9 @@ pub enum Command {
     Submit {
         text: String,
         client_request_id: String,
+        /// #343: attachment ids the page references (metadata already stored
+        /// by the attach commands; content is resolved in Rust at submit).
+        attachments: Vec<String>,
     },
     Cancel {
         turn_id: String,
@@ -627,14 +753,38 @@ pub fn parse_command(payload: &Value) -> Result<Command, ChatError> {
             };
             Ok(Command::History { conversation_id, before })
         }
-        "submit" if keys(&["action", "text", "client_request_id"]) => {
+        "submit" if keys(&["action", "text", "client_request_id"])
+            || keys(&["action", "text", "client_request_id", "attachments"]) =>
+        {
             let text = text_of("text").ok_or_else(bad)?;
             let client_request_id = text_of("client_request_id")
                 .filter(|id| valid_client_request_id(id))
                 .ok_or_else(bad)?;
+            let attachments = match map.get("attachments") {
+                None => Vec::new(),
+                Some(Value::Array(items)) => {
+                    if items.len() > MAX_ATTACHMENTS_PER_TURN {
+                        return Err(bad());
+                    }
+                    let mut ids: Vec<String> = Vec::with_capacity(items.len());
+                    for item in items {
+                        let id = item
+                            .as_str()
+                            .filter(|id| valid_attachment_id(id))
+                            .ok_or_else(bad)?;
+                        if ids.iter().any(|seen| seen == id) {
+                            return Err(bad()); // the same file twice is a mistake, not a feature
+                        }
+                        ids.push(id.to_string());
+                    }
+                    ids
+                }
+                Some(_) => return Err(bad()),
+            };
             Ok(Command::Submit {
                 text,
                 client_request_id,
+                attachments,
             })
         }
         "cancel" if keys(&["action", "turn_id"]) => {

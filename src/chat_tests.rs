@@ -379,7 +379,7 @@ fn chat_commands_parse_with_exact_keys() {
     assert_eq!(
         parse_command(&json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001"}))
             .unwrap(),
-        Command::Submit { text: "hola".into(), client_request_id: "req-0000000001".into() }
+        Command::Submit { text: "hola".into(), client_request_id: "req-0000000001".into(), attachments: Vec::new() }
     );
     assert_eq!(
         parse_command(&json!({"action": "cancel", "turn_id": "t-3"})).unwrap(),
@@ -418,4 +418,121 @@ fn chat_command_payload_is_size_capped_before_parsing_text() {
 fn check_command_is_argument_free() {
     assert_eq!(parse_command(&json!({"action": "check"})).unwrap(), Command::Check);
     assert!(parse_command(&json!({"action": "check", "endpoint": "x"})).is_err());
+}
+
+// --- #343 shape pins: the attachment work must not change the old wire shape --
+
+#[test]
+fn plain_message_content_serializes_as_a_json_string() {
+    // Pin: with no attachments, every prompt message keeps `content` as a
+    // JSON string — never an array — and the completion body is byte-identical.
+    let mut c = convo();
+    let a = c.submit("hola", "req-shape-000001", &profile()).unwrap();
+    c.apply(&a.turn_id, 1, Event::Delta("respuesta".into())).unwrap();
+    c.apply(&a.turn_id, 2, Event::Complete(FinishReason::Stop)).unwrap();
+    let b = c.submit("otra", "req-shape-000002", &profile()).unwrap();
+    let p = c.prompt_for(&b.turn_id, "sistema", 8192, 1024).unwrap();
+    assert_eq!(serde_json::to_value(&p.messages[0]).unwrap(), json!({"role":"system","content":"sistema"}));
+    assert_eq!(serde_json::to_value(&p.messages[1]).unwrap(), json!({"role":"user","content":"hola"}));
+    assert_eq!(serde_json::to_value(&p.messages[2]).unwrap(), json!({"role":"assistant","content":"respuesta"}));
+    assert_eq!(serde_json::to_value(&p.messages[3]).unwrap(), json!({"role":"user","content":"otra"}));
+    let body = crate::localmodel::completion_body("Abito-gpt", &p.messages, 1024);
+    assert!(body.contains("\"content\":\"sistema\""), "{body}");
+    assert!(body.contains("\"content\":\"hola\""), "{body}");
+}
+
+// --- #343: attachments through submit, prompts and the command set -----------
+
+fn attachment(id: &str, name: &str, mime: &str, file: &str) -> Attachment {
+    Attachment { id: id.into(), name: name.into(), mime: mime.into(), size: 12, file: file.into() }
+}
+
+#[test]
+fn submit_accepts_ids_and_turns_carry_the_metadata() {
+    let mut c = convo();
+    let a = c.submit_with_attachments(
+        "hola", "req-att-00000001", &profile(),
+        vec![attachment("a-0123456789abcdef", "notas.txt", "text/plain", "0123456789abcdef-notas.txt")],
+    ).unwrap();
+    let turn = c.turn(&a.turn_id).unwrap();
+    assert_eq!(turn.attachments.len(), 1);
+    assert_eq!(turn.attachments[0].name, "notas.txt");
+    // The wire shape with attachments is content parts, not a string.
+    let p = c.prompt_for(&a.turn_id, "sistema", 8192, 1024).unwrap();
+    let user = &p.messages[1];
+    assert_eq!(user.role, "user");
+    assert!(user.content.is_array(), "{}", user.content);
+}
+
+#[test]
+fn submit_command_parses_the_optional_attachments_key() {
+    let ok = json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001",
+        "attachments": ["a-0123456789abcdef", "a-ffffffffffffffff"]});
+    match parse_command(&ok).unwrap() {
+        Command::Submit { attachments, .. } => assert_eq!(attachments.len(), 2),
+        other => panic!("{other:?}"),
+    }
+    // No key: exactly the old command.
+    match parse_command(&json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001"})).unwrap() {
+        Command::Submit { attachments, .. } => assert!(attachments.is_empty()),
+        other => panic!("{other:?}"),
+    }
+    for bad in [
+        json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001", "attachments": ["b-0123456789abcdef"]}),
+        json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001", "attachments": ["a-0123456789ABCDEF"]}),
+        json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001", "attachments": ["a-0123456789abcdef", "a-0123456789abcdef"]}),
+        json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001", "attachments": {}}),
+        json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001", "attachments": ["a-0123456789abcdef"], "extra": 1}),
+    ] {
+        assert_eq!(parse_command(&bad).unwrap_err().code, "invalid_input", "{bad}");
+    }
+    // The per-turn cap is enforced at the command boundary.
+    let many: Vec<String> = (0..6).map(|i| format!("a-{:016x}", i)).collect();
+    let bad = json!({"action": "submit", "text": "hola", "client_request_id": "req-0000000001", "attachments": many});
+    assert_eq!(parse_command(&bad).unwrap_err().code, "invalid_input");
+}
+
+#[test]
+fn prompts_inline_text_attachments_and_note_missing_ones() {
+    let mut c = convo();
+    let a = c.submit_with_attachments(
+        "resumí esto", "req-att-00000002", &profile(),
+        vec![
+            attachment("a-0123456789abcdef", "notas.txt", "text/plain", "0123456789abcdef-notas.txt"),
+            attachment("a-ffffffffffffffff", "perdido.txt", "text/plain", "ffffffffffffffff-perdido.txt"),
+        ],
+    ).unwrap();
+    let resolve = |att: &Attachment| (att.id == "a-0123456789abcdef").then(|| "contenido del archivo".to_string());
+    let p = c.prompt_for_resolved(&a.turn_id, "sistema", 8192, 1024, &resolve).unwrap();
+    let content = p.messages[1].content.as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(text.starts_with("resumí esto"), "{text}");
+    assert!(text.contains("[Archivo adjunto: notas.txt]\ncontenido del archivo"), "{text}");
+    assert!(text.contains("[Archivo adjunto: perdido.txt — el archivo ya no está disponible]"), "{text}");
+    assert_eq!(content.len(), 1); // text only: no image parts
+}
+
+#[test]
+fn prompts_build_image_parts_and_reserve_their_budget() {
+    let mut c = convo();
+    let a = c.submit_with_attachments(
+        "mirá", "req-att-00000003", &profile(),
+        vec![attachment("a-0123456789abcdef", "foto.png", "image/png", "0123456789abcdef-foto.png")],
+    ).unwrap();
+    let resolve = |att: &Attachment| (att.mime == "image/png").then(|| "data:image/png;base64,AAAA".to_string());
+    let p = c.prompt_for_resolved(&a.turn_id, "sistema", 8192, 1024, &resolve).unwrap();
+    let content = p.messages[1].content.as_array().unwrap();
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[1]["type"], "image_url");
+    assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+    // The image cost enters the budget: a context too small for it errors honestly.
+    // used ≈ estimate("sistema") + estimate("mirá") + IMAGE_TOKEN_ESTIMATE = 1037.
+    let small = c.prompt_for_resolved(&a.turn_id, "sistema", IMAGE_TOKEN_ESTIMATE + 100, 100, &resolve);
+    assert_eq!(small.unwrap_err().code, "context_limit");
+}
+
+#[test]
+fn safe_errors_name_what_to_do() {
+    assert!(ChatError::attachment_unavailable().safe_message.contains("ya no está disponible"));
+    assert!(ChatError::vision_unsupported().safe_message.contains("no puede leer imágenes"));
 }

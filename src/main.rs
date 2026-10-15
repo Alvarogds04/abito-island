@@ -1541,6 +1541,8 @@ fn main() {
             desktop_action,
             open_chat_url,
             chathost::chat_action,
+            chathost::chat_attach,
+            chathost::chat_attach_data,
             modelshost::models_action,
             questionhost::question_action,
             hotkeyhost::hotkey_action,

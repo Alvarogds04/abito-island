@@ -188,3 +188,81 @@ fn private_modes_and_symlink_refusal() {
     symlink(&dir, temp.0.join("link")).unwrap();
     assert!(Store::open(&temp.0.join("link")).is_err());
 }
+
+// --- #343 shape pins: attachment metadata must not change the old record shape --
+
+#[test]
+fn old_turn_records_without_attachments_still_load_and_plain_turns_gain_no_key() {
+    let temp = Temp::new();
+    let dir = temp.0.join("history"); // Store::open creates and tightens it
+    let mut store = Store::open(&dir).unwrap();
+    let convo = store.create(None, 1).unwrap();
+    // A plain turn through the public API persists a record with NO
+    // `attachments` key at all (byte-shape preserved for older readers).
+    store.append(&convo.id, &turn(1, "texto viejo"), 2).unwrap();
+    let file = dir.join(format!("{}.jsonl", convo.id));
+    let contents = std::fs::read_to_string(&file).unwrap();
+    let turn_line = contents.lines().find(|l| l.contains("\"kind\":\"turn\"")).unwrap();
+    assert!(!turn_line.contains("attachments"), "{turn_line}");
+
+    // A record in the OLD shape (attachments key stripped) still loads, with
+    // zero attachments — nothing is invented.
+    std::fs::write(&file, contents).unwrap();
+    let reopened = Store::open(&dir).unwrap();
+    let summary = reopened.summary(&convo.id).unwrap();
+    let page = reopened.page(&convo.id, None, PAGE_SIZE).unwrap();
+    assert_eq!(summary.turns, 1);
+    assert_eq!(page.turns[0].user_text, "texto viejo");
+    assert_eq!(page.turns[0].reply, "answer <script> plain");
+    assert!(page.turns[0].attachments.is_empty());
+}
+
+#[test]
+fn attachment_metadata_round_trips_and_forged_records_are_refused() {
+    let temp = Temp::new();
+    let dir = temp.0.join("history"); // Store::open creates and tightens it
+    let mut store = Store::open(&dir).unwrap();
+    let convo = store.create(None, 1).unwrap();
+    let mut t = turn(1, "con adjunto");
+    t.attachments = vec![crate::chat::Attachment {
+        id: "a-0123456789abcdef".into(),
+        name: "notas.txt".into(),
+        mime: "text/plain".into(),
+        size: 9,
+        file: "0123456789abcdef-notas.txt".into(),
+    }];
+    store.append(&convo.id, &t, 2).unwrap();
+    let file = dir.join(format!("{}.jsonl", convo.id));
+    let reopened = Store::open(&dir).unwrap();
+    let page = reopened.page(&convo.id, None, PAGE_SIZE).unwrap();
+    assert_eq!(page.turns[0].attachments.len(), 1);
+    assert_eq!(page.turns[0].attachments[0].file, "0123456789abcdef-notas.txt");
+
+    // Stripping the attachments key turns the record into a valid OLD one.
+    let contents = std::fs::read_to_string(&file).unwrap();
+    let stripped = contents
+        .lines()
+        .map(|l| match l.find(",\"attachments\":[") {
+            Some(i) => {
+                let end = l[i..].find("]").map(|e| i + e + 1).unwrap_or(l.len());
+                format!("{}{}", &l[..i], &l[end..])
+            }
+            None => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&file, format!("{stripped}\n")).unwrap();
+    let reopened = Store::open(&dir).unwrap();
+    let page = reopened.page(&convo.id, None, PAGE_SIZE).unwrap();
+    assert_eq!(page.turns.len(), 1);
+    assert!(page.turns[0].attachments.is_empty(), "the old shape loads with zero attachments");
+
+    // A record whose attachment breaks the stored-name grammar is corrupt:
+    // forged from the ORIGINAL record (the one that carries the key).
+    let forged = contents.replace("0123456789abcdef-notas.txt", "0123456789abcdef-../escape.txt");
+    assert_ne!(forged, contents, "the forged edit must actually change the record");
+    std::fs::write(&file, forged).unwrap();
+    let reopened = Store::open(&dir).unwrap();
+    let page = reopened.page(&convo.id, None, PAGE_SIZE).unwrap();
+    assert_eq!(page.turns.len(), 0, "the forged record is skipped, never loaded");
+}

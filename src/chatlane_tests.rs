@@ -80,8 +80,8 @@ fn bytes_are_shown_in_spanish_gigabytes() {
 
 #[test]
 fn availability_maps_the_preflight_honestly() {
-    let ok = Ok(Ready { context_limit: 65536, busy: false, size_bytes: None });
-    let busy = Ok(Ready { context_limit: 65536, busy: true, size_bytes: None });
+    let ok = Ok(Ready { context_limit: 65536, busy: false, size_bytes: None, vision: None });
+    let busy = Ok(Ready { context_limit: 65536, busy: true, size_bytes: None, vision: None });
     assert_eq!(availability_of(&ok).state, "ready");
     assert_eq!(availability_of(&busy).state, "busy");
     let down = availability_of(&Err(ChatError::local_model_unavailable()));

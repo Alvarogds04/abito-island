@@ -25,6 +25,11 @@ tauri-plugin-single-instance = "2"
 # Windows; it is the Unix-only *calls* that src/platform/ gates (U1b..).
 libc = "0.2"
 sha2 = "0.10"
+# #343: image attachments ride to the local model as data URLs. base64 is
+# ALREADY in Cargo.lock as a transitive dependency (0.22.1); declaring it
+# here adds only this crate's edge — the lock gains exactly one line (the
+# dependency edge), no new packages, no version changes.
+base64 = "0.22"
 
 # ---- Unix-only platform layer (Windows port, U1a) ----------------------------
 # These were unconditional [dependencies], which made the whole crate
