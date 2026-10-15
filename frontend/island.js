@@ -72,6 +72,12 @@
   if (typeof AbitoClay !== 'undefined') {
     clay = AbitoClay.create(clayEl, { seed: 505, viewBox: '0 20 200 160' });
   }
+  // #347: presentation-only producers; pending human requests outrank decorations.
+  const character = window.AbitoCharacter.create({
+    clay, applyState: next => { if (clay && clay.state !== next) clay.setState(next); }, choosePose: (chat, host) => O.choosePose(chat, host), validCard, setTimer: setTimeout, clearTimer: clearTimeout,
+    notification: snap => snap && snap.available !== false ? NV.fromPending(snap.pending) : null,
+    blocked: () => motionReduced() || document.hidden || (typeof AbitoClay !== 'undefined' && AbitoClay.paused),
+  });
   applyMotion(); // from the first frame: Abito's own motion state, never the inherited one (#304)
 
   // ---- R6 pose (Q2): only REAL events drive it, through the engine's own
@@ -89,6 +95,7 @@
     const r = O.hostPoseView(snapshot, hostTracker, Date.now());
     hostTracker = r.tracker;
     hostPose = r.pose;
+    character.snapshot(snapshot);
     clearTimeout(hostTimer);
     if (r.pose && r.expiresAt) hostTimer = setTimeout(() => refreshHost(current), Math.max(50, r.expiresAt - Date.now() + 50));
     applyPose();
@@ -98,7 +105,8 @@
     // Priority (night review): active chat turn > time-boxed host error > the
     // chat's own error > rest (see O.choosePose).
     const next = O ? O.choosePose(chatPose, hostPose) : (chatPose || 'idle');
-    if (clay && clay.state !== next) clay.setState(next);
+    // Keep the legacy resolver unchanged; the controller layers real human requests above it.
+    character.chat(next);
   }
   document.addEventListener('abito:pose', event => {
     const state = event.detail;
@@ -799,7 +807,36 @@
     new MutationObserver(filterModels).observe(modelList, { childList: true });
   }
 
+  // #347 idle clock: real interaction, queued turns and focused/drafted composer keep Abito awake.
+  let characterTurnBusy = false;
+  function characterBusy() {
+    const field = $('chat-input');
+    character.busy(pressed || characterTurnBusy || !!(field && (field.value || document.activeElement === field)));
+  }
+  for (const name of ['pointerdown', 'pointermove', 'keydown', 'input', 'focusin', 'focusout']) {
+    document.addEventListener(name, () => { character.activity(); characterBusy(); });
+  }
+  for (const name of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(name, characterBusy);
+  const characterListen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  let questionStreamSeen = false, chatStreamSeen = false;
+  const characterQuestion = snap => { character.question(snap); };
+  const characterChat = view => {
+    characterTurnBusy = !!(view && view.active_turn && Array.isArray(view.turns) &&
+      view.turns.some(t => t.turn_id === view.active_turn && ['queued', 'thinking', 'streaming', 'waiting_approval'].includes(t.state)));
+    characterBusy();
+  };
+  if (characterListen) {
+    characterListen('question:state', event => { questionStreamSeen = true; characterQuestion(event && event.payload); }).catch(() => {});
+    characterListen('chat:state', event => { chatStreamSeen = true; characterChat(event && event.payload); }).catch(() => {});
+  }
+  if (invoke) {
+    invoke('question_action', { payload: { action: 'view' } }).then(snap => { if (!questionStreamSeen) characterQuestion(snap); }, () => {});
+    invoke('chat_action', { payload: { action: 'view' } }).then(view => { if (!chatStreamSeen) characterChat(view); }, () => {});
+  }
+  window.addEventListener('pagehide', () => character.destroy());
   // ---- boot ---------------------------------------------------------------
+  if (typeof AbitoClay !== 'undefined') AbitoClay.onChange(() => character.motionChanged());
+  character.activity();
   render();
   renderCard();
   requestAnimationFrame(() => reportEvidence(0));

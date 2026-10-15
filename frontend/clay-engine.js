@@ -1,9 +1,10 @@
-/* Abito clay engine — R6 (seven states). Single source inlined by build-r6.cjs into
-   seven-states.html and context-preview.html. Code English, UI copy Spanish.
-   The five R5 states keep their exact approved parameters; Listening and Error are new. */
+/* Abito clay engine — R7. The seven R6 poses and public names stay intact.
+   Additional state/timing mechanics informed by Coucou windows/src/mochi/engine.ts,
+   Copyright 2026 Louis Raillé, MIT. No Mochi character paths, palette, assets,
+   sounds or appendages: geometry and lid language remain Abito's own. */
 const AbitoClay = (() => {
   'use strict';
-  const REVISION = 'R6';
+  const REVISION = 'R7';
   const TAU = Math.PI * 2, K = 5, DIM = 2 * K + 1, N = 144;
   const CX = 100, CY = 102, R0 = 54;
   const NS = 'http://www.w3.org/2000/svg';
@@ -31,7 +32,26 @@ const AbitoClay = (() => {
     error:   { name: 'Error', caption: 'Confundido: ladea la cabeza, un ojo más alto que el otro y parpadea dos veces.', v: coeffs([[1, 0, .05], [2, .015, -.05], [3, -.012, 0]]),
                eye: { sx: .94, sy: .9, uL: 0, uR: .2, tilt: -.1, uc: .12, l: .04, bow: .2, asym: -.14 }, lift: 2, lean: -2.4, knead: .032 },
   };
-  const ORDER = ['idle', 'listen', 'think', 'speak', 'reject', 'confirm', 'error'];
+  // Append only: callers consuming the seven original names/order keep working.
+  const ORDER = ['idle', 'listen', 'think', 'speak', 'reject', 'confirm', 'error', 'working', 'searching', 'approval', 'question', 'finished', 'ratelimit', 'sleeping', 'dizzy'];
+  Object.assign(STATES, {
+    working: { name: 'Trabaja', caption: 'Amasa suavemente mientras trabaja.', v: coeffs([[1, 0, .015], [2, .055, 0], [3, .009, -.008]]),
+      eye: { ...STATES.idle.eye, sy: 1.04, l: .04 }, lift: -1, lean: 0, knead: .047 },
+    searching: { name: 'Busca', caption: 'Recorre de lado a lado con la mirada.', v: coeffs([[1, 0, .02], [2, -.035, .025]]),
+      eye: { ...STATES.idle.eye, sx: 1.04, sy: 1.06, uL: .08, uR: .08 }, lift: -2, lean: 1, knead: .032 },
+    approval: { name: 'Espera tu decisión', caption: 'Atento a tu decisión, sin aprobar nada.', v: coeffs([[1, 0, -.01], [2, -.025, .02]]),
+      eye: { ...STATES.idle.eye, sx: 1.12, sy: 1.14, uL: 0, uR: 0 }, lift: -2.5, lean: 1.4, knead: .03 },
+    question: { name: 'Pregunta', caption: 'Se inclina con curiosidad mientras espera tu respuesta.', v: coeffs([[1, 0, .025], [2, .012, -.035]]),
+      eye: { ...STATES.idle.eye, uL: .03, uR: .18, asym: .065 }, lift: -1, lean: -3, knead: .03 },
+    finished: { name: 'Turno terminado', caption: 'El turno terminó; no confirma éxito.', v: coeffs([[1, 0, .03], [2, .025, 0], [4, -.009, 0]]),
+      eye: { ...STATES.idle.eye, uL: .14, uR: .14 }, lift: 1.5, lean: 0, knead: .026 },
+    ratelimit: { name: 'En espera por límite', caption: 'Pose de espera; sólo cuando haya un productor de límite.', v: coeffs([[1, 0, .055], [2, .065, .018]]),
+      eye: { ...STATES.idle.eye, sy: .94, uL: .38, uR: .38 }, lift: 3, lean: -1, knead: .024 },
+    sleeping: { name: 'Duerme', caption: 'Descansa tras la inactividad; despierta con actividad real.', v: coeffs([[1, 0, .07], [2, .065, 0]]),
+      eye: { ...STATES.idle.eye, sy: .92, uL: .94, uR: .94 }, lift: 4, lean: 0, knead: .012 },
+    dizzy: { name: 'Mareado', caption: 'Se balancea después de un arrastre rápido de ida y vuelta.', v: coeffs([[1, 0, .045], [2, -.015, .035]]),
+      eye: { ...STATES.idle.eye, uL: .18, uR: .36, asym: .12, tilt: .08 }, lift: 1, lean: 0, knead: .036 },
+  });
 
   function superellipse(rx, ry, n = 4.2) {
     const s = Math.min(1, (8 * Math.pow(2, -1 / n) - 4) / 3), l = rx * s, m = ry * s, f = v => v.toFixed(2);
@@ -97,6 +117,12 @@ const AbitoClay = (() => {
       if (S.state === 'confirm') { const c = g % 1.9; if (c < .7) nod = 3.2 * Math.sin(Math.PI * c / .7) ** 2; }
       if (S.state === 'listen') nod = .9 * S.voice * Math.sin(TAU * .9 * t) ** 2;          // small attentive nods with the voice
       if (S.state === 'error') { tiltB = .014 * Math.sin(TAU * .32 * g); shake = .9 * Math.sin(TAU * .32 * g + 1); }  // slow puzzled sway
+      if (S.state === 'working') nod = -.9 * Math.sin(t * 4.4);
+      if (S.state === 'approval') nod = -.8 * Math.abs(Math.sin(t * 5.2));
+      if (S.state === 'question') tiltB = -.014;
+      if (S.state === 'finished' && g < 1.8) nod = 1.2 * Math.sin(Math.PI * g / 1.8);
+      if (S.state === 'sleeping') nod = .65 * Math.sin(t * 1.8);
+      if (S.state === 'dizzy') { shake = 2.4 * Math.sin(g * 9) * Math.exp(-g / 3.3); tiltB = .025 * Math.sin(g * 7); }
       S.shakeX = approach(S.shakeX, shake, 14, dt); S.nodY = approach(S.nodY, nod, 14, dt); S.tiltB = approach(S.tiltB, tiltB, 6, dt);
       if (S.state === 'speak') { if (t >= S.nextSyl) { S.envT = rng() < .16 ? 0 : rand(.35, 1); S.nextSyl = t + rand(.12, .22); } } else S.envT = 0;
       S.env = approach(S.env, S.envT, 14, dt);
@@ -116,6 +142,9 @@ const AbitoClay = (() => {
         else if (s === 'error') { S.gazeT = { x: rand(-.9, -.3), y: rand(-.1, .45) }; S.nextGaze = t + rand(1.6, 3); }
         else { S.gazeT = rng() < .3 ? { x: 0, y: 0 } : { x: rand(-1, 1), y: rand(-.5, .45) }; S.nextGaze = t + rand(1.2, 3); }
       }
+      if (S.state === 'searching') S.gazeT = { x: Math.sin(t * 2.6) * .8, y: -.06 };
+      if (S.state === 'sleeping') S.gazeT = { x: 0, y: .1 };
+      if (S.state === 'dizzy') S.gazeT = { x: -.35 * Math.sin(t * 9), y: .15 };
       S.gaze.x = approach(S.gaze.x, S.gazeT.x - .25 * S.shakeX / 3.6, 9, dt); S.gaze.y = approach(S.gaze.y, S.gazeT.y, 9, dt);
       if (!S.blink && t >= S.nextBlink && S.eye.l < .35) S.blink = { t0: t, dur: S.state === 'think' ? .24 : .16 };
       if (S.blink && t - S.blink.t0 > S.blink.dur + .04) {

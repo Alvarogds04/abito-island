@@ -3,7 +3,21 @@
 Skeleton of the Abito desktop island as a normal Cargo project with Tauri v2
 (`tauri-build` in `build.rs`, static `frontendDist`, **no npm, no
 node_modules, no cargo-tauri CLI**). Transparent, undecorated, always-on-top
-X11 window hosting the frozen R6 clay engine with free drag and edge docking.
+X11 window hosting Abito's own R7 clay character with free drag and edge docking.
+
+## R7 character states (#347)
+
+The seven R6 public names/order and existing looks remain, with eight own clay states appended
+(15 total). Real pending approvals/questions outrank active chat, existing errors, a neutral
+1800 ms new-turn-finished presentation, and 60 s idle sleep. Sending a decision is never success.
+`working/searching/ratelimit` are preview-only until real producers exist. #304's explicit
+opt-in system-motion preference remains; honored reduction shows the correct static pose.
+See [state/producer contract](../../docs/r6-states-mapping.md) and the coordinator-owned T6
+native evidence gate. No Mochi assets/design/sounds, new dependencies or native drag edits.
+
+Focused check: `node test-node/character-states-check.cjs`. Debug-only browser preview:
+`tests/character-preview.html` (not shipped); use its manual next-frame control or each static pose.
+Node tests are not native clipping, motion/CPU or real producer-roundtrip proof.
 
 Unit **M1b** adds the host/bridge layer on top of the M1a skeleton: the
 `window.desktop.*` facade over Tauri invoke/events, the Electron validation
@@ -786,8 +800,10 @@ Proven by the probe's read-back, not by intention:
 - drag release never toggles; a short click (< 6 physical px movement) toggles
   compact↔overview — threshold and snapping live in the pure `geometry` module
   with unit tests (`cargo test`, test-first: RED → GREEN),
-- frozen R6 rendered as SVG-DOM in WebKitGTK (`clay-engine.js` sha256
-  `e2dc5db38832d7f162b7991e5ea0518f7743d20a48d9a557347c507afe9a2ad8`, unchanged).
+- original M1a R6 rendered as SVG-DOM in WebKitGTK (historical evidence).
+  #347 now pins its own R7 engine at SHA-256
+  `24d54ff833e0d950c0bc7b73dd1698bad8f8d4b8101c2ef505f8e5652a0a8645`;
+  that source update is not a claim of new native acceptance.
 
 Not in this unit (later sessions): `window.desktop.*` bridge (M1b),
 capabilities/CSP hardening (M1b), UDS transport (M2), approval HTTP (M3),
@@ -994,8 +1010,8 @@ node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no
 
 - Build: `cargo build --release --locked --offline --features tauri/custom-protocol`
   (`custom-protocol` makes Tauri a real release: without it the binary embeds
-  the build-tree path as a dev build). Gates before building: R6 pin
-  (`e2dc5db3…`), curated `frontend/` list, CSP without remote/unsafe sources,
+  the build-tree path as a dev build). Gates before building: engine pin (public `checkR6`, now R7)
+  (`24d54ff8…`), curated `frontend/` list, CSP without remote/unsafe sources,
   capabilities = listen/unlisten only, no `devtools`/shell/fs/http features.
 - Stage: `abito-island` (release binary), `abito-island-launcher` (no args;
   refuses the whole `LD_*` family, `GDK_DEBUG`/`GTK_*` debug, WebKit inspector vars and every `ABITO_*` knob except `ABITO_PROJECT_ROOT`; forces X11),
