@@ -31,6 +31,8 @@ mod hotkeyhost;
 #[cfg(not(unix))]
 #[path = "hotkeyhost_windows.rs"]
 mod hotkeyhost;
+mod tray;
+mod trayhost;
 mod settingshost;
 mod specialists;
 mod specialistshost;
@@ -224,7 +226,12 @@ fn start_transport(app: &AppHandle) {
             state.connections.store(count, Ordering::SeqCst);
             publish(&connections_app, &state);
         })
-        .on_question_change(move || questionhost::invalidate(&question_app));
+        .on_question_change(move || {
+            // #315: the tray's question-pending fact is recomputed off-thread
+            // (the observer may fire while a caller holds the transport guard).
+            trayhost::note_question_change(&question_app);
+            questionhost::invalidate(&question_app);
+        });
     match transport::create_transport(options) {
         Ok(transport) => {
             // Local address only; no received payloads or labels are logged.
@@ -609,6 +616,10 @@ fn publish(app: &AppHandle, state: &AppState) {
         return;
     }
     let value = build_snapshot(app, state);
+    // #315: the tray follows the same snapshot facts the page sees. Before the
+    // dedup return: the connection/question facts may have moved even when the
+    // snapshot content did not.
+    trayhost::refresh(app, &value);
     let mut normalized = value;
     if let Value::Object(map) = &mut normalized {
         map.insert("revision".to_string(), Value::from(0));
@@ -1646,6 +1657,10 @@ fn main() {
             // never tears down the island; runtime errors reach agent:state.
             handle.state::<abito_island::daemonhost::HostSlot>().start();
             spawn_shutdown_watcher(handle.clone());
+            // #315: the tray (menu: Mostrar/Ocultar/Arrancar al iniciar sesión/Salir)
+            // plus one bounded, off-thread first connection attempt so the icon
+            // reflects the daemon without waiting for the first Settings open.
+            trayhost::start(&handle);
             // M3: approval lane — install the publish/context/log hooks,
             // then start the bridge (mode 'jar', mint, first poll, 10 s
             // cadence) exactly where main.cjs `startBridge` runs: after the
