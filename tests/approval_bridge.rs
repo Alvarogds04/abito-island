@@ -307,8 +307,24 @@ fn expired_card_refuses_before_any_http_call_is_made() {
     assert_eq!(fixture.fake.posts().len(), 0, "an expired card never posts");
     assert_eq!(fixture.fake.accepted(), before, "not one connection was made");
     let snapshot = fixture.snapshot();
-    assert_eq!(snapshot["card"]["state"], "inert");
-    assert_eq!(snapshot["card"]["reason"], "Propuesta vencida.");
+    // #338 / D1(B): an already-expired candidate NEVER reaches the lane — the
+    // host ignores it exactly like an empty pending list (`card.rs`
+    // `receive_candidate` filters `expires <= now`), so the card RETIRES to
+    // `null` instead of sitting inert forever. The row keeps polling as
+    // `pending` (only approve/execute write `Status.EXPIRED`,
+    // `sb_bridge/bridge.py:77-79,100-102`) and no verb could clear an inert
+    // card (`decide` returns before any HTTP), which is the bug D1 fixed.
+    // The refusal assertions above are unchanged and now stronger: there is
+    // not even a card left to click. The sticky «Propuesta vencida.» DISPLAY
+    // for a card that expires WHILE pinned stays pinned by `src/card.rs`
+    // (`reason_order_sticky_then_quit_then_expiry_then_health_then_busy_then_phase`,
+    // `expiry_of_a_pinned_card_is_rechecked_on_every_poll_and_sticky`,
+    // `empty_pending_list_keeps_the_pinned_card_inert_while_expanded`).
+    assert!(snapshot["card"].is_null(), "the expired card retires: {snapshot:?}");
+    // it stays retired while the expired row keeps polling as pending
+    approval::poll_once(&fixture.appr, &fixture.hooks);
+    assert!(fixture.snapshot()["card"].is_null(), "still retired after the next poll");
+    assert_eq!(fixture.fake.posts().len(), 0, "still no write after the next poll");
 }
 
 #[test]

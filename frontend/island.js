@@ -735,6 +735,21 @@
   if (allowButton) allowButton.addEventListener('click', event => { void decideCard('allow', event); });
   if (denyButton) denyButton.addEventListener('click', event => { void decideCard('deny', event); });
 
+  // F014 (#338): fold the waiting card down to the compact island WITHOUT
+  // deciding it (upstream `foldApproval`, windows/src/island/island.ts:144-154
+  // and the "Later — keep it waiting" button, views.ts:496-504). `close` is
+  // the host's own collapse verb and never touches the decision lane: the host
+  // keeps the card, the request keeps waiting (the compact sun flag carries
+  // it), and reopening the island shows the same card again.
+  const foldButton = $('card-fold');
+  if (foldButton) foldButton.addEventListener('click', event => {
+    if (event.isTrusted !== true || !window.desktop || !current || current.state !== 'expanded') return;
+    focusAfterPhase = 'island-toggle'; // folding moves focus with the view, like Escape
+    window.desktop.close().then(snap => {
+      if (snap) { current = snap; syncToggle(snap.state); }
+    }, () => { /* host refused the collapse: the card stays exactly as it was */ });
+  });
+
   // U1: the card's actionability depends on the visible view too.
   document.addEventListener('island:view', () => { if (current) renderCard(); });
   document.addEventListener('abito:question', event => {

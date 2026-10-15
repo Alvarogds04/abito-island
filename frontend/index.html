@@ -115,6 +115,11 @@
           <span id="card-conn" class="chip" role="img" hidden><span class="ico" id="card-conn-icon"></span><span class="word" id="card-conn-word"></span></span>
           <span id="card-bridge" class="chip" role="img" hidden><span class="ico" id="card-bridge-icon"></span><span class="word" id="card-bridge-word"></span></span>
           <button id="card-info" class="icon-btn" type="button" aria-label="Ver detalle de la decisión" aria-expanded="false" aria-controls="card-reason"><span class="ico" data-icon="info"></span></button>
+          <!-- F014 (#338): fold the waiting card down to the compact island
+               WITHOUT deciding it (upstream `foldApproval`, windows
+               /src/island/island.ts:144-154): the host keeps the card, the
+               request keeps waiting, reopening shows it again. -->
+          <button id="card-fold" class="icon-btn" type="button" aria-label="Plegar la tarjeta y dejar la solicitud esperando"><span class="ico" data-icon="arrow-up"></span></button>
         </div>
         <p id="operation"></p>
         <p id="card-reason" role="status" hidden></p>
