@@ -248,6 +248,50 @@
         };
       });
   }
+  // #408: ONE list of providers, each with ONE status and ONE obvious primary action. `flow` is the page's own
+  // memory of the login it started ({ providerId, phase: 'active' | 'error' | 'cancelled' }); the engine's
+  // wording is never shown — the texts below are ours (the engine can echo input), so a failure leaks nothing.
+  const FLOW_STATUS = Object.freeze({
+    connected: { kind: 'connected', word: 'Conectado', icon: 'check', tone: 'go' },
+    idle: { kind: 'idle', word: 'No conectado', icon: 'plug-off', tone: 'faint' },
+    progress: { kind: 'progress', word: 'En curso', icon: 'ring', tone: 'live' },
+    error: { kind: 'error', word: 'Error', icon: 'triangle', tone: 'red' },
+  });
+  const FLOW_ERROR = 'No se pudo iniciar sesión. No se guardó nada; probá de nuevo.';
+  const FLOW_CANCELLED = 'Cancelado. No se cambió nada.';
+  function providerCards(state, opts) {
+    const o = opts || {};
+    const flow = o.flow && typeof o.flow === 'object' ? o.flow : null;
+    const needle = String(o.filter || '').trim().toLowerCase();
+    const live = !!flow && flow.phase === 'active';
+    return ((state && state.providers) || [])
+      .filter(p => Array.isArray(p.methods) && p.methods.length
+        && (!o.method || p.methods.includes(o.method)) && String(p.name || '').toLowerCase().includes(needle))
+      .map(p => {
+        const account = accountOfProvider(state, p.id);
+        const isConnected = p.configured === true || (!!account && account.configured === true);
+        const mine = !!flow && flow.providerId === p.id;
+        const phase = mine ? flow.phase : null;
+        let status = isConnected ? FLOW_STATUS.connected : FLOW_STATUS.idle;
+        if (phase === 'active') status = FLOW_STATUS.progress;
+        else if (phase === 'error') status = FLOW_STATUS.error;
+        const methods = METHOD_ORDER.slice().reverse().filter(m => p.methods.includes(m) && (!o.method || o.method === m)); // oauth first
+        const blocked = !connected(state) || (live && !mine);
+        const make = (m, label) => ({ label, method: m, disabled: blocked || !loginPlan(state, p.id, m) });
+        let primary = null, alt = null;
+        if (phase === 'active') primary = { label: 'Cancelar', cancel: true, method: null, disabled: false };
+        else if (!isConnected && methods.length) {
+          primary = make(methods[0], phase === 'error' ? 'Reintentar' : methods[0] === 'oauth' ? 'Iniciar sesión' : 'Usar una clave de API');
+          if (methods[1]) alt = make(methods[1], 'Usar una clave');
+        }
+        return {
+          id: p.id, name: String(p.name || p.id), status, primary, alt,
+          logout: isConnected && !!account && account.configured === true && phase !== 'active',
+          accountId: account ? account.accountId : null,
+          error: phase === 'error' ? FLOW_ERROR : '', note: phase === 'cancelled' ? FLOW_CANCELLED : '',
+        };
+      });
+  }
   function labelFor(name, fallback) {
     const clean = Array.from(String(name || '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim()).slice(0, 80).join('').trim();
     return clean || String(fallback || '');
@@ -465,7 +509,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, TABS, tabById, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     THEME_MODES, THEME_LABELS, themeView };
 });

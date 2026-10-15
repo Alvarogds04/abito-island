@@ -399,6 +399,45 @@ test('accounts: the provider list is filtered by method and by the search box', 
   assert.equal(S.providerList(st2(), 'api_key', '')[0].actionLabel, 'Usar una clave de API');
 });
 
+test('#408 provider cards: every provider has ONE status and ONE obvious primary action', () => {
+  const cards = S.providerCards(st2(), {});
+  assert.deepEqual(cards.map(c => c.id), ['anthropic', 'openai', 'groq'], 'one list, all providers');
+  const [anthropic, openai, groq] = cards;
+  assert.deepEqual([anthropic.status.kind, anthropic.status.word, anthropic.status.tone], ['connected', 'Conectado', 'go']);
+  assert.equal(anthropic.primary, null, 'a connected provider has no connect button');
+  assert.equal(anthropic.logout, true);
+  assert.deepEqual([openai.status.kind, openai.status.word, openai.status.tone], ['idle', 'No conectado', 'faint']);
+  assert.deepEqual([openai.primary.label, openai.primary.method], ['Iniciar sesión', 'oauth']);
+  assert.deepEqual([groq.primary.label, groq.primary.method], ['Usar una clave de API', 'api_key']);
+  assert.equal(openai.alt, null, 'single-method provider: no second action');
+  const both = S.providerCards(st2({ providers: [{ id: 'newco', name: 'NewCo', methods: ['api_key', 'oauth'], configured: false }] }), {})[0];
+  assert.equal(both.primary.method, 'oauth'); assert.equal(both.alt.method, 'api_key'); assert.equal(both.alt.label, 'Usar una clave');
+});
+
+test('#408 provider cards: in-progress, error and cancelled belong to the provider that started the login', () => {
+  const run = flow => S.providerCards(st2(), { flow });
+  const busy = run({ providerId: 'openai', phase: 'active' });
+  assert.deepEqual([busy[1].status.kind, busy[1].status.word, busy[1].status.icon], ['progress', 'En curso', 'ring']);
+  assert.equal(busy[1].primary.label, 'Cancelar'); assert.equal(busy[1].primary.cancel, true);
+  assert.equal(busy[2].primary.disabled, true, 'other providers cannot start a second flow');
+  assert.equal(busy[0].status.kind, 'connected', 'others keep their own status');
+  const failed = run({ providerId: 'openai', phase: 'error' });
+  assert.deepEqual([failed[1].status.kind, failed[1].status.word, failed[1].status.tone], ['error', 'Error', 'red']);
+  assert.match(failed[1].error, /No se pudo iniciar sesión/); assert.equal(failed[1].primary.label, 'Reintentar');
+  assert.equal(failed[2].error, '', 'only the target shows the error');
+  const cancelled = run({ providerId: 'openai', phase: 'cancelled' });
+  assert.equal(cancelled[1].status.kind, 'idle'); assert.match(cancelled[1].note, /Cancelado/);
+  assert.equal(S.providerCards(st2({ connection: 'no_daemon' }), {})[1].primary.disabled, true, 'no engine, no login');
+});
+
+test('#408 provider cards: method filter and search narrow the list; error text is ours, never the engine\'s', () => {
+  assert.deepEqual(S.providerCards(st2(), { method: 'api_key' }).map(c => c.id), ['anthropic', 'groq']);
+  assert.equal(S.providerCards(st2(), { method: 'api_key' })[1].alt, null);
+  assert.deepEqual(S.providerCards(st2(), { filter: ' GRO ' }).map(c => c.id), ['groq']);
+  const err = S.providerCards(st2(), { flow: { providerId: 'groq', phase: 'error', detail: 'sk-secret-123 stack trace' } })[2];
+  assert.ok(!JSON.stringify(err).includes('sk-secret'), 'engine detail is never rendered');
+});
+
 test('accounts: «Iniciar sesión» uses the provider\'s account, or creates one named after the provider first', () => {
   const have = S.loginPlan(st2(), 'anthropic', 'oauth');
   assert.deepEqual(have, { kind: 'start', accountId: 'personal', method: 'oauth' });

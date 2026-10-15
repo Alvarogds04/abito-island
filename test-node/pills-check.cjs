@@ -263,3 +263,14 @@ test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices
   assert.equal(b.get('pill-name').textContent,'Codex');
   assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(b.get('settings-tab-connectors'));
 });
+
+test('#408 Cuentas renders the provider-cards section (and tab selection follows the click) without an engine', async () => {
+  const b = await settingsBoot({}, 'accounts');
+  assert.ok(b.get('provider-cards'), 'one provider list');
+  assert.equal(b.get('settings-tab-accounts').getAttribute('aria-selected'), 'true');
+  assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'false');
+  assert.equal(b.get('settings-tab-pills').tabIndex, -1, 'roving tabindex');
+  b.click('settings-tab-pills'); await flush();
+  assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'true');
+  assert.ok(!b.get('provider-cards'), 'only the selected tab is rendered');
+});

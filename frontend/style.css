@@ -1096,3 +1096,20 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 /* the model picker lives inside Ajustes now: in flow, no overlay of its own */
 #settings #models { position: static; padding: 0; background: none; border-radius: 0; flex: 1; min-height: 0; transform: none; transition: none; opacity: 1; visibility: visible; }
 #settings #models:not([data-open="true"]) { display: none; }
+
+/* ---- #408: provider cards (Cuentas). One card per provider: name + status chip, an error or note in plain
+   text, the in-progress flow (code/URL) inside the card with room, and ONE primary action. */
+.sfilter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
+.scards { gap: 8px; }
+.scard {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
+  border-radius: var(--radius-xl); border: 1px solid var(--line-soft); background: var(--fill-soft);
+}
+.scard[data-state="progress"] { border-color: var(--island-live); }
+.scard[data-state="error"] { border-color: var(--red-11); }
+.scard .sagent-head { justify-content: space-between; flex-wrap: wrap; }
+.scard .srow-actions { margin-left: 0; justify-content: flex-end; flex-wrap: wrap; }
+.sproblem { color: var(--red-11); }
+.scard .sflow { border: 0; padding: 4px 0; }
+.scard .scode { font-size: calc(var(--fs-title) * 1.25); padding: 8px 14px; }
+.scard .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }

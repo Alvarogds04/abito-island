@@ -47,6 +47,7 @@
   let method = null;      // Cuentas: null = the two method cards, else 'oauth' | 'api_key' (the provider list)
   let filter = '';
   let agentsAsk = null;   // { at: engine error counter when agents_list was sent, timer, timedOut }
+  let loginTarget = null;  // #408: { providerId, phase: 'active'|'error'|'cancelled', sawFlow } — the login this page started
   let pendingLogin = null; // a login that waits for the account it just asked the engine to create
   let agentState = null;
   let ownedAccounts = null; // masked host projection only, independent of daemon pushes
@@ -253,7 +254,7 @@
   function close(byKeyboard) {
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
-    capturing = false; method = null; filter = ''; pendingLogin = null;
+    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null;
     if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
     discardAccountForm();
@@ -355,6 +356,7 @@
     agent(payload).then(next => { busy = false; applyAgent(next); }, error => {
       busy = false;
       if (waiting) { clearTimeout(waiting.timer); waiting = null; }
+      if (loginTarget && loginTarget.phase === 'active' && !loginTarget.sawFlow && /^(auth_start|account_create)$/.test(payload.action)) { loginTarget.phase = 'error'; pendingLogin = null; }
       say((error && error.message) || 'No se pudo completar.'); render();
     });
   }
@@ -532,65 +534,70 @@
     // a login that was waiting for its brand-new account starts the moment that account shows up
     const ready = V.pendingLoginReady(st, pendingLogin);
     if (ready) { pendingLogin = null; queueMicrotask(() => send({ action: 'auth_start', accountId: ready.accountId, method: ready.method })); }
-    if (prompt || eventV || (auth.flowId && !auth.last)) { body.append(renderFlow(auth, prompt, eventV)); return; }
-    const outcome = V.flowOutcome(auth.last);
-    if (outcome) body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
-    if (method === null) {
-      const have = V.connectedAccounts(st);
-      if (have.length) {
-        const sec = el('section', 'ssec'); sec.append(sectionTitle('Conectadas'));
-        const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Cuentas conectadas');
-        for (const r of have) {
-          const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.providerName));
-          if (r.local) li.append(chipNode({ tone: 'faint', icon: 'lock', word: 'local', aria: 'Sólo local' }));
-          else li.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.providerName}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${r.providerName}` }));
-          list.append(li);
-        }
-        sec.append(list); body.append(sec);
+    const flowLive = !!(prompt || eventV || (auth.flowId && !auth.last));
+    // #408: the page remembers WHICH provider started the login, so status, progress and error sit on its card.
+    if (loginTarget && loginTarget.phase === 'active') {
+      if (flowLive) loginTarget.sawFlow = true;
+      else if (loginTarget.sawFlow && auth.last) {
+        const out = V.flowOutcome(auth.last);
+        if (out.word === 'Conectada') loginTarget = null;
+        else loginTarget.phase = out.word === 'Cancelado' ? 'cancelled' : 'error';
       }
-      const cards = el('div', 'smethods');
-      for (const c of V.METHOD_CARDS) {
-        const b = el('button', 'smethod'); b.type = 'button';
-        b.append(el('b', '', c.title), el('span', '', c.hint));
-        b.addEventListener('click', e => { if (e.isTrusted === true) { method = c.id; filter = ''; render(); } });
-        cards.append(b);
-      }
-      body.append(cards);
-      return;
     }
-    // provider list for the chosen method
-    const back = wordBtn('Volver', () => { method = null; filter = ''; render(); }, { icon: 'arrow-left' }); back.classList.add('sback');
-    body.append(back);
+    if (flowLive && !loginTarget) { body.append(renderFlow(auth, prompt, eventV)); return; } // a flow started elsewhere
+    const outcome = loginTarget ? null : V.flowOutcome(auth.last);
+    if (outcome && outcome.word === 'Conectada') body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
+    // method filter (all / subscription / API key) + search
+    const bar = el('div', 'sfilter'); bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Tipo de conexión');
+    for (const [id, word] of [[null, 'Todos'], ['oauth', 'Suscripción'], ['api_key', 'Clave de API']]) {
+      const b = el('button', 'sbtn' + (method === id ? ' primary' : ''), word); b.type = 'button';
+      b.setAttribute('aria-pressed', method === id ? 'true' : 'false');
+      b.addEventListener('click', e => { if (e.isTrusted === true) { method = id; render(); } });
+      bar.append(b);
+    }
+    body.append(bar);
     const search = el('input', 'sfield'); search.type = 'search'; search.id = 'settings-filter'; search.placeholder = 'Buscar proveedor';
     search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
     search.addEventListener('input', () => { filter = search.value; render(); });
     body.append(search);
-    const card = V.METHOD_CARDS.find(c => c.id === method);
-    const sec = el('section', 'ssec'); sec.append(sectionTitle(card.title), el('p', 'snote', card.hint));
-    const rows = V.providerList(st, method, filter);
-    const list = el('ul', 'srows'); list.setAttribute('aria-label', card.title);
-    for (const r of rows) {
-      const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.name));
-      if (r.connected) li.append(chipNode({ tone: 'go', icon: 'check', word: 'Conectado', aria: `${r.name}: conectado` }));
+    const sec = el('section', 'ssec'); sec.id = 'provider-cards'; sec.append(sectionTitle('Proveedores'));
+    const cards = V.providerCards(st, { method, filter, flow: loginTarget });
+    const list = el('ul', 'srows scards'); list.setAttribute('aria-label', 'Proveedores');
+    for (const c of cards) {
+      const li = el('li', 'scard'); li.dataset.state = c.status.kind; li.dataset.provider = c.id;
+      const head = el('span', 'sagent-head'); head.append(el('b', 'srow-title', c.name), chipNode({ tone: c.status.tone, icon: c.status.icon, word: c.status.word, aria: `${c.name}: ${c.status.word}` }));
+      li.append(head);
+      if (c.error) { const e = el('p', 'snote sproblem', c.error); e.setAttribute('role', 'alert'); li.append(e); }
+      if (c.note) li.append(el('p', 'snote', c.note));
+      if (c.status.kind === 'progress' && flowLive) li.append(renderFlow(auth, prompt, eventV, true));
+      else if (c.status.kind === 'progress') li.append(el('p', 'snote', 'Preparando el inicio de sesión…'));
       const actions = el('span', 'srow-actions');
-      actions.append(wordBtn(r.actionLabel, () => loginWith(r.id, method), { primary: method === 'oauth', aria: `${r.actionLabel}: ${r.name}`, disabled: !V.loginPlan(st, r.id, method) }));
-      if (r.canLogout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { aria: `${V.LOGOUT_WORD}: ${r.name}` }));
-      li.append(actions); list.append(li);
+      const act = (a, primary) => wordBtn(a.label, () => {
+        if (a.cancel) { send({ action: 'auth_cancel', flowId: String((auth && auth.flowId) || '') }); return; }
+        loginWith(c.id, a.method);
+      }, { primary, aria: `${a.label}: ${c.name}`, disabled: a.disabled });
+      if (c.primary && !(c.primary.cancel && flowLive)) actions.append(act(c.primary, true));
+      if (c.alt) actions.append(act(c.alt, false));
+      if (c.logout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: c.accountId }, `${c.name}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${c.name}` }));
+      if (actions.children.length) li.append(actions);
+      list.append(li);
     }
-    if (!rows.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
+    if (!cards.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
     sec.append(list); body.append(sec);
   }
   // «Iniciar sesión» / «Usar una clave»: reuse the provider's account, or create one named after the provider first
   function loginWith(providerId, m) {
     const plan = V.loginPlan(agentState, providerId, m);
     if (!plan) return;
+    loginTarget = { providerId, phase: 'active', sawFlow: false };
+    render();
     if (plan.kind === 'start') { send({ action: 'auth_start', accountId: plan.accountId, method: plan.method }); return; }
     pendingLogin = V.pendingLogin(agentState, plan.provider, plan.method);
     send({ action: 'account_create', provider: plan.provider, label: plan.label }, `${plan.label}: cuenta creada.`);
   }
 
   // The sign-in flow. The ONLY secret path: a masked field -> auth_reply -> cleared.
-  function renderFlow(auth, prompt, eventV) {
+  function renderFlow(auth, prompt, eventV, embedded) {
     const box = el('div', 'sflow'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Inicio de sesión en curso');
     if (eventV) {
       if (eventV.message) box.append(el('p', 'sline', eventV.message));
@@ -627,7 +634,7 @@
         box.append(f);
       }
     }
-    box.append(wordBtn('Cancelar', () => send({ action: 'auth_cancel', flowId: prompt ? prompt.flowId : String((auth && auth.flowId) || '') }), { icon: 'cross' }));
+    if (!embedded) box.append(wordBtn('Cancelar', () => send({ action: 'auth_cancel', flowId: prompt ? prompt.flowId : String((auth && auth.flowId) || '') }), { icon: 'cross' }));
     return box;
   }
   function reply(prompt, value) {
