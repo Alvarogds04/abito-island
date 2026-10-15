@@ -958,6 +958,37 @@ commits, rejected/no-op commands and failed rename without false publication. Do
 are not integrated/native acceptance. T2 connects identity colors, T3 handles native validation,
 and T4 owns independent integrated review. No real model calls belong to T1 checks.
 
+## #380 — system / light / dark theme
+
+`frontend/theme.js` owns one attribute, `<html data-theme>`, and one preference. Abito
+follows the system theme by default; **Ajustes → Tema** (three radio buttons, 44 px,
+arrow keys, filled + `aria-checked` when chosen) pins it to **Claro** or **Oscuro**, or
+returns to **Sistema**. Full contract in `docs/theme.md`.
+
+- **Two palettes, one design.** The dark palette is the shipped palette verbatim (every
+  token is the literal that used to sit in `style.css`); the light palette is derived
+  from it — same roles, same alphas over ink, warm sand surfaces from Abito's own clay.
+  Role colours (`--go`, `--sun`, `--red-11`, `--island-live`, `--faint`), the Dot
+  identity colours (#384), the motion policy (#304), radii, fonts and the frozen engine
+  paint are never themed.
+- **One closed preference.** `prefs.json` v1 gains an optional `theme` field, only
+  `"system" | "light" | "dark"`; absent = system and absence is preserved, an unknown
+  value reads as system, and `prefs_action` accepts exactly
+  `{"action":"set_theme","theme":"dark"}` through the same sender/rate/serial gate as
+  every other preference command. Refused values and failed saves change no data and
+  publish no `prefs:state`.
+- **Saved state is the only input to a paint.** Boot paints `system` immediately, then
+  the saved mode (`prefs_action view` + every `prefs:state`); a failed save keeps the
+  visible theme and says so in the panel. While the mode is `system`, exactly one
+  `matchMedia('(prefers-color-scheme: dark)')` listener follows the OS; leaving
+  `system` removes it, so an explicit choice can never be overridden. No polling, no
+  second owner, no CSS media query, and no OS setting is ever written.
+- Checks: `node test-node/theme-check.cjs` (19, real production module driven through
+  fake DOM/MediaQueryList/IPC events), also run by `cargo test` through
+  `tests/frontend_theme.rs`, plus `test-node/settings-view-check.cjs` and the closed
+  enum/counter tests in `src/prefs_tests.rs`. Real native window appearance is
+  parent-verified, not claimed by these checks.
+
 ## Layout
 
 ```

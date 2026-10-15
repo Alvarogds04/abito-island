@@ -136,6 +136,22 @@ body.probe-capture-bg { background: #d8c9a3; }
 .sdot[aria-checked="true"] { border-color: var(--island-ink); box-shadow: inset 0 0 0 1px var(--island-ink); }
 .sdot:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 .sdot-error { flex-basis: 100%; color: var(--red-11); font-size: 13px; line-height: 1.4; }
+/* #380: the theme picker — three fixed choices, same 44px target language as .sdot.
+   Selection never rides on colour alone: the chosen one is FILLED (shape + contrast) and
+   carries aria-checked + roving tabindex; focus ring stays --go on both palettes. */
+.stheme-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.stheme {
+  min-width: 44px; min-height: 44px; padding: 0 14px;
+  border-radius: var(--radius-full); border: 1px solid var(--line);
+  background: transparent; color: var(--island-ink); cursor: pointer;
+  font: 600 13px/1.2 var(--font-ui);
+  transition: background-color var(--dur-state) var(--ease-out), border-color var(--dur-state) var(--ease-out);
+}
+.stheme-label { display: inline-block; }
+.stheme[aria-checked="true"] { background: var(--go); border-color: var(--go); color: #000; }
+.stheme:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+html[data-motion="reduce"] .stheme { transition: none; }
+#theme-error:empty { display: none; }
 
 /* UI.1: visual overview. R6 (128px, left; 72px with a card) is placed by
    island.js. Right of it: status chip + «i», the Sileo pill, and the primary
@@ -160,10 +176,10 @@ body.probe-capture-bg { background: #d8c9a3; }
   display: inline-grid; place-items: center;
   min-width: 44px; min-height: 44px; padding: 0;
   border-radius: var(--radius-full);
-  border: 1px solid rgba(255, 255, 255, .25);
+  border: 1px solid var(--line);
   background: transparent; color: var(--island-ink); cursor: pointer;
 }
-.icon-btn:hover { background: rgba(255, 255, 255, .08); }
+.icon-btn:hover { background: var(--fill-hover); }
 .icon-btn[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
 
 #notices {
@@ -180,7 +196,7 @@ body.probe-capture-bg { background: #d8c9a3; }
 #notice-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 #notice-pill {
   display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 0 0 10px;
-  min-height: 44px; border-radius: var(--radius-full); background: #18181b;
+  min-height: 44px; border-radius: var(--radius-full); background: var(--surface);
 }
 #notice-ring { display: inline-grid; place-items: center; color: var(--go); }
 #notice-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
@@ -196,8 +212,8 @@ body.probe-capture-bg { background: #d8c9a3; }
 #notice-detail, #card-reason {
   margin: 0; font-size: 12px; line-height: 1.35; color: var(--island-muted); overflow-wrap: anywhere;
 }
-#card-reason:not(.sr-only) { position: absolute; left: 0; right: 0; top: 48px; padding: 6px 8px; background: #000; z-index: 1; }
-#notice-detail { position: absolute; left: 0; right: 56px; top: 48px; padding: 6px 8px; background: #000; z-index: 1; }
+#card-reason:not(.sr-only) { position: absolute; left: 0; right: 0; top: 48px; padding: 6px 8px; background: var(--island); z-index: 1; }
+#notice-detail { position: absolute; left: 0; right: 56px; top: 48px; padding: 6px 8px; background: var(--island); z-index: 1; }
 
 /* M3: approval card — the human's decision. R6 shrinks to 72px at the left
    and the card takes the stage; the notices strip steps aside (its text is
@@ -235,14 +251,14 @@ body.probe-capture-bg { background: #d8c9a3; }
   min-width: 44px;
   padding: 0 16px 0 12px;
   border-radius: var(--radius-full);
-  border: 1px solid rgba(255, 255, 255, .25);
+  border: 1px solid var(--line);
   background: transparent;
   color: var(--island-ink);
   font: 600 13px/1.2 var(--font-ui);
   cursor: pointer;
 }
 #allow { border-color: var(--go); color: var(--go); }
-#allow:hover:not(:disabled), #deny:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
+#allow:hover:not(:disabled), #deny:hover:not(:disabled) { background: var(--fill-hover); }
 #allow:disabled, #deny:disabled { opacity: .45; cursor: default; }
 /* The card state is also the island's contour: sun = waits for your yes. */
 #capsule[data-card-tone="sun"] #island { box-shadow: inset 0 0 0 2px var(--sun); }
@@ -367,7 +383,7 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
 #chat-log li { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* UI.2: «Vos»/«Abito» labels are gone: you sit on the right (tinted bubble),
    Abito on the left (plain). Notes/errors are icon + one word. */
-#chat-log li.user { margin-left: 0; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: rgba(255, 255, 255, .1); color: var(--island-ink); width: fit-content; max-width: 88%; align-self: flex-end; }
+#chat-log li.user { margin-left: 0; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: var(--bubble); color: var(--island-ink); width: fit-content; max-width: 88%; align-self: flex-end; }
 #chat-log li.assistant { max-width: 100%; color: var(--island-ink); }
 #chat-log li.note, #chat-log li.error { display: flex; align-items: center; gap: 6px; font: 600 12px/1.2 var(--font-ui); color: var(--island-muted); white-space: normal; }
 #chat-log li.note .ico svg, #chat-log li.error .ico svg { width: 16px; height: 16px; }
@@ -388,8 +404,8 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
   overflow-y: auto;
   padding: 12px 14px;
   border-radius: var(--radius-2xl);
-  border: 1px solid rgba(255, 255, 255, .22);
-  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--line-soft);
+  background: var(--fill);
   color: var(--island-ink);
   font: 400 13.5px/1.35 var(--font-ui);
   -webkit-user-select: text;
@@ -402,7 +418,7 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
   min-height: 44px;
   padding: 0 16px;
   border-radius: var(--radius-full);
-  border: 1px solid rgba(255, 255, 255, .25);
+  border: 1px solid var(--line);
   background: transparent;
   color: var(--island-ink);
   font: 600 13px/1 var(--font-ui);
@@ -410,12 +426,12 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
 }
 #chat-composer .round {
   display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; padding: 0;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); cursor: pointer;
+  border-radius: var(--radius-full); border: 1px solid var(--line); background: transparent; color: var(--island-ink); cursor: pointer;
 }
 #chat-send { background: var(--go) !important; border-color: var(--go) !important; color: #000 !important; }
 #chat-send:disabled { opacity: .4; cursor: default; }
 #chat-input[data-invalid="true"] { border-color: var(--red-11); }
-#chat-draft-word { position: absolute; right: 108px; bottom: 56px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
+#chat-draft-word { position: absolute; right: 108px; bottom: 56px; padding: 2px 8px; border-radius: 10px; background: var(--surface); color: var(--red-11); }
 #chat-new .dot { background: var(--island-live); }
 @keyframes row-in { from { opacity: 0; transform: translateY(4px); } }
 #chat-log li.enter { animation: row-in 160ms var(--ease-out); }
@@ -426,7 +442,7 @@ html[data-motion="reduce"] #chat-log li.enter { animation: none; }
   left: 50%;
   bottom: 56px;
   transform: translateX(-50%);
-  background: #18181b;
+  background: var(--surface);
 }
 
 html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
@@ -434,7 +450,7 @@ html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
 /* ---- U2: model picker (internal panel of the chat view) --------------- */
 #chat-models {
   min-width: 44px; min-height: 44px; padding: 0 14px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25);
+  border-radius: var(--radius-full); border: 1px solid var(--line);
   background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
 }
 #chat-models[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
@@ -467,7 +483,7 @@ html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
 .meter[data-known="false"] { color: var(--faint); }
 #models-note:not(.sr-only) {
   position: absolute; left: 0; right: 0; top: 48px; z-index: 2; margin: 0; padding: 8px 10px;
-  background: #18181b; border-radius: var(--radius-xl); color: var(--island-ink); font-size: 12px; line-height: 1.35;
+  background: var(--surface); border-radius: var(--radius-xl); color: var(--island-ink); font-size: 12px; line-height: 1.35;
 }
 #models-list { flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y proximity; }
 #models-list li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 0 0 2px; scroll-snap-align: start; }
@@ -487,7 +503,7 @@ html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
 /* the circle itself is the control's shape: hollow ring = pick it, lime check = chosen */
 #models-list .choose::before {
   content: ""; position: absolute; width: 28px; height: 28px; border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, .45); box-sizing: border-box;
+  border: 2px solid var(--line-ring); box-sizing: border-box;
 }
 #models-list .choose[aria-pressed="true"]::before { background: var(--go); border-color: var(--go); }
 #models-list .choose:hover:not(:disabled)::before { border-color: var(--island-ink); }
@@ -532,7 +548,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #question-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 #question-skip {
   flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 10px 0 8px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink);
+  border-radius: var(--radius-full); border: 1px solid var(--line); background: transparent; color: var(--island-ink);
   font: 600 13px/1.2 var(--font-ui); cursor: pointer;
 }
 #question-skip:disabled { opacity: .45; cursor: default; }
@@ -542,18 +558,18 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #question-options { display: flex; flex-wrap: wrap; gap: 8px; margin: auto 0 0; }
 .q-option {
   display: inline-flex; align-items: center; gap: 8px; min-height: 44px; min-width: 44px; padding: 0 16px 0 8px; max-width: 100%;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: var(--island-ink);
+  border-radius: var(--radius-full); border: 1px solid var(--line-mid); background: transparent; color: var(--island-ink);
   font: 600 13px/1.2 var(--font-ui); cursor: pointer; text-align: left;
 }
-.q-option:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
+.q-option:hover:not(:disabled) { background: var(--fill-hover); }
 .q-option:disabled { opacity: .45; cursor: default; }
-.q-key { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .35); color: var(--island-muted); font: 700 12px/1 var(--font-ui); }
+.q-key { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line-key); color: var(--island-muted); font: 700 12px/1 var(--font-ui); }
 .q-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .q-desc { display: none; }
 #question-freeform { display: flex; align-items: flex-end; gap: 8px; margin: 0; }
 #question-text {
   flex: 1; min-height: 44px; max-height: 44px; resize: none; padding: 12px 14px; border-radius: var(--radius-2xl);
-  border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .06); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui);
+  border: 1px solid var(--line-soft); background: var(--fill); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui);
   -webkit-user-select: text; user-select: text; cursor: text;
 }
 #question-text[data-invalid="true"] { border-color: var(--red-11); }
@@ -562,7 +578,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
   border: 1px solid var(--go); background: var(--go); color: #000; cursor: pointer;
 }
 #question-send:disabled { opacity: .4; cursor: default; }
-#question-word { position: absolute; right: 64px; bottom: 50px; padding: 2px 8px; border-radius: 10px; background: #18181b; color: var(--red-11); }
+#question-word { position: absolute; right: 64px; bottom: 50px; padding: 2px 8px; border-radius: 10px; background: var(--surface); color: var(--red-11); }
 #question-state[data-kind="sent"] .ico { color: var(--island-live); }
 
 
@@ -571,7 +587,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
    every state is icon + one word; nothing here depends on hover. */
 #open-settings {
   position: absolute; right: 72px; bottom: 12px; display: grid; place-items: center; width: 48px; height: 48px; padding: 0;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); cursor: pointer;
+  border-radius: var(--radius-full); border: 1px solid var(--line); background: transparent; color: var(--island-ink); cursor: pointer;
   opacity: 0; visibility: hidden; transform: translateY(6px);
   transition: opacity var(--dur-view-out) var(--ease-in), transform var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }
@@ -582,7 +598,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 /* these must out-rank the «shown in the overview» rule above (2 attributes), or they never apply */
 #capsule[data-phase="expanded"][data-view="overview"][data-question="pending"]:not([data-card]) #open-settings,
 #capsule[data-phase="expanded"][data-view="overview"][data-card] #open-settings { opacity: 0; visibility: hidden; }
-#open-settings:hover { background: rgba(255, 255, 255, .08); }
+#open-settings:hover { background: var(--fill-hover); }
 #settings {
   position: absolute; left: 12px; right: 12px; top: 58px; bottom: 12px; z-index: 3; /* below the chat header, which stays visible */ display: flex; flex-direction: column; gap: 4px;
   background: var(--island); color: var(--island-muted);
@@ -610,25 +626,25 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 .sempty, .snote { margin: 0; font-size: 12px; color: var(--island-muted); line-height: 1.35; }
 .sline { margin: 0; font-size: 13px; color: var(--island-ink); line-height: 1.35; overflow-wrap: anywhere; }
 .sline.sub { font-size: 12px; color: var(--island-muted); }
-.scode { align-self: flex-start; padding: 4px 10px; border-radius: 8px; background: #18181b; color: var(--island-ink); font: 700 15px/1.2 ui-monospace, monospace; letter-spacing: .08em; -webkit-user-select: text; user-select: text; cursor: text; }
+.scode { align-self: flex-start; padding: 4px 10px; border-radius: 8px; background: var(--surface); color: var(--island-ink); font: 700 15px/1.2 ui-monospace, monospace; letter-spacing: .08em; -webkit-user-select: text; user-select: text; cursor: text; }
 .sflow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-xl); border: 1px solid var(--island-live); }
 .sform { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
 .sfield {
-  flex: 1; min-width: 120px; min-height: 44px; padding: 0 14px; border-radius: var(--radius-2xl); border: 1px solid rgba(255, 255, 255, .22);
-  background: rgba(255, 255, 255, .06); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui); -webkit-user-select: text; user-select: text; cursor: text;
+  flex: 1; min-width: 120px; min-height: 44px; padding: 0 14px; border-radius: var(--radius-2xl); border: 1px solid var(--line-soft);
+  background: var(--fill); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui); -webkit-user-select: text; user-select: text; cursor: text;
   color-scheme: dark;
 }
 select.sfield { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 34px;
   background-image: linear-gradient(45deg, transparent 50%, var(--island-ink) 50%), linear-gradient(135deg, var(--island-ink) 50%, transparent 50%);
   background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
-select.sfield option { background: #18181b; color: var(--island-ink); }
+select.sfield option { background: var(--surface); color: var(--island-ink); }
 /* #309: in the 400 column the name field takes its own row, so its placeholder is never cut */
 #settings-body .sform .sfield[type="text"] { flex: 1 1 100%; order: 1; }
 #settings-body .sform select.sfield { flex: 1 1 100%; }
 #settings-body .sform .sbtn { order: 2; margin-left: auto; }
 .sbtn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px 0 10px;
-  border-radius: var(--radius-full); border: 1px solid rgba(255, 255, 255, .25); background: transparent; color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); cursor: pointer;
+  border-radius: var(--radius-full); border: 1px solid var(--line); background: transparent; color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); cursor: pointer;
 }
 .sname-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .sname-form .sfield { width: 100%; min-width: 0; flex: none; }
@@ -638,11 +654,11 @@ select.sfield option { background: #18181b; color: var(--island-ink); }
 #settings-display-name[aria-invalid="true"] { border-color: var(--red-11); }
 .sbtn.primary { background: var(--go); border-color: var(--go); color: #000; }
 .sbtn:disabled { opacity: .4; cursor: default; }
-.skbd { padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .3); background: #18181b; color: var(--island-ink); font: 700 12px/1.2 ui-monospace, monospace; }
+.skbd { padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-mid); background: var(--surface); color: var(--island-ink); font: 700 12px/1.2 ui-monospace, monospace; }
 .switch {
   position: relative; margin-left: auto; width: 56px; height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer;
 }
-.switch::before { content: ""; position: absolute; left: 4px; top: 10px; width: 48px; height: 24px; border-radius: 12px; border: 2px solid rgba(255, 255, 255, .4); box-sizing: border-box; transition: background-color var(--dur-state) var(--ease-out), border-color var(--dur-state) var(--ease-out); }
+.switch::before { content: ""; position: absolute; left: 4px; top: 10px; width: 48px; height: 24px; border-radius: 12px; border: 2px solid var(--line-track); box-sizing: border-box; transition: background-color var(--dur-state) var(--ease-out), border-color var(--dur-state) var(--ease-out); }
 .switch[aria-checked="true"]::before { background: var(--go); border-color: var(--go); }
 .switch .knob { position: absolute; top: 14px; left: 10px; width: 16px; height: 16px; border-radius: 50%; background: var(--island-ink); transition: transform var(--dur-state) var(--ease-out); }
 .switch[aria-checked="true"] .knob { transform: translateX(24px); background: #000; }
@@ -658,14 +674,14 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
 .smethods { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .smethod {
   display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 44px; padding: 12px 14px; text-align: left;
-  border-radius: var(--radius-xl); border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .04); color: var(--island-ink); cursor: pointer;
+  border-radius: var(--radius-xl); border: 1px solid var(--line-soft); background: var(--fill-soft); color: var(--island-ink); cursor: pointer;
 }
 .smethod b { font: 700 14px/1.2 var(--font-ui); }
 .smethod span { font: 400 12px/1.4 var(--font-ui); color: var(--island-muted); }
 .smethod:hover b { color: var(--go); }
 .sback { align-self: flex-start; margin: 2px 0 8px; }
 #settings-filter { flex: 0 0 auto; width: 100%; height: 44px; min-height: 44px; max-height: 44px; margin-bottom: 4px; }
-.sagent { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+.sagent { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line-faint); }
 .sagent:first-child { border-top: 0; }
 .sagent-head { display: flex; align-items: center; gap: 8px; }
 .sagent .srow-actions { margin-left: 0; justify-content: flex-end; }
@@ -689,13 +705,13 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
 .scolors .srow-title { border-left: 4px solid var(--identity-color); padding-left: 6px; }
 /* #327 radiogroup: Abito first, exactly one checked. Shape (filled dot) + word carry the state, never colour alone. */
 .sroles { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-.srole { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+.srole { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; border-top: 1px solid var(--line-faint); }
 .srole:first-child { border-top: 0; }
 .srole-pick { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--island-ink); text-align: left; cursor: pointer; font: inherit; }
 .srole-pick:disabled { opacity: .5; cursor: default; }
 .srole-pick .srow-title { flex: 1 1 auto; min-width: 0; }
 .srole-pick .chip { min-height: 24px; font-size: 12px; }
-.srole-dot { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .45); box-sizing: border-box; }
+.srole-dot { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-ring); box-sizing: border-box; }
 .srole-dot[data-color] { border-color: var(--identity-color); }
 .srole[data-checked="true"] .srole-dot { border-color: var(--identity-color, var(--go)); background: radial-gradient(circle, var(--identity-color, var(--go)) 0 45%, transparent 50%); }
 .srole .srow-sub { margin: 0 4px; }
@@ -746,7 +762,7 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 }
 #island-header #open-chat, #island-header #open-settings { position: relative; }
 #island-header .tab[aria-pressed="true"] { background: var(--tab-on); color: var(--ink); }
-#island-header .hdr-action { background: rgba(255, 255, 255, .08); color: #C9CCD2; }
+#island-header .hdr-action { background: var(--fill-hover); color: var(--hdr-ink); }
 #island-header .ico svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 #island-header button::after { position: absolute; top: 50%; left: 0; width: 44px; height: 44px; content: ""; transform: translateY(-50%); }
 #island-header button:active { scale: .96; }
@@ -767,13 +783,13 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #notice-row { gap: 4px; min-width: 0; }
 #notice-row .chip { font-weight: 400; font-size: 12px; }
 #notice-info { flex: 0 0 44px; border: 0; }
-#notice-pill { gap: 0; padding: 0; border: 1px solid var(--card-line); background: rgba(255, 255, 255, .05); }
+#notice-pill { gap: 0; padding: 0; border: 1px solid var(--card-line); background: var(--fill-alt); }
 #notice-open { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 8px; border: 0; border-radius: 18px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
 #notice-open:hover:not(:disabled) { background: var(--btn-bg); }
 #notice-open:disabled { cursor: default; }
 #notice-title { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 #notice-ring { flex: 0 0 24px; }
-#notice-count { flex: 0 0 auto; background: rgba(255, 255, 255, .09); color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+#notice-count { flex: 0 0 auto; background: var(--btn-bg); color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 #notice-dismiss { flex: 0 0 44px; border: 0; color: var(--muted); }
 #notice-detail { z-index: 6; border-radius: 10px; background: var(--card-bg); }
 /* Confirmed finished-click lane never shows/answers a covered question. */
@@ -789,8 +805,8 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #allow, #deny, .q-option, #question-skip { border: 0; border-radius: 9px; background: var(--btn-bg); color: var(--ink-2); font-weight: 500; }
 #allow { background: var(--primary-bg); color: var(--primary-ink); }
 #deny:hover:not(:disabled), .q-option:hover:not(:disabled), #question-skip:hover:not(:disabled) { background: var(--btn-bg-hover); }
-#allow:hover:not(:disabled) { background: #fff; }
-.q-key { border: 0; background: rgba(255, 255, 255, .07); border-radius: 6px; }
+#allow:hover:not(:disabled) { background: var(--primary-hover); }
+.q-key { border: 0; background: var(--fill-q); border-radius: 6px; }
 #card-head, #question-head { gap: 8px; }
 #card-head .chip, #question-head .chip { font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
 
@@ -803,10 +819,10 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #chat-body::before { position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(280px 280px at 50% calc(100% + 58px), rgba(99, 102, 241, .5), transparent 70%); content: ""; pointer-events: none; }
 #chat-body > * { z-index: 1; }
 #chat-log { position: relative; gap: 6px; }
-#chat-log li.user { border-radius: 14px; background: rgba(255, 255, 255, .07); }
+#chat-log li.user { border-radius: 14px; background: var(--fill-q); }
 #chat-log li.assistant { max-width: 92%; }
 #chat-composer { position: relative; gap: 6px; margin-left: 42px; }
-#chat-input { min-width: 0; border: 0; border-radius: 20px; background: rgba(255, 255, 255, .05); padding: 10px 12px; }
+#chat-input { min-width: 0; border: 0; border-radius: 20px; background: var(--fill-alt); padding: 10px 12px; }
 #chat-send { background: var(--primary-bg) !important; border: 0 !important; color: var(--primary-ink) !important; }
 #chat-composer .round { border-radius: 10px; width: 44px; min-width: 44px; height: 44px; }
 #chat-composer .round .ico svg { width: 16px; height: 16px; }
@@ -820,11 +836,11 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #models-bar { flex: 0 0 auto; }
 #models-bar .icon-btn { border: 0; }
 #models-meters { font-variant-numeric: tabular-nums; }
-.models-search-field { display: flex; align-items: center; width: 100%; flex: 0 0 auto; height: 44px; margin: 4px 0; padding: 0 10px; border-radius: 12px; background: rgba(255, 255, 255, .07); }
+.models-search-field { display: flex; align-items: center; width: 100%; flex: 0 0 auto; height: 44px; margin: 4px 0; padding: 0 10px; border-radius: 12px; background: var(--fill-q); }
 #models-search { width: 100%; min-width: 0; height: 44px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 400 13px/20px var(--font); }
 .models-search-field:focus-within { outline: 2px solid var(--go); outline-offset: 2px; }
 #models-search::placeholder { color: var(--muted); }
-#models-list li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 4px 8px; padding: 6px 10px; margin: 2px 0; border-radius: 8px; background: rgba(255, 255, 255, .05); }
+#models-list li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 4px 8px; padding: 6px 10px; margin: 2px 0; border-radius: 8px; background: var(--fill-alt); }
 #models-list .model-title { max-width: none; grid-column: 1; grid-row: 1; }
 #models-list .model-chips { grid-column: 1; grid-row: 2; flex-wrap: wrap; gap: 8px; }
 #models-list .choose { grid-column: 2; grid-row: 1 / 3; align-self: center; }
@@ -832,7 +848,7 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #settings-title { font-weight: 600; font-size: 20px; }
 #settings-close { border: 0; }
 .ssection { color: var(--muted); letter-spacing: .02em; }
-.smethod { border-color: var(--card-line); background: rgba(255, 255, 255, .05); border-radius: 12px; }
+.smethod { border-color: var(--card-line); background: var(--fill-alt); border-radius: 12px; }
 #settings-body { padding-right: 2px; }
 #settings-hint { text-wrap: pretty; }
 html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-header button { transition: none; scale: 1; }
@@ -897,7 +913,7 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 #chat-header { min-height: 56px; gap: 4px; padding-left: 16px; }
 #capsule[data-models="open"] #chat-header, #capsule[data-settings="open"] #chat-header { padding-left: 72px; }
 #chat-header .chip { font-size: var(--fs-body); }
-#chat-status-strip { position: absolute; z-index: 3; top: 70px; left: 50%; min-height: 0; padding: 4px 12px; transform: translateX(-50%); border-radius: 999px; background: #18181b; }
+#chat-status-strip { position: absolute; z-index: 3; top: 70px; left: 50%; min-height: 0; padding: 4px 12px; transform: translateX(-50%); border-radius: 999px; background: var(--surface); }
 #chat-body { padding: 16px 16px 14px; }
 #chat-log { gap: 8px; font-size: var(--fs-body); line-height: 1.45; padding: 4px 2px 10px 0; }
 #chat-log li { margin: 0; }
@@ -969,3 +985,78 @@ html[data-motion="reduce"] #island { transition: none; }
   transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), visibility 0s;
 }
 html[data-motion="reduce"] #capsule #island-header { transition: none; }
+
+/* ---- #380 system / light / dark theme ----------------------------------------------------------
+   Two palettes, ONE design. DARK is Abito's own shipped palette, verbatim: every value below is
+   the literal that used to sit in the rules above (`#18181b` panels, white-alpha lines and fills),
+   so the default looks exactly as it did. LIGHT is derived from it — same roles, same alphas,
+   warm sand surfaces taken from Abito's own clay (`#d8c9a3`), never a second style:
+     island (warm paper) < card < surface (lightest), mirroring dark's #000 < #141518 < #18181b.
+   Role colours (--go, --sun, --red-11, --island-live, --faint), the Dot identity colours, the
+   motion policy and the radii are NEVER themed: they mean the same thing on both palettes.
+   The mode itself is painted on <html data-theme> by theme.js (default `system`), and
+   `color-scheme` follows it so native fields, scrollbars and select options agree with the page.
+   This section owns the palette only; no rule below may read the OS media query. */
+:root {
+  color-scheme: dark;
+  --surface: #18181b;                 /* pills, code, kbd, options, strips (on the island) */
+  --line: rgba(255, 255, 255, .25);   /* control borders */
+  --line-soft: rgba(255, 255, 255, .22);  /* inputs and method cards */
+  --line-mid: rgba(255, 255, 255, .3);    /* question buttons, kbd */
+  --line-key: rgba(255, 255, 255, .35);   /* the small key ring */
+  --line-ring: rgba(255, 255, 255, .45);  /* hollow pick rings */
+  --line-track: rgba(255, 255, 255, .4);  /* switch track */
+  --line-faint: rgba(255, 255, 255, .08); /* row separators */
+  --fill: rgba(255, 255, 255, .06);       /* text fields */
+  --fill-soft: rgba(255, 255, 255, .04);  /* method cards */
+  --fill-alt: rgba(255, 255, 255, .05);   /* list rows, pill, compact inputs */
+  --fill-q: rgba(255, 255, 255, .07);     /* key cell, user bubble, search field */
+  --fill-hover: rgba(255, 255, 255, .08); /* hover and header action */
+  --bubble: rgba(255, 255, 255, .1);      /* your own message */
+  --hdr-ink: #C9CCD2;                     /* header action label */
+  --primary-hover: #fff;                  /* the primary button on hover */
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  /* surfaces: warm sand, derived from the clay the character is made of */
+  --island: #ece4d2;
+  --island-bg: #ece4d2;
+  --surface: #fbf8f1;
+  --card-bg: #f7f2e7;
+  --tab-on: #e7e0d0;
+  /* ink: the dark palette's neutrals, inverted in lightness, same warm cast */
+  --ink: #1a1915;
+  --ink-2: #2a2823;
+  --island-ink: #1a1915;
+  --muted: #5f5c54;
+  --muted-2: #55524b;
+  --hdr-muted: #6b675e;
+  --island-muted: #5f5c54;
+  --hdr-ink: #4d4a42;
+  /* lines and fills: identical alphas over ink instead of over paper */
+  --card-line: rgba(0, 0, 0, .07);
+  --line: rgba(0, 0, 0, .28);
+  --line-soft: rgba(0, 0, 0, .22);
+  --line-mid: rgba(0, 0, 0, .26);
+  --line-key: rgba(0, 0, 0, .3);
+  --line-ring: rgba(0, 0, 0, .35);
+  --line-track: rgba(0, 0, 0, .3);
+  --line-faint: rgba(0, 0, 0, .08);
+  --fill: rgba(0, 0, 0, .05);
+  --fill-soft: rgba(0, 0, 0, .04);
+  --fill-alt: rgba(0, 0, 0, .05);
+  --fill-q: rgba(0, 0, 0, .06);
+  --fill-hover: rgba(0, 0, 0, .07);
+  --bubble: rgba(0, 0, 0, .07);
+  --btn-bg: rgba(0, 0, 0, .06);
+  --btn-bg-hover: rgba(0, 0, 0, .12);
+  /* the primary («Permitir») button mirrors the dark one instead of vanishing on paper */
+  --primary-bg: #201f1b;
+  --primary-ink: #f7f4ec;
+  --primary-hover: #000;
+  /* native controls follow the page */
+  color-scheme: light;
+}
+/* The form fields carry their own `color-scheme: dark` (the white-select fix of #309):
+   the light palette overrides it so native selects, options and carets flip with the theme. */
+html[data-theme="light"] .sfield { color-scheme: light; }

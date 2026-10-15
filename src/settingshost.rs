@@ -1,7 +1,8 @@
 //! #306 host: the three closed IPC commands of the settings panel.
 //!
 //! - `agent_action`   → the island agent client (accounts, sign-in, connectors list);
-//! - `prefs_action`   → sound, explicit optional display name and avatar colors (`prefs.json` v1);
+//! - `prefs_action`   → sound, explicit optional display name, avatar colors and the
+//!   system/light/dark theme (#380) (`prefs.json` v1);
 //! - `hotkey_action`  → lives in `hotkeyhost.rs` (#305), reused as is.
 //!
 //! Every command validates the sender (the main webview only), takes the same shared
@@ -75,7 +76,8 @@ pub fn start(app: &AppHandle) {
 }
 
 fn view_prefs(p: &Prefs) -> Value {
-    json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors})
+    json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors,
+           "theme": p.theme().as_str()})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -84,7 +86,8 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
 }
 
 /// Closed preference commands: view, sound_on/off, set_sound_gain (0..=0.2),
-/// set_display_name, set/clear_avatar_color. Gain shares persistence and publication.
+/// set_display_name, set/clear_avatar_color, set_theme (system|light|dark). Gain shares
+/// persistence and publication; the theme is #380's optional closed field.
 #[tauri::command]
 pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();

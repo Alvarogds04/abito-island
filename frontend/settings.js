@@ -72,6 +72,7 @@
   // F1: feedback belongs to its identity and survives renders/retries until a save succeeds.
   const colorErrors = Object.create(null);
   let motionOverride = true;
+  let themeError = ''; // #380: a failed theme save keeps the previous theme and says so
   let capturing = false;
   let pendingOpen = false;
   const drafts = V.makeDrafts(); // what is being typed survives the re-renders (memory only)
@@ -168,6 +169,24 @@
         render();
         say(colorErrors[identity]);
       });
+  }
+
+  // #380: system / light / dark. The click only SENDS the choice: the host validates the closed
+  // enum, persists it and publishes `prefs:state`; theme.js paints from that saved state. So a
+  // failed save leaves the previous theme on screen (no optimistic paint, no false «guardado»).
+  function chooseTheme(mode) {
+    call('prefs_action', { action: 'set_theme', theme: mode }).then(p => {
+      themeError = '';
+      prefs = p;
+      render();
+      const view = V.themeView(p);
+      const chosen = view.options.find(o => o.selected) || view.options[0];
+      say(`Tema guardado: ${chosen.label}.`);
+    }, () => {
+      themeError = 'No se pudo guardar el tema; se mantuvo el anterior.';
+      render();
+      say(themeError);
+    });
   }
 
   // ---- open / close ---------------------------------------------------------------------------------------
@@ -739,6 +758,45 @@
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
+    // #380: the theme. Three fixed choices; the SAVED mode is the truth (the row renders from
+    // `prefs`), and applying it is theme.js's job after the host confirms the write.
+    const theme = group('Tema', 'Con «Sistema» Abito usa el tema de tu computadora y lo sigue cuando cambia. Con «Claro» u «Oscuro» queda fijo.');
+    const themePick = V.themeView(prefs);
+    const picker = el('span', 'stheme-options');
+    picker.setAttribute('role', 'radiogroup');
+    picker.setAttribute('aria-label', 'Tema');
+    for (const option of themePick.options) {
+      const b = el('button', 'stheme');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+      b.setAttribute('aria-label', option.aria);
+      b.id = `theme-mode-${option.id}`;
+      b.dataset.mode = option.id;
+      b.tabIndex = option.selected ? 0 : -1;
+      b.append(el('span', 'stheme-label', option.label));
+      b.addEventListener('keydown', e => {
+        if (e.isTrusted !== true || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+        e.preventDefault();
+        const all = [...picker.querySelectorAll('[role="radio"]')];
+        const at = all.indexOf(b);
+        let next = (at + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + all.length) % all.length;
+        if (e.key === 'Home') next = 0;
+        if (e.key === 'End') next = all.length - 1;
+        all.forEach((x, i) => { x.tabIndex = i === next ? 0 : -1; });
+        all[next].focus();
+        chooseTheme(all[next].dataset.mode);
+      });
+      b.addEventListener('click', e => { if (e.isTrusted === true) chooseTheme(option.id); });
+      picker.append(b);
+    }
+    theme.append(picker);
+    if (themeError) {
+      const problem = el('p', 'snote', themeError);
+      problem.id = 'theme-error';
+      problem.setAttribute('role', 'status');
+      theme.append(problem);
+    }
     // #384: the colour of the Dot. Green is the default and this choice is the ONLY input to it:
     // nothing on screen (a pose, an agent, a notice) repaints it. Sub-Abito rows appear when real
     // identities exist — the list above is the single place they will come from.

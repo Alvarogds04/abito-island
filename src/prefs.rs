@@ -1,5 +1,6 @@
 //! Non-secret island preferences, stored as v1. Missing or invalid fields use
-//! their own defaults: sound OFF, no display name and no color overrides. Names are explicit input,
+//! their own defaults: sound OFF, no display name, no color overrides and the
+//! system theme (#380). Names are explicit input,
 //! never obtained from accounts, the OS, or another profile.
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -18,6 +19,42 @@ pub const COLORS: [&str; 5] = ["green", "blue", "mint", "orange", "purple"];
 /// The optional colour map. It is absent from a file nobody customised, so an untouched
 /// `prefs.json` keeps exactly the bytes it had before #384.
 const AVATAR_COLORS: &str = "avatar_colors";
+
+/// The optional theme mode key (#380). Absent = `system`, and absence is preserved.
+const THEME: &str = "theme";
+
+/// #380: the closed theme mode. `System` is the DEFAULT and is also what an absent
+/// `theme` field means, so a file nobody changed never grows the key.
+pub const THEMES: [&str; 3] = ["system", "light", "dark"];
+
+/// The stored theme mode: an explicit choice, or nothing at all (= system).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+
+    /// Closed enum: only the three known modes parse, everything else is refused.
+    pub fn parse(value: &str) -> Option<Theme> {
+        match value {
+            "system" => Some(Theme::System),
+            "light" => Some(Theme::Light),
+            "dark" => Some(Theme::Dark),
+            _ => None,
+        }
+    }
+}
 
 /// Identities are the same closed slug shape the frontend enforces (avatar-colors.js
 /// `IDENTITY`): bounded, lowercase, no path or control characters.
@@ -40,6 +77,9 @@ pub struct Prefs {
     pub display_name: Option<String>,
     /// Canonical identity -> validated color. Orphan keys are retained, not cleaned up.
     pub avatar_colors: BTreeMap<String, String>,
+    /// #380 optional theme mode. `None` means the default (`system`) and is never written,
+    /// so an untouched or unknown-valued file keeps the bytes it had.
+    pub theme: Option<Theme>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -86,6 +126,9 @@ fn colors_from(value: Option<&Value>) -> BTreeMap<String, String> {
 impl Prefs {
     pub fn gain(&self) -> f64 { self.gain.filter(|n| valid_gain(*n)).unwrap_or(0.12) }
 
+    /// The effective mode: an absent or unreadable field is `system`.
+    pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
+
     pub fn from_text(text: Option<&str>) -> Prefs {
         let v = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
         let Some(v) = v else { return Prefs::default() };
@@ -98,6 +141,7 @@ impl Prefs {
             avatar_colors: colors_from(v.get(AVATAR_COLORS)),
             display_name: v.get("display_name").and_then(Value::as_str)
                 .and_then(|name| validated_name(name).ok()).flatten(),
+            theme: v.get(THEME).and_then(Value::as_str).and_then(Theme::parse),
         }
     }
 
@@ -111,6 +155,9 @@ impl Prefs {
         }
         if !self.avatar_colors.is_empty() {
             v[AVATAR_COLORS] = json!(self.avatar_colors);
+        }
+        if let Some(theme) = self.theme {
+            v[THEME] = json!(theme.as_str());
         }
         v.to_string()
     }
@@ -127,6 +174,7 @@ pub enum Command {
     SetDisplayName(String),
     SetAvatarColor { identity: String, color: String },
     ClearAvatarColor { identity: String },
+    SetTheme(Theme),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +183,8 @@ pub struct CommandError;
 /// Closed schema: existing actions take one key; set_display_name takes exactly
 /// action + display_name (string, <=80 scalars, no controls). Blank clears it.
 /// set_avatar_color takes exactly action + identity + color; clear_avatar_color
-/// takes exactly action + identity. All writers retain the other optional fields.
+/// takes exactly action + identity; set_theme takes exactly action + theme with
+/// one of the three closed modes. All writers retain the other optional fields.
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let map = payload.as_object().ok_or(CommandError)?;
     match map.get("action").and_then(Value::as_str) {
@@ -167,6 +216,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             }
             Ok(Command::ClearAvatarColor { identity: identity.to_string() })
         }
+        Some("set_theme") if map.len() == 2 => {
+            let theme = map.get("theme").and_then(Value::as_str).ok_or(CommandError)?;
+            Ok(Command::SetTheme(Theme::parse(theme).ok_or(CommandError)?))
+        }
         _ => Err(CommandError),
     }
 }
@@ -193,6 +246,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             if !valid_identity(identity) { return Err(CommandError); }
             next.avatar_colors.remove(identity);
         }
+        Command::SetTheme(theme) => next.theme = Some(*theme),
     }
     Ok(next)
 }

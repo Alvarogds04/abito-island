@@ -547,3 +547,117 @@ fn f055_gain_defaults_direct_validation_and_concurrent_existing_writers() {
     assert_eq!(Prefs::from_text(Some(&bytes.lock().unwrap())),final_view);
     assert_eq!(events.lock().unwrap().len(),4); assert_eq!(*events.lock().unwrap(),*writes.lock().unwrap());
 }
+
+#[test]
+fn theme_defaults_to_system_and_an_absent_field_never_rewrites_an_old_file() {
+    use std::sync::Mutex;
+    // The default is «follow the system», and a file nobody changed carries no theme key.
+    assert_eq!(Prefs::default().theme(), Theme::System);
+    for text in [None, Some(r#"{"v":1,"sound":true}"#), Some("{}"), Some("not json"),
+                 Some(r#"{"v":1,"sound":true,"theme":42}"#), Some(r#"{"v":1,"sound":true,"theme":"chartreuse}"#),
+                 Some(r#"{"v":1,"sound":true,"theme":null}"#)] {
+        let p = Prefs::from_text(text);
+        assert_eq!(p.theme(), Theme::System, "{text:?} must read as system");
+        let encoded: Value = serde_json::from_str(&p.to_text()).unwrap();
+        assert!(encoded.get("theme").is_none(), "{text:?} must not gain a theme key");
+        assert_eq!(Prefs::from_text(Some(&p.to_text())), p);
+    }
+    // An explicit choice round-trips; an untouched v1 file is re-emitted byte for byte.
+    // The serializer orders keys (the failure of asserting a hand-written order is why
+    // this asserts the bytes it ACTUALLY emits), and any input order re-encodes to them
+    // without ever gaining a theme key: order-independent content equality on top.
+    let canonical = r#"{"sound":true,"v":1}"#;
+    assert_eq!(Prefs::from_text(Some(canonical)).to_text(), canonical, "an untouched file keeps its bytes");
+    for plain in [canonical, r#"{"v":1,"sound":true}"#] {
+        let p = Prefs::from_text(Some(plain));
+        let encoded = p.to_text();
+        assert_eq!(serde_json::from_str::<Value>(&encoded).unwrap(), serde_json::from_str::<Value>(plain).unwrap(),
+            "same content regardless of input key order");
+        assert!(!encoded.contains("\"theme\""), "an untouched file never gains a theme key: {encoded}");
+    }
+    for mode in THEMES {
+        let p = Prefs { theme: Theme::parse(mode), ..Prefs::default() };
+        let value: Value = serde_json::from_str(&p.to_text()).unwrap();
+        assert_eq!(value["theme"], mode);
+        assert_eq!(Prefs::from_text(Some(&p.to_text())).theme(), p.theme());
+    }
+    // The closed shape is enforced on write as well as on read.
+    let bad = Prefs { theme: None, ..Prefs::default() };
+    assert_eq!(bad.theme().as_str(), "system");
+    assert_eq!(Theme::parse("System"), None);
+    assert_eq!(Theme::parse("SYSTEM"), None);
+    assert_eq!(Theme::parse(""), None);
+    let _ = Mutex::new(()); // (no disk needed here: to_text/from_text are the persistence seam)
+}
+
+#[test]
+fn set_theme_is_a_closed_command_and_rejects_leave_state_and_counters_unchanged() {
+    use std::sync::Mutex;
+    let mut current = Prefs { sound: true, theme: Some(Theme::Dark), ..Prefs::default() };
+    let mut writes = 0;
+    for value in [json!(null), json!(42), json!({}), json!("blue"), json!("System"), json!("DARK"), json!("")] {
+        let before = current.clone();
+        let command = parse_command(&json!({"action":"set_theme", "theme":value}));
+        assert_eq!(command, Err(CommandError), "{value} is outside the closed enum");
+        if let Ok(command) = command {
+            let _ = update(&current, &command, |_| { writes += 1; true });
+        }
+        assert_eq!(current, before, "a refused value never touches the state");
+        assert_eq!(writes, 0, "a refused value never touches the disk");
+    }
+    for bad in [json!({"action":"set_theme"}), json!({"action":"set_theme","theme":"dark","x":1}),
+                json!({"action":"set_theme","mode":"dark"}), json!({"action":"view","theme":"dark"})] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad} is not a valid command shape");
+    }
+    let command = parse_command(&json!({"action":"set_theme","theme":"light"})).unwrap();
+    assert_eq!(command, Command::SetTheme(Theme::Light));
+    current = update(&current, &command, |_| { writes += 1; true }).unwrap();
+    assert_eq!(current.theme(), Theme::Light);
+    assert!(current.sound, "the other fields are retained");
+    assert_eq!(writes, 1);
+    assert_eq!(Prefs::from_text(Some(&current.to_text())).theme(), Theme::Light);
+}
+
+#[test]
+fn theme_transact_persists_before_publish_and_a_failed_save_publishes_nothing() {
+    use std::sync::Mutex;
+    let state = Mutex::new(Prefs::default());
+    let serial = Mutex::new(());
+    let disk = Mutex::new(Prefs::default().to_text());
+    let events = Mutex::new(Vec::new());
+    let command = parse_command(&json!({"action":"set_theme","theme":"dark"})).unwrap();
+    let next = transact(&serial, &state, &command,
+        |p| { *disk.lock().unwrap() = p.to_text(); true },
+        |p| events.lock().unwrap().push(p.theme())).unwrap();
+    assert_eq!(next.theme(), Theme::Dark);
+    assert_eq!(*events.lock().unwrap(), vec![Theme::Dark]);
+    assert!(disk.lock().unwrap().contains("\"theme\":\"dark\""));
+    // A failed save installs nothing and publishes nothing: the visible state stays.
+    let before = state.lock().unwrap().clone();
+    let bytes = disk.lock().unwrap().clone();
+    let light = parse_command(&json!({"action":"set_theme","theme":"light"})).unwrap();
+    assert_eq!(transact(&serial, &state, &light, |_| false, |_| panic!("failed event")), Err(CommandError));
+    assert_eq!(*state.lock().unwrap(), before);
+    assert_eq!(*disk.lock().unwrap(), bytes);
+    assert_eq!(events.lock().unwrap().len(), 1);
+    // View (idempotent) writes nothing and publishes nothing.
+    transact(&serial, &state, &Command::View, |_| panic!("view write"), |_| panic!("view event")).unwrap();
+    assert_eq!(events.lock().unwrap().len(), 1);
+    // Re-selecting the mode that is already stored changes nothing.
+    transact(&serial, &state, &command, |_| panic!("no-op write"), |_| panic!("no-op event")).unwrap();
+    assert_eq!(events.lock().unwrap().len(), 1);
+    // A LEGITIMATE second write (dark -> system) persists first, then publishes exactly once more.
+    let system = parse_command(&json!({"action":"set_theme","theme":"system"})).unwrap();
+    transact(&serial, &state, &system,
+        |p| { *disk.lock().unwrap() = p.to_text(); true },
+        |p| events.lock().unwrap().push(p.theme())).unwrap();
+    assert_eq!(state.lock().unwrap().theme(), Theme::System);
+    assert!(disk.lock().unwrap().contains("\"theme\":\"system\""));
+    assert_eq!(*events.lock().unwrap(), vec![Theme::Dark, Theme::System]);
+    // A value the parser refuses never reaches the transaction: no state, disk or event moves.
+    let refused = disk.lock().unwrap().clone();
+    assert_eq!(parse_command(&json!({"action":"set_theme","theme":"sepia"})), Err(CommandError));
+    assert_eq!(state.lock().unwrap().theme(), Theme::System);
+    assert_eq!(*disk.lock().unwrap(), refused);
+    assert_eq!(events.lock().unwrap().len(), 2);
+}
