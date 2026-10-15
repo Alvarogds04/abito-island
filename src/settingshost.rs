@@ -88,7 +88,8 @@ fn view_prefs(p: &Prefs) -> Value {
     json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors,
         "mainPill": p.main_pill(), "declaredPills": p.declared_pills(),
         "pillColors": p.pill_colors,
-        "theme": p.theme().as_str()})
+        "theme": p.theme().as_str(),
+        "chosenModels": p.chosen_models})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -423,6 +424,21 @@ mod settings_view_tests {
         for banned in ["token", "pid", "endpoint", "procStart", "/home/", "/proc/"] {
             assert!(!text.contains(banned), "{banned} leaked: {text}");
         }
+    }
+
+    /// #414: the chosen models of the connected providers reach the WebView only as the
+    /// validated typed pref; nothing chosen projects as null, like every optional field.
+    #[test]
+    fn f414_the_webview_projection_carries_the_chosen_models() {
+        use abito_island::prefs::{parse_command, update, Prefs};
+        let prefs = Prefs::from_text(Some(r#"{"v":1,"chosen_models":{"anthropic":["claude-sonnet-4-5"]}}"#));
+        let view = view_prefs(&prefs);
+        assert_eq!(view["chosenModels"], json!({"anthropic":["claude-sonnet-4-5"]}));
+        assert_eq!(view_prefs(&Prefs::default())["chosenModels"], json!(null), "nothing chosen is null, like the other optional fields");
+        // a round trip through the closed command keeps the projection
+        let cmd = parse_command(&json!({"action":"set_chosen_models","provider":"openai","models":["gpt-5.2"]})).unwrap();
+        let next = update(&prefs, &cmd, |_| true).unwrap();
+        assert_eq!(view_prefs(&next)["chosenModels"], json!({"anthropic":["claude-sonnet-4-5"],"openai":["gpt-5.2"]}));
     }
 
     /// #346 F033: `pillColors` is the same projection shape as `avatarColors` — already

@@ -207,6 +207,13 @@ pub fn parse_ui_command(payload: &Value) -> Result<UiCommand, CommandError> {
             exact(1)?;
             wire(&[("type", "agents_list")])
         }
+        // #414: the connected providers' catalogue for Ajustes → Modelos. Metadata only: the
+        // engine answers with a `models` frame, folded into a bounded closed view below; no
+        // provider filter, no inference, no credential ever travels.
+        "models_list" => {
+            exact(1)?;
+            wire(&[("type", "models_list")])
+        }
         "agent_connect" => {
             // The plan the human SAW travels back with the click; the engine previews again and refuses to apply
             // a different one. Optional (absent = the engine applies a fresh preview), and exactly 64 lowercase hex.
@@ -316,6 +323,9 @@ pub struct ClientState {
     last_error: Value,
     /// The engine's `agents` frame, folded to a flat closed view (None until it speaks).
     agents: Value,
+    /// #414: the engine's `models` frame (the connected providers' catalogue), folded to a
+    /// bounded closed view (null until the engine answers a `models_list` ask).
+    models: Value,
 }
 
 /// A plan hash from the engine: exactly 64 lowercase hex characters.
@@ -351,6 +361,7 @@ impl ClientState {
             connectors: json!({"state": "loading", "items": []}),
             last_error: json!({"code": null, "n": 0}),
             agents: Value::Null,
+            models: Value::Null,
         }
     }
     pub fn connected() -> ClientState {
@@ -474,6 +485,28 @@ impl ClientState {
                     }));
                 }
                 self.agents = Value::Array(out);
+            }
+            "models" => {
+                // #414: the connected providers' catalogue, a bounded closed view: only rows with a
+                // slug-shaped provider and id survive, names are clipped text, and nothing else the
+                // frame carried (no endpoint, no pricing, no raw provider payload) reaches the page.
+                let Some(list) = frame.get("models").and_then(Value::as_array) else { return Ok(()) };
+                let slug = |s: &str| {
+                    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/' | b':'))
+                };
+                self.models = Value::Array(list.iter().take(2000).filter_map(|m| {
+                    let provider = clip(m, "provider", 64);
+                    let id = clip(m, "id", 200);
+                    let (Some(provider), Some(id)) = (provider.as_str(), id.as_str()) else { return None };
+                    if !slug(provider) || !slug(id) {
+                        return None;
+                    }
+                    Some(json!({
+                        "provider": provider, "id": id, "name": clip(m, "name", 200),
+                        "reasoning": m.get("reasoning").and_then(Value::as_bool).unwrap_or(false),
+                        "contextWindow": m.get("contextWindow").and_then(Value::as_i64).unwrap_or(0),
+                    }))
+                }).collect());
             }
             "error" => {
                 // the daemon's closed code set (anything else reads as plain `failed`), never free text

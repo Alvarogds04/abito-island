@@ -341,3 +341,67 @@ fn the_three_new_details_are_part_of_the_closed_set() {
     st.apply(&json!({"type":"agents","agents":[{"id":"codex","state":"error","detail":"stderr: /home/a/secret"}]})).unwrap();
     assert_eq!(serde_json::to_value(&st).unwrap()["agents"][0]["detail"], json!(null));
 }
+
+// ---- #414: the connected providers' catalogue (Ajustes → Modelos) -----------------------------------------
+
+#[test]
+fn the_models_list_command_is_closed_and_exact() {
+    assert!(matches!(parse_ui_command(&json!({"action":"models_list"})), Ok(UiCommand::Wire(w)) if w == "{\"type\":\"models_list\"}\n"));
+    for bad in [
+        json!({"action":"models_list","providerId":"anthropic"}),
+        json!({"action":"models_list","accountId":"a1"}),
+        json!({"action":"models_list","x":1}),
+        json!({"action":"models"}),
+        json!({"action":1}),
+        json!("models_list"),
+    ] {
+        assert!(parse_ui_command(&bad).is_err(), "{bad} is not a valid models_list command");
+    }
+}
+
+#[test]
+fn a_models_frame_is_folded_into_a_bounded_closed_view() {
+    let mut st = ClientState::connected();
+    assert_eq!(serde_json::to_value(&st).unwrap()["models"], json!(null), "unknown until the engine says so");
+    st.apply(&json!({"type":"models","models":[
+        {"provider":"anthropic","id":"claude-sonnet-4-5","name":"Claude Sonnet 4.5","reasoning":true,"input":["text","image"],"contextWindow":200000},
+        {"provider":"openai","id":"gpt-5.2","name":"GPT-5.2","reasoning":false,"input":[],"contextWindow":128000}]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["models"][0], json!({"provider":"anthropic","id":"claude-sonnet-4-5","name":"Claude Sonnet 4.5","reasoning":true,"contextWindow":200000}),
+        "the closed projection: no input matrix or anything else the frame carried");
+    assert_eq!(v["models"][1]["reasoning"], json!(false), "an absent flag reads as false, never as unknown");
+}
+
+#[test]
+fn hostile_model_entries_are_dropped_or_clamped() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"models","models":[
+        {"provider":"anthropic","id":"ok-1","name":"Ok 1"},
+        {"id":"no-provider","name":"No provider"},
+        {"provider":"openai","id":"<img src=x>","name":"x"},
+        {"provider":"anthropic","id":"ok-2","name":42},
+        "not an object"]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    let list = v["models"].as_array().unwrap();
+    assert_eq!(list.len(), 2, "only rows with a provider and a string id survive");
+    assert_eq!(list[0]["id"], json!("ok-1"));
+    assert_eq!(list[1]["id"], json!("ok-2"), "a non-string name is clipped to null, the row stays");
+    assert_eq!(list[1]["name"], json!(null));
+    // bounded: the engine's own 2000-row cap is the client's too
+    let many: Vec<Value> = (0..2100).map(|i| json!({"provider":"p","id":format!("m{i}"),"name":"m"})).collect();
+    st.apply(&json!({"type":"models","models":many})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["models"].as_array().unwrap().len(), 2000);
+    // a malformed frame changes nothing
+    st.apply(&json!({"type":"models","models":"nope"})).unwrap();
+    st.apply(&json!({"type":"models"})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["models"].as_array().unwrap().len(), 2000);
+}
+
+#[test]
+fn a_connection_that_drops_forgets_the_models() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"models","models":[{"provider":"p","id":"m1","name":"M1"}]})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["models"].as_array().unwrap().len(), 1);
+    assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["models"], json!(null));
+}

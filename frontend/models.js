@@ -52,7 +52,6 @@
   // this only shapes rows the panel can render, in text the page owns. Plain textContent only.
   let agentState = null;      // `agent_action view` + `agent:state`
   let prefsView = null;       // `prefs_action view` + `prefs:state`
-  let providersAsked = false; // the one `models_list` ask per panel life
   let provSection = null;
   const agent = payload => (invoke ? invoke('agent_action', { payload }) : Promise.reject(new Error('no ipc')));
   const prefsAction = payload => (invoke ? invoke('prefs_action', { payload }) : Promise.reject(new Error('no ipc')));
@@ -66,8 +65,9 @@
     prefsAction({ action: 'view' }).then(p => {
       if (p && typeof p === 'object') { prefsView = p; renderProviders(); }
     }, () => {});
-    // one metadata ask: the engine answers with a `models` frame, folded into the agent view
-    if (!providersAsked) { providersAsked = true; agent({ action: 'models_list' }).catch(() => {}); }
+    // one metadata ask per open: cheap, and it re-reads the catalogue after a daemon
+    // restart or a fresh login so the groups never show a stale provider set
+    agent({ action: 'models_list' }).catch(() => {});
   }
   function toggleModel(providerId, modelId) {
     const S = window.AbitoSettings;
