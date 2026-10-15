@@ -22,13 +22,23 @@ test('F055 general volume uses default and inclusive boundaries without coercion
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('three screens in gentle-dot order — Cuentas, Conectores, Ajustes — each with title, icon and a one-line hint', () => {
-  assert.deepEqual(S.SCREENS.map(x => x.id), ['accounts', 'connectors', 'settings']);
-  assert.deepEqual(S.SCREENS.map(x => x.title), ['Cuentas', 'Conectores', 'Ajustes']);
-  for (const x of S.SCREENS) { assert.ok(x.icon, x.id); assert.ok(x.id === 'settings' || x.hint.length > 20, x.id); }
-  assert.equal(S.screenById('connectors').title, 'Conectores');
-  assert.equal(S.screenById('nope'), null);
-  assert.equal(S.SECTIONS, undefined, 'the tab strip is gone');
+test('#408 seven sub-tabs of ONE Ajustes entry, in one table: Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General', () => {
+  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'connectors', 'models', 'specialists', 'pills', 'appearance', 'general']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['Cuentas', 'Conectores', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+  for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
+  assert.equal(S.tabById('connectors').title, 'Conectores');
+  assert.equal(S.tabById('nope'), null);
+  assert.equal(S.SCREENS, undefined);
+});
+
+test('#408 tablist keyboard: arrows wrap, Home/End jump, other keys are ignored', () => {
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'connectors');
+  assert.equal(S.tabKeyTarget('general', 'ArrowRight'), 'accounts');
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowLeft'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'Home'), 'accounts');
+  assert.equal(S.tabKeyTarget('pills', 'End'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'a'), null);
+  assert.equal(S.tabKeyTarget('nope', 'ArrowRight'), null);
 });
 
 // ---- connection chip -------------------------------------------------------------
@@ -200,11 +210,11 @@ test('markup: gear + every icon-only control is named; sections are real tabs; t
   assert.match(html, /<script defer src="settings\.js"><\/script>/);
   assert.match(html, /id="open-settings"[^>]*aria-label="Ajustes"/);
   assert.match(html, /id="settings"[^>]*role="dialog"[^>]*aria-label="Ajustes"/);
-  assert.doesNotMatch(html, /role="tablist"/, 'no tab strip: each screen has its own header button');
-  for (const id of ['accounts', 'connectors', 'settings']) {
-    const tag = new RegExp(`<button[^>]*id="open-screen-${id}"[^>]*>`).exec(html);
-    assert.ok(tag, id); assert.match(tag[0], /aria-label="[^"]{3,}"/, id); assert.match(tag[0], /aria-expanded="false"/, id);
-  }
+  assert.match(html, /id="settings-tabs"[^>]*role="tablist"[^>]*aria-label="[^"]{3,}"/, '#408: a real tablist');
+  for (const id of ['accounts', 'connectors']) assert.doesNotMatch(html, new RegExp(`id="open-screen-${id}"`), id + ' has no header button of its own');
+  assert.doesNotMatch(html, /id="chat-models"/, 'the Modelo header button moved into the Modelos tab');
+  const gear = /<button[^>]*id="open-screen-settings"[^>]*>/.exec(html);
+  assert.ok(gear); assert.match(gear[0], /aria-label="Ajustes"/); assert.match(gear[0], /aria-expanded="false"/);
   assert.match(html, /<h2[^>]*id="settings-title"/, 'the screen title is a real heading');
   assert.match(html, /id="settings-close"[^>]*aria-label="[^"]{3,}"/);
 });
@@ -513,9 +523,9 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 });
 
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
-  const all = JSON.stringify(S.SCREENS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.screenById('connectors').hint, /Preguntá antes de enviar/);
+  assert.match(S.tabById('connectors').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 

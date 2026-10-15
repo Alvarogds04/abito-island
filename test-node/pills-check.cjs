@@ -169,10 +169,11 @@ test('S6 initial prefs read cannot overwrite a newer pushed choice snapshot', as
 });
 
 
-async function settingsBoot(options) {
+async function settingsBoot(options, tab = 'pills') {
   const b = boot(options); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
   b.click('open-screen-settings'); await flush();
+  b.click('settings-tab-' + tab); await flush(); // #408: every section lives in its sub-tab
   return b;
 }
 const writes = b => b.calls.filter(x => x.cmd === 'prefs_action' && x.payload.action !== 'view');
@@ -249,15 +250,16 @@ test('S6 failed main save keeps previous snapshot and focus; explicit retry succ
 });
 
 test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices', async () => {
-  const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}});
+  const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}}, 'general');
   b.click('sw-sound'); await flush(); assert.equal(b.backend.prefs.sound,true);
   const gain=b.get('settings-sound-gain'); gain.value='0.2'; gain.fire('input'); gain.parentNode.fire('submit'); await flush();
   assert.equal(b.backend.prefs.gain,0.2);
+  b.click('settings-tab-appearance'); await flush();
   const name=b.get('settings-display-name'); name.value='Bea'; name.fire('input'); name.parentNode.fire('submit'); await flush();
   assert.equal(b.backend.prefs.displayName,'Bea');
   b.click('dot-color-abito-blue'); await flush(); assert.equal(b.backend.prefs.avatarColors.abito,'blue');
   assert.equal(b.backend.prefs.mainPill,'agent_codex'); assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']);
   assert.deepEqual(writes(b).map(x=>x.payload.action),['sound_on','set_sound_gain','set_display_name','set_avatar_color']);
   assert.equal(b.get('pill-name').textContent,'Codex');
-  assert.ok(b.get('open-screen-accounts')); assert.ok(b.get('open-screen-connectors'));
+  assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(b.get('settings-tab-connectors'));
 });

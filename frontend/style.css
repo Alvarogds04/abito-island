@@ -448,12 +448,6 @@ html[data-motion="reduce"] #chat-log li.enter { animation: none; }
 html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
 
 /* ---- U2: model picker (internal panel of the chat view) --------------- */
-#chat-models {
-  min-width: 44px; min-height: 44px; padding: 0 14px;
-  border-radius: var(--radius-full); border: 1px solid var(--line);
-  background: transparent; color: var(--island-ink); font: 600 13px/1 var(--font-ui); cursor: pointer;
-}
-#chat-models[aria-expanded="true"] { border-color: var(--go); color: var(--go); }
 /* Panels swap with the §9.2 motion (no display:none): the chat body leaves in
    160ms ease-in and the models panel enters after the 160ms delay. */
 #chat-body { transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), visibility 0s; }
@@ -1087,3 +1081,18 @@ html[data-theme="light"] {
 /* The form fields carry their own `color-scheme: dark` (the white-select fix of #309):
    the light palette overrides it so native selects, options and carets flip with the theme. */
 html[data-theme="light"] .sfield { color-scheme: light; }
+
+/* ---- #408: Ajustes sub-tabs. A tablist (wraps in the narrow column), every tab >= 44px, icon + word,
+   selection shown by border + colour + aria-selected (never colour alone: the selected tab is also bold). */
+#settings-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 4px; }
+.stab {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 12px 0 10px;
+  border-radius: var(--radius-full); border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
+  font: 600 13px/1.2 var(--font-ui); cursor: pointer;
+}
+.stab:hover { background: var(--fill-hover); color: var(--island-ink); }
+.stab[aria-selected="true"] { border-color: var(--go); color: var(--go); font-weight: 700; }
+.stab:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+/* the model picker lives inside Ajustes now: in flow, no overlay of its own */
+#settings #models { position: static; padding: 0; background: none; border-radius: 0; flex: 1; min-height: 0; transform: none; transition: none; opacity: 1; visibility: visible; }
+#settings #models:not([data-open="true"]) { display: none; }

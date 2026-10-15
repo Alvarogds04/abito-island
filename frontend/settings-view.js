@@ -13,14 +13,35 @@
   // ---- screens ------------------------------------------------------------------------------------------------
   // Copied from gentle-dot (MIT): one icon button per screen in the chat header; each screen COVERS the chat
   // body with a title, a close button and a one-line hint. Opening one closes the others.
-  const SCREENS = Object.freeze([
+  // #408: ONE entry point (Ajustes), seven sub-tabs. This table is the single place to rename or
+  // reorder them: the tab strip, the title/hint and the deep-link seam all read it.
+  const TABS = Object.freeze([
     Object.freeze({ id: 'accounts', title: 'Cuentas', icon: 'user', label: 'Cuentas',
       hint: 'Conectá el servicio de IA que ya pagás o pegá una clave de API. Tu inicio de sesión queda en esta computadora.' }),
     Object.freeze({ id: 'connectors', title: 'Conectores', icon: 'plug', label: 'Conectores',
       hint: 'Conectá tus agentes de código y dejá que Abito lea tus apps. Preguntá antes de enviar o cambiar algo.' }),
-    Object.freeze({ id: 'settings', title: 'Ajustes', icon: 'gear', label: 'Ajustes', hint: '' }),
+    Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
+      hint: 'Elegí el modelo local con el que charlás. Se usa desde el próximo mensaje.' }),
+    Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
+      hint: 'Roles manuales con sus propias instrucciones. Sólo se usan si los elegís.' }),
+    Object.freeze({ id: 'pills', title: 'Pills', icon: 'ring', label: 'Pills',
+      hint: 'Una principal y hasta cuatro declaradas; elegir no conecta.' }),
+    Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia',
+      hint: 'Tema, colores, movimiento y cómo te saluda Abito.' }),
+    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General',
+      hint: 'Atajo de teclado y sonido.' }),
   ]);
-  const screenById = id => SCREENS.find(x => x.id === id) || null;
+  const tabById = id => TABS.find(x => x.id === id) || null;
+  // Tablist keyboard (WAI-ARIA): arrows wrap, Home/End jump. Returns the id to focus, or null for any other key.
+  function tabKeyTarget(current, key) {
+    const at = TABS.findIndex(x => x.id === current);
+    if (at < 0) return null;
+    if (key === 'ArrowRight' || key === 'ArrowDown') return TABS[(at + 1) % TABS.length].id;
+    if (key === 'ArrowLeft' || key === 'ArrowUp') return TABS[(at - 1 + TABS.length) % TABS.length].id;
+    if (key === 'Home') return TABS[0].id;
+    if (key === 'End') return TABS[TABS.length - 1].id;
+    return null;
+  }
 
   // ---- connection to the island agent (the daemon) ------------------------------------
   const CONNECTION = Object.freeze({
@@ -444,7 +465,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, TABS, tabById, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     THEME_MODES, THEME_LABELS, themeView };
 });
