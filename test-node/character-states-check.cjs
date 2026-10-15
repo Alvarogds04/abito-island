@@ -211,7 +211,7 @@ test('engine greet(): 2 s body-only timeline, not an emote, moves the body and b
   a.step(2); b.step(2); assert.equal(a.sample().reaction, null); assert.equal(a.sample().d, b.sample().d);
   assert.equal(h.svg.children.length, 5, 'no particles/appendages for greeting');
 });
-test('launch greeting: first valid snapshot once; skipped, never deferred, when urgent or unavailable', () => {
+test('launch greeting: retried on later snapshots until it plays once; refused while urgent or unavailable, never deferred', () => {
   let s = setup(); s.c.snapshot({ available: false }); assert.equal(s.clay.sample().reaction, null);
   s.c.snapshot({ notices: [] }); assert.equal(s.clay.sample().reaction.name, 'greeting');
   s.clay.step(130); s.c.snapshot({ notices: [] }); assert.equal(s.clay.sample().reaction, null, 'once per page session'); s.c.destroy();
