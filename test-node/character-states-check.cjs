@@ -93,3 +93,63 @@ test('the live island wires host/question snapshots and inactivity to the public
   assert.match(island, /characterListen\('question:state'/); assert.match(island, /character\.question/);
   assert.match(island, /character\.activity/); assert.match(island, /O\.choosePose\(chatPose, hostPose\)/);
 });
+
+// ---- T2: emotional reactions (F058), hover love, yawn ----
+const emotes = ['love', 'surprised', 'proud', 'wink', 'yawn', 'happy', 'annoyed'];
+function twin() { const h = engine(); h.api.setManual(true); return { h, a: h.api.create(h.svg, { seed: 505 }), b: h.api.create(h.element(), { seed: 505 }) }; }
+test('public API lists the seven emotes', () => { assert.deepEqual(Array.from(engine().api.EMOTES), emotes); });
+for (const name of emotes) test(`emote ${name}: finite overlay changes the pose, then leaves the state untouched`, () => {
+  const { a, b } = twin(); assert.equal(a.triggerEmote(name), true);
+  assert.equal(a.sample().reaction.name, name);
+  assert.equal(a.triggerEmote('happy'), false, 'one reaction at a time, never queued');
+  a.step(40); b.step(40);
+  const mid = a.sample(), ctl = b.sample();
+  assert.notEqual(JSON.stringify([mid.d, mid.eyes]), JSON.stringify([ctl.d, ctl.eyes]), 'visible change mid reaction');
+  assert.equal(mid.state, 'idle');
+  a.step(150); b.step(150);
+  assert.equal(a.sample().reaction, null); assert.equal(a.sample().state, 'idle');
+  assert.equal(a.sample().d, b.sample().d, 'back to the exact base pose, no residue');
+});
+test('unknown emote is refused; an urgent state change cancels a running emote immediately', () => {
+  const { a } = twin(); assert.equal(a.triggerEmote('nope'), false); assert.equal(a.sample().reaction, null);
+  a.triggerEmote('love'); a.step(10); a.setState('error'); assert.equal(a.sample().reaction, null);
+});
+test('love and proud add only small Abito-green motes; no heart or extra appendage', () => {
+  const { h, a } = twin(); a.triggerEmote('love'); a.step(60);
+  const group = h.svg.children.find(c => c.attrs && 'data-abito-motes' in c.attrs);
+  assert.ok(group); assert.equal(group.children.length, 4);
+  assert.ok(group.children.every(c => c.attrs.r === '2.4' && c.attrs.fill === '#acdd96'));
+  assert.ok(group.children.some(c => Number(c.attrs.opacity) > 0));
+  a.step(120); assert.ok(group.children.every(c => Number(c.attrs.opacity) === 0));
+});
+test('honored reduced motion, pause and hidden page refuse or cancel emotes with no stale replay', () => {
+  const r = engine(true); const ri = r.api.create(r.svg); assert.equal(ri.triggerEmote('love'), false); assert.equal(ri.sample().reaction, null);
+  const { h, a } = twin(); a.triggerEmote('wink'); h.api.setPaused(true); assert.equal(a.sample().reaction, null);
+  assert.equal(a.triggerEmote('wink'), false); h.api.setPaused(false); assert.equal(a.sample().reaction, null);
+  a.triggerEmote('wink'); h.hide(true); assert.equal(a.sample().reaction, null); assert.equal(a.triggerEmote('wink'), false);
+  h.hide(false); assert.equal(a.sample().reaction, null);
+});
+test('hover love: 1900 ms continuous dwell, 6 s cooldown, leave cancels, never over attention or when pressed/busy', () => {
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] });
+  c.hover(true); time.advance(1899); assert.equal(clay.sample().reaction, null);
+  time.advance(1); assert.equal(clay.sample().reaction.name, 'love');
+  c.hover(false); assert.equal(clay.sample().reaction, null, 'leave cancels');
+  c.hover(true); time.advance(5999); assert.equal(clay.sample().reaction, null, 'cooldown from last love');
+  time.advance(1); assert.equal(clay.sample().reaction.name, 'love'); c.hover(false);
+  time.advance(7000); c.hover(true); time.advance(1000); c.hover(false); time.advance(5000); assert.equal(clay.sample().reaction, null, 'short dwell never fires');
+  c.chat('think'); c.hover(true); time.advance(3000); assert.equal(clay.sample().reaction, null, 'active turn is never decorated'); c.hover(false); c.chat(null);
+  c.busy(true); c.hover(true); time.advance(3000); assert.equal(clay.sample().reaction, null, 'drag/composer busy'); c.hover(false); c.busy(false);
+  c.destroy(); assert.equal(time.count(), 0);
+});
+test('yawn once at 58 s idle, before the 60 s sleep; activity re-arms; urgent state cancels it', () => {
+  const { c, clay, time } = setup(); c.snapshot({ notices: [] });
+  time.advance(57999); assert.equal(clay.sample().reaction, null);
+  time.advance(1); assert.equal(clay.sample().reaction.name, 'yawn');
+  time.advance(2000); assert.equal(clay.state, 'sleeping'); assert.equal(clay.sample().reaction, null);
+  c.activity(); time.advance(57999); assert.equal(clay.sample().reaction, null); time.advance(1); assert.equal(clay.sample().reaction.name, 'yawn');
+  c.chat('think'); assert.equal(clay.sample().reaction, null); c.destroy();
+});
+test('island wires pointer hover to the controller', () => {
+  const island = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
+  assert.match(island, /character\.hover\(/);
+});

@@ -9,6 +9,9 @@
   }
   const print = () => { document.getElementById('sample').textContent = JSON.stringify(clay.sample()); };
   const set = () => { clay.setState(picker.value === 'thinking' ? 'think' : picker.value); print(); };
+  const emote = document.getElementById('emote');
+  for (const name of AbitoClay.EMOTES) { const o = document.createElement('option'); o.value = name; o.textContent = name; emote.appendChild(o); }
+  emote.addEventListener('change', () => { if (emote.value) clay.triggerEmote(emote.value); print(); });
   picker.addEventListener('change', set);
   document.getElementById('step').addEventListener('click', () => { clay.step(16); print(); });
   document.getElementById('still').addEventListener('click', () => { clay.staticPose(); print(); });

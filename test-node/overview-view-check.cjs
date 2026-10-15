@@ -279,7 +279,7 @@ test('R6 visible size: ~128px plain overview, ~72px with the card (scale/viewBox
   const scale = Math.min(1, 1) / Math.max(vb[2], vb[3]);
   assert.ok(Math.abs(units * scale * plain - 128) <= 6, `plain visible ${units * scale * plain}`);
   assert.ok(Math.abs(units * scale * card - 72) <= 4, `card visible ${units * scale * card}`);
-  assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex').slice(0, 8), '24d54ff8');
+  assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex').slice(0, 8), '6534f543');
 });
 
 test('R6 margins: card box keeps >=20px from the island edge (reject shake ~2px), viewBox top air', () => {

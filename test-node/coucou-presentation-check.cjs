@@ -40,7 +40,7 @@ test('Coucou tokens and card composition are present without replacing native si
   assert.match(island, /CHAT\.w = vw; CHAT\.h = vh/);
   assert.match(island, /const W0 = 2 \* Math\.PI \/ 0\.5/);
   assert.match(island, /const ZETA = 0\.72/);
-  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex'), '24d54ff833e0d950c0bc7b73dd1698bad8f8d4b8101c2ef505f8e5652a0a8645');
+  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex'), '6534f543b34d7fce3c460f6aae65867b8e40234ac4cf15e289183c91fc9d9c52');
 });
 
 test('opener derives only strict UUID+kind from trusted input; legacy display remains', () => {

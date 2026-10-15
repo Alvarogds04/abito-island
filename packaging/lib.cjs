@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const R6_PREFIX = '24d54ff8';
+const R6_PREFIX = '6534f543';
 const IDENTIFIER = 'com.abitog.AbitoTauri';
 const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop', 'abito-desktop-preview'];
 const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'character-motion.js', 'clay-engine.js', 'desktop.js', 'icons.js', 'index.html',

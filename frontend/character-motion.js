@@ -8,7 +8,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AbitoCharacter = Object.freeze(api);
 })(typeof self !== 'undefined' ? self : this, () => {
-  const SLEEP_MS = 60000, FINISHED_MS = 1800;
+  const SLEEP_MS = 60000, FINISHED_MS = 1800, YAWN_MS = 58000, HOVER_DWELL_MS = 1900, HOVER_COOLDOWN_MS = 6000;
   function create(options) {
     const { clay, choosePose, validCard, notification } = options;
     const now = options.now || Date.now;
@@ -18,6 +18,17 @@
     let snapshot = null, question = null, chat = null, host = null, occupied = false;
     let lastActivity = now(), finishedUntil = 0, timer = 0, destroyed = false;
     let baseline = false;
+    let hovering = false, hoverTimer = 0, lastLove = -Infinity, yawned = false;
+    const emote = name => !!(clay && clay.triggerEmote && clay.triggerEmote(name));
+    // Decorations only on a calm idle character; never over attention, a turn, a drag or reduced/hidden motion.
+    const calm = () => !destroyed && !occupied && !blocked() && clay && clay.state === 'idle' && producer() === 'idle';
+    function clearHover() { clearTimer(hoverTimer); hoverTimer = 0; }
+    function armHover() {
+      clearHover();
+      if (!hovering) return;
+      const wait = Math.max(HOVER_DWELL_MS, lastLove + HOVER_COOLDOWN_MS - now());
+      hoverTimer = setTimer(() => { hoverTimer = 0; if (hovering && calm() && now() - lastLove >= HOVER_COOLDOWN_MS && emote('love')) lastLove = now(); }, Math.min(2147483647, wait));
+    }
     const seen = new Set();
     const noticeKey = n => n && typeof n.id === 'string' && typeof n.sessionId === 'string' &&
       Number.isFinite(n.expiresAt) && n.expiresAt > now() ? JSON.stringify([n.sessionId, n.id]) : null;
@@ -42,10 +53,13 @@
         else if (at - lastActivity >= SLEEP_MS) state = 'sleeping';
       }
       applyState(state);
+      if (state !== 'idle' && clay && clay.cancelReaction) clay.cancelReaction();
+      if (at - lastActivity < YAWN_MS) yawned = false;
+      else if (!yawned && state === 'idle' && source === 'idle' && !occupied && !blocked() && finishedUntil <= at) { yawned = true; emote('yawn'); }
       let due = Infinity;
       if (pending) due = pending.expiry;
       if (finishedUntil > at) due = Math.min(due, finishedUntil);
-      if (source === 'idle' && !occupied && !blocked() && state !== 'sleeping') due = Math.min(due, lastActivity + SLEEP_MS);
+      if (source === 'idle' && !occupied && !blocked() && state !== 'sleeping') due = Math.min(due, lastActivity + (yawned ? SLEEP_MS : YAWN_MS));
       // Browsers/Node coerce delays above signed int32 to 1 ms: cap, then recheck.
       if (Number.isFinite(due)) timer = setTimer(sync, Math.min(2147483647, Math.max(1, due - at)));
     }
@@ -75,8 +89,14 @@
       activity() { lastActivity = now(); finishedUntil = 0; sync(); },
       motionChanged() { lastActivity = now(); finishedUntil = 0; sync(); },
       get state() { return clay ? clay.state : producer(); },
-      destroy() { destroyed = true; clearTimer(timer); timer = 0; },
+      hover(inside) {
+        inside = !!inside; if (inside === hovering) return;
+        hovering = inside;
+        if (inside) armHover();
+        else { clearHover(); if (clay && clay.reaction === 'love' && clay.cancelReaction) clay.cancelReaction(); }
+      },
+      destroy() { destroyed = true; clearTimer(timer); timer = 0; clearHover(); },
     };
   }
-  return { create, SLEEP_MS, FINISHED_MS };
+  return { create, SLEEP_MS, FINISHED_MS, YAWN_MS, HOVER_DWELL_MS, HOVER_COOLDOWN_MS };
 });

@@ -53,6 +53,28 @@ const AbitoClay = (() => {
       eye: { ...STATES.idle.eye, uL: .18, uR: .36, asym: .12, tilt: .08 }, lift: 1, lean: 0, knead: .036 },
   });
 
+  /* Emote overlays (#347 F058): finite, cancellable presentation layers over the current
+     state. Envelope timing informed by Coucou mochi/engine.ts reaction lifetimes; every
+     offset below is Abito's own eye/lid/body language (no heart/star eyes, no appendages).
+     rise/fall are fractions of dur; fx(e) returns additive offsets for envelope e in 0..1. */
+  const EMOTES = {
+    love:      { dur: 1.8, rise: .09, fall: .17, motes: 4, fx: e => ({ lift: -2.5 * e, lean: 0, eye: { uL: -.04 * e, uR: -.04 * e, l: .1 * e } }) },
+    surprised: { dur: 1.0, rise: .14, fall: .38, motes: 0, fx: e => ({ lift: -4 * e, lean: 0, eye: { sx: .22 * e, sy: .3 * e, uL: -.04 * e, uR: -.04 * e } }) },
+    proud:     { dur: 1.3, rise: .17, fall: .22, motes: 3, fx: e => ({ lift: -2 * e, lean: 1.5 * e, eye: { uL: -.04 * e, uR: -.04 * e, l: .06 * e } }) },
+    wink:      { dur: .8, rise: .2, fall: .3, motes: 0, fx: e => ({ lift: 0, lean: 1.6 * e, eye: { winkR: .95 * e } }) },
+    yawn:      { dur: 1.0, rise: .5, fall: .5, motes: 0, fx: e => ({ lift: -3 * e, lean: 0, eye: { uL: .55 * e, uR: .55 * e, sy: .08 * e } }) },
+    happy:     { dur: 1.0, rise: .2, fall: .4, motes: 0, fx: e => ({ lift: -1.5 * e, lean: 0, eye: { l: .26 * e, sy: -.12 * e, sx: .1 * e } }) },
+    annoyed:   { dur: .8, rise: .25, fall: .3, motes: 0, fx: e => ({ lift: 0, lean: -2 * e, eye: { uL: .3 * e, uR: .3 * e, tilt: .15 * e } }) },
+  };
+  const EMOTE_NAMES = Object.keys(EMOTES);
+  const smooth = x => x * x * (3 - 2 * x);
+  function envelope(em, p) {
+    if (p <= 0 || p >= 1) return 0;
+    if (p < em.rise) return smooth(p / em.rise);
+    if (p > 1 - em.fall) return smooth((1 - p) / em.fall);
+    return 1;
+  }
+
   function superellipse(rx, ry, n = 4.2) {
     const s = Math.min(1, (8 * Math.pow(2, -1 / n) - 4) / 3), l = rx * s, m = ry * s, f = v => v.toFixed(2);
     const u = [[rx, 0], [rx, m], [l, ry], [0, ry], [-l, ry], [-rx, m], [-rx, 0], [-rx, -m], [-l, -ry], [0, -ry], [l, -ry], [rx, -m], [rx, 0]];
@@ -104,10 +126,18 @@ const AbitoClay = (() => {
     const S = {
       t: 0, state: start, from: start, x: Float64Array.from(STATES[start].v), morph: 1,
       eye: { ...STATES[start].eye }, lift: STATES[start].lift, lean: STATES[start].lean, shakeX: 0, nodY: 0, tiltB: 0,
-      env: 0, envT: 0, nextSyl: 0, voice: 0, voiceT: 0, nextVoice: 0,
+      reaction: null, env: 0, envT: 0, nextSyl: 0, voice: 0, voiceT: 0, nextVoice: 0,
       gaze: { x: 0, y: 0 }, gazeT: { x: 0, y: 0 }, nextGaze: 1, blink: null, nextBlink: 1.6, gestureT0: 0,
     };
-    let lastGeo = null;
+    let lastGeo = null, motes = null;
+    function ensureMotes() {
+      if (motes) return motes;
+      const g = mk('g', { 'data-abito-motes': '', 'aria-hidden': 'true' });
+      motes = Array.from({ length: 4 }, () => mk('circle', { r: 2.4, fill: '#acdd96', opacity: 0, cx: 100, cy: 100 }, g));
+      return motes;
+    }
+    const reactionP = () => S.reaction ? (S.t - S.reaction.t0) / EMOTES[S.reaction.name].dur : 0;
+    function cancelReaction() { if (!S.reaction) return false; S.reaction = null; if (motes) motes.forEach(m => m.setAttribute('opacity', 0)); return true; }
 
     function tick(dt) {
       S.t += dt;
@@ -123,6 +153,7 @@ const AbitoClay = (() => {
       if (S.state === 'finished' && g < 1.8) nod = 1.2 * Math.sin(Math.PI * g / 1.8);
       if (S.state === 'sleeping') nod = .65 * Math.sin(t * 1.8);
       if (S.state === 'dizzy') { shake = 2.4 * Math.sin(g * 9) * Math.exp(-g / 3.3); tiltB = .025 * Math.sin(g * 7); }
+      if (S.reaction && reactionP() >= 1) cancelReaction();
       S.shakeX = approach(S.shakeX, shake, 14, dt); S.nodY = approach(S.nodY, nod, 14, dt); S.tiltB = approach(S.tiltB, tiltB, 6, dt);
       if (S.state === 'speak') { if (t >= S.nextSyl) { S.envT = rng() < .16 ? 0 : rand(.35, 1); S.nextSyl = t + rand(.12, .22); } } else S.envT = 0;
       S.env = approach(S.env, S.envT, 14, dt);
@@ -163,22 +194,35 @@ const AbitoClay = (() => {
       for (let i = 0; i < N; i++) { let v = 1; for (let k = 1; k <= K; k++) v += c[ci(k, 0)] * CS[i][k][0] + c[ci(k, 1)] * CS[i][k][1]; r[i] = clamp(v, .7, 1.35); area += r[i] * r[i]; }
       area *= .5 * TAU / N;
       const scale = R0 * Math.sqrt(Math.PI / area) * (1 + .012 * Math.sin(TAU * t / 4.2));
-      const ox = CX + S.shakeX + S.lean, oy = CY + S.lift + S.nodY;
+      const rp = S.reaction ? reactionP() : 0, rem = S.reaction && EMOTES[S.reaction.name];
+      const rf = rem ? rem.fx(envelope(rem, rp)) : null;
+      const ox = CX + S.shakeX + S.lean + (rf ? rf.lean : 0), oy = CY + S.lift + S.nodY + (rf ? rf.lift : 0);
       const pts = new Array(N);
       for (let i = 0; i < N; i++) pts[i] = [ox + scale * r[i] * CS[i][1][0], oy + scale * r[i] * CS[i][1][1]];
-      const E = S.eye, fx = ox + S.gaze.x * 3.2 + S.shakeX * .4 + S.lean * .5, fy = oy - 8 + S.gaze.y * 2.4 + S.nodY * .6;
+      const E = { ...S.eye }, wink = rf && rf.eye.winkR || 0;
+      if (rf) for (const k in rf.eye) if (k !== 'winkR') E[k] = k === 'sx' || k === 'sy' ? E[k] * (1 + rf.eye[k]) : E[k] + rf.eye[k];
+      const fx = ox + S.gaze.x * 3.2 + S.shakeX * .4 + S.lean * .5, fy = oy - 8 + S.gaze.y * 2.4 + S.nodY * .6;
       let closed = 0; if (S.blink) { const p = (t - S.blink.t0) / S.blink.dur; if (p > 0 && p < 1) closed = Math.sin(p * Math.PI); }
       const talk = S.env;
       const eyes = [-1, 1].map(side => ({
         cx: fx + side * 16.5 + S.gaze.x * 2.2, cy: fy + side * E.asym * -6,
         rx: 6 * E.sx * (1 + .05 * talk), ry: 14.2 * E.sy * (side < 0 ? 1 - E.asym : 1 + E.asym * .4) * (1 + .1 * talk), uc: E.uc,
-        rot: side * -3, upper: clamp(Math.max(side < 0 ? E.uL : E.uR, closed * .98), 0, 1), slope: side * E.tilt,
+        rot: side * -3, upper: clamp(Math.max(side < 0 ? E.uL : E.uR, closed * .98, side > 0 ? wink : 0), 0, 1), slope: side * E.tilt,
         lower: clamp(E.l + .1 * talk, 0, .9), bow: E.bow,
       }));
-      return { pts, eyes };
+      const mt = [];
+      if (rem && rem.motes) for (let i = 0; i < rem.motes; i++) {
+        // staggered round motes rising off the body; positions are deterministic in (state, i, time)
+        const life = .9, born = i * .18, a = S.t - S.reaction.t0 - born;
+        if (a <= 0 || a >= life) { mt.push(null); continue; }
+        const q = a / life, side = i % 2 ? 1 : -1;
+        mt.push({ x: ox + side * (14 + 5 * i) + 4 * Math.sin(q * 5 + i), y: oy - 30 - 22 * q, o: Math.sin(Math.PI * q) * .85 });
+      }
+      return { pts, eyes, motes: mt };
     }
     function render() {
       const g = compose(); lastGeo = g;
+      if (motes || g.motes.length) { ensureMotes().forEach((m, i) => { const p = g.motes[i]; if (p) { m.setAttribute('cx', p.x.toFixed(2)); m.setAttribute('cy', p.y.toFixed(2)); m.setAttribute('opacity', p.o.toFixed(2)); } else m.setAttribute('opacity', 0); }); }
       bodyEl.setAttribute('d', pathFrom(g.pts));
       g.eyes.forEach((e, i) => {
         const el = eyeEls[i];
@@ -196,14 +240,21 @@ const AbitoClay = (() => {
       S.x = Float64Array.from(st.v); S.eye = { ...st.eye }; S.lift = st.lift; S.lean = st.lean; S.morph = 1;
       S.env = S.state === 'speak' ? .5 : 0; S.voice = S.state === 'listen' ? .5 : 0; S.shakeX = 0; S.nodY = 0; S.tiltB = S.state === 'error' ? .01 : 0; S.blink = null;
       S.gaze = S.state === 'think' ? { x: .7, y: -.85 } : S.state === 'reject' ? { x: -.6, y: .25 } : S.state === 'error' ? { x: -.6, y: .2 } : S.state === 'listen' ? { x: .2, y: -.05 } : { x: 0, y: 0 };
-      const t0 = S.t; S.t = 0; render(); S.t = t0;
+      cancelReaction(); const t0 = S.t; S.t = 0; render(); S.t = t0;
     }
     const inst = {
       id, svg, live: opts.live !== false, S,
       get state() { return S.state; }, get morph() { return S.morph; }, get from() { return S.from; },
-      setState(s) { if (!STATES[s]) return; if (s !== S.state) { S.from = S.state; S.morph = 0; S.gestureT0 = S.t; } S.state = s; S.nextGaze = S.t; S.nextSyl = S.t; S.nextVoice = S.t; if (!inst.live || reducedNow()) staticPose(); },
-      tick, render, staticPose,
-      sample() { const g = lastGeo || compose(); return { t: S.t, state: S.state, morph: S.morph, d: bodyEl.getAttribute('d'), pts: g.pts.map(p => [p[0], p[1]]), eyes: g.eyes }; },
+      setState(s) { if (!STATES[s]) return; if (s !== S.state) { cancelReaction(); S.from = S.state; S.morph = 0; S.gestureT0 = S.t; } S.state = s; S.nextGaze = S.t; S.nextSyl = S.t; S.nextVoice = S.t; if (!inst.live || reducedNow()) staticPose(); },
+      tick, render, staticPose, cancelReaction,
+      // Emote overlay: one at a time, never queued; refused when motion is static/paused/hidden.
+      triggerEmote(name) {
+        const em = EMOTES[name];
+        if (!em || S.reaction || reducedNow() || G.paused || document.hidden || G.error) return false;
+        S.reaction = { name, t0: S.t }; return true;
+      },
+      get reaction() { return S.reaction ? S.reaction.name : null; },
+      sample() { const g = lastGeo || compose(); return { t: S.t, state: S.state, morph: S.morph, reaction: S.reaction ? { name: S.reaction.name, progress: reactionP() } : null, d: bodyEl.getAttribute('d'), pts: g.pts.map(p => [p[0], p[1]]), eyes: g.eyes }; },
       step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) tick(dt); render(); return inst.sample(); },
       destroy() { instances.delete(inst); },
     };
@@ -237,7 +288,7 @@ const AbitoClay = (() => {
   function fail(err) { G.error = String(err && err.message || err).slice(0, 140); halt(); notify(); }
   addEventListener('error', e => fail(e.error || e.message));
   addEventListener('unhandledrejection', e => fail(e.reason));
-  document.addEventListener('visibilitychange', () => loop.sync());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) instances.forEach(i => i.cancelReaction()); loop.sync(); });
   MQ.addEventListener('change', e => { G.osReduced = e.matches; if (reducedNow()) instances.forEach(i => i.staticPose()); loop.sync(); });
   const running = () => G.scheduled && performance.now() - G.lastFrameAt < 600;
   function statusKind() {
@@ -251,9 +302,9 @@ const AbitoClay = (() => {
     return ['stalled', 'Detenida: el navegador no está dibujando cuadros'];
   }
   return {
-    REVISION, STATES, ORDER, create, statusKind, running, reducedNow,
+    REVISION, STATES, ORDER, EMOTES: EMOTE_NAMES, create, statusKind, running, reducedNow,
     get paused() { return G.paused; }, get forced() { return G.forced; }, get osReduced() { return G.osReduced; }, get error() { return G.error; }, get frames() { return G.frames; },
-    setPaused(p) { G.paused = !!p; loop.sync(); },
+    setPaused(p) { G.paused = !!p; if (G.paused) instances.forEach(i => i.cancelReaction()); loop.sync(); },
     setForced(f) { G.forced = !!f; if (reducedNow()) instances.forEach(i => i.staticPose()); loop.sync(); },
     setManual(m) { G.manual = !!m; loop.sync(); },
     onChange(fn) { listeners.add(fn); },

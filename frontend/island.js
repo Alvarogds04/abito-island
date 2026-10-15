@@ -360,6 +360,7 @@
     const box = { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
     const next = O.hoverScale(point, box, { reduced: motionReduced(), dragging: pressed });
     if (next !== scale) clayEl.style.setProperty('--hover', String(next));
+    character.hover(!!point && !pressed && next > 1);
   }
   window.addEventListener('pointermove', e => {
     if (!pressed) { updateHover({ x: e.clientX, y: e.clientY }); return; }
