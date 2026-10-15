@@ -2,7 +2,8 @@
 /* #306 — the settings panel (providers, connectors, general), an internal panel of the
    chat view like the model picker (same island, same motion). It talks to Rust ONLY
    through three closed commands: `agent_action` (accounts / sign-in / connectors),
-   `prefs_action` (sound) and `hotkey_action` (the global shortcut), plus the existing
+   `prefs_action` (sound/gain/name/avatar and local catalog choices) and
+   `hotkey_action` (the global shortcut), plus the existing
    window.desktop verbs for system motion. It never sees the agent's token or socket.
    - Plain text only (textContent). No innerHTML anywhere: icons are DOM nodes built from the
      closed own registry (DOMParser), so no data can ever become markup.
@@ -58,6 +59,8 @@
     accountForm = null; accountError = ''; accountGeneration += 1;
   }
   let prefs = { sound: false };
+  let pillSaving = false;
+  let pillError = '';
   let gainDraft = null;
   let gainSaving = false;
   let gainError = '';
@@ -79,12 +82,6 @@
 
   const say = text => { if (text) { live.textContent = ''; requestAnimationFrame(() => { live.textContent = text; }); } };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
-  function iconBtn(name, label, onClick, extra) {
-    const b = el('button', 'icon-btn ' + (extra || ''));
-    b.type = 'button'; b.setAttribute('aria-label', label); putIcon(b, name);
-    b.addEventListener('click', e => { if (e.isTrusted === true) onClick(e); });
-    return b;
-  }
   function wordBtn(word, onClick, opts) {
     const o = opts || {};
     const b = el('button', 'sbtn' + (o.primary ? ' primary' : ''));
@@ -751,6 +748,28 @@
         const notice = el('p', 'snote', identities.kind === 'loading' ? 'Leyendo los colores de tus especialistas…' : 'Colores de especialistas no disponibles: no se pudieron cargar sus identidades.');
         notice.id = 'specialist-colors-status'; notice.setAttribute('role', 'status'); color.append(notice);
       }
+    }
+    const pills = window.AbitoPillSettings, model = window.AbitoPills;
+    if (pills && model) {
+      const section = group('Pills', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
+      pills.render(section, prefs, { saving: pillSaving, error: pillError, putIcon,
+        onCommand(payload) {
+          if (pillSaving || !isOpen() || screen !== 'settings') return;
+          const current = model.normalize(prefs);
+          const next = payload.action === 'set_main_pill' ? model.chooseMain(current, payload.id)
+            : payload.action === 'toggle_declared_pill' ? model.toggle(current, payload.id) : null;
+          if (!next || (payload.action === 'set_main_pill' && payload.id === current.mainPill)) return;
+          pillSaving = true; pillError = ''; render();
+          call('prefs_action', payload).then(saved => {
+            pillSaving = false; prefs = saved; render();
+            say('Pill guardada. Elegir no conecta el servicio.');
+          }, () => {
+            pillSaving = false;
+            pillError = 'No se pudo guardar la pill; se mantuvo la elección anterior.';
+            render(); say(pillError);
+          });
+        },
+      });
     }
   }
 })();

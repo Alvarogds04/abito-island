@@ -674,3 +674,111 @@ fn a_damaged_position_never_panics_and_never_costs_the_other_preferences() {
     assert_eq!(ok.position, Some((-300, 40)));
     assert!(ok.sound);
 }
+
+// #345: only public parse/load/update/transact interfaces, isolated storage callbacks.
+#[test]
+fn f032_optional_defaults_and_saved_normalization() {
+    let old = Prefs::from_text(Some(r#"{"v":1,"sound":true,"future_unvalidated":{"secret":"not retained"}}"#));
+    assert_eq!(old.to_text(), r#"{"sound":true,"v":1}"#);
+    let raw = r#"{"v":1,"sound":true,"main_pill":"ai_google","declared_pills":["unknown","integration_claude","agent_gemini","agent_gemini","ai_google","agent_amp","integration_notion","integration_spotify",7,"integration_music","agent_claude-desktop"]}"#;
+    let loaded = Prefs::from_text(Some(raw));
+    let v: Value = serde_json::from_str(&loaded.to_text()).unwrap();
+    assert_eq!(v["declared_pills"], json!(["agent_gemini","ai_google","agent_amp","integration_notion"]));
+    assert!(loaded.sound);
+    assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded);
+    for raw in [r#"{"v":1,"main_pill":"unknown","declared_pills":false}"#,
+                r#"{"v":1,"main_pill":4,"declared_pills":"bad"}"#] {
+        assert_eq!(Prefs::from_text(Some(raw)).to_text(), Prefs::default().to_text());
+    }
+    let empty = Prefs::from_text(Some(r#"{"v":1,"declared_pills":[]}"#));
+    let v: Value = serde_json::from_str(&empty.to_text()).unwrap();
+    assert_eq!(v["declared_pills"], json!([]));
+}
+
+#[test]
+fn f032_main_and_toggle_public_transactions_preserve_legacy_fields() {
+    use std::sync::Mutex;
+    let original = Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"orphan":"mint"},"declared_pills":["agent_cursor","ai_google"]}"#));
+    let state = Mutex::new(original); let serial = Mutex::new(());
+    let disk = Mutex::new(state.lock().unwrap().to_text()); let events = Mutex::new(Vec::new());
+    let commands = [
+        json!({"action":"set_main_pill","id":"agent_cursor"}),
+        json!({"action":"toggle_declared_pill","id":"ai_google"}),
+        json!({"action":"toggle_declared_pill","id":"agent_codex"}),
+        json!({"action":"toggle_declared_pill","id":"ai_openai"}),
+        json!({"action":"toggle_declared_pill","id":"integration_github"}),
+        json!({"action":"toggle_declared_pill","id":"integration_notion"}),
+    ];
+    for payload in commands {
+        let command = parse_command(&payload).expect("accepted public pill command");
+        let next = transact(&serial,&state,&command,|p| { *disk.lock().unwrap()=p.to_text(); true },
+            |p| { assert!(serial.try_lock().is_err()); assert_eq!(*state.try_lock().unwrap(),*p); events.lock().unwrap().push(p.to_text()); }).unwrap();
+        assert!(next.sound); assert_eq!(next.gain(),0.2); assert_eq!(next.display_name.as_deref(),Some("Ana"));
+        assert_eq!(next.avatar_colors["orphan"],"mint");
+        assert_eq!(Prefs::from_text(Some(&disk.lock().unwrap())),next);
+    }
+    let v: Value = serde_json::from_str(&disk.lock().unwrap()).unwrap();
+    assert_eq!(v["main_pill"],"agent_cursor");
+    assert_eq!(v["declared_pills"],json!(["agent_codex","ai_openai","integration_github","integration_notion"]));
+    assert_eq!(events.lock().unwrap().len(),6);
+    let before = state.lock().unwrap().clone(); let bytes = disk.lock().unwrap().clone();
+    for payload in [
+        json!({"action":"toggle_declared_pill","id":"ai_google"}),
+        json!({"action":"toggle_declared_pill","id":"agent_cursor"}),
+    ] {
+        let command = parse_command(&payload).unwrap();
+        let mut writes=0; let mut published=0;
+        assert_eq!(transact(&serial,&state,&command,|_| { writes+=1; true },|_| { published+=1; }),Err(CommandError));
+        assert_eq!(writes,0); assert_eq!(published,0); assert_eq!(*state.lock().unwrap(),before); assert_eq!(*disk.lock().unwrap(),bytes);
+    }
+    let remove = parse_command(&json!({"action":"toggle_declared_pill","id":"agent_codex"})).unwrap();
+    let mut writes=0; let mut published=0;
+    assert_eq!(transact(&serial,&state,&remove,|_| { writes+=1; false },|_| { published+=1; }),Err(CommandError));
+    assert_eq!(writes,1); assert_eq!(published,0); assert_eq!(*state.lock().unwrap(),before);
+    let removed = transact(&serial,&state,&remove,|_| true,|_| {}).unwrap();
+    let v: Value=serde_json::from_str(&removed.to_text()).unwrap();
+    assert_eq!(v["declared_pills"],json!(["ai_openai","integration_github","integration_notion"]));
+    let mut attempts=0;
+    let main=parse_command(&json!({"action":"set_main_pill","id":"agent_cursor"})).unwrap();
+    assert_eq!(transact(&serial,&state,&main,|_| {attempts+=1; false},|_| panic!("noop event")),Ok(removed));
+    assert_eq!(attempts,0);
+}
+
+#[test]
+fn f032_closed_ipc_refusal_keeps_state_bytes_and_counters() {
+    let current=Prefs::from_text(Some(r#"{"v":1,"sound":true,"declared_pills":[]}"#));
+    let bytes=current.to_text(); let mut writes=0; let mut published=0;
+    for payload in [
+        json!({"action":"set_main_pill","id":"ai_google"}),
+        json!({"action":"set_main_pill","id":4}),json!({"action":"set_main_pill"}),
+        json!({"action":"toggle_declared_pill","id":"unknown"}),
+        json!({"action":"toggle_declared_pill","id":"integration_music"}),
+        json!({"action":"toggle_declared_pill","id":null}),
+        json!({"action":"toggle_declared_pill","id":["agent_amp","agent_amp"]}),
+        json!({"action":"toggle_declared_pill","id":"agent_amp","declared_pills":["agent_amp","agent_amp"]}),
+        json!({"action":"toggle_declared_pill","declared_pills":["agent_amp","ai_google","ai_openai","agent_codex","agent_gemini"]}),
+    ] {
+        assert_eq!(parse_command(&payload),Err(CommandError),"{payload}");
+        if let Ok(command)=parse_command(&payload) {
+            let serial=std::sync::Mutex::new(()); let state=std::sync::Mutex::new(current.clone());
+            let _=transact(&serial,&state,&command,|_| {writes+=1;true},|_| {published+=1;});
+        }
+        assert_eq!(current.to_text(),bytes); assert_eq!(writes,0); assert_eq!(published,0);
+    }
+}
+
+#[test]
+fn f032_every_legacy_writer_keeps_typed_pill_choices_and_drops_unknown_json() {
+    let current=Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"purple","orphan":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"unvalidated_secret":"ignored"}"#));
+    for payload in [
+        json!({"action":"view"}),json!({"action":"sound_on"}),json!({"action":"sound_off"}),
+        json!({"action":"set_sound_gain","gain":0.1}),json!({"action":"set_display_name","display_name":"Bea"}),
+        json!({"action":"set_avatar_color","identity":"abito","color":"blue"}),
+        json!({"action":"clear_avatar_color","identity":"abito"}),
+    ] {
+        let next=update(&current,&parse_command(&payload).unwrap(),|_| true).unwrap();
+        let v:Value=serde_json::from_str(&next.to_text()).unwrap();
+        assert_eq!(v["main_pill"],"agent_codex"); assert_eq!(v["declared_pills"],json!(["ai_google"]));
+        assert!(v.get("unvalidated_secret").is_none()); assert_eq!(next.avatar_colors["orphan"],"mint");
+    }
+}

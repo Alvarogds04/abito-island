@@ -63,13 +63,62 @@ function rig(extra = {}) {
   return { engine, time, ctxs, doc, bus, wiring, calls, lines, settle };
 }
 
+// Fixture translation only, not a Rust evaluator: extract the whole json!(...)
+// with balanced parentheses/quoted strings, then map ONLY known typed fields.
+// Pill defaults come from the actual Rust constants; every projected field stays.
+function hostDtoFixture(host) {
+  try {
+    const start = /fn view_prefs\(p: &Prefs\) -> Value \{\s*json!\(/.exec(host);
+    assert.ok(start, 'view_prefs must contain its explicit JSON projection');
+    const at = start.index + start[0].length;
+    let depth = 1, quoted = false, escaped = false, end = -1;
+    for (let i = at; i < host.length; i++) {
+      const ch = host[i];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') quoted = false;
+      } else if (ch === '"') quoted = true;
+      else if (ch === '(') depth++;
+      else if (ch === ')' && --depth === 0) { end = i; break; }
+    }
+    assert.ok(end >= at && !quoted, 'complete Host DTO JSON macro required');
+    const prefs = fs.readFileSync(path.join(__dirname, '..', 'src', 'prefs.rs'), 'utf8');
+    const main = /pub const DEFAULT_MAIN_PILL:\s*&str\s*=\s*("[^"]+");/.exec(prefs);
+    const declared = /pub const DEFAULT_DECLARED_PILLS:\s*\[&str;\s*4\]\s*=\s*(\[[^\]]*\]);/.exec(prefs);
+    assert.ok(main && declared, 'actual typed pill defaults must be available');
+    const values = {
+      'p.sound': true, 'p.display_name': null, 'p.avatar_colors': {},
+      'p.gain': 0, 'p.gain()': 0,
+      'p.main_pill()': JSON.parse(main[1]),
+      'p.declared_pills()': JSON.parse(declared[1]),
+    };
+    const expression = host.slice(at, end).replace(/\bp\.[a-z_]+(?:\(\))?/g, token => {
+      if (!Object.hasOwn(values, token)) throw new Error('Unmapped Host DTO expression: ' + token);
+      return JSON.stringify(values[token]);
+    });
+    return JSON.parse(expression);
+  } catch (cause) {
+    throw new Error('Host DTO fixture extraction failed: ' + cause.message, { cause });
+  }
+}
+
+test('Host DTO fixture extracts complete legacy and multiline typed projections without dropping fields', () => {
+  const host = fs.readFileSync(path.join(__dirname, '..', 'src', 'settingshost.rs'), 'utf8');
+  const dto = hostDtoFixture(host);
+  assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
+    mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'] });
+  const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
+  assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });
+  const quoted = 'complete ) with "quoted" text';
+  const withLiteral = legacy.replace('"sound": p.sound', `"literal": ${JSON.stringify(quoted)}, "sound": p.sound`);
+  assert.equal(hostDtoFixture(withLiteral).literal, quoted, 'quoted parentheses/escapes cannot terminate the macro');
+  assert.throws(() => hostDtoFixture(host.replace('p.main_pill()', 'p.unknown_helper()')), /Unmapped Host DTO expression: p\.unknown_helper\(\)/);
+});
+
 test('F055 actual public host DTO enables sound and carries zero gain', async () => {
   const host = fs.readFileSync(path.join(__dirname, '..', 'src', 'settingshost.rs'), 'utf8');
-  const expression = host.match(/fn view_prefs\(p: &Prefs\) -> Value \{\s*json!\(([^\n]+)\)/)[1];
-  let dto;
-  try {
-    dto = JSON.parse(expression.replace(/p\.sound/g, 'true').replace(/p\.display_name/g, 'null').replace(/p\.avatar_colors/g, '{}').replace(/p\.gain(?:\(\))?/g, '0'));
-  } catch (error) { assert.fail(`Host DTO fixture extraction failed: ${error.message}`); }
+  const dto = hostDtoFixture(host);
   const r = rig(); r.wiring.applyPrefs(dto);
   assert.equal(r.engine.isEnabled(), true, 'actual host DTO must enable the engine');
   assert.equal(r.engine.state().gain, 0);
