@@ -415,7 +415,10 @@ async function main() {
     const src = fs.readFileSync(path.join(FRONTEND, 'chat.js'), 'utf8');
     const invoked = new Set();
     for (const m of src.matchAll(/\b(?:call|invoke)\('([a-z_]+)'/g)) invoked.add(m[1]);
-    assert.deepEqual([...invoked].sort(), ['chat_action', 'models_action', 'open_chat_url', 'specialists_action'],
+    assert.deepEqual([...invoked].sort(),
+      // #343: chat_attach (dropped path) and chat_attach_data (picked bytes)
+      // are part of the closed set now — same gate (sender + rate) in Rust.
+      ['chat_action', 'chat_attach', 'chat_attach_data', 'models_action', 'open_chat_url', 'specialists_action'],
       'the closed set of commands this file may put on the wire');
     const actionsOf = name => {
       const sites = src.match(new RegExp(`\\b${name}\\(`, 'g')) || [];

@@ -539,7 +539,17 @@ with exact keys — a page
 cannot name an endpoint, model, key or approval (the probe proves a
 smuggled `model` field is rejected). Events: `chat:state`. The
 `desktop:state` 13-key snapshot is unchanged; no new capability or CSP
-origin was added (the WebView never talks HTTP; Rust does).
+origin was added (the WebView never talks HTTP; Rust does). #343 adds
+two more gated commands to the closed set: `chat_attach` (a dropped path;
+Rust reads ≤10 MiB, validates against a content-based MIME allowlist and
+copies the file into the island workspace's `uploads/` directory) and
+`chat_attach_data` (a picked file as raw bytes: one-line JSON name header,
+LF, file bytes). Both return `{id, name, mime, size}` or a safe Spanish
+error; rejected files are validated BEFORE the first write, so a refusal
+stores nothing. The page references attachments by id only; submit
+carries the ids, prompt building inlines text files and sends images as
+`image_url` parts gated on the router's `/modalities/vision` (a
+vision-less model gets a safe error turn, never a silent drop).
 
 **Accessibility/motion/silence:** named controls ≥44 px (probe-measured),
 text status independent of R6, polite live region once per state change or
@@ -548,9 +558,11 @@ composer's Enter guard consumes only the identity signals an IME exposes
 (`isComposing` and the legacy 229 sentinel) and its known gap is written out
 in «Verifying U1» below, focus moves to the composer only on a deliberate
 keyboard open or a click; overview↔chat uses the contract spring/340 ms curve and snaps under
-`prefers-reduced-motion`; no audio elements, no sound. Drag never attaches
-to the transcript or composer. R6 is only scaled/positioned (sha256
-unchanged).
+`prefers-reduced-motion`; no audio elements, no sound. The island's own window drag never
+attaches to the transcript or composer; the ONLY drag the chat listens for is #343's file
+drop (`tauri://drag-drop`, chat view only, paths forwarded to `chat_attach` — malformed
+payloads are ignored and rejected files leave nothing behind). R6 is only scaled/positioned
+(sha256 unchanged).
 
 **Local conversations (#341 / F026, OD003, OD004, GD022, GD037).** The
 new-chat button or **Ctrl+N** clears the current context and draft without
