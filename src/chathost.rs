@@ -287,6 +287,92 @@ pub async fn chat_action(
     }
 }
 
+/// #343 — the island root that owns the attachments workspace:
+/// `ABITO_ISLAND_DIR` (absolute) or the user's `~/.abito-island`, same rule
+/// the agent connection uses. `None` = the island does not exist yet.
+fn island_root() -> Option<std::path::PathBuf> {
+    abito_island::agentconn::island_root(
+        std::env::var("ABITO_ISLAND_DIR").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+fn attach_error(e: chat::ChatError) -> BridgeError {
+    BridgeError { code: e.code, message: e.safe_message }
+}
+
+async fn store_attachment<F>(work: F) -> Result<Value, BridgeError>
+where
+    F: FnOnce(&std::path::Path) -> Result<abito_island::uploads::Attachment, chat::ChatError> + Send + 'static,
+{
+    let island = island_root().ok_or_else(|| {
+        attach_error(chat::ChatError::invalid_input(
+            "La carpeta de trabajo de Abito todavía no existe: abrí el chat cuando el motor esté disponible.",
+        ))
+    })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = abito_island::uploads::attachments_dir(&island).map_err(attach_error)?;
+        let stored = work(&dir).map_err(attach_error)?;
+        serde_json::to_value(stored).map_err(|_| BridgeError::denied("attach failed"))
+    })
+    .await
+    .map_err(|_| BridgeError::denied("attach aborted"))?
+}
+
+/// #343 — `chat_attach`: one file DROPPED into the chat. The page only ever
+/// sends the path it received from the window's drag-drop event: Rust reads
+/// it (capped), validates it against the allowlist and copies it into the
+/// island's own uploads directory. The original path is never stored or
+/// referenced afterwards. Same gate and rate limit as every chat command.
+#[tauri::command]
+pub async fn chat_attach(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<Value, BridgeError> {
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    bridge::sender_ok(webview.label(), &url)?;
+    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    let path = payload
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| attach_error(chat::ChatError::invalid_input("Pedido de archivo inválido.")))?
+        .to_string();
+    store_attachment(move |dir| {
+        let (name, bytes) = abito_island::uploads::read_dropped(std::path::Path::new(&path))?;
+        abito_island::uploads::attach(dir, &name, &bytes)
+    })
+    .await
+}
+
+/// #343 — `chat_attach_data`: one file PICKED in the composer. The page
+/// sends raw bytes through Tauri's raw invoke (an ArrayBuffer payload): a
+/// one-line JSON header `{{"name":"…"}}`, LF, then the file bytes. Rust
+/// validates against the SAME allowlist and stores into the SAME uploads
+/// directory as `chat_attach` — the page never names a storage path.
+#[tauri::command]
+pub async fn chat_attach_data(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Value, BridgeError> {
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    bridge::sender_ok(webview.label(), &url)?;
+    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    let body = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+        tauri::ipc::InvokeBody::Json(_) => {
+            return Err(attach_error(chat::ChatError::invalid_input("Pedido de archivo inválido.")));
+        }
+    };
+    store_attachment(move |dir| {
+        let (name, bytes) = abito_island::uploads::split_raw_body(&body)?;
+        abito_island::uploads::attach(dir, &name, bytes)
+    })
+    .await
+}
+
 /// Initialize private local history; probes are memory-only unless explicitly isolated.
 pub fn start_history(app: &AppHandle) {
     let state = app.state::<AppState>();

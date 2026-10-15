@@ -51,6 +51,7 @@ pub mod requests;
 pub mod renderenv;
 pub mod retry;
 pub mod transport_view;
+pub mod uploads;
 // The real receiver is Linux-only (UDS + SO_PEERCRED). Windows named pipes
 // and a macOS backend remain separate human decisions with their own cfg arms.
 #[cfg(target_os = "linux")]
