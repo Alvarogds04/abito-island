@@ -74,6 +74,7 @@
     label: 'Reiniciar motor',
     busyLabel: 'Reiniciando…',
     ok: 'Motor reiniciado.',
+    refused: 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.',
     late: 'El motor no respondió a tiempo; volvé a probar en un momento.',
     failed: 'No se pudo reiniciar el motor.',
   });
@@ -86,10 +87,14 @@
         aria: 'Reiniciar el motor del agente' },
     };
   }
-  // Success only when the restart ANSWERED `ready`; a timeout is a timeout, never a success,
-  // and no host/engine string is ever shown — only these sentences.
+  // Success only for the closed `outcome` of the restart: `restarted` is the ONLY success,
+  // `refused` names a foreign motor that we never touch (GD029), `timeout` is a timeout —
+  // never a success. A reply without the closed outcome falls back to the connection truth.
   function daemonRestartOutcome(result, error) {
     if (!result || error) return { tone: 'red', icon: 'triangle', say: DAEMON_RESTART.failed };
+    if (result.outcome === 'restarted') return { tone: 'go', icon: 'check', say: DAEMON_RESTART.ok };
+    if (result.outcome === 'refused') return { tone: 'sun', icon: 'info', say: DAEMON_RESTART.refused };
+    if (result.outcome === 'timeout') return { tone: 'sun', icon: 'clock', say: DAEMON_RESTART.late };
     if (result.ready === true) return { tone: 'go', icon: 'check', say: DAEMON_RESTART.ok };
     return { tone: 'sun', icon: 'clock', say: DAEMON_RESTART.late };
   }

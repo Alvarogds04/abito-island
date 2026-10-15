@@ -137,7 +137,9 @@ fn crash_helper() {
         assert_eq!(slot.failure(), None);
         wait_lines(1);
         let pid1 = fs::read_to_string(&pids).unwrap().lines().next().unwrap().to_string();
+        assert_eq!(slot.pid().map(|p| p.to_string()), Some(pid1.clone()), "the slot exposes our live child for the restart verdict");
         slot.stop();
+        assert_eq!(slot.pid(), None, "after stop the slot holds no child");
         assert!(!Path::new(&format!("/proc/{pid1}")).exists(), "stop must reap its child");
         slot.start();
         assert_eq!(slot.failure(), None, "the second start must spawn cleanly");
@@ -269,4 +271,10 @@ fn early_child_exit_is_reaped_at_runtime_and_reported() {
     // 3) stop() after a runtime reap is a clean no-op (no double signal, no panic)
     slot.stop();
     slot.stop();
+    // 4) the dead child leaves no live pid behind (the restart verdict reads this)
+    loop {
+        if slot.pid().is_none() { break }
+        assert!(std::time::Instant::now() < deadline, "the slot keeps holding the dead child");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }

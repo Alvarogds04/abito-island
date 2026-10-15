@@ -630,7 +630,7 @@ test('connecting: the screen draws «Conectando» while the first state is on it
 const HASH = 'a'.repeat(64);
 const plan = (extra = {}) => ({ id: 'claude-code', state: 'not_connected', backup: false, detail: null, plan_hash: HASH,
   summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first.', reviewable: true, trust_review: false, ...extra });
-const rowOf = (entry, id) => S.agentsView(agentsState([entry])).rows[0];
+const rowOf = (entry, _id) => S.agentsView(agentsState([entry])).rows[0];
 
 test('plan: the closed summary is shown next to the button, and the click carries the hash the human saw', () => {
   const r = rowOf(plan());
@@ -922,4 +922,24 @@ test('#390 GD027: the restart control is one closed neutral label with honest ou
   const all = JSON.stringify([idle, busy, ok, late, failed]);
   assert.ok(!all.includes('portal'), 'the hotkey portal wording is not ours to write');
   assert.ok(!all.includes('token') && !all.includes('sk-'));
+});
+
+// ---- #390 fix: the closed `outcome` drives the sentence ----------------------------------------
+test('#390 GD027 fix: outcome drives the sentence — restarted/refused/timeout, closed and ours', () => {
+  const restarted = S.daemonRestartOutcome({ action: 'restart', ready: true, connection: 'connected', outcome: 'restarted' });
+  assert.deepEqual([restarted.tone, restarted.icon, restarted.say], ['go', 'check', 'Motor reiniciado.']);
+  // the coordinator's verbatim sentence, no engine text
+  const refused = S.daemonRestartOutcome({ action: 'restart', ready: false, connection: 'no_daemon', outcome: 'refused' });
+  assert.equal(refused.say, 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.');
+  const timeout = S.daemonRestartOutcome({ action: 'restart', ready: false, connection: 'no_daemon', outcome: 'timeout' });
+  assert.equal(timeout.say, 'El motor no respondió a tiempo; volvé a probar en un momento.');
+  assert.equal(timeout.tone, 'sun');
+  // refused and timeout are distinct states, never success
+  assert.notEqual(refused.say, restarted.say);
+  assert.ok(refused.tone !== 'go', 'a refused restart never reads as success');
+  // the previous contract (a reply without the closed outcome) keeps its meaning
+  assert.deepEqual([S.daemonRestartOutcome({ action: 'restart', ready: true }).say, S.daemonRestartOutcome({ action: 'restart', ready: false }).tone], ['Motor reiniciado.', 'sun']);
+  assert.equal(S.daemonRestartOutcome(null, { code: 'host_spawn_failed' }).tone, 'red');
+  const all = JSON.stringify([restarted, refused, timeout]);
+  assert.ok(!all.includes('portal') && !all.includes('token') && !all.includes('sk-'), 'no foreign wording');
 });

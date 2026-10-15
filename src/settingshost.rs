@@ -263,11 +263,17 @@ pub(crate) fn parse_daemon_action(payload: &Value) -> Option<&'static str> {
 
 /// The truth of the daemon is the CONNECTION: lazily create the client (like
 /// `agent_action view`), connect when it is not connected, and — when `wait` is
-/// given — keep trying until it answers `ready` or the bound expires. Holds the
-/// agent slot (the same rule as `agent_action`): the state callback only emits,
-/// it never re-locks. The caller only ever gets `{ready, connection}`: no token,
-/// no pid, no path.
-fn daemon_view(handle: &AppHandle, state: &AppState, root: &std::path::Path, wait: Option<Duration>) -> Value {
+/// given — keep trying until it answers `ready`, OUR OWN child dies, or the bound
+/// expires. Holds the agent slot (the same rule as `agent_action`): the state
+/// callback only emits, it never re-locks. Returns `(connection, own_child_gone)`
+/// for the restart verdict; the page only ever sees `{action, ready, connection, outcome}`.
+fn daemon_connect(
+    handle: &AppHandle,
+    state: &AppState,
+    root: &std::path::Path,
+    wait: Option<Duration>,
+    watch: Option<&abito_island::daemonhost::HostSlot>,
+) -> (String, bool) {
     let mut guard = state.settings.agent.lock().expect("agent lock");
     let emitter = handle.clone();
     let conn = guard.get_or_insert_with(|| {
@@ -277,11 +283,18 @@ fn daemon_view(handle: &AppHandle, state: &AppState, root: &std::path::Path, wai
     });
     let connected = |c: &AgentConn| c.view().get("connection").and_then(Value::as_str) == Some("connected");
     let deadline = wait.map(|w| Instant::now() + w);
+    let mut own_gone = false;
     loop {
+        // Try the connection FIRST: a stale `connected` must be refreshed honestly.
         if !connected(conn) {
             conn.connect(root);
         }
         if connected(conn) {
+            break;
+        }
+        // A watched child that died without serving must not burn the whole bound.
+        if watch.is_some_and(|w| w.pid().is_none()) {
+            own_gone = true;
             break;
         }
         match deadline {
@@ -291,14 +304,44 @@ fn daemon_view(handle: &AppHandle, state: &AppState, root: &std::path::Path, wai
     }
     let view = conn.view();
     let connection = view.get("connection").and_then(Value::as_str).unwrap_or("no_daemon").to_string();
-    json!({ "ready": connection == "connected", "connection": connection })
+    (connection, own_gone)
+}
+
+/// The pid in `<root>/runtime/session.json`, read ONLY to compare it with our own
+/// child inside Rust (#390 fix). It never crosses to the page.
+fn session_pid(root: &std::path::Path) -> Option<u32> {
+    let text = std::fs::read_to_string(abito_island::agentconn::session_path(root)).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    value.get("pid")?.as_u64()?.try_into().ok()
+}
+
+/// #390 fix — the closed verdict of a `restart`, decided ONLY from our own child:
+/// `restarted` (our child serves the session it published), `refused` (our child never
+/// spawned, GD029 rejected it and it died, or the session belongs to someone else — a
+/// foreign motor we never touch), `timeout` (our child was still booting at the bound).
+/// Never a pid.
+pub(crate) fn restart_outcome(own: Option<u32>, session_pid: Option<u32>, own_alive: bool, connected: bool) -> &'static str {
+    let Some(own) = own else { return "refused" };
+    if connected {
+        return if session_pid == Some(own) { "restarted" } else { "refused" };
+    }
+    if !own_alive {
+        return "refused";
+    }
+    "timeout"
+}
+
+/// The restart answer: exactly `{action, ready, connection, outcome}` — no token, no pid, no path.
+pub(crate) fn restart_response(action: &str, connection: &str, outcome: &'static str) -> Value {
+    json!({ "action": action, "ready": connection == "connected", "connection": connection, "outcome": outcome })
 }
 
 /// #390 GD027 — the closed daemon lifecycle command behind the Ajustes button.
-/// `status` reports the current state once; `restart` closes the old socket's reader,
-/// stops the app-owned host child (bounded TERM/KILL/reap in `daemonhost`), spawns it
-/// again and waits (bounded) for the fresh daemon to answer `ready`. The answer is
-/// `{"action","ready","connection"}` — never a token, a pid or a path.
+/// `status` reports the current state once (the fast path, unchanged). `restart` drops
+/// the old client, stops the app-owned host child (bounded TERM/KILL/reap in
+/// `daemonhost`), spawns it again and answers the CLOSED `outcome` — `restarted` |
+/// `refused` | `timeout` — decided from our own child's pid vs `session.json`, never
+/// exposed. `{action, ready, connection, outcome}`: no token, no pid, no path.
 #[tauri::command]
 pub async fn daemon_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
@@ -311,19 +354,24 @@ pub async fn daemon_action(app: AppHandle, webview: tauri::Webview, state: State
         let root = island_root(std::env::var("ABITO_ISLAND_DIR").ok().as_deref(), std::env::var("HOME").ok().as_deref())
             .ok_or_else(|| err("no_island_root"))?;
         if action == "restart" {
-            // The old socket's reader must go BEFORE its daemon does.
-            if let Some(conn) = state.settings.agent.lock().expect("agent lock").as_ref() {
-                conn.close();
-            }
+            // The old client (and its reader) go BEFORE its daemon; the fresh one below
+            // starts from `no_daemon`, never from a stale `connected`.
+            let old = state.settings.agent.lock().expect("agent lock").take();
+            drop(old);
             // Bounded stop (daemonhost Drop: TERM group, KILL, reap) then a fresh spawn.
             let slot = handle.state::<abito_island::daemonhost::HostSlot>();
             slot.stop();
             slot.start();
-            let view = daemon_view(&handle, &state, &root, Some(RESTART_WAIT));
-            return Ok(json!({ "action": action, "ready": view["ready"], "connection": view["connection"] }));
+            let own = slot.pid();
+            let (connection, own_gone) = daemon_connect(&handle, &state, &root, Some(RESTART_WAIT), Some(&*slot));
+            let connected = connection == "connected";
+            let own_alive = !own_gone && slot.pid().is_some();
+            let outcome = restart_outcome(own, session_pid(&root), own_alive, connected);
+            return Ok(restart_response(action, &connection, outcome));
         }
-        let view = daemon_view(&handle, &state, &root, None);
-        Ok(json!({ "action": action, "ready": view["ready"], "connection": view["connection"] }))
+        // status: the fast path — one honest attempt, same shape as before
+        let (connection, _) = daemon_connect(&handle, &state, &root, None, None);
+        Ok(json!({ "action": action, "ready": connection == "connected", "connection": connection }))
     })
     .await
     .map_err(|_| err("daemon_aborted"))?
@@ -350,6 +398,8 @@ pub fn stop(app: &AppHandle) {
 mod settings_view_tests {
     use super::parse_daemon_action;
     use super::parse_settings_view;
+    use super::restart_outcome;
+    use super::restart_response;
     use serde_json::json;
 
     #[test]
@@ -358,6 +408,49 @@ mod settings_view_tests {
         assert_eq!(parse_settings_view(&json!({"open": false})), Some(false));
         for bad in [json!({}), json!({"open": 1}), json!({"open": "true"}), json!({"open": true, "w": 900}), json!(true), json!(null), json!({"width": 900})] {
             assert_eq!(parse_settings_view(&bad), None, "{bad}");
+        }
+    }
+
+    /// #390 fix: the verdict comes from OUR OWN child — a closed vocabulary, never a pid.
+    #[test]
+    fn restart_outcome_is_a_closed_vocabulary_from_the_own_child_verdict() {
+        // the coordinator's fake: our child never spawned and nobody answers → refused (ready false)
+        assert_eq!(restart_outcome(None, None, false, false), "refused");
+        // no child of ours, but a foreign daemon answers session.json
+        assert_eq!(restart_outcome(None, Some(1234), false, true), "refused");
+        // our own child published the session and serves it
+        assert_eq!(restart_outcome(Some(100), Some(100), true, true), "restarted");
+        // connected, but the session belongs to someone else (ours never published)
+        assert_eq!(restart_outcome(Some(100), Some(200), true, true), "refused");
+        // our spawn was rejected (GD029) and the child died without serving
+        assert_eq!(restart_outcome(Some(100), Some(200), false, false), "refused");
+        assert_eq!(restart_outcome(Some(100), None, false, false), "refused");
+        // still booting when the bound expired: honestly a timeout
+        assert_eq!(restart_outcome(Some(100), None, true, false), "timeout");
+        assert_eq!(restart_outcome(Some(100), Some(100), true, false), "timeout");
+        for verdict in [
+            restart_outcome(None, None, false, false),
+            restart_outcome(Some(100), Some(100), true, true),
+            restart_outcome(Some(100), None, true, false),
+        ] {
+            assert!(matches!(verdict, "restarted" | "refused" | "timeout"), "{verdict}");
+        }
+    }
+
+    /// #390 fix: the restart answer carries exactly its four keys — no token, pid or path.
+    #[test]
+    fn restart_response_never_carries_a_token_pid_or_path() {
+        let text = serde_json::to_string(&restart_response("restart", "connected", "restarted")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["action", "connection", "outcome", "ready"]);
+        assert_eq!(value["ready"], json!(true));
+        let late = restart_response("restart", "no_daemon", "timeout");
+        assert_eq!(late["ready"], json!(false));
+        assert_eq!(late["outcome"], json!("timeout"));
+        for banned in ["token", "pid", "endpoint", "procStart", "/home/", "/proc/"] {
+            assert!(!text.contains(banned), "{banned} leaked: {text}");
         }
     }
 
