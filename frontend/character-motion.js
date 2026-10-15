@@ -103,8 +103,10 @@
         if (producer() === 'idle' && !occupied && !blocked()) finishedUntil = now() + FINISHED_MS;
       }
       sync();
-      // First valid snapshot only, once: skipped (not deferred) if anything urgent or busy.
-      if (!greeted && snapshot.available !== false) { greeted = true; greet(); }
+      // Launch greeting: retried on later snapshots until greet() actually plays it once, then
+      // never again. A refusal (urgent, busy, reduced/paused/hidden) is never forced and never
+      // deferred onto a timer — only a later snapshot retries it.
+      if (!greeted && snapshot.available !== false && greet()) greeted = true;
     }
     return {
       snapshot: observe,
