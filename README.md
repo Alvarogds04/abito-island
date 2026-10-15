@@ -680,6 +680,51 @@ cargo test --manifest-path apps/desktop-tauri/Cargo.toml
 #   smuggled origin refused, selection effective, fake router saw only GETs
 ```
 
+## #339 / F024 — the model row above the composer
+
+The chat column carries one row between «Respuesta nueva» and the composer: a
+button with the availability dot, the effective local model's name and a
+caret, plus an inline picker above it. Upstream Coucou's “Click model name
+above composer” (`windows/src/views/chat.ts:216-254`); the macOS popover
+itself (`IslandViewContent.swift:1345-1375`) is not ported, per the 0.2 scope
+rule.
+
+**What it shows (R1/R4):** the EFFECTIVE target of the next turn — Rust has
+already resolved the active specialist into `chat:state.target`
+(`chathost::current_target` → `specialistshost::turn_snapshot`), so the row
+names exactly the model that will answer. The alias, or the profile id when it
+has none; «Sin modelo local elegido» when there is no target; and the role's
+name appended («Abito-gpt · Investigación») only when that role is what
+supplies this exact model, with a one-line note inside the picker. Plain text
+only (`textContent`), the origin rides in the accessible name without its
+scheme, and never an endpoint, key, account or provider (S5).
+
+**What a click does (R2/R3):** toggles the picker over the SAME closed
+`models_action` set Ajustes → Modelos uses — `list` on open,
+`select{profile_id}` on a row — so a selection applies from the NEXT message
+(a running turn keeps its frozen target) and nothing new reached the wire: no
+new verb, no new preference, no Rust change, and `chat_action`'s closed set is
+untouched. Escape closes the picker first; a running turn freezes the row; a
+CHOSEN target that is down or blocked disables it, while no target chosen (or
+no preflight verdict yet) keeps it enabled — otherwise the picker would be a
+dead end exactly when the human needs it.
+
+**What it is not:** not a per-turn override; not a provider picker (the chat
+lane is local-only, `src/chatlane.rs`; cloud chips would need a new wire verb
+plus a daemon round trip and engine restart, out of 0.2); and it never writes
+a role. `chat.js` may invoke exactly `chat_action`, `open_chat_url`,
+`models_action {list,select}` and `specialists_action {view}` — a check pins
+that set so a later edit cannot grow it silently.
+
+### Verifying #339
+
+```sh
+node apps/desktop-tauri/test-node/chat-view-check.cjs         # 52 checks (5 pure F024: label/aria/note/enabled/markup)
+node apps/desktop-tauri/test-node/chat-model-picker-check.cjs # 10 checks, fake DOM driving the REAL chat.js
+node apps/desktop-tauri/tests/composer-ime-check.cjs          # 10 checks: the keyboard contract still holds
+# cargo test runs both harnesses through tests/frontend_chat_view.rs
+```
+
 ## #327 — manual specialists (roles the human creates and chooses)
 
 A specialist is a role the human creates by hand and picks explicitly: a
