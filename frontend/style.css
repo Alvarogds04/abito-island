@@ -1144,3 +1144,30 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings[data-rail="true"] .scard .srow-actions { margin-top: auto; }
 #settings[data-rail="true"] .sagent { padding: 12px 0; }
 #settings[data-rail="true"] #settings-body { padding-right: 8px; gap: 0; }
+
+/* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
+   settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
+   is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
+   (--fs-label 13px / --fs-caption 12px, 12px floor, no raw px font-size) while the 44px click target
+   of every control stays exactly where the rest of Ajustes keeps it. Written AFTER the #408 rail
+   block so it wins at equal specificity (both are id + attribute + class). */
+#settings-body[data-screen="accounts"] .ssec { margin-top: 12px; }
+#settings-body[data-screen="accounts"] .ssec:first-child { margin-top: 2px; }
+#settings-body[data-screen="accounts"] .ssec > .snote { margin: 0 0 4px; }
+#settings-body[data-screen="accounts"] .ssection { line-height: 16px; margin-bottom: 2px; }
+#settings-body[data-screen="accounts"] .srows { gap: 4px; }
+#settings-body[data-screen="accounts"] .srow { gap: 6px; min-height: 44px; padding: 0; }
+#settings-body[data-screen="accounts"] .srow-title { font-size: var(--fs-label); }
+#settings-body[data-screen="accounts"] .snote, #settings-body[data-screen="accounts"] .sempty { font-size: var(--fs-caption); }
+#settings-body[data-screen="accounts"] .sline { font-size: var(--fs-label); }
+#settings-body[data-screen="accounts"] .srow-actions { gap: 4px; }
+#settings-body[data-screen="accounts"] .sbtn { min-height: 44px; min-width: 44px; gap: 4px; padding: 0 10px 0 8px; font: 600 var(--fs-label)/1.2 var(--font-ui); }
+#settings-body[data-screen="accounts"] .sbtn .ico svg { width: 16px; height: 16px; }
+#settings-body[data-screen="accounts"] .sfilter { gap: 4px; margin: 0 0 4px; }
+#settings-body[data-screen="accounts"] .scards { gap: 6px; }
+#settings-body[data-screen="accounts"] .scard { gap: 4px; padding: 10px 12px; }
+#settings-body[data-screen="accounts"] .scard .scode { font-size: var(--fs-title); padding: 6px 10px; }
+#settings-body[data-screen="accounts"] .sagent { gap: 2px; padding: 6px 0; }
+#settings-body[data-screen="accounts"] .sagent-head { gap: 6px; }
+#settings-body[data-screen="accounts"] .chip { min-height: 24px; font-size: var(--fs-caption); }
+#settings-body[data-screen="accounts"] .chip .ico svg { width: 16px; height: 16px; }

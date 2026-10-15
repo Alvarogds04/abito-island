@@ -237,6 +237,9 @@
       b.tabIndex = on ? 0 : -1;
     }
     body.hidden = id === 'models'; // the model picker is its own panel (models.js), shown by the event below
+    // #410: the open sub-tab is a PUBLIC DOM attribute of the tabpanel. The compact Conexiones rules
+    // (#410 block in style.css) are scoped to it, so every other Ajustes tab keeps its own look.
+    body.dataset.screen = id;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: id }));
     if (id === 'accounts') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
     render();
@@ -442,7 +445,11 @@
       for (const account of ownedAccounts.accounts) {
         const row = el('div', 'srow'); row.style.flexWrap = 'wrap';
         const title = el('b', 'srow-title', account.config.nombre); title.style.overflowWrap = 'anywhere';
-        row.append(title, el('span', 'snote', account.hasCredential ? 'Clave guardada' : 'Sin clave'));
+        // #410 S2: the credential state is an icon chip from the closed registry (same two words as
+        // before) instead of a bare line of muted text. Faint tone: a stored key is CONFIGURATION,
+        // never a connection claim (#308).
+        row.append(title, chipNode({ tone: 'faint', icon: account.hasCredential ? 'lock' : 'plug-off',
+          word: account.hasCredential ? 'Clave guardada' : 'Sin clave' }));
         row.append(accountTarget(wordBtn('Editar', () => { accountForm = makeAccountForm(account); render(); }, { disabled: accountSaving, aria: `Editar ${account.config.nombre}` })));
         // #409 T2 / S5: deletion stays reachable now that the Pi card is gone (same sentences, same non-mutation).
         row.append(accountTarget(wordBtn('Quitar conexión', () => removeAccount(account.accountId), { icon: 'plug-off', disabled: accountSaving, aria: `Quitar conexión: ${account.config.nombre}` })));
