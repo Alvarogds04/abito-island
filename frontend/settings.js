@@ -2,7 +2,8 @@
 /* #306 — the settings panel (providers, connectors, general), an internal panel of the
    chat view like the model picker (same island, same motion). It talks to Rust ONLY
    through three closed commands: `agent_action` (accounts / sign-in / connectors),
-   `prefs_action` (sound) and `hotkey_action` (the global shortcut), plus the existing
+   `prefs_action` (sound/gain/name/avatar and local catalog choices) and
+   `hotkey_action` (the global shortcut), plus the existing
    window.desktop verbs for system motion. It never sees the agent's token or socket.
    - Plain text only (textContent). No innerHTML anywhere: icons are DOM nodes built from the
      closed own registry (DOMParser), so no data can ever become markup.
@@ -39,18 +40,21 @@
   const call = (cmd, payload) => (invoke ? invoke(cmd, { payload }) : Promise.reject(new Error('no ipc')));
   const agent = payload => call('agent_action', payload);
 
-  const openers = V.SCREENS.map(x => $(`open-screen-${x.id}`)).filter(Boolean);
+  const openers = [$('open-screen-settings')].filter(Boolean); // the chat header gear: the ONE entry (#408)
+  const tabsHost = $('settings-tabs');
   const live = $('settings-live');
   let screen = 'accounts';
   let method = null;      // Cuentas: null = the two method cards, else 'oauth' | 'api_key' (the provider list)
   let filter = '';
   let agentsAsk = null;   // { at: engine error counter when agents_list was sent, timer, timedOut }
+  let loginTarget = null;  // #408: { providerId, phase: 'active'|'error'|'cancelled', sawFlow } — the login this page started
   let pendingLogin = null; // a login that waits for the account it just asked the engine to create
   let agentState = null;
   let ownedAccounts = null; // masked host projection only, independent of daemon pushes
   let accountForm = null;
   let accountSaving = false;
   let accountError = '';
+  let accountNote = null; // #409 T2: outcome of the last removal attempt, in words we own
   let accountGeneration = 0;
   function discardAccountForm() {
     const secret = accountForm && accountForm.querySelector('#account-secret');
@@ -58,6 +62,8 @@
     accountForm = null; accountError = ''; accountGeneration += 1;
   }
   let prefs = { sound: false };
+  let pillSaving = false;
+  let pillError = '';
   let gainDraft = null;
   let gainSaving = false;
   let gainError = '';
@@ -65,6 +71,9 @@
   let nameSaving = false;
   let nameError = '';
   let hotkey = null;
+  // #390 GD027: the manual restart of the daemon (Ajustes → Conexiones), one in-flight flag
+  let daemonBusy = false;
+  let daemonNote = null;
   // #327 owns the sole role cache; Settings reads only its immutable id/name projection.
   const AVATAR = window.AbitoAvatarColors;
   const specialistIdentities = () => window.AbitoSpecialistsPanel?.identityView() || { kind: 'loading', identities: [] };
@@ -72,6 +81,7 @@
   // F1: feedback belongs to its identity and survives renders/retries until a save succeeds.
   const colorErrors = Object.create(null);
   let motionOverride = true;
+  let themeError = ''; // #380: a failed theme save keeps the previous theme and says so
   let capturing = false;
   let pendingOpen = false;
   const drafts = V.makeDrafts(); // what is being typed survives the re-renders (memory only)
@@ -79,12 +89,6 @@
 
   const say = text => { if (text) { live.textContent = ''; requestAnimationFrame(() => { live.textContent = text; }); } };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
-  function iconBtn(name, label, onClick, extra) {
-    const b = el('button', 'icon-btn ' + (extra || ''));
-    b.type = 'button'; b.setAttribute('aria-label', label); putIcon(b, name);
-    b.addEventListener('click', e => { if (e.isTrusted === true) onClick(e); });
-    return b;
-  }
   function wordBtn(word, onClick, opts) {
     const o = opts || {};
     const b = el('button', 'sbtn' + (o.primary ? ' primary' : ''));
@@ -170,18 +174,77 @@
       });
   }
 
+  // #380: system / light / dark. The click only SENDS the choice: the host validates the closed
+  // enum, persists it and publishes `prefs:state`; theme.js paints from that saved state. So a
+  // failed save leaves the previous theme on screen (no optimistic paint, no false «guardado»).
+  function chooseTheme(mode) {
+    call('prefs_action', { action: 'set_theme', theme: mode }).then(p => {
+      themeError = '';
+      prefs = p;
+      render();
+      const view = V.themeView(p);
+      const chosen = view.options.find(o => o.selected) || view.options[0];
+      say(`Tema guardado: ${chosen.label}.`);
+    }, () => {
+      themeError = 'No se pudo guardar el tema; se mantuvo el anterior.';
+      render();
+      say(themeError);
+    });
+  }
+
   // ---- open / close ---------------------------------------------------------------------------------------
-  // gentle-dot: one header button per screen; a screen covers the chat body; opening one replaces the other.
+  // #408: the sub-tab strip, built once from V.TABS. Roving tabindex + arrow keys (WAI-ARIA tablist).
+  function buildTabs() {
+    if (!tabsHost) return;
+    for (const def of V.TABS) {
+      const b = el('button', 'stab');
+      b.type = 'button'; b.id = `settings-tab-${def.id}`; b.dataset.tab = def.id;
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-controls', def.id === 'models' ? 'models' : 'settings-body');
+      const i = el('span', 'ico'); putIcon(i, def.icon);
+      b.append(i, el('span', 'word', def.label));
+      b.addEventListener('click', e => { if (e.isTrusted === true) showScreen(def.id); });
+      b.addEventListener('keydown', e => {
+        if (e.isTrusted !== true || e.isComposing) return;
+        const next = V.tabKeyTarget(def.id, e.key);
+        if (!next) return;
+        e.preventDefault(); e.stopPropagation();
+        showScreen(next);
+        const nb = $(`settings-tab-${next}`); if (nb) nb.focus();
+      });
+      tabsHost.append(b);
+    }
+  }
+  buildTabs();
+  // #408: at the Settings size (wide) the tabs are a vertical rail; in the 400 column a wrapping row.
+  const RAIL_MIN_W = 600;
+  function syncRail() {
+    const wide = typeof panel.clientWidth === 'number' && panel.clientWidth >= RAIL_MIN_W;
+    panel.dataset.rail = wide ? 'true' : 'false';
+    if (tabsHost) tabsHost.setAttribute('aria-orientation', wide ? 'vertical' : 'horizontal');
+  }
+  window.addEventListener('resize', syncRail);
   function showScreen(id) {
     screen = id;
+    id = V.tabAlias(id) || 'accounts';
+    screen = id;
     if (id !== 'accounts') { method = null; filter = ''; discardAccountForm(); }
-    const def = V.screenById(id);
-    $('settings-title').textContent = def.title;
+    const def = V.tabById(id);
+    $('settings-title').textContent = 'Ajustes';
     $('settings-hint').textContent = def.hint;
     $('settings-hint').hidden = !def.hint;
-    panel.setAttribute('aria-label', def.title);
-    for (const b of openers) b.setAttribute('aria-expanded', b.id === `open-screen-${id}` ? 'true' : 'false');
-    if (id === 'connectors') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
+    panel.setAttribute('aria-label', `Ajustes: ${def.title}`);
+    if (tabsHost) for (const b of tabsHost.children) {
+      const on = b.dataset.tab === id;
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;
+    }
+    body.hidden = id === 'models'; // the model picker is its own panel (models.js), shown by the event below
+    // #410: the open sub-tab is a PUBLIC DOM attribute of the tabpanel. The compact Conexiones rules
+    // (#410 block in style.css) are scoped to it, so every other Ajustes tab keeps its own look.
+    body.dataset.screen = id;
+    document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: id }));
+    if (id === 'accounts') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
     render();
   }
   // The engine answers `agents_list` with an `agents` frame — or, if it does not know the command, with
@@ -189,44 +252,52 @@
   function askAgents() {
     if (agentsAsk) clearTimeout(agentsAsk.timer);
     const ask = { at: (agentState && agentState.last_error && agentState.last_error.n) || 0, timedOut: false, timer: 0 };
-    ask.timer = setTimeout(() => { ask.timedOut = true; if (isOpen() && screen === 'connectors') render(); }, V.AGENTS_WAIT_MS);
+    ask.timer = setTimeout(() => { ask.timedOut = true; if (isOpen() && screen === 'accounts') render(); }, V.AGENTS_WAIT_MS);
     agentsAsk = ask;
     agent({ action: 'agents_list' }).catch(() => {});
   }
   // The first state normally arrives within a few ms. If it never does, stop saying «Conectando»: the engine
   // is not there, and the screen says so (the same honest word as before, just not before it was asked).
   let connectTimer = 0;
+  // #408: Ajustes asks Rust for the Settings size on open and gives it back on close. Rust owns the number
+  // (geometry::settings_visible, clamped to the work area); the page only says open/closed. A failure
+  // leaves the chat size, which still works (scrolling), so it is never fatal.
+  function askSize(openNow) { call('settings_view', { open: openNow }).catch(() => {}); }
   function open(id) {
     clearTimeout(connectTimer);
     if (agentState === null) connectTimer = setTimeout(() => { if (agentState === null) { agentState = { connection: 'no_daemon' }; if (isOpen()) render(); } }, V.CONNECT_WAIT_MS);
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
+    for (const b of openers) b.setAttribute('aria-expanded', 'true');
+    askSize(true);
+    syncRail();
     refreshAll();
     showScreen(id || screen);
     $('settings-close').focus();
   }
   function close(byKeyboard) {
+    if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
-    capturing = false; method = null; filter = ''; pendingLogin = null;
+    document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
+    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null; accountNote = null;
     if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
     discardAccountForm();
     drafts.reset(); // a half-typed key never outlives the panel
     if (waiting) { clearTimeout(waiting.timer); waiting = null; }
-    // the panel lives in the chat view: focus returns to the chat input
-    if (byKeyboard) { const c = $('chat-input'); if (c && !c.disabled) c.focus(); }
+    // #408: focus returns to the control that opened Ajustes (the gear in the chat header)
+    if (byKeyboard) { const g = $('open-screen-settings'); if (g) g.focus(); }
   }
   const isOpen = () => panel.dataset.open === 'true';
 
-  // the header buttons toggle their screen; the gear of the overview opens the chat view first
+  // the chat-header gear toggles Ajustes; the gear of the overview opens the chat view first
   for (const b of openers) b.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
-    const id = b.id.replace('open-screen-', '');
-    if (isOpen() && screen === id) close(e.detail === 0); else open(id);
+    if (isOpen()) close(e.detail === 0); else open(screen);
   });
   const gear = $('open-settings');
   if (gear) gear.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
-    pendingOpen = 'settings';
+    pendingOpen = screen;
     call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; });
   });
   document.addEventListener('island:view', e => {
@@ -237,8 +308,8 @@
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
-    if (e.detail === 'open') { pendingOpen = 'settings'; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
-    else if (V.screenById(e.detail)) { method = null; filter = ''; if (isOpen()) showScreen(e.detail); else open(e.detail); }
+    if (e.detail === 'open') { pendingOpen = screen; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
+    else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { method = null; filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
     else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { method = e.detail.split(':')[1]; if (isOpen()) showScreen('accounts'); else open('accounts'); }
   });
   // Escape: the shortcut capture first, then the panel (never the island)
@@ -309,6 +380,7 @@
     agent(payload).then(next => { busy = false; applyAgent(next); }, error => {
       busy = false;
       if (waiting) { clearTimeout(waiting.timer); waiting = null; }
+      if (loginTarget && loginTarget.phase === 'active' && !loginTarget.sawFlow && /^(auth_start|account_create)$/.test(payload.action)) { loginTarget.phase = 'error'; pendingLogin = null; }
       say((error && error.message) || 'No se pudo completar.'); render();
     });
   }
@@ -334,14 +406,12 @@
     body.textContent = '';
     const conn = V.connectionView(agentState);
     const chip = $('settings-conn');
-    chip.hidden = !conn || screen === 'settings';
+    chip.hidden = !conn || screen !== 'accounts';
     if (conn) { chip.dataset.tone = conn.tone; chip.setAttribute('aria-label', conn.aria); putIcon($('settings-conn-icon'), conn.icon); $('settings-conn-word').textContent = conn.word; }
-    if (screen === 'accounts') renderAccounts();
-    else if (screen === 'connectors') renderConnectors();
-    else {
-      renderGeneral();
-      // #327: the specialists live inside Ajustes (no new screen, no new icon): the human creates a
-      // role, chooses it and goes back to the principal from here.
+    if (screen === 'accounts') { renderAccounts(); renderConnectors(); }
+    else if (screen === 'models') { /* models.js owns this panel */ }
+    else if (screen === 'specialists') {
+      // #327: the human creates a role, chooses it and goes back to the principal from here.
       const panel = window.AbitoSpecialistsPanel;
       if (panel) {
         const host = el('div');
@@ -351,7 +421,7 @@
       } else {
         body.append(el('p', 'snote', 'Los especialistas no están disponibles en esta compilación.'));
       }
-    }
+    } else renderGeneral(); // pills / appearance / general: each section names its tab
     body.scrollTop = keep;
     if (focused && $(focused) && body.contains($(focused))) {
       $(focused).focus();
@@ -378,15 +448,33 @@
       for (const account of ownedAccounts.accounts) {
         const row = el('div', 'srow'); row.style.flexWrap = 'wrap';
         const title = el('b', 'srow-title', account.config.nombre); title.style.overflowWrap = 'anywhere';
-        row.append(title, el('span', 'snote', account.hasCredential ? 'Clave guardada' : 'Sin clave'));
+        // #410 S2: the credential state is an icon chip from the closed registry (same two words as
+        // before) instead of a bare line of muted text. Faint tone: a stored key is CONFIGURATION,
+        // never a connection claim (#308).
+        row.append(title, chipNode({ tone: 'faint', icon: account.hasCredential ? 'lock' : 'plug-off',
+          word: account.hasCredential ? 'Clave guardada' : 'Sin clave' }));
         row.append(accountTarget(wordBtn('Editar', () => { accountForm = makeAccountForm(account); render(); }, { disabled: accountSaving, aria: `Editar ${account.config.nombre}` })));
+        // #409 T2 / S5: deletion stays reachable now that the Pi card is gone (same sentences, same non-mutation).
+        row.append(accountTarget(wordBtn('Quitar conexión', () => removeAccount(account.accountId), { icon: 'plug-off', disabled: accountSaving, aria: `Quitar conexión: ${account.config.nombre}` })));
         section.append(row);
       }
       const add = accountTarget(wordBtn('Configurar proveedor', () => { accountForm = makeAccountForm(null); render(); }, { disabled: accountSaving }));
       add.id = 'account-add'; section.append(add);
     }
+    if (accountNote) { const n = el('p', accountNote.tone === 'red' ? 'snote sproblem' : 'snote', accountNote.say); n.setAttribute('role', accountNote.tone === 'red' ? 'alert' : 'status'); section.append(n); }
     if (accountError) { const error = el('p', 'snote', accountError); error.setAttribute('role', 'alert'); section.append(error); }
     body.append(section);
+  }
+  // #409 T2: removing an owned account from its row. Success updates the masked snapshot from the
+  // reply; failure changes nothing and says so. The verb and sentences are the ones of the removed card.
+  function removeAccount(accountId) {
+    if (accountSaving) return;
+    accountSaving = true; accountNote = null; render();
+    agent({ action: 'abito_account_remove', accountId }).then(r => {
+      accountSaving = false;
+      if (r && Object.hasOwn(r, "ownedAccounts") && r.ownedAccounts) ownedAccounts = { accounts: V.ownedAccounts(r.ownedAccounts) };
+      accountNote = { tone: 'go', say: 'Conexión quitada. La clave se borró del almacén de Abito.' }; render(); say(accountNote.say);
+    }, () => { accountSaving = false; accountNote = { tone: 'red', say: 'No se pudo quitar la conexión. No se cambió nada.' }; render(); });
   }
   function makeAccountForm(saved) {
     accountError = '';
@@ -477,7 +565,46 @@
 
   // ---- Cuentas (gentle-dot AccountsPanel): Conectadas → dos tarjetas de método → lista de proveedores con buscador ----
   function sectionTitle(text) { return el('h3', 'ssection', text); }
+  // #390 GD027: ONE closed command stops and relaunches the daemon (Rust owns the whole
+  // lifecycle: bounded stop, fresh spawn, bounded wait). The wording is ours; a failure is
+  // shown, never hidden; the button disables itself while a restart is in flight.
+  function renderDaemonSection() {
+    const v = V.daemonRestartView(daemonBusy);
+    const sec = el('section', 'ssec'); sec.id = 'daemon-restart';
+    sec.append(sectionTitle(v.title));
+    sec.append(el('p', 'snote', v.hint));
+    const row = el('div', 'srow');
+    row.append(el('span', 'srow-title', 'Motor'));
+    const actions = el('span', 'srow-actions');
+    actions.append(wordBtn(v.action.label, () => restartDaemon(), { icon: 'refresh', disabled: v.action.disabled, aria: v.action.aria }));
+    row.append(actions);
+    sec.append(row);
+    if (daemonNote) {
+      const note = el('p', daemonNote.tone === 'red' ? 'snote sproblem' : 'snote', daemonNote.say);
+      note.id = 'daemon-restart-note';
+      note.setAttribute('role', daemonNote.tone === 'red' ? 'alert' : 'status');
+      sec.append(note);
+    }
+    body.append(sec);
+  }
+  function restartDaemon() {
+    if (daemonBusy) return;
+    daemonBusy = true; daemonNote = null; render();
+    call('daemon_action', { action: 'restart' }).then(result => {
+      daemonBusy = false;
+      daemonNote = V.daemonRestartOutcome(result);
+      render();
+      say(daemonNote.say);
+      agent({ action: 'view' }).then(applyAgent, () => {}); // the fresh daemon's state, through the normal channel
+    }, error => {
+      daemonBusy = false;
+      daemonNote = V.daemonRestartOutcome(null, error);
+      render();
+      say(daemonNote.say);
+    });
+  }
   function renderAccounts() {
+    renderDaemonSection();
     renderOwnedAccounts();
     const st = agentState || { connection: 'connecting', providers: [], accounts: [], profiles: { profiles: [], active: null }, auth: {} };
     const auth = st.auth || {};
@@ -487,65 +614,70 @@
     // a login that was waiting for its brand-new account starts the moment that account shows up
     const ready = V.pendingLoginReady(st, pendingLogin);
     if (ready) { pendingLogin = null; queueMicrotask(() => send({ action: 'auth_start', accountId: ready.accountId, method: ready.method })); }
-    if (prompt || eventV || (auth.flowId && !auth.last)) { body.append(renderFlow(auth, prompt, eventV)); return; }
-    const outcome = V.flowOutcome(auth.last);
-    if (outcome) body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
-    if (method === null) {
-      const have = V.connectedAccounts(st);
-      if (have.length) {
-        const sec = el('section', 'ssec'); sec.append(sectionTitle('Conectadas'));
-        const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Cuentas conectadas');
-        for (const r of have) {
-          const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.providerName));
-          if (r.local) li.append(chipNode({ tone: 'faint', icon: 'lock', word: 'local', aria: 'Sólo local' }));
-          else li.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.providerName}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${r.providerName}` }));
-          list.append(li);
-        }
-        sec.append(list); body.append(sec);
+    const flowLive = !!(prompt || eventV || (auth.flowId && !auth.last));
+    // #408: the page remembers WHICH provider started the login, so status, progress and error sit on its card.
+    if (loginTarget && loginTarget.phase === 'active') {
+      if (flowLive) loginTarget.sawFlow = true;
+      else if (loginTarget.sawFlow && auth.last) {
+        const out = V.flowOutcome(auth.last);
+        if (out.word === 'Conectada') loginTarget = null;
+        else loginTarget.phase = out.word === 'Cancelado' ? 'cancelled' : 'error';
       }
-      const cards = el('div', 'smethods');
-      for (const c of V.METHOD_CARDS) {
-        const b = el('button', 'smethod'); b.type = 'button';
-        b.append(el('b', '', c.title), el('span', '', c.hint));
-        b.addEventListener('click', e => { if (e.isTrusted === true) { method = c.id; filter = ''; render(); } });
-        cards.append(b);
-      }
-      body.append(cards);
-      return;
     }
-    // provider list for the chosen method
-    const back = wordBtn('Volver', () => { method = null; filter = ''; render(); }, { icon: 'arrow-left' }); back.classList.add('sback');
-    body.append(back);
+    if (flowLive && !loginTarget) { body.append(renderFlow(auth, prompt, eventV)); return; } // a flow started elsewhere
+    const outcome = loginTarget ? null : V.flowOutcome(auth.last);
+    if (outcome && outcome.word === 'Conectada') body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
+    // method filter (all / subscription / API key) + search
+    const bar = el('div', 'sfilter'); bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Tipo de conexión');
+    for (const [id, word] of [[null, 'Todos'], ['oauth', 'Suscripción'], ['api_key', 'Clave de API']]) {
+      const b = el('button', 'sbtn' + (method === id ? ' primary' : ''), word); b.type = 'button';
+      b.setAttribute('aria-pressed', method === id ? 'true' : 'false');
+      b.addEventListener('click', e => { if (e.isTrusted === true) { method = id; render(); } });
+      bar.append(b);
+    }
+    body.append(bar);
     const search = el('input', 'sfield'); search.type = 'search'; search.id = 'settings-filter'; search.placeholder = 'Buscar proveedor';
     search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
     search.addEventListener('input', () => { filter = search.value; render(); });
     body.append(search);
-    const card = V.METHOD_CARDS.find(c => c.id === method);
-    const sec = el('section', 'ssec'); sec.append(sectionTitle(card.title), el('p', 'snote', card.hint));
-    const rows = V.providerList(st, method, filter);
-    const list = el('ul', 'srows'); list.setAttribute('aria-label', card.title);
-    for (const r of rows) {
-      const li = el('li', 'srow'); li.append(el('b', 'srow-title', r.name));
-      if (r.connected) li.append(chipNode({ tone: 'go', icon: 'check', word: 'Conectado', aria: `${r.name}: conectado` }));
+    const sec = el('section', 'ssec'); sec.id = 'provider-cards'; sec.append(sectionTitle('Proveedores de IA'));
+    const cards = V.providerCards(st, { method, filter, flow: loginTarget });
+    const list = el('ul', 'srows scards'); list.setAttribute('aria-label', 'Proveedores');
+    for (const c of cards) {
+      const li = el('li', 'scard'); li.dataset.state = c.status.kind; li.dataset.provider = c.id;
+      const head = el('span', 'sagent-head'); head.append(el('b', 'srow-title', c.name), chipNode({ tone: c.status.tone, icon: c.status.icon, word: c.status.word, aria: `${c.name}: ${c.status.word}` }));
+      li.append(head);
+      if (c.error) { const e = el('p', 'snote sproblem', c.error); e.setAttribute('role', 'alert'); li.append(e); }
+      if (c.note) li.append(el('p', 'snote', c.note));
+      if (c.status.kind === 'progress' && flowLive) li.append(renderFlow(auth, prompt, eventV, true));
+      else if (c.status.kind === 'progress') li.append(el('p', 'snote', 'Preparando el inicio de sesión…'));
       const actions = el('span', 'srow-actions');
-      actions.append(wordBtn(r.actionLabel, () => loginWith(r.id, method), { primary: method === 'oauth', aria: `${r.actionLabel}: ${r.name}`, disabled: !V.loginPlan(st, r.id, method) }));
-      if (r.canLogout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { aria: `${V.LOGOUT_WORD}: ${r.name}` }));
-      li.append(actions); list.append(li);
+      const act = (a, primary) => wordBtn(a.label, () => {
+        if (a.cancel) { send({ action: 'auth_cancel', flowId: String((auth && auth.flowId) || '') }); return; }
+        loginWith(c.id, a.method);
+      }, { primary, aria: `${a.label}: ${c.name}`, disabled: a.disabled });
+      if (c.primary && !(c.primary.cancel && flowLive)) actions.append(act(c.primary, true));
+      if (c.alt) actions.append(act(c.alt, false));
+      if (c.logout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: c.accountId }, `${c.name}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${c.name}` }));
+      if (actions.children.length) li.append(actions);
+      list.append(li);
     }
-    if (!rows.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
+    if (!cards.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
     sec.append(list); body.append(sec);
   }
   // «Iniciar sesión» / «Usar una clave»: reuse the provider's account, or create one named after the provider first
   function loginWith(providerId, m) {
     const plan = V.loginPlan(agentState, providerId, m);
     if (!plan) return;
+    loginTarget = { providerId, phase: 'active', sawFlow: false };
+    render();
     if (plan.kind === 'start') { send({ action: 'auth_start', accountId: plan.accountId, method: plan.method }); return; }
     pendingLogin = V.pendingLogin(agentState, plan.provider, plan.method);
     send({ action: 'account_create', provider: plan.provider, label: plan.label }, `${plan.label}: cuenta creada.`);
   }
 
   // The sign-in flow. The ONLY secret path: a masked field -> auth_reply -> cleared.
-  function renderFlow(auth, prompt, eventV) {
+  function renderFlow(auth, prompt, eventV, embedded) {
     const box = el('div', 'sflow'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Inicio de sesión en curso');
     if (eventV) {
       if (eventV.message) box.append(el('p', 'sline', eventV.message));
@@ -582,7 +714,7 @@
         box.append(f);
       }
     }
-    box.append(wordBtn('Cancelar', () => send({ action: 'auth_cancel', flowId: prompt ? prompt.flowId : String((auth && auth.flowId) || '') }), { icon: 'cross' }));
+    if (!embedded) box.append(wordBtn('Cancelar', () => send({ action: 'auth_cancel', flowId: prompt ? prompt.flowId : String((auth && auth.flowId) || '') }), { icon: 'cross' }));
     return box;
   }
   function reply(prompt, value) {
@@ -594,7 +726,7 @@
     // 1) agents: Conectar / Actualizar / Desconectar. The click IS the confirmation; the engine installs with a
     //    backup. Nothing here asks the human to open a terminal.
     const av = V.agentsView(agentState, agentsAsk ? { askedAtError: agentsAsk.at, timedOut: agentsAsk.timedOut } : {});
-    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código'));
+    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código')); sec.id = 'connections-agents';
     if (av.kind === 'unsupported') { sec.append(chipNode(av), el('p', 'snote', av.note)); }
     else if (av.kind !== 'ready') sec.append(chipNode(av.kind === 'loading' ? { tone: 'live', icon: 'ring', word: '', aria: 'Leyendo agentes' } : av));
     else {
@@ -617,7 +749,7 @@
     body.append(sec);
     // 2) services (read-only until the engine can connect them)
     const v = V.connectorsView(agentState);
-    const svc = el('section', 'ssec'); svc.append(sectionTitle('Servicios'));
+    const svc = el('section', 'ssec'); svc.append(sectionTitle('Servicios')); svc.id = 'connections-services';
     if (v.kind !== 'ready') svc.append(chipNode(v));
     else {
       const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Servicios');
@@ -646,9 +778,10 @@
   // ---- Ajustes (gentle-dot SettingsPanel): «Atajo de teclado» first, then the rest, each under its own heading -----------
   function renderGeneral() {
     const g = V.generalView({ sound: prefs.sound, gain: prefs.gain, motionOverride, hotkey });
-    const group = (title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); body.append(sec); return sec; };
+    // each section belongs to one tab (#408); a section of another tab is built detached and never attached
+    const group = (tab, title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); if (tab === screen) body.append(sec); return sec; };
     if (g.hotkey) {
-      const sec = group('Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
+      const sec = group('general', 'Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
       const h = g.hotkey;
       const row = el('div', 'srow');
       row.append(el('span', 'srow-title', 'Atajo'));
@@ -662,7 +795,7 @@
       sec.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
       if (h.note) sec.append(el('p', 'snote', h.note));
     }
-    const personal = group('Saludo', 'Sólo para saludarte en el chat vacío. Dejalo en blanco para un saludo sin nombre.');
+    const personal = group('appearance', 'Saludo', 'Sólo para saludarte en el chat vacío. Dejalo en blanco para un saludo sin nombre.');
     const nameForm = el('form', 'sname-form'); nameForm.noValidate = true;
     const label = el('label', 'srow-title', 'Tu nombre (opcional)'); label.htmlFor = 'settings-display-name';
     const nameInput = el('input', 'sfield'); nameInput.type = 'text'; nameInput.id = 'settings-display-name';
@@ -696,7 +829,7 @@
       });
     });
     nameForm.append(label, nameInput, hint, error, save); personal.append(nameForm); paint();
-    const sound = group('Sonido', 'Avisos sonoros de la isla. Empieza apagado.');
+    const sound = group('general', 'Sonido', 'Avisos sonoros de la isla. Empieza apagado.');
     sound.append(toggleRow('sw-sound', 'Sonido', g.sound.on, () => call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); }, () => {})));
     const gainForm = el('form', 'sname-form'); gainForm.noValidate = true;
     const gainLabel = el('label', 'srow-title', 'Volumen'); gainLabel.htmlFor = 'settings-sound-gain';
@@ -734,23 +867,88 @@
       });
     });
     gainForm.append(gainLabel, gainInput, gainHint, gainIssue, gainSave); sound.append(gainForm); paintGain();
-    const motion = group('Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
+    const motion = group('appearance', 'Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
     motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
+    // #380: the theme. Three fixed choices; the SAVED mode is the truth (the row renders from
+    // `prefs`), and applying it is theme.js's job after the host confirms the write.
+    const theme = group('appearance', 'Tema', 'Con «Sistema» Abito usa el tema de tu computadora y lo sigue cuando cambia. Con «Claro» u «Oscuro» queda fijo.');
+    const themePick = V.themeView(prefs);
+    const picker = el('span', 'stheme-options');
+    picker.setAttribute('role', 'radiogroup');
+    picker.setAttribute('aria-label', 'Tema');
+    for (const option of themePick.options) {
+      const b = el('button', 'stheme');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+      b.setAttribute('aria-label', option.aria);
+      b.id = `theme-mode-${option.id}`;
+      b.dataset.mode = option.id;
+      b.tabIndex = option.selected ? 0 : -1;
+      b.append(el('span', 'stheme-label', option.label));
+      b.addEventListener('keydown', e => {
+        if (e.isTrusted !== true || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+        e.preventDefault();
+        const all = [...picker.querySelectorAll('[role="radio"]')];
+        const at = all.indexOf(b);
+        let next = (at + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + all.length) % all.length;
+        if (e.key === 'Home') next = 0;
+        if (e.key === 'End') next = all.length - 1;
+        all.forEach((x, i) => { x.tabIndex = i === next ? 0 : -1; });
+        all[next].focus();
+        chooseTheme(all[next].dataset.mode);
+      });
+      b.addEventListener('click', e => { if (e.isTrusted === true) chooseTheme(option.id); });
+      picker.append(b);
+    }
+    theme.append(picker);
+    if (themeError) {
+      const problem = el('p', 'snote', themeError);
+      problem.id = 'theme-error';
+      problem.setAttribute('role', 'status');
+      theme.append(problem);
+    }
     // #384: the colour of the Dot. Green is the default and this choice is the ONLY input to it:
     // nothing on screen (a pose, an agent, a notice) repaints it. Sub-Abito rows appear when real
     // identities exist — the list above is the single place they will come from.
     const identities = specialistIdentities();
     const rows = V.colorRows(prefs, AVATAR ? [{ id: AVATAR.PRINCIPAL_ID, name: 'Abito' }, ...identities.identities] : [], AVATAR);
     if (rows.length) {
-      const color = group('Color', 'Abito mantiene su color en la isla. El especialista muestra el suyo en su indicador; los colores pueden repetirse.');
+      const color = group('appearance', 'Color', 'Abito mantiene su color en la isla. El especialista muestra el suyo en su indicador; los colores pueden repetirse.');
       for (const row of rows) color.append(colorRow(row));
       if (identities.kind !== 'ready') {
         const notice = el('p', 'snote', identities.kind === 'loading' ? 'Leyendo los colores de tus especialistas…' : 'Colores de especialistas no disponibles: no se pudieron cargar sus identidades.');
         notice.id = 'specialist-colors-status'; notice.setAttribute('role', 'status'); color.append(notice);
       }
+    }
+    const pills = window.AbitoPillSettings, model = window.AbitoPills;
+    if (pills && model) {
+      const section = group('pills', 'Pills', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
+      pills.render(section, prefs, { saving: pillSaving, error: pillError, putIcon,
+        onCommand(payload) {
+          if (pillSaving || !isOpen() || screen !== 'pills') return;
+          const current = model.normalize(prefs);
+          const next = payload.action === 'set_main_pill' ? model.chooseMain(current, payload.id)
+            : payload.action === 'toggle_declared_pill' ? model.toggle(current, payload.id)
+            : payload.action === 'set_pill_color' ? model.setColor(current, payload.id, payload.color)
+            : payload.action === 'clear_pill_color' ? model.clearColor(current, payload.id) : null;
+          if (!next || (payload.action === 'set_main_pill' && payload.id === current.mainPill)) return;
+          pillSaving = true; pillError = ''; render();
+          call('prefs_action', payload).then(saved => {
+            pillSaving = false; prefs = saved; render();
+            say(payload.action === 'set_pill_color' ? 'Color de pill guardado.'
+              : payload.action === 'clear_pill_color' ? 'Color de pill quitado.'
+              : 'Pill guardada. Elegir no conecta el servicio.');
+          }, () => {
+            pillSaving = false;
+            pillError = 'No se pudo guardar la pill; se mantuvo la elección anterior.';
+            render(); say(pillError);
+          });
+        },
+      });
     }
   }
 })();

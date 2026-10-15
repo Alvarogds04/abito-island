@@ -40,7 +40,7 @@ test('Coucou tokens and card composition are present without replacing native si
   assert.match(island, /CHAT\.w = vw; CHAT\.h = vh/);
   assert.match(island, /const W0 = 2 \* Math\.PI \/ 0\.5/);
   assert.match(island, /const ZETA = 0\.72/);
-  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex'), 'e2dc5db38832d7f162b7991e5ea0518f7743d20a48d9a557347c507afe9a2ad8');
+  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex'), 'b699ebbc9e4d92b7a0ffbb213af32c58e0b164715f20dde25709ee14a9ccf76e');
 });
 
 test('opener derives only strict UUID+kind from trusted input; legacy display remains', () => {
@@ -123,17 +123,48 @@ function boot() {
     getBoundingClientRect() { return { left: 0, top: 0, width: 50, height: 50 }; }
     fire(kind, fields = {}) { for (const fn of this.handlers[kind] || []) fn({ preventDefault() {}, ...fields }); }
     focus() {}
+    // #411: the shipped island writes icon NODES with replaceChildren, never markup.
+    replaceChildren(...children) { this.children = children; }
   }
   const get = id => { if (!nodes.has(id)) nodes.set(id, new Element(id)); return nodes.get(id); };
-  const events = {}, native = {}, calls = [];
-  const doc = { getElementById: get, querySelectorAll: () => [], body: new Element('body'), documentElement: new Element('html'), addEventListener(k, fn) { (events[k] ||= []).push(fn); }, dispatchEvent(e) { for (const fn of events[e.type] || []) fn(e); } };
+  const events = {}, native = {}, calls = [], windowEvents = {}, timers = new Map();
+  let timerId = 0;
+  const setTimer = (fn, ms) => { const id = ++timerId; timers.set(id, { fn, ms }); return id; };
+  const clearTimer = id => timers.delete(id);
+  const doc = { getElementById: get, querySelectorAll: () => [], createElement: tag => new Element(tag), body: new Element('body'), documentElement: new Element('html'), addEventListener(k, fn) { (events[k] ||= []).push(fn); }, dispatchEvent(e) { for (const fn of events[e.type] || []) fn(e); } };
   const stateHandlers = [];
   const resolved = value => ({ then(fn) { if (fn) fn(value); return { catch() {} }; } });
-  const window = { AbitoOverview: O, AbitoNotify: N, AbitoIcons: { svg: () => '', ring: () => '' }, addEventListener() {}, desktop: { onState(fn) { stateHandlers.push(fn); }, snapshot() { return resolved(null); }, click(payload) { calls.push(['click', payload]); return resolved(null); }, dismiss() { calls.push(['dismiss']); return resolved(null); }, expand() { calls.push(['expand']); return resolved(null); }, close() { calls.push(['close']); return resolved(null); }, allow() { calls.push(['allow']); return resolved(null); }, deny() { calls.push(['deny']); return resolved(null); } }, __TAURI__: { event: { listen(name, fn) { native[name] = fn; return { catch() {} }; } } } };
+  const window = { AbitoOverview: O, AbitoNotify: N, AbitoIcons: { svg: () => '', ring: () => '' }, addEventListener(name, fn) { (windowEvents[name] ||= []).push(fn); }, desktop: { onState(fn) { stateHandlers.push(fn); }, snapshot() { return resolved(null); }, click(payload) { calls.push(['click', payload]); return resolved(null); }, dismiss() { calls.push(['dismiss']); return resolved(null); }, expand() { calls.push(['expand']); return resolved(null); }, close() { calls.push(['close']); return resolved(null); }, allow() { calls.push(['allow']); return resolved(null); }, deny() { calls.push(['deny']); return resolved(null); } }, __TAURI__: { event: { listen(name, fn) { native[name] = fn; return { catch() {} }; } } } };
+  window.AbitoCharacter = require(path.join(frontend, 'character-motion.js'));
+  const h = require('./character-harness.cjs').engine();
+  const clay = h.api.create(h.svg);
+  const AbitoClay = { create: () => clay, get forced() { return h.api.forced; }, setForced: value => h.api.setForced(value), onChange: fn => h.api.onChange(fn) };
   get('capsule').dataset = { phase: 'compact', view: 'overview' };
-  vm.runInNewContext(read('island.js'), { window, document: doc, matchMedia: () => ({ matches: true, addEventListener() {} }), performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: () => 1, clearTimeout() {}, setInterval() {}, MutationObserver: class { observe() {} }, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } }, console });
-  return { get, calls, window, native, state(s) { for (const fn of stateHandlers) fn(s); } };
+  // #411: the shipped island parses its closed-registry icons, so the vm gets the
+  // same DOMParser stub convention as test-node/pills-check.cjs:91.
+  vm.runInNewContext(read('island.js'), { AbitoClay, window, document: doc,
+    DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } }, matchMedia: () => ({ matches: true, addEventListener() {} }), performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: setTimer, clearTimeout: clearTimer, setInterval() {}, MutationObserver: class { observe() {} }, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } }, console });
+  return { get, calls, window, native, clay, timers,
+    fireWindow(name, event = {}) { for (const fn of windowEvents[name] || []) fn(event); },
+    state(s) { for (const fn of stateHandlers) fn(s); } };
 }
+
+test('R7 live public producer routing uses isolated capped timers, cancels on pagehide, preserves 2099 expiry', () => {
+  const b = boot();
+  b.state({ state: 'expanded', motionOverride: true, revision: 1, notices: [],
+    card: { state: 'pending', reason: null, operation: 'live operation', expires_at: '2099-01-01T00:00:00Z' } });
+  assert.equal(b.clay.state, 'approval');
+  assert.ok([...b.timers.values()].some(t => t.ms === 2147483647));
+  b.native['question:state']({ payload: { available: true, pending: { id: ID, kind: 'question', text: 'Real question',
+    options: [{ index: 0, label: 'Choice' }], expires_at: Date.now() + 60000 } } });
+  assert.equal(b.clay.state, 'approval', 'backend card still wins');
+  b.state({ state: 'expanded', revision: 2, notices: [] }); assert.equal(b.clay.state, 'question');
+  b.native['question:state']({ payload: { available: true, pending: null } }); assert.equal(b.clay.state, 'idle');
+  b.state({ state: 'expanded', motionOverride: true, revision: 3, notices: [],
+    card: { state: 'pending', reason: null, operation: 'live operation', expires_at: '2099-01-01T00:00:00Z' } });
+  b.fireWindow('pagehide'); assert.ok(![...b.timers.values()].some(t => t.ms === 2147483647));
+  assert.deepEqual(b.calls, [], 'producer observation never answers/approves or navigates');
+});
 
 test('trusted opener and separate dismiss never answer, approve, or fall back to expand', () => {
   const b = boot();

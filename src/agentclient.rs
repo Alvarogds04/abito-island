@@ -527,7 +527,7 @@ impl fmt::Debug for AccountCommand {
 }
 
 pub fn is_account_action(payload: &Value) -> bool {
-    matches!(payload.get("action").and_then(Value::as_str), Some("abito_account_save" | "abito_account_create" | "abito_account_endpoint_set"))
+    matches!(payload.get("action").and_then(Value::as_str), Some("abito_account_save" | "abito_account_create" | "abito_account_endpoint_set" | "abito_account_remove"))
 }
 
 fn account_url(raw: &str, local: bool) -> bool {
@@ -628,7 +628,23 @@ impl AccountStore {
         })).collect();
         json!({"accounts":accounts})
     }
+    fn remove(&mut self, account_id: &str, publish: impl FnOnce(Value)) -> Result<Value, crate::bridge::BridgeError> {
+        let at = self.records.iter().position(|r| r.account_id == account_id).ok_or_else(|| account_error("account_missing"))?;
+        let mut next = self.records.clone();
+        next.remove(at);
+        self.persist(&next).map_err(|_| account_error("save_failed"))?;
+        self.records = next;
+        let snapshot = self.view();
+        publish(snapshot.clone());
+        Ok(snapshot)
+    }
     pub fn command(&mut self, payload: &Value, publish: impl FnOnce(Value)) -> Result<Value, crate::bridge::BridgeError> {
+        if payload.get("action").and_then(Value::as_str) == Some("abito_account_remove") {
+            // closed schema: exactly {action, accountId}
+            let map = payload.as_object().filter(|m| m.len() == 2);
+            let id = map.and_then(|m| m.get("accountId")).and_then(Value::as_str).filter(|s| strict_id(s));
+            return match id { Some(id) => self.remove(id, publish), None => Err(account_error("invalid_account")) };
+        }
         let mut command = parse_account(payload).map_err(|_| account_error("invalid_account"))?;
         let at = self.records.iter().position(|r| r.account_id == command.record.account_id);
         if command.action == "abito_account_create" && at.is_some() { return Err(account_error("account_exists")); }

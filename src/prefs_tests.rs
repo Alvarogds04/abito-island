@@ -547,3 +547,438 @@ fn f055_gain_defaults_direct_validation_and_concurrent_existing_writers() {
     assert_eq!(Prefs::from_text(Some(&bytes.lock().unwrap())),final_view);
     assert_eq!(events.lock().unwrap().len(),4); assert_eq!(*events.lock().unwrap(),*writes.lock().unwrap());
 }
+
+// ---- #264 / GD049: the remembered desktop position (optional v1 field) -----
+
+#[test]
+fn a_dragged_position_round_trips_as_an_optional_v1_field() {
+    let saved = Prefs { position: Some((910, 1002)), ..Prefs::default() };
+    let text = saved.to_text();
+    assert!(!text.contains('\n'), "the file stays one line: {text}");
+    let wire: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(wire["position"]["x"], 910);
+    assert_eq!(wire["position"]["y"], 1002);
+    assert_eq!(wire["v"], 1, "the file stays v1");
+    assert_eq!(Prefs::from_text(Some(&text)), saved);
+    // a position left of the origin (a monitor to the left) is a real position
+    let west = Prefs { position: Some((-300, 40)), ..Prefs::default() };
+    assert_eq!(Prefs::from_text(Some(&west.to_text())), west);
+}
+
+#[test]
+fn the_position_is_native_only_and_never_reaches_the_webview_schema() {
+    // parse_command is the WebView's closed schema; the position is written by
+    // the native drag path only, so no payload can set or clear it.
+    for payload in [
+        json!({"action":"set_position","x":910,"y":1002}),
+        json!({"action":"set_position"}),
+        json!({"action":"clear_position"}),
+        json!({"action":"position","x":910,"y":1002}),
+        json!({"action":"set_position","x":910,"y":1002,"z":0}),
+    ] {
+        assert_eq!(parse_command(&payload), Err(CommandError), "{payload}");
+    }
+    // and the native command itself refuses a coordinate no desktop has
+    let current = Prefs { position: Some((910, 1002)), ..Prefs::default() };
+    for bad in [
+        Command::SetPosition(2_000_000, 0),
+        Command::SetPosition(0, -2_000_000),
+        Command::SetPosition(i32::MAX, i32::MIN),
+    ] {
+        assert_eq!(apply(&current, &bad), Err(CommandError), "{bad:?}");
+    }
+    assert_eq!(current.position, Some((910, 1002)), "a rejected write never mutates state");
+    let moved = apply(&current, &Command::SetPosition(100, 1002)).unwrap();
+    assert_eq!(moved.position, Some((100, 1002)));
+    assert_eq!(moved.sound, current.sound, "the position never touches another field");
+}
+
+#[test]
+fn an_old_prefs_file_without_a_position_reads_and_writes_back_the_same_bytes() {
+    // Regression: a file written before #264 keeps EXACTLY its bytes when this
+    // build reads and rewrites it, and its every field still loads.
+    let old = r#"{"avatar_colors":{"abito":"purple"},"display_name":"Ana","gain":0.12,"sound":true,"v":1}"#;
+    let p = Prefs::from_text(Some(old));
+    assert_eq!(p.position, None, "nobody has dragged the island yet");
+    assert!(p.sound);
+    assert_eq!(p.display_name.as_deref(), Some("Ana"));
+    assert_eq!(p.gain(), 0.12);
+    assert_eq!(p.avatar_colors["abito"], "purple");
+    assert_eq!(p.to_text(), old, "the position key must not change an untouched file");
+    // the same promise the #384 test pins for colours
+    let minimal = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#)).to_text();
+    assert!(!minimal.contains("position"), "{minimal}");
+    assert!(minimal.contains(r#""sound":true"#), "{minimal}");
+}
+
+#[test]
+fn a_settings_change_after_a_drag_never_drops_the_saved_position() {
+    use std::sync::Mutex;
+    let serial = Mutex::new(());
+    let state = Mutex::new(Prefs::default());
+    let disk = Mutex::new(Prefs::default().to_text());
+    // 1. the drag release commits its position through the SAME gate and file
+    transact(&serial, &state, &Command::SetPosition(910, 1002), |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    // 2. a later settings change must not erase it (lost-update regression)
+    let rename = parse_command(&json!({"action":"set_display_name","display_name":"Ana"})).unwrap();
+    transact(&serial, &state, &rename, |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    let sound = parse_command(&json!({"action":"sound_on"})).unwrap();
+    transact(&serial, &state, &sound, |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    // 3. and a later drag overwrites only the position
+    transact(&serial, &state, &Command::SetPosition(100, 32), |p| { *disk.lock().unwrap() = p.to_text(); true }, |_| {}).unwrap();
+    let reloaded = Prefs::from_text(Some(&disk.lock().unwrap()));
+    assert_eq!(reloaded.position, Some((100, 32)));
+    assert_eq!(reloaded.display_name.as_deref(), Some("Ana"));
+    assert!(reloaded.sound);
+    assert_eq!(*state.lock().unwrap(), reloaded, "memory and disk agree after every commit");
+    // a no-op release (same coordinates) writes nothing at all
+    let bytes = disk.lock().unwrap().clone();
+    transact(&serial, &state, &Command::SetPosition(100, 32), |_| panic!("no-op write"), |_| panic!("no-op event")).unwrap();
+    assert_eq!(*disk.lock().unwrap(), bytes);
+    // a rejected position never reaches the disk either
+    assert_eq!(transact(&serial, &state, &Command::SetPosition(5_000_000, 0), |_| panic!("invalid write"), |_| panic!("invalid event")), Err(CommandError));
+    assert_eq!(*disk.lock().unwrap(), bytes);
+}
+
+#[test]
+fn a_damaged_position_never_panics_and_never_costs_the_other_preferences() {
+    for bad in [
+        r#"{"v":1,"sound":true,"position":42}"#,
+        r#"{"v":1,"sound":true,"position":"910,1002"}"#,
+        r#"{"v":1,"sound":true,"position":[]}"#,
+        r#"{"v":1,"sound":true,"position":null}"#,
+        r#"{"v":1,"sound":true,"position":{}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910}}"#,
+        r#"{"v":1,"sound":true,"position":{"y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":"910","y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910.5,"y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910,"y":1002.5}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":99999999999,"y":1002}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":-910,"y":-99999999999}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":99999999999,"y":99999999999}}"#,
+        r#"{"v":1,"sound":true,"position":{"x":910,"y":1002,"z":0}}"#,
+    ] {
+        let p = Prefs::from_text(Some(bad));
+        assert_eq!(p.position, None, "{bad}: a damaged position reads as no position");
+        assert!(p.sound, "{bad}: the sound preference must survive");
+        assert_eq!(p.display_name, None);
+        assert!(p.avatar_colors.is_empty());
+        // writing the surviving preferences back adds no position key
+        assert!(!p.to_text().contains("position"), "{bad} -> {}", p.to_text());
+    }
+    // a truncated file is still just the defaults, never a panic
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1,"sound":true,"position":{"x":9"#)), Prefs::default());
+    assert_eq!(Prefs::from_text(Some("\u{0}\u{1}")), Prefs::default());
+    // only a complete, bounded pair survives
+    let ok = Prefs::from_text(Some(r#"{"v":1,"sound":true,"position":{"x":-300,"y":40}}"#));
+    assert_eq!(ok.position, Some((-300, 40)));
+    assert!(ok.sound);
+}
+
+// #345: only public parse/load/update/transact interfaces, isolated storage callbacks.
+#[test]
+fn f032_optional_defaults_and_saved_normalization() {
+    let old = Prefs::from_text(Some(r#"{"v":1,"sound":true,"future_unvalidated":{"secret":"not retained"}}"#));
+    assert_eq!(old.to_text(), r#"{"sound":true,"v":1}"#);
+    let raw = r#"{"v":1,"sound":true,"main_pill":"ai_google","declared_pills":["unknown","integration_claude","agent_gemini","agent_gemini","ai_google","agent_amp","integration_notion","integration_spotify",7,"integration_music","agent_claude-desktop"]}"#;
+    let loaded = Prefs::from_text(Some(raw));
+    let v: Value = serde_json::from_str(&loaded.to_text()).unwrap();
+    assert_eq!(v["declared_pills"], json!(["agent_gemini","ai_google","agent_amp","integration_notion"]));
+    assert!(loaded.sound);
+    assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded);
+    for raw in [r#"{"v":1,"main_pill":"unknown","declared_pills":false}"#,
+                r#"{"v":1,"main_pill":4,"declared_pills":"bad"}"#] {
+        assert_eq!(Prefs::from_text(Some(raw)).to_text(), Prefs::default().to_text());
+    }
+    let empty = Prefs::from_text(Some(r#"{"v":1,"declared_pills":[]}"#));
+    let v: Value = serde_json::from_str(&empty.to_text()).unwrap();
+    assert_eq!(v["declared_pills"], json!([]));
+}
+
+#[test]
+fn f032_main_and_toggle_public_transactions_preserve_legacy_fields() {
+    use std::sync::Mutex;
+    let original = Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"orphan":"mint"},"declared_pills":["agent_cursor","ai_google"]}"#));
+    let state = Mutex::new(original); let serial = Mutex::new(());
+    let disk = Mutex::new(state.lock().unwrap().to_text()); let events = Mutex::new(Vec::new());
+    let commands = [
+        json!({"action":"set_main_pill","id":"agent_cursor"}),
+        json!({"action":"toggle_declared_pill","id":"ai_google"}),
+        json!({"action":"toggle_declared_pill","id":"agent_codex"}),
+        json!({"action":"toggle_declared_pill","id":"ai_openai"}),
+        json!({"action":"toggle_declared_pill","id":"integration_github"}),
+        json!({"action":"toggle_declared_pill","id":"integration_notion"}),
+    ];
+    for payload in commands {
+        let command = parse_command(&payload).expect("accepted public pill command");
+        let next = transact(&serial,&state,&command,|p| { *disk.lock().unwrap()=p.to_text(); true },
+            |p| { assert!(serial.try_lock().is_err()); assert_eq!(*state.try_lock().unwrap(),*p); events.lock().unwrap().push(p.to_text()); }).unwrap();
+        assert!(next.sound); assert_eq!(next.gain(),0.2); assert_eq!(next.display_name.as_deref(),Some("Ana"));
+        assert_eq!(next.avatar_colors["orphan"],"mint");
+        assert_eq!(Prefs::from_text(Some(&disk.lock().unwrap())),next);
+    }
+    let v: Value = serde_json::from_str(&disk.lock().unwrap()).unwrap();
+    assert_eq!(v["main_pill"],"agent_cursor");
+    assert_eq!(v["declared_pills"],json!(["agent_codex","ai_openai","integration_github","integration_notion"]));
+    assert_eq!(events.lock().unwrap().len(),6);
+    let before = state.lock().unwrap().clone(); let bytes = disk.lock().unwrap().clone();
+    for payload in [
+        json!({"action":"toggle_declared_pill","id":"ai_google"}),
+        json!({"action":"toggle_declared_pill","id":"agent_cursor"}),
+    ] {
+        let command = parse_command(&payload).unwrap();
+        let mut writes=0; let mut published=0;
+        assert_eq!(transact(&serial,&state,&command,|_| { writes+=1; true },|_| { published+=1; }),Err(CommandError));
+        assert_eq!(writes,0); assert_eq!(published,0); assert_eq!(*state.lock().unwrap(),before); assert_eq!(*disk.lock().unwrap(),bytes);
+    }
+    let remove = parse_command(&json!({"action":"toggle_declared_pill","id":"agent_codex"})).unwrap();
+    let mut writes=0; let mut published=0;
+    assert_eq!(transact(&serial,&state,&remove,|_| { writes+=1; false },|_| { published+=1; }),Err(CommandError));
+    assert_eq!(writes,1); assert_eq!(published,0); assert_eq!(*state.lock().unwrap(),before);
+    let removed = transact(&serial,&state,&remove,|_| true,|_| {}).unwrap();
+    let v: Value=serde_json::from_str(&removed.to_text()).unwrap();
+    assert_eq!(v["declared_pills"],json!(["ai_openai","integration_github","integration_notion"]));
+    let mut attempts=0;
+    let main=parse_command(&json!({"action":"set_main_pill","id":"agent_cursor"})).unwrap();
+    assert_eq!(transact(&serial,&state,&main,|_| {attempts+=1; false},|_| panic!("noop event")),Ok(removed));
+    assert_eq!(attempts,0);
+}
+
+#[test]
+fn f032_closed_ipc_refusal_keeps_state_bytes_and_counters() {
+    let current=Prefs::from_text(Some(r#"{"v":1,"sound":true,"declared_pills":[]}"#));
+    let bytes=current.to_text(); let mut writes=0; let mut published=0;
+    for payload in [
+        json!({"action":"set_main_pill","id":"ai_google"}),
+        json!({"action":"set_main_pill","id":4}),json!({"action":"set_main_pill"}),
+        json!({"action":"toggle_declared_pill","id":"unknown"}),
+        json!({"action":"toggle_declared_pill","id":"integration_music"}),
+        json!({"action":"toggle_declared_pill","id":null}),
+        json!({"action":"toggle_declared_pill","id":["agent_amp","agent_amp"]}),
+        json!({"action":"toggle_declared_pill","id":"agent_amp","declared_pills":["agent_amp","agent_amp"]}),
+        json!({"action":"toggle_declared_pill","declared_pills":["agent_amp","ai_google","ai_openai","agent_codex","agent_gemini"]}),
+    ] {
+        assert_eq!(parse_command(&payload),Err(CommandError),"{payload}");
+        if let Ok(command)=parse_command(&payload) {
+            let serial=std::sync::Mutex::new(()); let state=std::sync::Mutex::new(current.clone());
+            let _=transact(&serial,&state,&command,|_| {writes+=1;true},|_| {published+=1;});
+        }
+        assert_eq!(current.to_text(),bytes); assert_eq!(writes,0); assert_eq!(published,0);
+    }
+}
+
+#[test]
+fn f032_every_legacy_writer_keeps_typed_pill_choices_and_drops_unknown_json() {
+    let current=Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"purple","orphan":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"unvalidated_secret":"ignored"}"#));
+    for payload in [
+        json!({"action":"view"}),json!({"action":"sound_on"}),json!({"action":"sound_off"}),
+        json!({"action":"set_sound_gain","gain":0.1}),json!({"action":"set_display_name","display_name":"Bea"}),
+        json!({"action":"set_avatar_color","identity":"abito","color":"blue"}),
+        json!({"action":"clear_avatar_color","identity":"abito"}),
+    ] {
+        let next=update(&current,&parse_command(&payload).unwrap(),|_| true).unwrap();
+        let v:Value=serde_json::from_str(&next.to_text()).unwrap();
+        assert_eq!(v["main_pill"],"agent_codex"); assert_eq!(v["declared_pills"],json!(["ai_google"]));
+        assert!(v.get("unvalidated_secret").is_none()); assert_eq!(next.avatar_colors["orphan"],"mint");
+    }
+}
+
+// #346 F033 — per-pill colours: the closed five-name palette is the ONLY colour vocabulary.
+#[test]
+fn f033_pill_colors_keep_the_closed_palette_and_never_destroy_the_catalogue() {
+    let raw = r##"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_amp":"mint","agent_cursor":"#ff0000","agent_muse":"MINT","integration_claude":"expression(alert(1))","integration_n8n":"<img src=x onerror=alert(1)>","ai_google":7,"unknown_pill":"blue","__proto__":"purple"},"future_unvalidated":{"secret":"not retained"}}"##;
+    let loaded = Prefs::from_text(Some(raw));
+    let v: Value = serde_json::from_str(&loaded.to_text()).unwrap();
+    assert_eq!(v["pill_colors"], json!({"agent_amp":"mint"}), "only a catalog id carrying a palette name survives");
+    assert_eq!(v["main_pill"], json!("agent_codex"));
+    assert_eq!(v["declared_pills"], json!(["ai_google"]));
+    assert_eq!(v["avatar_colors"], json!({"abito":"mint"}));
+    assert!(loaded.sound);
+    assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded, "the kept entries round-trip");
+    // Absent/unusable pill_colors never writes the key: «ausente/vacío nunca escribe».
+    for text in [r#"{"v":1}"#, r#"{"v":1,"pill_colors":{}}"#, r#"{"v":1,"pill_colors":null}"#,
+                 r#"{"v":1,"pill_colors":"green"}"#, r#"{"v":1,"pill_colors":["green"]}"#,
+                 r#"{"v":1,"pill_colors":{"agent_amp":"nope"}}"#,
+                 r#"{"v":1,"pill_colors":{"unknown_pill":"green"}}"#] {
+        let out = Prefs::from_text(Some(text)).to_text();
+        assert!(!out.contains("pill_colors"), "{text} → {out}");
+    }
+}
+
+#[test]
+fn f033_set_pill_color_is_exact_arity_and_only_touches_its_own_field() {
+    let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_cursor":"blue"}}"#));
+    let command = parse_command(&json!({"action":"set_pill_color","id":"agent_amp","color":"purple"}))
+        .expect("closed three-key pill colour command accepted");
+    let next = update(&current, &command, |_| true).expect("a palette colour applies");
+    let written: Value = serde_json::from_str(&next.to_text()).unwrap();
+    assert_eq!(written["pill_colors"], json!({"agent_amp":"purple","agent_cursor":"blue"}), "the new key lands beside the kept one");
+    let mut before: Value = serde_json::from_str(&current.to_text()).unwrap();
+    let mut after: Value = serde_json::from_str(&next.to_text()).unwrap();
+    before.as_object_mut().unwrap().remove("pill_colors");
+    after.as_object_mut().unwrap().remove("pill_colors");
+    assert_eq!(before, after, "set_pill_color changes nothing but its own field");
+    for bad in [
+        json!({"action":"set_pill_color"}),
+        json!({"action":"set_pill_color","id":"agent_amp"}),
+        json!({"action":"set_pill_color","color":"purple"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"purple","extra":1}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"#9fdb7f"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"MINT"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"rgb(0,255,0)"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"green;background:url(https://evil)"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":""}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":null}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":7}),
+        json!({"action":"set_pill_color","id":"integration_music","color":"purple"}),
+        json!({"action":"set_pill_color","id":"unknown_pill","color":"purple"}),
+        json!({"action":"set_pill_color","id":"__proto__","color":"purple"}),
+        json!({"action":"set_pill_color","id":7,"color":"purple"}),
+        json!({"action":"set_pill_color","id":["agent_amp"],"color":"purple"}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn f033_clear_pill_color_is_exact_arity_and_only_removes_its_own_key() {
+    let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_amp":"mint","agent_cursor":"blue"}}"#));
+    let command = parse_command(&json!({"action":"clear_pill_color","id":"agent_amp"}))
+        .expect("closed two-key pill colour clear accepted");
+    let next = update(&current, &command, |_| true).expect("the key is removable");
+    let v: Value = serde_json::from_str(&next.to_text()).unwrap();
+    assert_eq!(v["pill_colors"], json!({"agent_cursor":"blue"}), "only that pill loses its colour");
+    assert_eq!(next.declared_pills(), current.declared_pills());
+    assert_eq!(next.main_pill(), current.main_pill());
+    assert!(next.sound && next.display_name.is_some() && !next.avatar_colors.is_empty());
+    let untouched = update(&current,
+        &parse_command(&json!({"action":"clear_pill_color","id":"integration_n8n"})).unwrap(), |_| true).unwrap();
+    let untouched_text: Value = serde_json::from_str(&untouched.to_text()).unwrap();
+    assert_eq!(untouched_text["pill_colors"], json!({"agent_amp":"mint","agent_cursor":"blue"}), "clearing an absent colour changes nothing");
+    for bad in [
+        json!({"action":"clear_pill_color"}),
+        json!({"action":"clear_pill_color","color":"blue"}),
+        json!({"action":"clear_pill_color","id":"agent_amp","color":"blue"}),
+        json!({"action":"clear_pill_color","id":"unknown_pill"}),
+        json!({"action":"clear_pill_color","id":"integration_music"}),
+        json!({"action":"clear_pill_color","id":7}),
+        json!({"action":"clear_pill_color","id":null}),
+        json!({"action":"clear_pill_color","id":["agent_amp"]}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn theme_defaults_to_system_and_an_absent_field_never_rewrites_an_old_file() {
+    use std::sync::Mutex;
+    // The default is «follow the system», and a file nobody changed carries no theme key.
+    assert_eq!(Prefs::default().theme(), Theme::System);
+    for text in [None, Some(r#"{"v":1,"sound":true}"#), Some("{}"), Some("not json"),
+                 Some(r#"{"v":1,"sound":true,"theme":42}"#), Some(r#"{"v":1,"sound":true,"theme":"chartreuse}"#),
+                 Some(r#"{"v":1,"sound":true,"theme":null}"#)] {
+        let p = Prefs::from_text(text);
+        assert_eq!(p.theme(), Theme::System, "{text:?} must read as system");
+        let encoded: Value = serde_json::from_str(&p.to_text()).unwrap();
+        assert!(encoded.get("theme").is_none(), "{text:?} must not gain a theme key");
+        assert_eq!(Prefs::from_text(Some(&p.to_text())), p);
+    }
+    // An explicit choice round-trips; an untouched v1 file is re-emitted byte for byte.
+    // The serializer orders keys (the failure of asserting a hand-written order is why
+    // this asserts the bytes it ACTUALLY emits), and any input order re-encodes to them
+    // without ever gaining a theme key: order-independent content equality on top.
+    let canonical = r#"{"sound":true,"v":1}"#;
+    assert_eq!(Prefs::from_text(Some(canonical)).to_text(), canonical, "an untouched file keeps its bytes");
+    for plain in [canonical, r#"{"v":1,"sound":true}"#] {
+        let p = Prefs::from_text(Some(plain));
+        let encoded = p.to_text();
+        assert_eq!(serde_json::from_str::<Value>(&encoded).unwrap(), serde_json::from_str::<Value>(plain).unwrap(),
+            "same content regardless of input key order");
+        assert!(!encoded.contains("\"theme\""), "an untouched file never gains a theme key: {encoded}");
+    }
+    for mode in THEMES {
+        let p = Prefs { theme: Theme::parse(mode), ..Prefs::default() };
+        let value: Value = serde_json::from_str(&p.to_text()).unwrap();
+        assert_eq!(value["theme"], mode);
+        assert_eq!(Prefs::from_text(Some(&p.to_text())).theme(), p.theme());
+    }
+    // The closed shape is enforced on write as well as on read.
+    let bad = Prefs { theme: None, ..Prefs::default() };
+    assert_eq!(bad.theme().as_str(), "system");
+    assert_eq!(Theme::parse("System"), None);
+    assert_eq!(Theme::parse("SYSTEM"), None);
+    assert_eq!(Theme::parse(""), None);
+    let _ = Mutex::new(()); // (no disk needed here: to_text/from_text are the persistence seam)
+}
+
+#[test]
+fn set_theme_is_a_closed_command_and_rejects_leave_state_and_counters_unchanged() {
+    use std::sync::Mutex;
+    let mut current = Prefs { sound: true, theme: Some(Theme::Dark), ..Prefs::default() };
+    let mut writes = 0;
+    for value in [json!(null), json!(42), json!({}), json!("blue"), json!("System"), json!("DARK"), json!("")] {
+        let before = current.clone();
+        let command = parse_command(&json!({"action":"set_theme", "theme":value}));
+        assert_eq!(command, Err(CommandError), "{value} is outside the closed enum");
+        if let Ok(command) = command {
+            let _ = update(&current, &command, |_| { writes += 1; true });
+        }
+        assert_eq!(current, before, "a refused value never touches the state");
+        assert_eq!(writes, 0, "a refused value never touches the disk");
+    }
+    for bad in [json!({"action":"set_theme"}), json!({"action":"set_theme","theme":"dark","x":1}),
+                json!({"action":"set_theme","mode":"dark"}), json!({"action":"view","theme":"dark"})] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad} is not a valid command shape");
+    }
+    let command = parse_command(&json!({"action":"set_theme","theme":"light"})).unwrap();
+    assert_eq!(command, Command::SetTheme(Theme::Light));
+    current = update(&current, &command, |_| { writes += 1; true }).unwrap();
+    assert_eq!(current.theme(), Theme::Light);
+    assert!(current.sound, "the other fields are retained");
+    assert_eq!(writes, 1);
+    assert_eq!(Prefs::from_text(Some(&current.to_text())).theme(), Theme::Light);
+}
+
+#[test]
+fn theme_transact_persists_before_publish_and_a_failed_save_publishes_nothing() {
+    use std::sync::Mutex;
+    let state = Mutex::new(Prefs::default());
+    let serial = Mutex::new(());
+    let disk = Mutex::new(Prefs::default().to_text());
+    let events = Mutex::new(Vec::new());
+    let command = parse_command(&json!({"action":"set_theme","theme":"dark"})).unwrap();
+    let next = transact(&serial, &state, &command,
+        |p| { *disk.lock().unwrap() = p.to_text(); true },
+        |p| events.lock().unwrap().push(p.theme())).unwrap();
+    assert_eq!(next.theme(), Theme::Dark);
+    assert_eq!(*events.lock().unwrap(), vec![Theme::Dark]);
+    assert!(disk.lock().unwrap().contains("\"theme\":\"dark\""));
+    // A failed save installs nothing and publishes nothing: the visible state stays.
+    let before = state.lock().unwrap().clone();
+    let bytes = disk.lock().unwrap().clone();
+    let light = parse_command(&json!({"action":"set_theme","theme":"light"})).unwrap();
+    assert_eq!(transact(&serial, &state, &light, |_| false, |_| panic!("failed event")), Err(CommandError));
+    assert_eq!(*state.lock().unwrap(), before);
+    assert_eq!(*disk.lock().unwrap(), bytes);
+    assert_eq!(events.lock().unwrap().len(), 1);
+    // View (idempotent) writes nothing and publishes nothing.
+    transact(&serial, &state, &Command::View, |_| panic!("view write"), |_| panic!("view event")).unwrap();
+    assert_eq!(events.lock().unwrap().len(), 1);
+    // Re-selecting the mode that is already stored changes nothing.
+    transact(&serial, &state, &command, |_| panic!("no-op write"), |_| panic!("no-op event")).unwrap();
+    assert_eq!(events.lock().unwrap().len(), 1);
+    // A LEGITIMATE second write (dark -> system) persists first, then publishes exactly once more.
+    let system = parse_command(&json!({"action":"set_theme","theme":"system"})).unwrap();
+    transact(&serial, &state, &system,
+        |p| { *disk.lock().unwrap() = p.to_text(); true },
+        |p| events.lock().unwrap().push(p.theme())).unwrap();
+    assert_eq!(state.lock().unwrap().theme(), Theme::System);
+    assert!(disk.lock().unwrap().contains("\"theme\":\"system\""));
+    assert_eq!(*events.lock().unwrap(), vec![Theme::Dark, Theme::System]);
+    // A value the parser refuses never reaches the transaction: no state, disk or event moves.
+    let refused = disk.lock().unwrap().clone();
+    assert_eq!(parse_command(&json!({"action":"set_theme","theme":"sepia"})), Err(CommandError));
+    assert_eq!(state.lock().unwrap().theme(), Theme::System);
+    assert_eq!(*disk.lock().unwrap(), refused);
+    assert_eq!(events.lock().unwrap().len(), 2);
+}

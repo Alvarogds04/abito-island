@@ -82,11 +82,76 @@ fn normal_drop_terminates_and_reaps_owned_host() {
     assert!(!Path::new(&format!("/proc/{pid}")).exists());
 }
 
+// #390 GD027 pin: what `daemon_action restart` does at the slot level — stop() then start()
+// yields a FRESH child, the old one is reaped and stays gone. Explicit bounds, no unbounded waits.
+// (Characterization of existing APIs: passes before AND after the slice-B sources — a pin, not a RED.)
+#[test]
+fn stop_then_start_yields_a_fresh_reaped_child() {
+    let root = TestDir::new().unwrap();
+    let bin = root.path().join("bin");
+    let home = root.path().join("home");
+    let pids = root.path().join("pids");
+    // fake node: record our own pid per spawn, then stand in for the daemon
+    executable(&bin.join("node"), &format!("#!/bin/sh\nprintf '%s\\n' \"$$\" >> '{}'\nexec /bin/sleep 120\n", pids.display()));
+    executable(&home.join(".local/bin/pi"), "#!/bin/sh\nexec /bin/sleep 120\n");
+    let mut app = Command::new(std::env::current_exe().unwrap()).args(["--exact", "crash_helper", "--nocapture"])
+        .env("ISLAND_HOST_TEST_HELPER", root.path()).env("ISLAND_HOST_TEST_RESTART", "1")
+        .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()))
+        .env("HOME", &home)
+        .stdout(std::process::Stdio::null()).spawn().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !root.path().join("restart.finished").exists() {
+        if std::time::Instant::now() >= deadline {
+            app.kill().unwrap(); app.wait().unwrap();
+            panic!("restart pin did not finish; pids={:?}", fs::read_to_string(&pids).unwrap_or_default());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(app.try_wait().unwrap().is_some(), "the helper must exit on its own");
+    let lines: Vec<String> = fs::read_to_string(&pids).unwrap().lines().map(str::to_string).collect();
+    assert_eq!(lines.len(), 2, "exactly one child per start: {lines:?}");
+}
+
 // A separate process is essential: SIGKILL must bypass destructors exactly as an app crash does.
 #[test]
 fn crash_helper() {
     let Some(dir) = std::env::var_os("ISLAND_HOST_TEST_HELPER") else { return };
     let dir = std::path::PathBuf::from(dir);
+    if std::env::var_os("ISLAND_HOST_TEST_RESTART").is_some() {
+        use abito_island::daemonhost::HostSlot;
+        let pids = dir.join("pids");
+        let read = || fs::read_to_string(&pids).unwrap_or_default().lines().count();
+        let wait_lines = |n: usize| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while read() < n {
+                assert!(std::time::Instant::now() < deadline, "child {n} never recorded its pid");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        let alive = |pid: &str| {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            stat.contains("(sleep") && !stat[stat.rfind(')').map(|i| i + 2).unwrap_or(0)..].starts_with('Z')
+        };
+        let slot = HostSlot::default();
+        slot.start();
+        assert_eq!(slot.failure(), None);
+        wait_lines(1);
+        let pid1 = fs::read_to_string(&pids).unwrap().lines().next().unwrap().to_string();
+        assert_eq!(slot.pid().map(|p| p.to_string()), Some(pid1.clone()), "the slot exposes our live child for the restart verdict");
+        slot.stop();
+        assert_eq!(slot.pid(), None, "after stop the slot holds no child");
+        assert!(!Path::new(&format!("/proc/{pid1}")).exists(), "stop must reap its child");
+        slot.start();
+        assert_eq!(slot.failure(), None, "the second start must spawn cleanly");
+        wait_lines(2);
+        let pid2 = fs::read_to_string(&pids).unwrap().lines().nth(1).unwrap().to_string();
+        assert!(alive(&pid2), "the fresh child is alive");
+        assert!(!Path::new(&format!("/proc/{pid1}")).exists(), "the old child stays gone");
+        slot.stop();
+        assert!(!Path::new(&format!("/proc/{pid2}")).exists(), "and the new one is reaped too");
+        fs::write(dir.join("restart.finished"), "ready").unwrap();
+        return;
+    }
     if std::env::var_os("ISLAND_HOST_TEST_PATH").is_some() {
         let slot = abito_island::daemonhost::HostSlot::default();
         slot.start(); assert_eq!(slot.failure(), None);
@@ -173,4 +238,43 @@ fn host_failure_does_not_exit_its_app_or_restart_host() {
     assert_eq!(host.try_wait().unwrap().unwrap().code(), Some(17));
     assert!(host.try_wait().unwrap().is_some());
     drop(host); // the test/app remains alive
+}
+
+// #390 GD014/check (4): a child that exits ON ITS OWN must be reaped at runtime
+// (never left as a zombie while the app lives) and its early exit must become
+// visible through the slot. Explicit bound, no unbounded waits.
+#[test]
+fn early_child_exit_is_reaped_at_runtime_and_reported() {
+    let root = TestDir::new().unwrap();
+    let script = root.path().join("host.sh");
+    executable(&script, "#!/bin/sh\nexit 17\n");
+    let host = Host::spawn_command(Command::new(script)).unwrap();
+    let pid = host.pid();
+    let slot = abito_island::daemonhost::HostSlot::default();
+    slot.adopt(host);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // 1) the early exit is observed and reported
+    loop {
+        if let Some(status) = slot.exit_status() {
+            assert_eq!(status.code(), Some(17), "the early child exit is visible to the host");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the child exit was never reported");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // 2) reaped, not a zombie: /proc/<pid> is gone while the app keeps running
+    loop {
+        if !Path::new(&format!("/proc/{pid}")).exists() { break }
+        assert!(std::time::Instant::now() < deadline, "zombie left behind: /proc/{pid} still exists");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // 3) stop() after a runtime reap is a clean no-op (no double signal, no panic)
+    slot.stop();
+    slot.stop();
+    // 4) the dead child leaves no live pid behind (the restart verdict reads this)
+    loop {
+        if slot.pid().is_none() { break }
+        assert!(std::time::Instant::now() < deadline, "the slot keeps holding the dead child");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }

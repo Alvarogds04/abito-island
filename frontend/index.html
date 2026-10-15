@@ -8,7 +8,7 @@
   <title>Abito</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="chat-markdown.css">
-  <!-- Frozen R6, copied byte-for-byte (sha256 e2dc5db3…): SVG-DOM, never redrawn. -->
+  <!-- R7 clay character (sha256 b699ebbc…): Abito's own SVG-DOM, no reserved assets. -->
   <script defer src="clay-engine.js"></script>
   <!-- window.desktop facade must exist before the island boots. -->
   <script defer src="desktop.js"></script>
@@ -17,9 +17,18 @@
   <!-- #384: the Dot's colour contract (pure) — loaded before the island and the settings panel,
        the two places that consume it. -->
   <script defer src="avatar-colors.js"></script>
+  <!-- #380: system/light/dark theme — paints <html data-theme> from the saved preference
+       before the island draws, so the palette is never flashed wrong. -->
+  <script defer src="theme.js"></script>
   <script defer src="overview-view.js"></script>
+  <!-- #345 catalog choices are local preferences, never live connector claims. -->
+  <script defer src="pill-catalog.js"></script>
+  <script defer src="pills.js"></script>
+  <script defer src="pills-view.js"></script>
   <!-- N6: notification with 1..N reply options (Pi questions QP/1 are one case). -->
   <script defer src="notify-view.js"></script>
+  <script defer src="character-motion.js"></script>
+  <script defer src="character-minibots.js"></script>
   <script defer src="sound-engine.js"></script>
   <script defer src="sound-wiring.js"></script>
   <script defer src="island.js"></script>
@@ -29,6 +38,7 @@
   <script defer src="chat.js"></script>
   <script defer src="models.js"></script>
   <!-- #306: settings panel (providers, connectors, general). -->
+  <script defer src="pill-settings.js"></script>
   <script defer src="settings-view.js"></script>
   <script defer src="settings.js"></script>
   <!-- #327: manual specialists — the pure view-model first, then its section in Ajustes. -->
@@ -63,7 +73,14 @@
         <div class="card card-left">
           <div class="agentline"><strong>Abito</strong><span id="overview-status" class="source"></span></div>
           <p id="overview-detail" class="overview-detail"></p>
+          <div class="pill-summary">
+            <strong id="pill-name"></strong><span id="pill-state" class="source"></span>
+            <p id="pill-detail"></p>
+          </div>
         </div>
+        <div id="pill-choices" class="card" role="group" aria-label="Pills declaradas"></div>
+        <span id="pill-live" class="sr-only" role="status" aria-live="polite"></span>
+        <ul id="minibots" aria-label="Turnos activos" hidden></ul>
       </section>
       <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
       <!-- M2: Sileo-style notice, display only (own code, silence).
@@ -98,6 +115,11 @@
           <span id="card-conn" class="chip" role="img" hidden><span class="ico" id="card-conn-icon"></span><span class="word" id="card-conn-word"></span></span>
           <span id="card-bridge" class="chip" role="img" hidden><span class="ico" id="card-bridge-icon"></span><span class="word" id="card-bridge-word"></span></span>
           <button id="card-info" class="icon-btn" type="button" aria-label="Ver detalle de la decisión" aria-expanded="false" aria-controls="card-reason"><span class="ico" data-icon="info"></span></button>
+          <!-- F014 (#338): fold the waiting card down to the compact island
+               WITHOUT deciding it (upstream `foldApproval`, windows
+               /src/island/island.ts:144-154): the host keeps the card, the
+               request keeps waiting, reopening shows it again. -->
+          <button id="card-fold" class="icon-btn" type="button" aria-label="Plegar la tarjeta y dejar la solicitud esperando"><span class="ico" data-icon="arrow-up"></span></button>
         </div>
         <p id="operation"></p>
         <p id="card-reason" role="status" hidden></p>
@@ -138,49 +160,53 @@
                chosen in Ajustes -> Especialistas, and a role never appears here by itself. -->
           <span id="chat-specialist" class="chip" role="img" hidden><span class="ico" id="chat-specialist-icon" data-icon="user"></span><span class="word" id="chat-specialist-word"></span></span>
           <p id="chat-status" class="sr-only"></p>
-          <button id="open-screen-accounts" class="icon-btn" type="button" aria-label="Cuentas" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="user"></span></button>
-          <button id="open-screen-connectors" class="icon-btn" type="button" aria-label="Conectores" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="plug"></span></button>
           <button id="open-screen-settings" class="icon-btn" type="button" aria-label="Ajustes" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="gear"></span></button>
-          <button id="chat-models" class="icon-btn" type="button" aria-label="Modelo local" aria-expanded="false" aria-controls="models"><span class="ico" data-icon="chip"></span></button>
           <button id="chat-back" class="icon-btn" type="button" aria-label="Volver"><span class="ico" data-icon="arrow-left"></span></button>
         </header>
         <!-- #309: the agent state is its own full-width strip between the header and the history -->
         <div id="chat-status-strip">
           <span id="chat-state" class="chip" role="img"><span class="ico" id="chat-state-icon"></span><span class="word" id="chat-state-word"></span></span>
         </div>
+        <p id="chat-history-warning" role="status" hidden></p>
+        <div id="conversations" role="dialog" aria-label="Conversaciones guardadas" hidden inert>
+          <div id="conversations-bar"><h2>Conversaciones</h2><button id="conversations-close" class="icon-btn" type="button" aria-label="Volver al chat"><span class="ico" data-icon="cross"></span></button></div>
+          <p id="conversations-note" role="status"></p>
+          <ul id="conversations-list" aria-label="Conversaciones guardadas"></ul>
+        </div>
         <div id="chat-body">
+          <div id="chat-history-controls" role="group" aria-label="Conversaciones">
+            <button id="chat-create" class="icon-btn" type="button" aria-label="Nueva conversación (Ctrl+N)" title="Nueva conversación (Ctrl+N)"><span class="ico" data-icon="bubble"></span></button>
+            <button id="chat-conversations" class="icon-btn" type="button" aria-label="Conversaciones guardadas" aria-expanded="false" aria-controls="conversations"><span class="ico" data-icon="clock"></span></button>
+          </div>
           <ol id="chat-log" tabindex="0" aria-label="Historial de la conversación"></ol>
           <button id="chat-new" type="button" hidden aria-label="Respuesta nueva"><span class="ico" data-icon="arrow-down"></span><span class="dot"></span></button>
+          <!-- F024: the model row above the composer — the LOCAL model of the NEXT turn
+               (chat:state.target, already resolved by Rust) and its picker. The picker reads
+               the SAME closed `models_action` set as Ajustes → Modelos (list/select): it can
+               never name an endpoint, a key, an account or a provider (S5). Plain text only. -->
+          <div id="chat-model-row">
+            <button id="chat-model-btn" type="button" disabled aria-expanded="false" aria-controls="chat-model-picker">
+              <span class="model-dot" aria-hidden="true"></span>
+              <span class="word" id="chat-model-name"></span>
+              <span class="model-caret" aria-hidden="true"></span>
+            </button>
+            <div id="chat-model-picker" role="group" aria-label="Modelos locales" hidden inert>
+              <p id="chat-model-note" class="picker-note"></p>
+            </div>
+          </div>
           <form id="chat-composer" novalidate>
             <label for="chat-input" class="sr-only">Mensaje para Abito</label>
             <textarea id="chat-input" rows="1" maxlength="8000" spellcheck="true"
               aria-describedby="chat-help chat-problem" placeholder="Escribí…"></textarea>
             <span id="chat-draft-word" class="chip" data-tone="red" hidden></span>
-            <span id="chat-help" class="sr-only">Enter envía. Mayúsculas más Enter agrega una línea. Escape sale del campo; otro Escape cierra la isla.</span>
+            <span id="chat-help" class="sr-only">Enter envía. Mayúsculas más Enter agrega una línea. Ctrl+N crea una conversación sin borrar el historial. Escape sale del campo; otro Escape cierra la isla.</span>
             <button id="chat-cancel" class="round" type="button" hidden aria-label="Cancelar"><span class="ico" data-icon="square"></span></button>
             <button id="chat-send" class="round" type="submit" disabled aria-label="Enviar"><span class="ico" data-icon="arrow-up"></span></button>
           </form>
           <p id="chat-problem" class="sr-only" aria-live="polite"></p>
         </div>
-        <!-- U2: self-hosted model choice — an internal panel of the same
-             island (replaces the transcript while open). Local only, no
-             keys; listed is never shown as ready. -->
-        <div id="models" inert aria-label="Modelo local">
-          <!-- #309: the buttons come first so wrapping pushes the meters to a second row, never a button out of the island -->
-          <div id="models-bar">
-            <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
-            <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>
-            <button id="models-refresh" class="icon-btn" type="button" aria-label="Actualizar modelos locales"><span class="ico" data-icon="refresh"></span></button>
-            <button id="models-close" class="icon-btn" type="button" aria-label="Listo, volver a la conversación"><span class="ico" data-icon="check"></span></button>
-            <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
-          </div>
-          <p id="models-note" class="sr-only"></p>
-          <label class="models-search-field" for="models-search"><span class="sr-only">Buscar modelos locales</span><input id="models-search" type="search" placeholder="Buscar modelos" autocomplete="off"></label>
-          <ul id="models-list" aria-label="Modelos locales"></ul>
-          <p id="models-resources" class="sr-only"></p>
-        </div>
-        <!-- #310: settings, copied from gentle-dot (MIT). Three SCREENS (Cuentas, Conectores, Ajustes), one header
-             button each; a screen covers the chat body with a title, a close button and a one-line hint. Plain text
+        <!-- #408: ONE Ajustes entry (the gear) with sub-tabs (settings-view.js TABS: Cuentas, Conectores, Modelos,
+             Especialistas, Pills, Apariencia, General); the panel covers the chat body with a title, a tablist, a close button and a one-line hint. Plain text
              only (textContent); a key is typed into a masked field, sent once as `auth_reply` and cleared. -->
         <div id="settings" inert role="dialog" aria-labelledby="settings-title" aria-label="Ajustes">
           <div id="settings-bar">
@@ -188,8 +214,25 @@
             <span id="settings-conn" class="chip" role="img" hidden><span class="ico" id="settings-conn-icon"></span><span class="word" id="settings-conn-word"></span></span>
             <button id="settings-close" class="icon-btn" type="button" aria-label="Cerrar ajustes"><span class="ico" data-icon="cross"></span></button>
           </div>
+          <div id="settings-tabs" role="tablist" aria-label="Secciones de Ajustes" aria-orientation="horizontal"></div>
           <p id="settings-hint" class="snote"></p>
-          <div id="settings-body" tabindex="-1"></div>
+          <div id="settings-body" tabindex="-1" role="tabpanel"></div>
+          <!-- U2: self-hosted model choice — an internal panel of the same
+               island (replaces the transcript while open). Local only, no
+               keys; listed is never shown as ready. -->
+          <div id="models" inert role="tabpanel" aria-labelledby="settings-tab-models" aria-label="Modelo local">
+            <!-- #309: the buttons come first so wrapping pushes the meters to a second row, never a button out of the island -->
+            <div id="models-bar">
+              <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
+              <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>
+              <button id="models-refresh" class="icon-btn" type="button" aria-label="Actualizar modelos locales"><span class="ico" data-icon="refresh"></span></button>
+              <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
+            </div>
+            <p id="models-note" class="sr-only"></p>
+            <label class="models-search-field" for="models-search"><span class="sr-only">Buscar modelos locales</span><input id="models-search" type="search" placeholder="Buscar modelos" autocomplete="off"></label>
+            <ul id="models-list" aria-label="Modelos locales"></ul>
+            <p id="models-resources" class="sr-only"></p>
+          </div>
           <p id="settings-live" class="sr-only" role="status" aria-live="polite"></p>
         </div>
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>

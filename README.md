@@ -3,7 +3,21 @@
 Skeleton of the Abito desktop island as a normal Cargo project with Tauri v2
 (`tauri-build` in `build.rs`, static `frontendDist`, **no npm, no
 node_modules, no cargo-tauri CLI**). Transparent, undecorated, always-on-top
-X11 window hosting the frozen R6 clay engine with free drag and edge docking.
+X11 window hosting Abito's own R7 clay character with free drag and edge docking.
+
+## R7 character states (#347)
+
+The seven R6 public names/order and existing looks remain, with eight own clay states appended
+(15 total). Real pending approvals/questions outrank active chat, existing errors, a neutral
+1800 ms new-turn-finished presentation, and 60 s idle sleep. Sending a decision is never success.
+`working/searching/ratelimit` are preview-only until real producers exist. #304's explicit
+opt-in system-motion preference remains; honored reduction shows the correct static pose.
+See [state/producer contract](../../docs/r6-states-mapping.md) and the coordinator-owned T6
+native evidence gate. No Mochi assets/design/sounds, new dependencies or native drag edits.
+
+Focused check: `node test-node/character-states-check.cjs`. Debug-only browser preview:
+`tests/character-preview.html` (not shipped); use its manual next-frame control or each static pose.
+Node tests are not native clipping, motion/CPU or real producer-roundtrip proof.
 
 Unit **M1b** adds the host/bridge layer on top of the M1a skeleton: the
 `window.desktop.*` facade over Tauri invoke/events, the Electron validation
@@ -23,6 +37,61 @@ to Rust: the `bridge.json` credential read, the in-memory session cookie, the
 auth ladder, polling (health + proposals), the pinned proposal card, and the
 wired `allow`/`deny`/`choose` verbs. The WebView only ever sends the human's
 click; Rust re-validates card id, expiry and `payload_hash` before `/execute`.
+
+## Pill catalog (#345, F031/F032)
+
+The [pill model](../../docs/pills.md) contains 25 stable identities, one main
+workspace choice and up to four declarations. Choices are local, explicitly
+**not connections**; services remain unavailable without a real producer.
+Run `node apps/desktop-tauri/test-node/pill-catalog-check.cjs` from the repo root
+for the offline model checks; `node apps/desktop-tauri/test-node/pills-check.cjs`
+executes the actual overview/settings scripts against a local fake DOM/IPC.
+Use **Ajustes → Pills** to set the main and declare/remove choices. The overview
+shows main plus declarations in catalog order and keeps its existing host
+connection, notices and decision controls. Per-pill colour overrides are
+documented in the next section (#346).
+
+## #346 — per-pill colours (F033 palette override)
+
+Every visible pill may wear one of the five palette colours, chosen by the human
+in **Ajustes → Pills**. The mechanism is closed end to end and the model lives
+with the rest of the pill docs in [docs/pills.md](../../docs/pills.md).
+
+- **One vocabulary, no raw values.** The only accepted colours are the five names
+  `green | blue | mint | orange | purple`: `COLORS` in `src/prefs.rs` and
+  `PALETTE` in `frontend/avatar-colors.js` — the same set the Dot uses. No hex,
+  rgb, CSS text or user string is ever stored, transported or painted; the model
+  answers only an already-validated name or the empty string (`colorOf`).
+- **Typed field.** `prefs.json` gains an optional `pill_colors` map
+  (pill id → palette name). Unknown pill ids and off-set colours drop on load —
+  the `main_pill` reading rule mirrored — and absent or empty never writes the
+  key, so untouched files keep their bytes and a hostile value can never destroy
+  the stored catalogue or any other known field.
+- **Two closed commands.** `{"action":"set_pill_color","id":"agent_amp","color":"purple"}`
+  (exactly three keys) and `{"action":"clear_pill_color","id":"agent_amp"}` (exactly
+  two). Both validate the offered catalog id and the palette name in
+  `parse_command` and again in `apply`; wrong arity, an unoffered id (Apple Music,
+  Claude Desktop on Linux), a sixth name, `""`, a prototype key or a non-string is
+  `invalid_schema` with no persistence and no publication.
+- **Projection.** The `prefs_action` view and the `prefs:state` event carry
+  `pillColors` beside `avatarColors`: already-validated names only, nothing new or
+  sensitive crosses the wire.
+- **UI.** Each offered row in **Ajustes → Pills** gets a closed select with the
+  five colour names plus a selectable **Sin color**, which dispatches
+  `clear_pill_color` — the escape hatch the avatar does not need, because there
+  the default is itself one of the five while a colourless pill must stay
+  reversible. The overview paints `data-color` only from the validated name, and
+  `style.css` maps the five names to the never-themed `--dot-*-2` identity tokens
+  as borders: both #380 palettes show the same colour, hover/pressed pill rules
+  stay untouched, and the pill keeps its name text and aria — colour never
+  carries meaning alone.
+- **Checks.** `pill-catalog-check.cjs` and `pills-check.cjs` pin the model gates
+  and the DOM/event boundary (set/clear writes, hostile values never paint);
+  `settings-view-check.cjs`, `theme-check.cjs` and `avatar-colors-check.cjs` stay
+  green as regression evidence; `sound-wiring-check.cjs` pins the `pillColors`
+  DTO shape beside `avatarColors`; `cargo test --lib f033_` (from
+  `apps/desktop-tauri`) pins catalogue survival, arity and field isolation. Only
+  a human on a real preview can prove legibility of each colour on both palettes.
 
 ## Run
 
@@ -456,15 +525,17 @@ forgets the chat view so the next click opens the overview again.
 local model can honestly produce — native ids, duplicate client id → same
 turn, one running turn (`queue_full`), monotonic `seq` (gap/regression/
 after-terminal rejected), states `queued|thinking|streaming|waiting_approval|
-completed|cancelled|error`, safe typed errors, draft ≤8,000 scalars, cache
-≤100 turns / 256 KiB. `waiting_approval` exists in the machine but nothing
+completed|cancelled|error`, safe typed errors, draft ≤8,000 scalars, active
+context cache ≤100 turns / 256 KiB. Persisted presentation pages (#341) are
+separate and never enlarge that context budget. `waiting_approval` exists in the machine but nothing
 can enter it: **there is no Pi chat producer on the desktop yet**; the view
 says so (`producer.pi: "not_connected"`). That adapter is a marked future
 dependency, not simulated.
 
 **IPC:** one new command, `chat_action`, behind the same sender gate as
 `desktop_action`, its own 30/s rate budget, a 33 KiB payload cap and the
-closed set `view|open|back|check|submit|cancel` with exact keys — a page
+closed set `view|open|back|check|submit|cancel|new|list|restore|history`
+with exact keys — a page
 cannot name an endpoint, model, key or approval (the probe proves a
 smuggled `model` field is rejected). Events: `chat:state`. The
 `desktop:state` 13-key snapshot is unchanged; no new capability or CSP
@@ -480,6 +551,26 @@ keyboard open or a click; overview↔chat uses the contract spring/340 ms curve 
 `prefers-reduced-motion`; no audio elements, no sound. Drag never attaches
 to the transcript or composer. R6 is only scaled/positioned (sha256
 unchanged).
+
+**Local conversations (#341 / F026, OD003, OD004, GD022, GD037).** The
+new-chat button or **Ctrl+N** clears the current context and draft without
+deleting saved history. The clock button lists conversations newest first,
+with the first-message title (80 Unicode scalars plus ellipsis), creation-time
+specialist and last activity. Opening restores the newest 25 turns; scrolling
+up loads older pages while preserving the reader's position. Finish or cancel
+a running reply before switching. A deleted specialist falls back to Abito
+principal with a visible notice; no alternative model is silently selected.
+
+History uses append-only JSONL in `app_data_dir/conversations/` (Unix directory
+0700, files 0600) plus an atomic index. Malformed records are skipped and
+reported, and interrupted turns restore as cancelled without resuming inference.
+Accepted message text is persisted as written; app credentials, headers, account
+state and system/specialist instructions are not copied. Files are not encrypted.
+Probe mode is memory-only unless `ABITO_CONVERSATIONS_DATA_DIR` names an absolute
+isolated test directory. Deletion, retention limits, cloud sync and import are
+out of scope. See [Local conversations](../../docs/conversations.md) for IPC,
+paging, privacy and the **partial final verification evidence**. No live app
+verification was performed in this workstream; parent verification remains open.
 
 **The empty-chat greeting (F027 / TaskView342).** With no message yet the column shows
 what §2.3 shipped: the lock `local` + eye-off pair, centred, and the whole sentence in
@@ -630,6 +721,51 @@ cargo test --manifest-path apps/desktop-tauri/Cargo.toml
 # probe: models_evidence — rows rendered with 44 px buttons, gates
 #   ready/unknown/unavailable, select diag/unknown refused, set_key and
 #   smuggled origin refused, selection effective, fake router saw only GETs
+```
+
+## #339 / F024 — the model row above the composer
+
+The chat column carries one row between «Respuesta nueva» and the composer: a
+button with the availability dot, the effective local model's name and a
+caret, plus an inline picker above it. Upstream Coucou's “Click model name
+above composer” (`windows/src/views/chat.ts:216-254`); the macOS popover
+itself (`IslandViewContent.swift:1345-1375`) is not ported, per the 0.2 scope
+rule.
+
+**What it shows (R1/R4):** the EFFECTIVE target of the next turn — Rust has
+already resolved the active specialist into `chat:state.target`
+(`chathost::current_target` → `specialistshost::turn_snapshot`), so the row
+names exactly the model that will answer. The alias, or the profile id when it
+has none; «Sin modelo local elegido» when there is no target; and the role's
+name appended («Abito-gpt · Investigación») only when that role is what
+supplies this exact model, with a one-line note inside the picker. Plain text
+only (`textContent`), the origin rides in the accessible name without its
+scheme, and never an endpoint, key, account or provider (S5).
+
+**What a click does (R2/R3):** toggles the picker over the SAME closed
+`models_action` set Ajustes → Modelos uses — `list` on open,
+`select{profile_id}` on a row — so a selection applies from the NEXT message
+(a running turn keeps its frozen target) and nothing new reached the wire: no
+new verb, no new preference, no Rust change, and `chat_action`'s closed set is
+untouched. Escape closes the picker first; a running turn freezes the row; a
+CHOSEN target that is down or blocked disables it, while no target chosen (or
+no preflight verdict yet) keeps it enabled — otherwise the picker would be a
+dead end exactly when the human needs it.
+
+**What it is not:** not a per-turn override; not a provider picker (the chat
+lane is local-only, `src/chatlane.rs`; cloud chips would need a new wire verb
+plus a daemon round trip and engine restart, out of 0.2); and it never writes
+a role. `chat.js` may invoke exactly `chat_action`, `open_chat_url`,
+`models_action {list,select}` and `specialists_action {view}` — a check pins
+that set so a later edit cannot grow it silently.
+
+### Verifying #339
+
+```sh
+node apps/desktop-tauri/test-node/chat-view-check.cjs         # 52 checks (5 pure F024: label/aria/note/enabled/markup)
+node apps/desktop-tauri/test-node/chat-model-picker-check.cjs # 10 checks, fake DOM driving the REAL chat.js
+node apps/desktop-tauri/tests/composer-ime-check.cjs          # 10 checks: the keyboard contract still holds
+# cargo test runs both harnesses through tests/frontend_chat_view.rs
 ```
 
 ## #327 — manual specialists (roles the human creates and chooses)
@@ -812,8 +948,10 @@ Proven by the probe's read-back, not by intention:
 - drag release never toggles; a short click (< 6 physical px movement) toggles
   compact↔overview — threshold and snapping live in the pure `geometry` module
   with unit tests (`cargo test`, test-first: RED → GREEN),
-- frozen R6 rendered as SVG-DOM in WebKitGTK (`clay-engine.js` sha256
-  `e2dc5db38832d7f162b7991e5ea0518f7743d20a48d9a557347c507afe9a2ad8`, unchanged).
+- original M1a R6 rendered as SVG-DOM in WebKitGTK (historical evidence).
+  #347 now pins its own R7 engine at SHA-256
+  `b699ebbc9e4d92b7a0ffbb213af32c58e0b164715f20dde25709ee14a9ccf76e`;
+  that source update is not a claim of new native acceptance.
 
 Not in this unit (later sessions): `window.desktop.*` bridge (M1b),
 capabilities/CSP hardening (M1b), UDS transport (M2), approval HTTP (M3),
@@ -958,6 +1096,99 @@ commits, rejected/no-op commands and failed rename without false publication. Do
 are not integrated/native acceptance. T2 connects identity colors, T3 handles native validation,
 and T4 owns independent integrated review. No real model calls belong to T1 checks.
 
+## #264 — the remembered position (GD049, "Persist panel position")
+
+Inventory GD049: *"Load and save the assistant's desktop position across launches."*
+
+- **Saved on release.** The one event that decides where the island lives is a drag
+  release: `drag_release` → `ReleaseOutcome::Snapped` → `settingshost::save_position`,
+  so only that outcome is persisted. A short click (toggle), a cancelled release and
+  the periodic re-clamps write nothing — they never decided a placement.
+- **Restored on launch.** `setup` loads `prefs.json` *before* the first geometry
+  decision (`settingshost::start` runs first), then asks `geometry::restore_position`:
+  if the saved origin still lies fully inside the **current** work area it is used
+  verbatim; otherwise the existing M1a default (top-centre) is used. The docked
+  `core.edge` is derived from the restored rectangle, so an island restored at the
+  bottom still grows upward when it expands. The post-load geometry pin
+  (`record_frontend_evidence`) re-pins to the same restored origin instead of
+  snapping the island back to top-centre.
+- **Never off-screen, never fatal.** A monitor removal, a resolution change or any
+  origin outside the work area falls back to the default placement (`clamp_rect`
+  equality is the "fully inside" test, so nothing half-restored is ever placed).
+  Corrupt, truncated, over-bounded or wrongly typed `position` data reads as
+  *no position* (→ default) and costs no other preference; a hostile value cannot
+  panic (`unsigned_abs` bounds, `i32::try_from`).
+- **Where it lives.** `prefs.json` stays **v1**; `position` is a new *optional*
+  field (`{"x":..,"y":..}`, physical px), written only by the native drag path
+  through the same `prefs::transact` gate and atomic writer as every other
+  preference — so a settings change after a drag cannot drop the position and a
+  drag cannot drop a settings change. A file written before #264 loads and writes
+  back **byte-for-byte unchanged**.
+- **Not exposed to the WebView.** `prefs::parse_command` is untouched: no payload
+  can set or clear the position. `prefs::Command::SetPosition` is reachable only
+  from `drag_release`, and rejects coordinates outside ±1 000 000 px.
+
+**Verification (test-first: RED → GREEN).** RED: `cargo test --offline --locked` did not
+compile — 30 errors naming exactly the API that did not exist yet (`Prefs::position`,
+`Command::SetPosition`, `geometry::restore_position`, `ReleaseOutcome::saved_position`).
+GREEN, same command with `CARGO_TARGET_DIR=$PWD/target`:
+
+```sh
+CARGO_TARGET_DIR="$PWD/target" cargo test --offline --locked --no-fail-fast
+#   503 passed · 32 failed · 6 ignored, over 30 targets
+#   lib 346 -> 356 (10 new: 5 prefs position + 4 geometry restore + 1 core save-on-release)
+#   main (bin) 34, agent_daemon 14, approval_bridge 17, chat_local_model 15, daemonhost 7,
+#   fixture_leaf 8, frontend_* 10, hotkey_portal 11, hotkey_x11 12, install_root 7,
+#   install_script 1, models_selection 5, notice_click 4, own_window_no_wm 1,
+#   packaging 1, tmpdirs 1, native_window_normal/question_producer 6 ignored, doc-tests 0
+#
+#   The 32 failures are PRE-EXISTING in this worktree, not from #264: question_receiver
+#   (24) and transport_receiver (8) bind a Unix socket below `target/tmp`, whose path here
+#   is 94 bytes against sockaddr_un's 107 -> PathTooLong / "path must be shorter than
+#   SUN_LEN". Proven by re-running BOTH binaries with the #264 changes STASHED: the same
+#   24 + 8 failures on the base commit e8065d4.
+node test-node/*-check.cjs
+#   15 of 16 exit 0; producer-check.cjs exits 2 on its usage line because it is a harness
+#   (endpoint, runtime, cwd) driven by tests/transport_receiver.rs, not a standalone check
+node tests/composer-ime-check.cjs   # 10 passed, 0 failed
+```
+
+Not verified here: the app was never launched on the desktop (the parent does that), so
+the live drag → relaunch restore path is proven by the unit chain
+(`core::release` → `saved_position` → `prefs::transact` → `geometry::restore_position`),
+not by a real second launch.
+
+## #380 — system / light / dark theme
+
+`frontend/theme.js` owns one attribute, `<html data-theme>`, and one preference. Abito
+follows the system theme by default; **Ajustes → Tema** (three radio buttons, 44 px,
+arrow keys, filled + `aria-checked` when chosen) pins it to **Claro** or **Oscuro**, or
+returns to **Sistema**. Full contract in `docs/theme.md`.
+
+- **Two palettes, one design.** The dark palette is the shipped palette verbatim (every
+  token is the literal that used to sit in `style.css`); the light palette is derived
+  from it — same roles, same alphas over ink, warm sand surfaces from Abito's own clay.
+  Role colours (`--go`, `--sun`, `--red-11`, `--island-live`, `--faint`), the Dot
+  identity colours (#384), the motion policy (#304), radii, fonts and the frozen engine
+  paint are never themed.
+- **One closed preference.** `prefs.json` v1 gains an optional `theme` field, only
+  `"system" | "light" | "dark"`; absent = system and absence is preserved, an unknown
+  value reads as system, and `prefs_action` accepts exactly
+  `{"action":"set_theme","theme":"dark"}` through the same sender/rate/serial gate as
+  every other preference command. Refused values and failed saves change no data and
+  publish no `prefs:state`.
+- **Saved state is the only input to a paint.** Boot paints `system` immediately, then
+  the saved mode (`prefs_action view` + every `prefs:state`); a failed save keeps the
+  visible theme and says so in the panel. While the mode is `system`, exactly one
+  `matchMedia('(prefers-color-scheme: dark)')` listener follows the OS; leaving
+  `system` removes it, so an explicit choice can never be overridden. No polling, no
+  second owner, no CSS media query, and no OS setting is ever written.
+- Checks: `node test-node/theme-check.cjs` (19, real production module driven through
+  fake DOM/MediaQueryList/IPC events), also run by `cargo test` through
+  `tests/frontend_theme.rs`, plus `test-node/settings-view-check.cjs` and the closed
+  enum/counter tests in `src/prefs_tests.rs`. Real native window appearance is
+  parent-verified, not claimed by these checks.
+
 ## Layout
 
 ```
@@ -1020,8 +1251,8 @@ node packaging/verify.cjs dist/abito-island/<version>   # re-hash vs receipt, no
 
 - Build: `cargo build --release --locked --offline --features tauri/custom-protocol`
   (`custom-protocol` makes Tauri a real release: without it the binary embeds
-  the build-tree path as a dev build). Gates before building: R6 pin
-  (`e2dc5db3…`), curated `frontend/` list, CSP without remote/unsafe sources,
+  the build-tree path as a dev build). Gates before building: engine pin (public `checkR6`, now R7)
+  (`b699ebbc…`), curated `frontend/` list, CSP without remote/unsafe sources,
   capabilities = listen/unlisten only, no `devtools`/shell/fs/http features.
 - Stage: `abito-island` (release binary), `abito-island-launcher` (no args;
   refuses the whole `LD_*` family, `GDK_DEBUG`/`GTK_*` debug, WebKit inspector vars and every `ABITO_*` knob except `ABITO_PROJECT_ROOT`; forces X11),
@@ -1063,3 +1294,20 @@ running binary can be replaced), and writes
 `$HOME/Apps/sb-second-brain` (`--project-root` to change). Idempotent; `--uninstall`
 removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 (11, toy stage in temp dirs). Never touches `com.abitog.Abito*` roots.
+
+## #408 — Unified Ajustes with sub-tabs and an island that grows to fit
+
+- **One entry:** the gear (overview and chat header) opens **Ajustes**. The separate Cuentas, Conectores and Modelo header buttons are gone; the old open events (`abito:settings-select` with a tab id) still deep-link into the matching tab.
+- **Sub-tabs** (a real `role="tablist"`: arrows wrap, Home/End, roving tabindex, `aria-selected`, 44 px, visible focus): Cuentas · Conectores · Modelos · Especialistas · Pills · Apariencia · General. Names, order, icons and hints live in one table, `settings-view.js` `TABS`; rename or reorder there.
+- **Where things went:** atajo + sonido → General; saludo, movimiento, tema, colores → Apariencia; the local-models picker (`#models`, same `models.js`) → Modelos.
+- **Cuentas / providers:** one card per provider (`providerCards`): status **Conectado / No conectado / En curso / Error**, one primary action (Iniciar sesión · Usar una clave de API · Cancelar · Reintentar), the device code / URL / masked key prompt inside the card. Errors are the UI's own sentences; engine text is never rendered. Same daemon protocol and the same masked-field → `auth_reply` → cleared path; approvals stay UI-only.
+- **Auto-expand (S4):** opening Ajustes calls `settings_view {open:true}`; Rust (`geometry::settings_visible`: 720 wide, height `min(680, work area − gaps)`, ≥ 240, narrower on small screens) stages the resize on the docked edge and clamps it to the work area. Closing sends `{open:false}` and the previous chat rectangle is restored. The page never sends a size; the payload is exactly one boolean. Compact and overview sizes are untouched.
+- **Tests:** `test-node/settings-view-check.cjs` (tabs table, tablist keys, provider cards), `test-node/pills-check.cjs` (tab routing, size request), `src/core.rs` tests (grow, exact restore, small work areas, forget on leave) and `settingshost` payload test.
+
+### #408 — Conexiones merge
+
+- **Conexiones** replaces Cuentas + Conectores: «Proveedores de IA», «Agentes de código» and «Servicios» in one tab (`connectors` still resolves to it through `tabAlias`).
+- **The key is write-only:** never shown back, logged, put in a view/IPC payload or sent to the WebView (`hasCredential` only). The masked editor behind «Editar» in the owned-account row is the only way to set, keep or clear it; it saves through `abito_account_create|abito_account_save|abito_account_endpoint_set` into Abito's own 0600 `accounts.json`.
+- **Deleting an account:** «Quitar conexión» on the owned-account row (`abito_account_remove`) deletes the account and its key from `accounts.json`. Failure changes nothing and says so: «No se pudo quitar la conexión. No se cambió nada.»
+- **No copy from Pi (#409):** there is no import of Pi's `nan` connection; the key is entered by hand in the UI. The daemon, its protocol and `desktop-daemon/src/auth.cjs` are unchanged and still never read the user's Pi credentials.
+- **Tests:** `test-node/pills-check.cjs` and `settings-view-check.cjs` (no Pi card, no Pi IPC command, the owned-account row).

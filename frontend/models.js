@@ -10,7 +10,6 @@
   const $ = id => document.getElementById(id);
   const capsule = $('capsule');
   const panel = $('models');
-  const toggle = $('chat-models');
   const list = $('models-list');
   const note = $('models-note');
   const noteButton = $('models-info');
@@ -19,9 +18,8 @@
   const countChip = $('models-count');
   const resources = $('models-resources');
   const refreshButton = $('models-refresh');
-  const closeButton = $('models-close');
   const live = $('chat-live');
-  if (!V || !panel || !toggle) return;
+  if (!V || !panel) return;
   const ICONS = window.AbitoIcons;
   const icon = name => (ICONS ? ICONS.svg(name) : '');
   // Static own icons (closed registry, never data).
@@ -127,27 +125,21 @@
     note.classList.toggle('sr-only', !open);
   }
   noteButton.addEventListener('click', () => setInfo(noteButton.getAttribute('aria-expanded') !== 'true'));
-  function open(byKeyboard) {
+  // #408: the picker is the «Modelos» sub-tab of Ajustes; settings.js announces the active tab.
+  function open() {
     panel.inert = false;
     panel.dataset.open = 'true';
     setInfo(false);
-    capsule.dataset.models = 'open';
-    toggle.setAttribute('aria-expanded', 'true');
     refresh(); // metadata only, never inference
-    if (byKeyboard) refreshButton.focus();
   }
-  function close(byKeyboard) {
+  function close() {
     panel.inert = true;
     delete panel.dataset.open;
     setInfo(false);
-    delete capsule.dataset.models;
-    toggle.setAttribute('aria-expanded', 'false');
-    if (byKeyboard) toggle.focus();
   }
-  toggle.addEventListener('click', e => (panel.inert ? open(e.detail === 0) : close(e.detail === 0)));
-  closeButton.addEventListener('click', e => close(e.detail === 0));
+  document.addEventListener('abito:settings-tab', e => (e.detail === 'models' ? open() : close()));
   refreshButton.addEventListener('click', refresh);
-  document.addEventListener('island:view', e => { if (e.detail !== 'chat') close(false); });
+  document.addEventListener('island:view', e => { if (e.detail !== 'chat') close(); });
   if (listen) listen('models:state', ev => apply(ev && ev.payload)).catch(() => {});
   action({ action: 'list' }).then(apply, () => {});
 })();

@@ -140,10 +140,29 @@ fn resolve_turn(
 }
 
 pub fn turn_configuration(state: &AppState, base: &str) -> Result<(Option<Target>, String), ChatError> {
+    turn_snapshot(state, base).map(|(target, system, _)| (target, system))
+}
+
+/// #341 uses the SAME role snapshot for the prompt, target and conversation association.
+pub fn turn_snapshot(state: &AppState, base: &str) -> Result<(Option<Target>, String, Option<abito_island::conversations::SpecialistRef>), ChatError> {
     let role = state.specialists.role();
     let fallback = state.chat_target.lock().expect("chat target lock").clone();
     let registry = modelshost::registry(state);
-    resolve_turn(role.as_ref(), fallback, &registry, base)
+    let (target, system) = resolve_turn(role.as_ref(), fallback, &registry, base)?;
+    let specialist = role.map(|s| abito_island::conversations::SpecialistRef { id: s.id, name: s.name });
+    Ok((target, system, specialist))
+}
+
+/// Restore a conversation's creation-time role identity without inventing a replacement role.
+/// Missing roles fall back to the principal; existing roles keep the normal local-model checks.
+pub fn select_conversation_role(app: &AppHandle, state: &AppState, id: Option<&str>) -> Result<bool, BridgeError> {
+    let store = state.specialists.snapshot();
+    let missing = id.is_some_and(|id| store.find(id).is_none());
+    let selected = id.filter(|_| !missing).map(str::to_owned);
+    state.specialists.execute(config_dir(app).as_deref(), &modelshost::registry(state), Command::Select { id: selected }, |view| {
+        if !QUITTING.load(Ordering::SeqCst) { let _ = app.emit("specialists:state", view); }
+    })?;
+    Ok(missing)
 }
 
 pub fn effective_target(state: &AppState) -> Result<Option<Target>, ChatError> {

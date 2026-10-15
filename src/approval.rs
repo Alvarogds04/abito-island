@@ -832,7 +832,11 @@ fn poll_inner(appr: &Shared, hooks: &SharedHooks) {
             }
             let ctx = (hooks.ctx)(); // (ctx closures never take the approval lock)
             let mutation_busy = guard.mutation_busy;
-            if let Some(candidate) = candidate {
+            // F013 / R1 (#338): legacy calls `receiveCandidate(parseProposals(...))
+            // ` ALWAYS, with `null` too (main.cjs:292). An empty pending list
+            // therefore reaches the lane: it clears the card while compact and
+            // marks the pin inert while expanded — never a stale card.
+            {
                 // one explicit deref so `queued` and `selected` are disjoint
                 // field borrows of the guarded struct
                 let approval = &mut *guard;

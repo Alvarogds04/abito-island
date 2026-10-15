@@ -10,7 +10,7 @@ const path = require('node:path');
 const frontend = path.join(__dirname, '..', 'frontend');
 const S = require(path.join(frontend, 'settings-view.js'));
 let passed = 0;
-const test = (name, fn) => { fn(); passed += 1; };
+const test = (_name, fn) => { fn(); passed += 1; };
 
 test('F055 general volume uses default and inclusive boundaries without coercion', () => {
   assert.equal(S.generalView({}).sound.gain, 0.12);
@@ -22,13 +22,28 @@ test('F055 general volume uses default and inclusive boundaries without coercion
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('three screens in gentle-dot order — Cuentas, Conectores, Ajustes — each with title, icon and a one-line hint', () => {
-  assert.deepEqual(S.SCREENS.map(x => x.id), ['accounts', 'connectors', 'settings']);
-  assert.deepEqual(S.SCREENS.map(x => x.title), ['Cuentas', 'Conectores', 'Ajustes']);
-  for (const x of S.SCREENS) { assert.ok(x.icon, x.id); assert.ok(x.id === 'settings' || x.hint.length > 20, x.id); }
-  assert.equal(S.screenById('connectors').title, 'Conectores');
-  assert.equal(S.screenById('nope'), null);
-  assert.equal(S.SECTIONS, undefined, 'the tab strip is gone');
+test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Pills, Apariencia, General', () => {
+  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'models', 'specialists', 'pills', 'appearance', 'general']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['Conexiones', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+  // S8: the old ids still resolve (deep links), to the merged tab
+  assert.equal(S.tabAlias('connectors'), 'accounts');
+  assert.equal(S.tabAlias('accounts'), 'accounts');
+  assert.equal(S.tabAlias('models'), 'models');
+  assert.equal(S.tabAlias('nope'), null);
+  for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
+  assert.equal(S.tabById('connectors'), null, 'resolved through tabAlias, not a tab of its own');
+  assert.equal(S.tabById('nope'), null);
+  assert.equal(S.SCREENS, undefined);
+});
+
+test('#408 tablist keyboard: arrows wrap, Home/End jump, other keys are ignored', () => {
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'models');
+  assert.equal(S.tabKeyTarget('general', 'ArrowRight'), 'accounts');
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowLeft'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'Home'), 'accounts');
+  assert.equal(S.tabKeyTarget('pills', 'End'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'a'), null);
+  assert.equal(S.tabKeyTarget('nope', 'ArrowRight'), null);
 });
 
 // ---- connection chip -------------------------------------------------------------
@@ -200,11 +215,11 @@ test('markup: gear + every icon-only control is named; sections are real tabs; t
   assert.match(html, /<script defer src="settings\.js"><\/script>/);
   assert.match(html, /id="open-settings"[^>]*aria-label="Ajustes"/);
   assert.match(html, /id="settings"[^>]*role="dialog"[^>]*aria-label="Ajustes"/);
-  assert.doesNotMatch(html, /role="tablist"/, 'no tab strip: each screen has its own header button');
-  for (const id of ['accounts', 'connectors', 'settings']) {
-    const tag = new RegExp(`<button[^>]*id="open-screen-${id}"[^>]*>`).exec(html);
-    assert.ok(tag, id); assert.match(tag[0], /aria-label="[^"]{3,}"/, id); assert.match(tag[0], /aria-expanded="false"/, id);
-  }
+  assert.match(html, /id="settings-tabs"[^>]*role="tablist"[^>]*aria-label="[^"]{3,}"/, '#408: a real tablist');
+  for (const id of ['accounts', 'connectors']) assert.doesNotMatch(html, new RegExp(`id="open-screen-${id}"`), id + ' has no header button of its own');
+  assert.doesNotMatch(html, /id="chat-models"/, 'the Modelo header button moved into the Modelos tab');
+  const gear = /<button[^>]*id="open-screen-settings"[^>]*>/.exec(html);
+  assert.ok(gear); assert.match(gear[0], /aria-label="Ajustes"/); assert.match(gear[0], /aria-expanded="false"/);
   assert.match(html, /<h2[^>]*id="settings-title"/, 'the screen title is a real heading');
   assert.match(html, /id="settings-close"[^>]*aria-label="[^"]{3,}"/);
 });
@@ -345,10 +360,10 @@ test('style: the rules that HIDE the gear are at least as specific as the rule t
   }
 });
 
-test('focus: closing the panel by keyboard lands on something visible in the CHAT view (the gear is overview-only)', () => {
+test('focus: closing the panel by keyboard lands on the chat-header gear, which stays visible in the CHAT view (#408; #open-settings is overview-only)', () => {
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   const close = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
-  assert.match(close, /chat-input/, 'focus goes back to the chat input');
+  assert.match(close, /open-screen-settings/, 'focus goes back to the gear that opened Ajustes');
   assert.doesNotMatch(close, /AbitoFocusHome/);
 });
 
@@ -387,6 +402,45 @@ test('accounts: the provider list is filtered by method and by the search box', 
   assert.equal(S.providerList(st2(), 'oauth', '')[1].connected, false);
   assert.equal(S.providerList(st2(), 'oauth', '')[0].actionLabel, 'Iniciar sesión');
   assert.equal(S.providerList(st2(), 'api_key', '')[0].actionLabel, 'Usar una clave de API');
+});
+
+test('#408 provider cards: every provider has ONE status and ONE obvious primary action', () => {
+  const cards = S.providerCards(st2(), {});
+  assert.deepEqual(cards.map(c => c.id), ['anthropic', 'openai', 'groq'], 'one list, all providers');
+  const [anthropic, openai, groq] = cards;
+  assert.deepEqual([anthropic.status.kind, anthropic.status.word, anthropic.status.tone], ['connected', 'Conectado', 'go']);
+  assert.equal(anthropic.primary, null, 'a connected provider has no connect button');
+  assert.equal(anthropic.logout, true);
+  assert.deepEqual([openai.status.kind, openai.status.word, openai.status.tone], ['idle', 'No conectado', 'faint']);
+  assert.deepEqual([openai.primary.label, openai.primary.method], ['Iniciar sesión', 'oauth']);
+  assert.deepEqual([groq.primary.label, groq.primary.method], ['Usar una clave de API', 'api_key']);
+  assert.equal(openai.alt, null, 'single-method provider: no second action');
+  const both = S.providerCards(st2({ providers: [{ id: 'newco', name: 'NewCo', methods: ['api_key', 'oauth'], configured: false }] }), {})[0];
+  assert.equal(both.primary.method, 'oauth'); assert.equal(both.alt.method, 'api_key'); assert.equal(both.alt.label, 'Usar una clave');
+});
+
+test('#408 provider cards: in-progress, error and cancelled belong to the provider that started the login', () => {
+  const run = flow => S.providerCards(st2(), { flow });
+  const busy = run({ providerId: 'openai', phase: 'active' });
+  assert.deepEqual([busy[1].status.kind, busy[1].status.word, busy[1].status.icon], ['progress', 'En curso', 'ring']);
+  assert.equal(busy[1].primary.label, 'Cancelar'); assert.equal(busy[1].primary.cancel, true);
+  assert.equal(busy[2].primary.disabled, true, 'other providers cannot start a second flow');
+  assert.equal(busy[0].status.kind, 'connected', 'others keep their own status');
+  const failed = run({ providerId: 'openai', phase: 'error' });
+  assert.deepEqual([failed[1].status.kind, failed[1].status.word, failed[1].status.tone], ['error', 'Error', 'red']);
+  assert.match(failed[1].error, /No se pudo iniciar sesión/); assert.equal(failed[1].primary.label, 'Reintentar');
+  assert.equal(failed[2].error, '', 'only the target shows the error');
+  const cancelled = run({ providerId: 'openai', phase: 'cancelled' });
+  assert.equal(cancelled[1].status.kind, 'idle'); assert.match(cancelled[1].note, /Cancelado/);
+  assert.equal(S.providerCards(st2({ connection: 'no_daemon' }), {})[1].primary.disabled, true, 'no engine, no login');
+});
+
+test('#408 provider cards: method filter and search narrow the list; error text is ours, never the engine\'s', () => {
+  assert.deepEqual(S.providerCards(st2(), { method: 'api_key' }).map(c => c.id), ['anthropic', 'groq']);
+  assert.equal(S.providerCards(st2(), { method: 'api_key' })[1].alt, null);
+  assert.deepEqual(S.providerCards(st2(), { filter: ' GRO ' }).map(c => c.id), ['groq']);
+  const err = S.providerCards(st2(), { flow: { providerId: 'groq', phase: 'error', detail: 'sk-secret-123 stack trace' } })[2];
+  assert.ok(!JSON.stringify(err).includes('sk-secret'), 'engine detail is never rendered');
 });
 
 test('accounts: «Iniciar sesión» uses the provider\'s account, or creates one named after the provider first', () => {
@@ -513,9 +567,9 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 });
 
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
-  const all = JSON.stringify(S.SCREENS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.screenById('connectors').hint, /Preguntá antes de enviar/);
+  assert.match(S.tabById('accounts').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 
@@ -576,7 +630,7 @@ test('connecting: the screen draws «Conectando» while the first state is on it
 const HASH = 'a'.repeat(64);
 const plan = (extra = {}) => ({ id: 'claude-code', state: 'not_connected', backup: false, detail: null, plan_hash: HASH,
   summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first.', reviewable: true, trust_review: false, ...extra });
-const rowOf = (entry, id) => S.agentsView(agentsState([entry])).rows[0];
+const rowOf = (entry, _id) => S.agentsView(agentsState([entry])).rows[0];
 
 test('plan: the closed summary is shown next to the button, and the click carries the hash the human saw', () => {
   const r = rowOf(plan());
@@ -754,4 +808,219 @@ test('#308 configuration is not connection readiness and commands are namespaced
   assert.match(src, /account-secret/);
   assert.match(src, /accountError/);
 });
+// ---- #380: the theme row of Ajustes (the painting itself lives in theme.js / theme-check) ----------
+test('#380 theme: the panel offers exactly the three closed modes from the SAVED prefs, in voseo-free nouns', () => {
+  assert.deepEqual([...S.THEME_MODES], ['system', 'light', 'dark']);
+  assert.deepEqual(S.themeView({ theme: 'dark' }).options.map(o => o.id), ['system', 'light', 'dark']);
+  assert.deepEqual(S.themeView({ theme: 'dark' }).options.filter(o => o.selected).map(o => o.id), ['dark']);
+  assert.deepEqual(S.themeView({ theme: 'light' }).options.filter(o => o.selected).map(o => o.id), ['light']);
+  // an absent or damaged stored value is «Sistema»: the panel never shows a mode it cannot persist
+  assert.equal(S.themeView({}).mode, 'system');
+  assert.equal(S.themeView({ theme: 'chartreuse' }).mode, 'system');
+  assert.equal(S.themeView(null).mode, 'system');
+  for (const option of S.themeView({}).options) assert.ok(option.label && option.aria, option.id);
+  assert.equal(S.THEME_LABELS.system, 'Sistema');
+  assert.equal(S.THEME_LABELS.light, 'Claro');
+  assert.equal(S.THEME_LABELS.dark, 'Oscuro');
+});
+
+test('#380 theme wiring: one closed sender, no local paint, and a failed save keeps the old theme in words', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.equal((src.match(/action: 'set_theme'/g) || []).length, 1, 'set_theme is sent through prefs_action only');
+  assert.match(src, /\{ action: 'set_theme', theme: mode \}/);
+  assert.doesNotMatch(src, /dataset\.theme|data-theme|setAttribute\('data-theme'/, 'only theme.js paints <html data-theme>');
+  assert.match(src, /No se pudo guardar el tema; se mantuvo el anterior\./);
+  assert.match(src, /const themePick = V\.themeView\(prefs\)/, 'the row renders from the saved prefs, so a refused save re-renders the truth');
+  assert.match(src, /role', 'radiogroup'/);
+  assert.match(src, /b\.tabIndex = option\.selected \? 0 : -1/, 'roving tabindex, like the colour radios');
+  // the picker ships with the page and its styles exist on both palettes
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(css, /\.stheme \{[^}]*min-height: 44px/);
+  assert.match(css, /\.stheme\[aria-checked="true"\]/, 'selection is filled + aria-checked, never colour alone');
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /<script defer src="theme\.js"><\/script>/);
+});
+
 console.log(`settings-view-check: ${passed} passed`);
+
+test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row only as the 400 column fallback', () => {
+  assert.equal(S.tabKeyTarget('pills', 'ArrowDown'), 'appearance');
+  assert.equal(S.tabKeyTarget('pills', 'ArrowUp'), 'specialists');
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /setAttribute\('aria-orientation', wide \? 'vertical' : 'horizontal'\)/);
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(css, /#settings\[data-rail="true"\] #settings-tabs\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(css, /#settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/, 'the row fallback wraps');
+});
+
+test('#408 S9 spacing at the Settings size: wider rail, roomier panel and sections, 2-column cards, tall rail items', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, sel); return css.slice(i, css.indexOf('}', i)); };
+  assert.match(rule('#settings[data-rail="true"]'), /grid-template-columns:\s*200px/);
+  assert.match(rule('#settings[data-rail="true"]'), /padding:\s*20px 24px/);
+  assert.match(rule('#settings[data-rail="true"] .ssec'), /margin-top:\s*20px/);
+  assert.match(rule('#settings[data-rail="true"] #settings-tabs'), /gap:\s*6px/);
+  assert.match(rule('#settings[data-rail="true"] .stab'), /min-height:\s*48px/);
+  assert.match(rule('#settings[data-rail="true"] .scard'), /padding:\s*16px 18px/);
+  assert.match(rule('#settings[data-rail="true"] .scards'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(rule('#settings[data-rail="true"] .scards'), /gap:\s*12px/);
+  assert.match(rule('#settings[data-rail="true"] .scard .sagent-head'), /align-items:\s*center/);
+});
+
+test('#409 T1 the copy-from-Pi surface is gone end to end: no view export, no page/host/module/doc remnant', () => {
+  // the view module no longer exports the Pi card/outcome helpers
+  assert.equal(S.piConnection, undefined, 'piConnection export removed');
+  assert.equal(S.piOutcome, undefined, 'piOutcome export removed');
+  const root = path.join(__dirname, '..');
+  const read = p => fs.readFileSync(p, 'utf8');
+  for (const [name, src] of [['settings-view.js', read(path.join(frontend, 'settings-view.js'))], ['settings.js', read(path.join(frontend, 'settings.js'))]]) {
+    for (const gone of ['Usar la conexión de Pi', 'Volver a copiar desde Pi', 'pi_connection', 'importFromPi', 'renderPiCard', 'refreshPi']) {
+      assert.ok(!src.includes(gone), `${name} must not contain ${gone}`);
+    }
+  }
+  // host: the command, its registration, the module and its tests are deleted; no store writer left
+  assert.ok(!fs.existsSync(path.join(root, 'src', 'piimport.rs')), 'src/piimport.rs deleted');
+  assert.ok(!fs.existsSync(path.join(root, 'src', 'piimport_tests.rs')), 'src/piimport_tests.rs deleted');
+  for (const [name, gone] of [['main.rs', 'pi_connection'], ['lib.rs', 'piimport'], ['settingshost.rs', 'pi_connection'], ['settingshost.rs', 'piimport'], ['agentclient.rs', 'import_pi_nan'], ['agentclient.rs', 'piimport']]) {
+    assert.ok(!read(path.join(root, 'src', name)).includes(gone), `src/${name} must not contain ${gone}`);
+  }
+  const readme = read(path.join(root, 'README.md'));
+  for (const gone of ['Usar la conexión de Pi', 'pi_connection', 'piimport']) {
+    assert.ok(!readme.includes(gone), `README.md must not contain ${gone}`);
+  }
+});
+
+test('#409 T3 docs and source pins: manual editor fields, row removal, and the public checks that pin both', () => {
+  const root = path.join(__dirname, '..');
+  const read = p => fs.readFileSync(p, 'utf8');
+  // S5 documented: deletion is reachable from the owned-account row
+  const readme = read(path.join(root, 'README.md'));
+  assert.match(readme, /«Quitar conexión»/, 'README documents deletion from the owned-account row');
+  assert.match(readme, /abito_account_remove/, 'README names the closed verb behind it');
+  // S4 pinned at the source: every field, the three credential options, clear-before-IPC
+  const src = read(path.join(frontend, 'settings.js'));
+  for (const field of ['account-provider', 'account-name', 'account-url', 'account-api', 'account-models', 'account-default', 'account-credential', 'account-secret', 'account-save', 'account-endpoint']) {
+    assert.ok(src.includes(field), `manual editor field ${field}`);
+  }
+  for (const label of ['Conservar', 'Establecer clave', 'Borrar clave']) assert.ok(src.includes(label), `credential option ${label}`);
+  assert.match(src, /secret\.value = ''/, 'the secret field is cleared, never retained');
+  assert.match(src, /removeAccount\(account\.accountId\)/, 'the row wires removal through the closed verb');
+  // a public check must keep pinning the removal sentences (S5) and the manual path (S4)
+  const pills = read(path.join(__dirname, 'pills-check.cjs'));
+  assert.ok(pills.includes('Conexión quitada. La clave se borró del almacén de Abito.'), 'pills-check pins the removal success sentence');
+  // the failure sentence lives in a regex literal in pills-check (backslash-escaped dots)
+  assert.ok(pills.includes('No se pudo quitar la conexión') && pills.includes('No se cambió nada'), 'pills-check pins the removal failure sentence');
+  assert.ok(pills.includes('account-credential'), 'pills-check drives the manual credential options');
+});
+
+// ---- #410 Conexiones compacta (S1-S3): denser type and spacing INSIDE that tab only -----------------
+const bareCss = () => fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const COMPACT_SCOPE = '#settings-body[data-screen="accounts"]';
+const compactBlock = () => {
+  const bare = bareCss();
+  const at = bare.indexOf(COMPACT_SCOPE);
+  assert.ok(at >= 0, 'the #410 compact block exists (scoped to the Conexiones tabpanel)');
+  return bare.slice(at);
+};
+
+test('#410 scope: the open sub-tab is a public DOM attribute, and every compact rule is scoped to Conexiones', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /body\.dataset\.screen = id/, 'settings.js publishes the open screen on the tabpanel');
+  const bare = bareCss();
+  // written AFTER the #408 rail rules it densifies, so it wins at equal specificity
+  assert.ok(bare.indexOf(COMPACT_SCOPE) > bare.indexOf('#settings[data-rail="true"] .scard'),
+    'the compact block comes after the rail block');
+  const rules = [...compactBlock().matchAll(/(^|\n)([^{}\n][^{}]*)\{([^}]*)\}/g)];
+  assert.ok(rules.length >= 12, `compact rules found: ${rules.length}`);
+  for (const m of rules) {
+    assert.match(m[2], new RegExp(COMPACT_SCOPE.replace(/[.\[\]"]/g, c => '\\' + c)),
+      `unscoped rule: ${m[2].trim()} — the other Ajustes tabs keep their look (S3)`);
+  }
+  // the bar (title + connection chip) and the per-tab hint live OUTSIDE the tabpanel, so the block
+  // never names them: the shared chrome keeps its size on every tab
+  assert.doesNotMatch(compactBlock(), /#settings-(?:conn|hint|bar|title)/, 'shared chrome is not compacted');
+});
+
+test('#410 compact sizing: V1 tokens only, one type step down, tighter rows — and every control keeps its 44px target', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const block = compactBlock();
+  const rule = sel => {
+    const hits = [...block.matchAll(/(^|\n)([^{}\n][^{}]*)\{([^}]*)\}/g)]
+      .filter(m => m[2].split(',').map(x => x.trim()).includes(sel));
+    assert.ok(hits.length, `rule ${sel}`);
+    return hits[hits.length - 1][3]; // the LAST matching rule wins in CSS
+  };
+  // S3: the compact block stays on the V1 --fs-* tokens (12px floor): no raw px font size at all
+  assert.doesNotMatch(block, /font(?:-size)?:[^;}]*\d+(?:\.\d+)?px/, 'raw px font-size inside the compact block');
+  assert.match(rule(`${COMPACT_SCOPE} .srow-title`), /font-size: var\(--fs-label\)/);  // 14px -> 13px
+  assert.match(rule(`${COMPACT_SCOPE} .snote`), /font-size: var\(--fs-caption\)/);     // 13px -> 12px
+  assert.match(rule(`${COMPACT_SCOPE} .sline`), /font-size: var\(--fs-label\)/);       // 14px -> 13px
+  assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /font: 600 var\(--fs-label\)/);         // 14px -> 13px
+  assert.match(rule(`${COMPACT_SCOPE} .chip`), /font-size: var\(--fs-caption\)/);      // 13px -> 12px
+  // tighter than the same selectors outside the tab (V1 / #408 rail), which the rules above keep
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 44px/);   // was 48px (V1)
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /gap: 6px/);           // was 10px (V1)
+  assert.match(rule(`${COMPACT_SCOPE} .srows`), /gap: 4px/);          // was 6px
+  assert.match(rule(`${COMPACT_SCOPE} .ssec`), /margin-top: 12px/);   // was 20px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .ssection`), /line-height: 16px/); // was 18px (V1)
+  assert.match(rule(`${COMPACT_SCOPE} .scard`), /padding: 10px 12px/);// was 16px 18px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .scard`), /gap: 4px/);          // was 8px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .sagent`), /padding: 6px 0/);   // was 12px 0 (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .sfilter`), /gap: 4px/);        // was 6px
+  assert.match(rule(`${COMPACT_SCOPE} .srow-actions`), /gap: 4px/);   // was 6px
+  assert.match(rule(`${COMPACT_SCOPE} .chip`), /min-height: 24px/);   // was 28px
+  // S3 click targets kept: the compact block densifies spacing/type, never the 44px floor
+  assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-height: 44px/);
+  assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-width: 44px/);
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 44px/);
+  assert.match(css.match(/#settings-filter \{([^}]*)\}/)[1], /height: 44px/, 'the Conexiones search keeps its target');
+  assert.match(css.match(/\.sfield \{([^}]*)\}/)[1], /min-height: 44px/, 'fields keep their target');
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /node\.style\.minHeight = '44px'/, 'the owned-account buttons keep their 44px anchor (#308)');
+});
+
+// ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
+test('#390 GD027: the restart control is one closed neutral label with honest outcomes', () => {
+  const idle = S.daemonRestartView();
+  assert.equal(idle.action.label, 'Reiniciar motor');
+  assert.equal(idle.action.disabled, false);
+  assert.ok(idle.title.length > 0, 'the section names itself');
+  assert.ok(idle.hint.length > 10, 'the human learns what a restart does');
+  const busy = S.daemonRestartView(true);
+  assert.equal(busy.action.label, 'Reiniciando…');
+  assert.equal(busy.action.disabled, true, 'one restart at a time, from the button itself');
+  const ok = S.daemonRestartOutcome({ action: 'restart', ready: true });
+  assert.deepEqual([ok.tone, ok.icon], ['go', 'check']);
+  assert.match(ok.say, /reiniciado/i);
+  const late = S.daemonRestartOutcome({ action: 'restart', ready: false });
+  assert.equal(late.tone, 'sun');
+  assert.ok(late.say.length > 5, 'a timeout is said out loud, never as success');
+  const failed = S.daemonRestartOutcome(null, { code: 'host_spawn_failed' });
+  assert.equal(failed.tone, 'red');
+  assert.ok(!failed.say.includes('host_spawn_failed'), 'no host text leaks into Ajustes');
+  // Neutral phrasing on purpose: #305's `portal_rejected` wording belongs to that worker,
+  // and neither tokens nor engine text may ever appear in this panel.
+  const all = JSON.stringify([idle, busy, ok, late, failed]);
+  assert.ok(!all.includes('portal'), 'the hotkey portal wording is not ours to write');
+  assert.ok(!all.includes('token') && !all.includes('sk-'));
+});
+
+// ---- #390 fix: the closed `outcome` drives the sentence ----------------------------------------
+test('#390 GD027 fix: outcome drives the sentence — restarted/refused/timeout, closed and ours', () => {
+  const restarted = S.daemonRestartOutcome({ action: 'restart', ready: true, connection: 'connected', outcome: 'restarted' });
+  assert.deepEqual([restarted.tone, restarted.icon, restarted.say], ['go', 'check', 'Motor reiniciado.']);
+  // the coordinator's verbatim sentence, no engine text
+  const refused = S.daemonRestartOutcome({ action: 'restart', ready: false, connection: 'no_daemon', outcome: 'refused' });
+  assert.equal(refused.say, 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.');
+  const timeout = S.daemonRestartOutcome({ action: 'restart', ready: false, connection: 'no_daemon', outcome: 'timeout' });
+  assert.equal(timeout.say, 'El motor no respondió a tiempo; volvé a probar en un momento.');
+  assert.equal(timeout.tone, 'sun');
+  // refused and timeout are distinct states, never success
+  assert.notEqual(refused.say, restarted.say);
+  assert.ok(refused.tone !== 'go', 'a refused restart never reads as success');
+  // the previous contract (a reply without the closed outcome) keeps its meaning
+  assert.deepEqual([S.daemonRestartOutcome({ action: 'restart', ready: true }).say, S.daemonRestartOutcome({ action: 'restart', ready: false }).tone], ['Motor reiniciado.', 'sun']);
+  assert.equal(S.daemonRestartOutcome(null, { code: 'host_spawn_failed' }).tone, 'red');
+  const all = JSON.stringify([restarted, refused, timeout]);
+  assert.ok(!all.includes('portal') && !all.includes('token') && !all.includes('sk-'), 'no foreign wording');
+});

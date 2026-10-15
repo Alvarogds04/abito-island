@@ -47,6 +47,21 @@ pub enum ReleaseOutcome {
     Cancelled,
 }
 
+impl ReleaseOutcome {
+    /// #264 (GD049): the origin this release decided for the island, when it
+    /// decided one at all — that is, a deliberate drag release and nothing
+    /// else. A short click only toggles (the dot never moved), a cancelled
+    /// release reconciles to the edge without a placement, and a release with
+    /// no press behind it is not the human putting the island anywhere.
+    /// This is the ONLY value the host persists across launches.
+    pub fn saved_position(&self) -> Option<(i32, i32)> {
+        match self {
+            ReleaseOutcome::Snapped { rect, .. } => Some((rect.x, rect.y)),
+            ReleaseOutcome::Toggle(_) | ReleaseOutcome::Cancelled => None,
+        }
+    }
+}
+
 /// Size + position for a compact<->overview switch, already anchored and clamped.
 #[derive(Debug, PartialEq)]
 pub enum TogglePlan {
@@ -113,6 +128,10 @@ pub struct Core {
     pub expanded: bool,
     /// U1: the expanded island shows the chat view (only while expanded).
     pub chat: bool,
+    /// #408: Ajustes is open inside the chat, so the column has the Settings size (only with `chat`).
+    pub settings: bool,
+    /// The chat rectangle before Settings grew it; closing restores it exactly (when it still fits).
+    settings_prev: Option<Rect>,
     press: Option<Press>,
     /// #309: the (stage, final) rectangles of the last view plan, while the window has not reached
     /// the final size yet. The host applies a plan asynchronously (a set_size is only a request),
@@ -231,6 +250,8 @@ impl Core {
         // Collapsing always forgets the chat view: the next short click
         // opens the overview (M1 contract), never the chat directly.
         self.chat = false;
+        self.settings = false;
+        self.settings_prev = None;
         if self.expanded {
             TogglePlan::Expand {
                 size,
@@ -259,6 +280,38 @@ impl Core {
         } else {
             (geometry::LOGICAL_OVERVIEW, geometry::OVERVIEW_VISIBLE)
         };
+        self.settings = false; // any view change forgets the Settings size
+        self.settings_prev = None;
+        Some(self.resize(io, area, chat, logical, visible, None))
+    }
+
+    /// #408: grow the chat column to the Settings size (`open`) or give it back. Only inside the chat
+    /// view; the window grows around its centre on the same docked edge and always stays inside the
+    /// work area. Closing restores the previous rectangle exactly when it still fits that size.
+    pub fn plan_settings(&mut self, io: &dyn WindowIo, area: Rect, open: bool) -> Option<ViewPlan> {
+        if !self.expanded || !self.chat || self.settings == open {
+            return None;
+        }
+        let scale = io.scale();
+        let (logical, visible, restore) = if open {
+            let (x, y) = io.outer_position();
+            let (w, h) = io.size();
+            // a stale in-flight plan means the getter is not the truth yet: remember the planned chat rect
+            self.settings_prev = Some(match self.in_flight {
+                Some((_, fin)) if (w, h) != (fin.w, fin.h) => fin,
+                _ => Rect { x, y, w, h },
+            });
+            (geometry::settings_window(area.w, area.h, scale), geometry::settings_visible(area.w, area.h, scale), None)
+        } else {
+            (geometry::chat_window(area.h, scale), geometry::chat_visible(area.h, scale), self.settings_prev.take())
+        };
+        self.settings = open;
+        Some(self.resize(io, area, true, logical, visible, restore))
+    }
+
+    /// The staged resize shared by every view change (see [`ViewPlan::stage`]).
+    fn resize(&mut self, io: &dyn WindowIo, area: Rect, chat: bool, logical: (i32, i32), visible: (i32, i32), restore: Option<Rect>) -> ViewPlan {
+        let scale = io.scale();
         let size = geometry::scaled_size(logical, scale);
         let (x, y) = io.outer_position();
         let (w, h) = io.size();
@@ -273,24 +326,32 @@ impl Core {
         }
         let stage = stage_rect(self.edge, current, size, size, area);
         // the final window is centred on the stage: the island does not jump when the stage is dropped
-        let rect = geometry::anchor_toggle(self.edge, stage, size, area);
+        let mut rect = geometry::anchor_toggle(self.edge, stage, size, area);
+        if let Some(prev) = restore {
+            if (prev.w, prev.h) == size {
+                let held = geometry::clamp_rect(prev, area);
+                if (held.w, held.h) == size {
+                    rect = held;
+                }
+            }
+        }
         self.chat = chat;
         self.in_flight = Some((stage, rect));
-        Some(ViewPlan {
+        ViewPlan {
             chat,
             size,
             rect,
             stage,
             visible,
             edge: self.edge,
-        })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{chat_visible, chat_window, LOGICAL_COMPACT, LOGICAL_OVERVIEW};
+    use crate::geometry::{chat_visible, chat_window, settings_window, LOGICAL_COMPACT, LOGICAL_OVERVIEW};
     use std::cell::Cell;
 
     fn area() -> Rect {
@@ -613,5 +674,119 @@ mod tests {
         let again = core.toggle(&io, area());
         assert_eq!(again.size(), LOGICAL_OVERVIEW);
         assert!(!core.chat);
+    }
+
+    // --- #264 (GD049): only a deliberate drag release decides what the next
+    // --- launch remembers ------------------------------------------------------
+
+    #[test]
+    fn only_a_drag_release_carries_the_position_to_persist() {
+        let io = FakeIo::compact_top();
+        let mut core = Core::new();
+        // drag to the bottom-right and release: this is the placement to save
+        core.press(&io, (50.0, 20.0));
+        core.drag(&io, area(), (152.0, 1008.0));
+        let dragged = core.release(&io, area(), (50.0, 20.0), false);
+        assert!(matches!(dragged, ReleaseOutcome::Snapped { .. }));
+        assert_eq!(dragged.saved_position(), Some((910, 32 + 1048 - LOGICAL_COMPACT.1)));
+        // a short click toggles the island; it does not re-place it
+        core.press(&io, (50.0, 20.0));
+        let clicked = core.release(&io, area(), (50.0, 20.0), false);
+        assert!(matches!(clicked, ReleaseOutcome::Toggle(_)));
+        assert_eq!(clicked.saved_position(), None);
+        // a cancelled release reconciles to the edge but is no deliberate placement
+        core.press(&io, (50.0, 20.0));
+        let cancelled = core.release(&io, area(), (50.0, 20.0), true);
+        assert_eq!(cancelled, ReleaseOutcome::Cancelled);
+        assert_eq!(cancelled.saved_position(), None);
+        // no press at all: nothing to remember either
+        assert_eq!(core.release(&io, area(), (50.0, 20.0), false).saved_position(), None);
+    }
+
+    // ---- #408: the chat column grows to a Settings size while Ajustes is open ----------------------
+
+    fn chat_open() -> (Core, FakeIo, ViewPlan) {
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).unwrap();
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        (core, io, open)
+    }
+
+    #[test]
+    fn settings_size_needs_the_chat_view_first() {
+        let (mut core, io) = expanded_top();
+        assert_eq!(core.plan_settings(&io, area(), true), None, "overview: no settings size");
+        let io = FakeIo::compact_top();
+        assert_eq!(Core::new().plan_settings(&io, area(), true), None, "compact: never");
+    }
+
+    #[test]
+    fn opening_settings_grows_the_column_to_the_settings_size_inside_the_work_area() {
+        let (mut core, io, chat) = chat_open();
+        let plan = core.plan_settings(&io, area(), true).expect("open settings");
+        assert!(plan.chat, "still the chat view for the page");
+        assert_eq!(plan.visible, (720, 680));
+        assert_eq!(plan.size, settings_window(area().w, area().h, 1.0));
+        assert_eq!(plan.size, (752, 696));
+        assert_eq!(plan.rect.y, chat.rect.y, "same docked edge");
+        assert_eq!(plan.rect.x + plan.rect.w / 2, chat.rect.x + chat.rect.w / 2, "grows around its centre");
+        assert!(plan.rect.x >= area().x && plan.rect.right() <= area().right() && plan.rect.bottom() <= area().bottom());
+        assert!(plan.stage.w >= plan.rect.w.max(chat.rect.w) && plan.stage.h >= plan.rect.h.max(chat.rect.h), "the stage holds both sizes");
+        assert_eq!(core.plan_settings(&io, area(), true), None, "repeating is a no-op");
+    }
+
+    #[test]
+    fn closing_settings_restores_the_previous_chat_rectangle_exactly() {
+        let (mut core, io, chat) = chat_open();
+        let open = core.plan_settings(&io, area(), true).unwrap();
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        let back = core.plan_settings(&io, area(), false).expect("close settings");
+        assert_eq!(back.rect, chat.rect, "the same size AND placement as before");
+        assert_eq!((back.size, back.visible), (chat.size, chat.visible));
+        assert!(back.chat);
+        assert_eq!(core.plan_settings(&io, area(), false), None);
+    }
+
+    #[test]
+    fn settings_stays_inside_small_work_areas() {
+        for (w, h) in [(1920, 1048), (1366, 600), (800, 560), (700, 400)] {
+            let a = Rect { x: 0, y: 32, w, h };
+            let (mut core, io, _) = {
+                let (mut core, io) = expanded_top();
+                let open = core.plan_view(&io, a, true).unwrap();
+                io.size.set(open.size);
+                io.pos.set((open.rect.x, open.rect.y));
+                (core, io, open)
+            };
+            let plan = core.plan_settings(&io, a, true).unwrap();
+            assert!(plan.rect.w <= w && plan.rect.h <= h, "{w}x{h}: {:?}", plan.rect);
+            assert!(plan.rect.x >= a.x && plan.rect.right() <= a.right(), "{w}x{h} horizontally");
+            assert!(plan.rect.y >= a.y && plan.rect.bottom() <= a.bottom(), "{w}x{h} vertically");
+            assert!(plan.visible.1 >= 240, "{w}x{h}: never shorter than the chat minimum");
+        }
+    }
+
+    #[test]
+    fn leaving_the_chat_or_collapsing_forgets_the_settings_size() {
+        let (mut core, io, _) = chat_open();
+        core.plan_settings(&io, area(), true).unwrap();
+        let back = core.plan_view(&io, area(), false).expect("back to the overview");
+        assert_eq!((back.size, back.visible), (LOGICAL_OVERVIEW, (640, 160)));
+        assert!(!core.settings);
+        let (mut core, io, _) = chat_open();
+        core.plan_settings(&io, area(), true).unwrap();
+        core.toggle(&io, area());
+        assert!(!core.settings && !core.chat);
+    }
+
+    #[test]
+    fn opening_the_chat_after_settings_uses_the_plain_column() {
+        let (mut core, io, chat) = chat_open();
+        core.plan_settings(&io, area(), true).unwrap();
+        core.plan_view(&io, area(), false).unwrap();
+        let again = core.plan_view(&io, area(), true).unwrap();
+        assert_eq!(again.size, chat.size);
     }
 }

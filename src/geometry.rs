@@ -89,6 +89,30 @@ pub fn chat_visible(area_h_phys: i32, scale: f64) -> (i32, i32) {
     (CHAT_COLUMN_W, room.clamp(CHAT_MIN_H, CHAT_PREFERRED_H))
 }
 
+/// #408 — while Ajustes is open the chat column grows to a comfortable working size. VISIBLE sizes,
+/// logical px, same window margins as every other view.
+pub const SETTINGS_W: i32 = 720;
+/// Visible height when the screen allows it.
+pub const SETTINGS_PREFERRED_H: i32 = 680;
+/// Logical px of air left on each side of a width-limited Settings view.
+pub const SETTINGS_SIDE_GAP: i32 = 16;
+
+/// Visible Settings size in logical px for a work area of `area_w_phys` x `area_h_phys` physical px:
+/// 720 wide (less on a narrow screen, never wider than the work area minus the window margins and a
+/// little air) and the chat's height rule capped at 680. Rust owns the number, as for the chat.
+pub fn settings_visible(area_w_phys: i32, area_h_phys: i32, scale: f64) -> (i32, i32) {
+    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let room_w = (area_w_phys as f64 / s).floor() as i32 - WINDOW_MARGIN.0 - 2 * SETTINGS_SIDE_GAP;
+    let room_h = logical_area_h(area_h_phys, scale) - CHAT_FAR_GAP - WINDOW_MARGIN.1;
+    (SETTINGS_W.min(room_w.max(CHAT_COLUMN_W)), room_h.clamp(CHAT_MIN_H, SETTINGS_PREFERRED_H))
+}
+
+/// Native Settings window in logical px: the visible size plus the overview's window margins.
+pub fn settings_window(area_w_phys: i32, area_h_phys: i32, scale: f64) -> (i32, i32) {
+    let (w, h) = settings_visible(area_w_phys, area_h_phys, scale);
+    (w + WINDOW_MARGIN.0, h + WINDOW_MARGIN.1)
+}
+
 /// Native chat window in logical px: the visible column plus the overview's window margins.
 pub fn chat_window(area_h_phys: i32, scale: f64) -> (i32, i32) {
     let (w, h) = chat_visible(area_h_phys, scale);
@@ -176,6 +200,27 @@ pub fn initial_position(area: Rect, w: i32, h: i32) -> Rect {
         y: area.y,
         w,
         h,
+    }
+}
+
+/// #264 (GD049): the position the human last dragged the island to, or the
+/// default placement when there is none or it no longer exists.
+///
+/// The saved origin is used VERBATIM only when the whole window still lies
+/// inside the CURRENT work area (a monitor was removed, the resolution
+/// changed, the point now sits under a panel or outside every screen → it
+/// does not). Otherwise the existing top-centre default wins: the island is
+/// never restored off-screen, and a half-valid rectangle is never guessed at.
+pub fn restore_position(saved: Option<(i32, i32)>, area: Rect, w: i32, h: i32) -> Rect {
+    let default = || initial_position(area, w, h);
+    let Some((x, y)) = saved else { return default() };
+    let wanted = Rect { x, y, w, h };
+    // `clamp_rect` only returns the rect unchanged when it already fits whole,
+    // and it also refuses a window larger than the area itself.
+    if clamp_rect(wanted, area) == wanted {
+        wanted
+    } else {
+        default()
     }
 }
 
@@ -677,5 +722,74 @@ mod tests {
         let tiny = Rect { x: 0, y: 0, w: 300, h: 200 };
         let moved = reclamp_on_workarea_change(r, tiny).unwrap();
         assert_eq!((moved.w, moved.h), (300, 200));
+    }
+
+    // --- #264 (GD049): the remembered position, restored verbatim or forgotten ---
+
+    #[test]
+    fn a_saved_position_inside_the_current_work_area_is_restored_verbatim() {
+        // dragged to the bottom-right of the work area and released there
+        assert_eq!(
+            restore_position(Some((1400, 1002)), area(), 78, 78),
+            Rect { x: 1400, y: 1002, w: 78, h: 78 }
+        );
+        // still top-docked, below the GNOME top bar
+        assert_eq!(
+            restore_position(Some((100, 32)), area(), 78, 78),
+            Rect { x: 100, y: 32, w: 78, h: 78 }
+        );
+        // an island that starts at the very corner is still inside
+        assert_eq!(restore_position(Some((0, 32)), area(), 78, 78).x, 0);
+        assert_eq!(restore_position(Some((1920 - 78, 1080 - 78)), area(), 78, 78).bottom(), 1080);
+    }
+
+    #[test]
+    fn a_saved_position_that_no_longer_exists_falls_back_to_the_default_placement() {
+        let default = initial_position(area(), 78, 78);
+        // monitor removed, resolution changed or simply outside the work area:
+        // the CURRENT default placement wins, never the stale coordinates.
+        for saved in [
+            (2000, 1002),  // right of a screen that is narrower now
+            (1400, 1200),  // below the current work area
+            (1400, -200),  // above it (y < area.y)
+            (1400, 10),    // under the top bar: outside the WORK area
+            (-3000, 100),  // left of every monitor present now
+        ] {
+            let restored = restore_position(Some(saved), area(), 78, 78);
+            assert_eq!(restored, default, "{saved:?} is unusable: default placement");
+            assert!(restored.x >= area().x && restored.right() <= area().right());
+            assert!(restored.y >= area().y && restored.bottom() <= area().bottom());
+        }
+        // a window bigger than the area cannot be restored verbatim either: it
+        // gets exactly the default placement it would have had with NO saved
+        // position at all (`initial_position` for its own size — never a guess).
+        assert_eq!(
+            restore_position(Some((0, 32)), area(), 4000, 78),
+            restore_position(None, area(), 4000, 78)
+        );
+        assert_eq!(restore_position(Some((0, 32)), area(), 4000, 78), initial_position(area(), 4000, 78));
+    }
+
+    #[test]
+    fn without_a_saved_position_the_default_top_centre_placement_is_unchanged() {
+        assert_eq!(restore_position(None, area(), 78, 78), initial_position(area(), 78, 78));
+        let r = restore_position(None, area(), 78, 78);
+        assert_eq!((r.x, r.y), ((1920 - 78) / 2, 32), "the M1a contract placement");
+    }
+
+    #[test]
+    fn whatever_was_saved_the_island_never_lands_off_screen() {
+        // sweep of remembered points, good and hostile: the result is ALWAYS
+        // fully inside the current work area (spec: never place it off-screen).
+        let mut x = -4000;
+        while x < 4000 {
+            for y in [-1000, -1, 0, 31, 32, 500, 1079, 1080, 5000] {
+                let r = restore_position(Some((x, y)), area(), 78, 78);
+                assert!(r.x >= area().x && r.right() <= area().right(), "x={x} y={y} -> {r:?}");
+                assert!(r.y >= area().y && r.bottom() <= area().bottom(), "x={x} y={y} -> {r:?}");
+                assert_eq!((r.w, r.h), (78, 78), "the compact size is never corrupted");
+            }
+            x += 271;
+        }
     }
 }

@@ -16,15 +16,27 @@ let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
 
 test('source gates pass on the real crate (R6 pin, curated frontend, config, capabilities, no devtools)', () => {
-  assert.ok(L.checkR6(crate).startsWith('e2dc5db3'));
+  assert.ok(L.checkR6(crate).startsWith('b699ebbc'));
   assert.equal(L.checkFrontend(crate).length, L.FRONTEND_FILES.length);
   const cfg = L.checkConfig(crate);
   assert.equal(cfg.identifier, 'com.abitog.AbitoTauri');
 });
 
+test('R7 character controller is explicitly in the closed shipped list', () => {
+  assert.equal(L.FRONTEND_FILES.filter(f => f === 'character-motion.js').length, 1);
+});
+
+test('mini-bot module is explicitly in the closed shipped list', () => {
+  assert.equal(L.FRONTEND_FILES.filter(f => f === 'character-minibots.js').length, 1);
+});
+
 test('F025 adds exactly its two assets to the closed shipped list', () => {
   assert.deepEqual(L.FRONTEND_FILES.filter(f => f.startsWith('chat-markdown.')).sort(), ['chat-markdown.css', 'chat-markdown.js']);
   assert.equal(new Set(L.FRONTEND_FILES).size, L.FRONTEND_FILES.length);
+});
+
+test('F031 pure catalog/model files are shipped without weakening the curated gate', () => {
+  for (const file of ['pill-catalog.js', 'pill-settings.js', 'pills.js', 'pills-view.js']) assert.ok(L.FRONTEND_FILES.includes(file), file);
 });
 
 function copyCrate() {
@@ -52,7 +64,7 @@ test('each gate FAILS when its rule is broken', () => {
   assert.throws(() => L.checkFrontend(d), /curated list/); fs.rmSync(d, { recursive: true });
 });
 
-function fakeStage({ crateDir = crate } = {}) {
+function fakeStage({ crateDir: _crateDir = crate } = {}) {
   const dir = T.make('abito-stage-');
   fs.writeFileSync(path.join(dir, 'abito-island'), '#!/bin/true\nfake binary\n', { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'abito-island-launcher'), L.launcherText(), { mode: 0o755 });

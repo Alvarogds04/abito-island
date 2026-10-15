@@ -304,7 +304,7 @@ struct AppState {
     /// `ABITO_BRIDGE_BASE` was already set from outside.
     #[cfg(any(debug_assertions, feature = "probe"))]
     probe_fake: Mutex<Option<Arc<fakebridge::FakeBackend>>>,
-    /// U1: the island conversation (process memory only, never on disk).
+    /// The bounded active chat lane, backed by #341 private local history.
     chat: chatlane::SharedLane,
     /// U1: the selected LOCAL target (U2 picker writes it; `None` = no
     /// verified local model selected → Send refuses with `profile_missing`).
@@ -845,6 +845,14 @@ fn drag_release(app: AppHandle, state: State<AppState>, x: f64, y: f64, cancelle
             }
             ReleaseOutcome::Snapped { rect, edge } => {
                 store_requested(&state, "snap", Some((rect.x, rect.y)), None);
+                // #264 (GD049): this release is the placement the next launch
+                // restores. It goes through the same prefs gate and file as every
+                // other preference; a failed write keeps the previous position.
+                if let Some((x, y)) = outcome.saved_position() {
+                    if !settingshost::save_position(&app, x, y) {
+                        eprintln!("island position not persisted: keeping the previous one");
+                    }
+                }
                 push_edge(&app, edge);
                 "snap".to_string()
             }
@@ -1340,7 +1348,7 @@ fn record_frontend_evidence(
             let scale = win.scale_factor().unwrap_or(1.0);
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
             let wa = workarea::current(&win);
-            let rect = geometry::initial_position(wa.rect, w, h);
+            let rect = geometry::restore_position(settingshost::saved_position(&app), wa.rect, w, h);
             let io = TauriIo(&win);
             if win
                 .inner_size()
@@ -1538,6 +1546,8 @@ fn main() {
             hotkeyhost::hotkey_action,
             settingshost::agent_action,
             settingshost::prefs_action,
+            settingshost::settings_view,
+            settingshost::daemon_action,
             specialistshost::specialists_action,
             record_facade_evidence,
             record_chat_evidence,
@@ -1576,11 +1586,16 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             let win = main_window(&handle);
+            // #264: the remembered position must be in memory BEFORE the first
+            // geometry decision, so the prefs host starts here (it only reads
+            // prefs.json/accounts.json; it has no window dependency).
+            settingshost::start(&handle);
             let wa = workarea::current(&win);
             let scale = win.scale_factor().unwrap_or(1.0);
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
-            // Origin: top-centre of the work area (contract M1a).
-            let rect = geometry::initial_position(wa.rect, w, h);
+            // Origin: the position the human last dragged the island to, when it
+            // still fits the current work area; otherwise the M1a top-centre default.
+            let rect = geometry::restore_position(settingshost::saved_position(&handle), wa.rect, w, h);
             let io = TauriIo(&win);
             io.set_size(w, h);
             io.set_outer_position(rect.x, rect.y);
@@ -1592,6 +1607,10 @@ fn main() {
             }
             let state = app.state::<AppState>();
             *state.work_area.lock().expect("work area lock") = wa.rect;
+            // #264: the dock edge follows the RESTORED origin, so an island that
+            // came back at the bottom still grows upward when it expands (the
+            // default top-centre placement derives Top, as before).
+            state.core.lock().expect("core lock").edge = geometry::nearest_vertical_edge(rect, wa.rect);
             store_requested(&state, "initial", Some((rect.x, rect.y)), Some((w, h)));
             platform::audit::sample(&handle, "setup", 0, Some((w, h)));
             // Read-only sampling stops with this process. No probe or UI actions.
@@ -1614,8 +1633,9 @@ fn main() {
             spawn_workarea_watcher(handle.clone());
             spawn_publish_ticker(handle.clone());
             hotkeyhost::start(&handle); // #305: global show/hide shortcut (config + X11 grab)
-            settingshost::start(&handle); // #306: settings prefs
+            // #306 settings prefs: `settingshost::start` runs before the island is placed (#264)
             specialistshost::start(&handle); // #327: the manual specialists (empty = the principal)
+            chathost::start_history(&handle); // #341: isolated private conversation store
             // M2: local notice transport + SIGINT/SIGTERM socket cleanup
             // (main.cjs creates the transport after the window loads; here it
             // starts before the probe so the probe can use its endpoint).

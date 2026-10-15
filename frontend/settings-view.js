@@ -13,14 +13,36 @@
   // ---- screens ------------------------------------------------------------------------------------------------
   // Copied from gentle-dot (MIT): one icon button per screen in the chat header; each screen COVERS the chat
   // body with a title, a close button and a one-line hint. Opening one closes the others.
-  const SCREENS = Object.freeze([
-    Object.freeze({ id: 'accounts', title: 'Cuentas', icon: 'user', label: 'Cuentas',
-      hint: 'Conectá el servicio de IA que ya pagás o pegá una clave de API. Tu inicio de sesión queda en esta computadora.' }),
-    Object.freeze({ id: 'connectors', title: 'Conectores', icon: 'plug', label: 'Conectores',
-      hint: 'Conectá tus agentes de código y dejá que Abito lea tus apps. Preguntá antes de enviar o cambiar algo.' }),
-    Object.freeze({ id: 'settings', title: 'Ajustes', icon: 'gear', label: 'Ajustes', hint: '' }),
+  // #408: ONE entry point (Ajustes), seven sub-tabs. This table is the single place to rename or
+  // reorder them: the tab strip, the title/hint and the deep-link seam all read it.
+  const TABS = Object.freeze([
+    Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones',
+      hint: 'Proveedores de IA, agentes de código y servicios en un solo lugar. Tu inicio de sesión queda en esta computadora. Preguntá antes de enviar o cambiar algo.' }),
+    Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
+      hint: 'Elegí el modelo local con el que charlás. Se usa desde el próximo mensaje.' }),
+    Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
+      hint: 'Roles manuales con sus propias instrucciones. Sólo se usan si los elegís.' }),
+    Object.freeze({ id: 'pills', title: 'Pills', icon: 'ring', label: 'Pills',
+      hint: 'Una principal y hasta cuatro declaradas; elegir no conecta.' }),
+    Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia',
+      hint: 'Tema, colores, movimiento y cómo te saluda Abito.' }),
+    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General',
+      hint: 'Atajo de teclado y sonido.' }),
   ]);
-  const screenById = id => SCREENS.find(x => x.id === id) || null;
+  const tabById = id => TABS.find(x => x.id === id) || null;
+  // S8: Cuentas + Conectores are ONE tab now. Old ids (deep links, probe seam) resolve through this table.
+  const TAB_ALIASES = Object.freeze({ connectors: 'accounts' });
+  const tabAlias = id => (Object.prototype.hasOwnProperty.call(TAB_ALIASES, id) ? TAB_ALIASES[id] : (tabById(id) ? id : null));
+  // Tablist keyboard (WAI-ARIA): arrows wrap, Home/End jump. Returns the id to focus, or null for any other key.
+  function tabKeyTarget(current, key) {
+    const at = TABS.findIndex(x => x.id === current);
+    if (at < 0) return null;
+    if (key === 'ArrowRight' || key === 'ArrowDown') return TABS[(at + 1) % TABS.length].id;
+    if (key === 'ArrowLeft' || key === 'ArrowUp') return TABS[(at - 1 + TABS.length) % TABS.length].id;
+    if (key === 'Home') return TABS[0].id;
+    if (key === 'End') return TABS[TABS.length - 1].id;
+    return null;
+  }
 
   // ---- connection to the island agent (the daemon) ------------------------------------
   const CONNECTION = Object.freeze({
@@ -42,6 +64,40 @@
     return { kind: c in CONNECTION ? c : 'no_daemon', word: row[0], icon: row[1], tone: row[2], aria: `${row[0]}: ${row[3]}` };
   }
   const connected = state => !!state && state.connection === 'connected';
+
+  // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
+  // Closed shape and OUR words only: the engine never writes this panel (and #305's
+  // `portal_rejected` wording belongs to that worker — nothing here ever renders it).
+  const DAEMON_RESTART = Object.freeze({
+    title: 'Motor del agente',
+    hint: 'El motor local que ejecuta los proveedores y los agentes. Reiniciar corta lo que esté en curso y vuelve a conectar.',
+    label: 'Reiniciar motor',
+    busyLabel: 'Reiniciando…',
+    ok: 'Motor reiniciado.',
+    refused: 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.',
+    late: 'El motor no respondió a tiempo; volvé a probar en un momento.',
+    failed: 'No se pudo reiniciar el motor.',
+  });
+  // `busy` is the page's own in-flight flag: the button disables ITSELF while a restart runs.
+  function daemonRestartView(busy) {
+    return {
+      title: DAEMON_RESTART.title,
+      hint: DAEMON_RESTART.hint,
+      action: { label: busy === true ? DAEMON_RESTART.busyLabel : DAEMON_RESTART.label, disabled: busy === true,
+        aria: 'Reiniciar el motor del agente' },
+    };
+  }
+  // Success only for the closed `outcome` of the restart: `restarted` is the ONLY success,
+  // `refused` names a foreign motor that we never touch (GD029), `timeout` is a timeout —
+  // never a success. A reply without the closed outcome falls back to the connection truth.
+  function daemonRestartOutcome(result, error) {
+    if (!result || error) return { tone: 'red', icon: 'triangle', say: DAEMON_RESTART.failed };
+    if (result.outcome === 'restarted') return { tone: 'go', icon: 'check', say: DAEMON_RESTART.ok };
+    if (result.outcome === 'refused') return { tone: 'sun', icon: 'info', say: DAEMON_RESTART.refused };
+    if (result.outcome === 'timeout') return { tone: 'sun', icon: 'clock', say: DAEMON_RESTART.late };
+    if (result.ready === true) return { tone: 'go', icon: 'check', say: DAEMON_RESTART.ok };
+    return { tone: 'sun', icon: 'clock', say: DAEMON_RESTART.late };
+  }
 
   // ---- providers / accounts --------------------------------------------------------------
   const METHOD_ORDER = ['api_key', 'oauth'];
@@ -144,6 +200,27 @@
 
   // ---- general --------------------------------------------------------------------------------------------
   const soundDefault = () => false; // the island contract is silence until the human opts in
+
+  // ---- #380: the theme, a closed shape the panel can render -------------------------------------------------
+  // Exactly three choices. The saved mode is the truth; anything the host cannot persist
+  // (an old file, a damaged value) reads as «system», so the panel never offers a fourth
+  // theme. Labels are ours (Spanish, voseo-free nouns), never taken from any payload.
+  const THEME_MODES = Object.freeze(['system', 'light', 'dark']);
+  const THEME_LABELS = Object.freeze({ system: 'Sistema', light: 'Claro', dark: 'Oscuro' });
+  const THEME_ARIA = Object.freeze({
+    system: 'Tema: sigue el sistema. Cambia cuando tu computadora cambia de claro u oscuro.',
+    light: 'Tema: claro. Fijo, no sigue al sistema.',
+    dark: 'Tema: oscuro. Fijo, no sigue al sistema.',
+  });
+  function themeView(prefs) {
+    const saved = prefs && typeof prefs === 'object' && typeof prefs.theme === 'string' ? prefs.theme : undefined;
+    const mode = THEME_MODES.includes(saved) ? saved : 'system';
+    return {
+      mode,
+      options: THEME_MODES.map(id => ({ id, label: THEME_LABELS[id], selected: id === mode, aria: THEME_ARIA[id] })),
+      aria: THEME_ARIA[mode],
+    };
+  }
   function generalView(input) {
     const i = input || {};
     const h = i.hotkey || null;
@@ -203,6 +280,50 @@
           id: p.id, name: String(p.name || p.id), connected: p.configured === true || (!!account && account.configured === true),
           accountId: account ? account.accountId : null, canLogout: !!account && account.configured === true,
           actionLabel: method === 'oauth' ? 'Iniciar sesión' : 'Usar una clave de API',
+        };
+      });
+  }
+  // #408: ONE list of providers, each with ONE status and ONE obvious primary action. `flow` is the page's own
+  // memory of the login it started ({ providerId, phase: 'active' | 'error' | 'cancelled' }); the engine's
+  // wording is never shown — the texts below are ours (the engine can echo input), so a failure leaks nothing.
+  const FLOW_STATUS = Object.freeze({
+    connected: { kind: 'connected', word: 'Conectado', icon: 'check', tone: 'go' },
+    idle: { kind: 'idle', word: 'No conectado', icon: 'plug-off', tone: 'faint' },
+    progress: { kind: 'progress', word: 'En curso', icon: 'ring', tone: 'live' },
+    error: { kind: 'error', word: 'Error', icon: 'triangle', tone: 'red' },
+  });
+  const FLOW_ERROR = 'No se pudo iniciar sesión. No se guardó nada; probá de nuevo.';
+  const FLOW_CANCELLED = 'Cancelado. No se cambió nada.';
+  function providerCards(state, opts) {
+    const o = opts || {};
+    const flow = o.flow && typeof o.flow === 'object' ? o.flow : null;
+    const needle = String(o.filter || '').trim().toLowerCase();
+    const live = !!flow && flow.phase === 'active';
+    return ((state && state.providers) || [])
+      .filter(p => Array.isArray(p.methods) && p.methods.length
+        && (!o.method || p.methods.includes(o.method)) && String(p.name || '').toLowerCase().includes(needle))
+      .map(p => {
+        const account = accountOfProvider(state, p.id);
+        const isConnected = p.configured === true || (!!account && account.configured === true);
+        const mine = !!flow && flow.providerId === p.id;
+        const phase = mine ? flow.phase : null;
+        let status = isConnected ? FLOW_STATUS.connected : FLOW_STATUS.idle;
+        if (phase === 'active') status = FLOW_STATUS.progress;
+        else if (phase === 'error') status = FLOW_STATUS.error;
+        const methods = METHOD_ORDER.slice().reverse().filter(m => p.methods.includes(m) && (!o.method || o.method === m)); // oauth first
+        const blocked = !connected(state) || (live && !mine);
+        const make = (m, label) => ({ label, method: m, disabled: blocked || !loginPlan(state, p.id, m) });
+        let primary = null, alt = null;
+        if (phase === 'active') primary = { label: 'Cancelar', cancel: true, method: null, disabled: false };
+        else if (!isConnected && methods.length) {
+          primary = make(methods[0], phase === 'error' ? 'Reintentar' : methods[0] === 'oauth' ? 'Iniciar sesión' : 'Usar una clave de API');
+          if (methods[1]) alt = make(methods[1], 'Usar una clave');
+        }
+        return {
+          id: p.id, name: String(p.name || p.id), status, primary, alt,
+          logout: isConnected && !!account && account.configured === true && phase !== 'active',
+          accountId: account ? account.accountId : null,
+          error: phase === 'error' ? FLOW_ERROR : '', note: phase === 'cancelled' ? FLOW_CANCELLED : '',
         };
       });
   }
@@ -423,6 +544,8 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
-    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
+    daemonRestartView, daemonRestartOutcome,
+    THEME_MODES, THEME_LABELS, themeView };
 });

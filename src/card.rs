@@ -285,19 +285,28 @@ pub fn same_card(a: Option<&Candidate>, b: &Candidate) -> bool {
 pub fn receive_candidate(
     queued: &mut Option<Candidate>,
     selected: &mut Option<Candidate>,
-    mut candidate: Candidate,
+    candidate: Option<Candidate>,
     expanded: bool,
     mutation_busy: bool,
     now_ms: i64,
 ) {
+    // F013 / R2 (#338): the store only writes `Status.EXPIRED` when
+    // approve/execute is attempted (`sb_bridge/bridge.py:77-79,100-102`), so a
+    // row whose `expires_at` already passed keeps polling as `pending`. Such a
+    // candidate is ignored exactly like an empty pending list, otherwise the
+    // expired card would sit on the island forever with no verb to clear it
+    // (`approval.rs decide` refuses every verb once a reason exists).
+    let mut candidate = candidate.filter(|fresh| fresh.expires > now_ms);
+    // F013 / R1 (#338): `None` is legacy `receiveCandidate(null)` — the empty
+    // pending list that `main.cjs poll` feeds on every poll (main.cjs:292).
     // `if (sameCard(queued, candidate)) candidate.reason = queued.reason`:
     // a stale repeat of a decided card inherits the sticky reason.
-    if let Some(previous) = queued.as_ref() {
-        if same_card(Some(previous), &candidate) {
-            candidate.reason = previous.reason;
+    if let (Some(previous), Some(incoming)) = (queued.as_ref(), candidate.as_mut()) {
+        if same_card(Some(previous), incoming) {
+            incoming.reason = previous.reason;
         }
     }
-    *queued = Some(candidate); // `queued = candidate` happens FIRST, always
+    *queued = candidate; // `queued = candidate` happens FIRST, always (may be null)
     if !expanded && !mutation_busy {
         *selected = queued.clone(); // `selected = queued` (same object in JS)
         return;
@@ -309,18 +318,23 @@ pub fn receive_candidate(
     if now_ms >= pinned.expires && pinned.reason.is_none() {
         pinned.reason = Some(Reason::EXPIRED); // `selected.reason ||= expired`
     }
-    // The fresh candidate now lives in `queued` (legacy: `candidate` IS
-    // `queued` after line 2).
-    let incoming = queued.as_mut().expect("queued holds the candidate");
-    if pinned.id == incoming.id && pinned.hash == incoming.hash {
-        // same decision: refresh the display fields, copy the sticky reason
-        // onto the queue (in JS both point at the shared object)
-        pinned.operation = incoming.operation.clone();
-        pinned.expires_at = incoming.expires_at.clone();
-        pinned.expires = incoming.expires;
-        incoming.reason = pinned.reason;
-    } else if pinned.reason.is_none() {
-        pinned.reason = Some(Reason::CHANGED); // `selected.reason ||= changed`
+    // The fresh candidate (if any) now lives in `queued` (legacy: `candidate`
+    // IS `queued` after line 2). `sameCard(selected, null)` is false, so an
+    // empty list lands on the `changed` branch below (main.cjs:257-258).
+    match queued.as_mut() {
+        Some(incoming) if incoming.id == pinned.id && incoming.hash == pinned.hash => {
+            // same decision: refresh the display fields, copy the sticky reason
+            // onto the queue (in JS both point at the shared object)
+            pinned.operation = incoming.operation.clone();
+            pinned.expires_at = incoming.expires_at.clone();
+            pinned.expires = incoming.expires;
+            incoming.reason = pinned.reason;
+        }
+        _ => {
+            if pinned.reason.is_none() {
+                pinned.reason = Some(Reason::CHANGED); // `selected.reason ||= changed`
+            }
+        }
     }
 }
 
@@ -645,20 +659,71 @@ mod tests {
     fn compact_poll_promotes_the_candidate_to_selected() {
         let mut queued = None;
         let mut selected = None;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
         assert_eq!(selected.as_ref().unwrap().id, proposal_id('a'));
         assert_eq!(queued.as_ref().unwrap().id, proposal_id('a'));
+    }
+
+    #[test]
+    fn an_expired_incoming_candidate_is_ignored_like_an_empty_pending_list() {
+        // F013 / R2 (#338): the row keeps polling as `pending` even after its
+        // `expires_at` passed (only approve/execute write `Status.EXPIRED`),
+        // so the host must ignore such a candidate exactly like an empty
+        // pending list, or the expired card stays on screen forever.
+        let mut queued = None;
+        let mut selected = None;
+        let mut stale = candidate('a');
+        stale.expires = NOW - 1;
+        receive_candidate(&mut queued, &mut selected, Some(stale), false, false, NOW);
+        assert!(selected.is_none(), "an expired candidate never reaches the card");
+        assert!(queued.is_none(), "an expired candidate never queues");
+    }
+
+    #[test]
+    fn empty_pending_list_clears_the_card_while_the_island_is_compact() {
+        // F013 / R1 (#338): legacy `main.cjs poll` always calls
+        // `receiveCandidate(parseProposals(...))`, i.e. with `null` too
+        // (main.cjs:292), which clears `queued` and — while compact —
+        // `selected` (main.cjs:249-250). The stale card must retire.
+        let mut queued = None;
+        let mut selected = None;
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
+        assert!(selected.is_some());
+        receive_candidate(&mut queued, &mut selected, None, false, false, NOW + 1);
+        assert!(queued.is_none(), "an empty pending list clears the queue");
+        assert!(selected.is_none(), "an empty pending list clears the card while compact");
+    }
+
+    #[test]
+    fn empty_pending_list_keeps_the_pinned_card_inert_while_expanded() {
+        // F013 / R1 (#338): while the overlay is open the pin survives the
+        // empty list and goes inert `changed` (main.cjs:252-258); an already
+        // expired pin keeps the sticky `expired` reason instead (order: expiry
+        // first, then `changed`).
+        let mut queued = None;
+        let mut selected = None;
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, None, true, false, NOW + 1);
+        assert!(queued.is_none());
+        let pinned = selected.as_ref().unwrap();
+        assert_eq!(pinned.id, proposal_id('a'), "the pin is kept, not dropped");
+        assert_eq!(pinned.reason, Some(Reason::CHANGED));
+        // same path with a pin already past its expiry: `expired` is sticky
+        selected.as_mut().unwrap().reason = None;
+        selected.as_mut().unwrap().expires = NOW + 1;
+        receive_candidate(&mut queued, &mut selected, None, true, false, NOW + 2);
+        assert_eq!(selected.as_ref().unwrap().reason, Some(Reason::EXPIRED));
     }
 
     #[test]
     fn open_overlay_pins_the_selected_card_until_close_reexpand() {
         let mut queued = None;
         let mut selected = None;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
         // a replacement arrives while the overlay is open
         let mut replacement = candidate('b');
         replacement.operation = "Different operation".into();
-        receive_candidate(&mut queued, &mut selected, replacement, true, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(replacement), true, false, NOW);
         // the pinned card keeps ITS operation and becomes inert `changed`
         let pinned = selected.as_ref().unwrap();
         assert_eq!(pinned.id, proposal_id('a'));
@@ -668,7 +733,7 @@ mod tests {
         assert_eq!(queued.as_ref().unwrap().id, proposal_id('b'));
         // explicit re-expand (compact poll then expand) swaps to the queue
         let promote = queued.clone().unwrap();
-        receive_candidate(&mut queued, &mut selected, promote, false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(promote), false, false, NOW);
         assert_eq!(selected.as_ref().unwrap().id, proposal_id('b'));
         assert_eq!(selected.as_ref().unwrap().reason, None);
     }
@@ -677,12 +742,12 @@ mod tests {
     fn empty_open_overlay_never_acquires_an_unseen_card() {
         let mut queued = None;
         let mut selected = None;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), true, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), true, false, NOW);
         assert!(selected.is_none(), "open overlay without a pinned card");
         assert_eq!(queued.as_ref().unwrap().id, proposal_id('a'));
         // close + re-expand acquires it (compact poll promotes, expand keeps)
         let promote = queued.clone().unwrap();
-        receive_candidate(&mut queued, &mut selected, promote, false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(promote), false, false, NOW);
         assert_eq!(selected.as_ref().unwrap().id, proposal_id('a'));
     }
 
@@ -690,18 +755,18 @@ mod tests {
     fn same_id_same_hash_refreshes_fields_and_keeps_the_sticky_reason() {
         let mut queued = None;
         let mut selected = None;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
         // the pinned card was decided (sticky `sent`)
         selected.as_mut().unwrap().reason = Some(Reason::SENT);
         // a stale poll repeats the same card
-        receive_candidate(&mut queued, &mut selected, candidate('a'), true, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), true, false, NOW);
         let pinned = selected.as_ref().unwrap();
         assert_eq!(pinned.reason, Some(Reason::SENT), "decided stays inert");
         assert_eq!(queued.as_ref().unwrap().reason, Some(Reason::SENT));
         // same id with refreshed operation/expiry updates the pinned card
         let mut refreshed = candidate('a');
         refreshed.operation = "Revised label".into();
-        receive_candidate(&mut queued, &mut selected, refreshed, true, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(refreshed), true, false, NOW);
         assert_eq!(selected.as_ref().unwrap().operation, "Revised label");
         assert_eq!(selected.as_ref().unwrap().reason, Some(Reason::SENT));
     }
@@ -710,11 +775,11 @@ mod tests {
     fn same_id_changed_hash_is_a_different_decision_and_goes_inert() {
         let mut queued = None;
         let mut selected = None;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
         let mut changed = candidate('a');
         changed.hash = "d".repeat(64);
         changed.operation = "Updated operation".into();
-        receive_candidate(&mut queued, &mut selected, changed, true, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(changed), true, false, NOW);
         let pinned = selected.as_ref().unwrap();
         assert_eq!(pinned.operation, "Review document", "pin keeps old fields");
         assert_eq!(pinned.reason, Some(Reason::CHANGED));
@@ -725,16 +790,16 @@ mod tests {
         let mut queued = None;
         let mut selected = None;
         // compact poll promotes the card, then the overlay opens over it
-        receive_candidate(&mut queued, &mut selected, candidate('a'), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
         // time passes inside the open overlay: the pin expires
         selected.as_mut().unwrap().expires = NOW - 1;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), true, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), true, false, NOW);
         assert_eq!(selected.as_ref().unwrap().reason, Some(Reason::EXPIRED));
         // a later poll with a fresh expiry cannot revive it inside the open
         // overlay (main.test.cjs `expiry cannot silently revive`)
         let mut revived = candidate('a');
         revived.expires = NOW + 600_000;
-        receive_candidate(&mut queued, &mut selected, revived, true, false, NOW + 1);
+        receive_candidate(&mut queued, &mut selected, Some(revived), true, false, NOW + 1);
         assert_eq!(selected.as_ref().unwrap().reason, Some(Reason::EXPIRED));
     }
 
@@ -744,10 +809,10 @@ mod tests {
         // NOT promote; it follows the pinning branch (legacy exactly).
         let mut queued = None;
         let mut selected = None;
-        receive_candidate(&mut queued, &mut selected, candidate('a'), false, false, NOW);
+        receive_candidate(&mut queued, &mut selected, Some(candidate('a')), false, false, NOW);
         let mut replacement = candidate('b');
         replacement.operation = "Different".into();
-        receive_candidate(&mut queued, &mut selected, replacement, false, true, NOW + 1);
+        receive_candidate(&mut queued, &mut selected, Some(replacement), false, true, NOW + 1);
         assert_eq!(selected.as_ref().unwrap().id, proposal_id('a'));
         assert_eq!(selected.as_ref().unwrap().reason, Some(Reason::CHANGED));
     }

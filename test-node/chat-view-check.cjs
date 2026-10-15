@@ -190,7 +190,7 @@ test('UI.2 rows: short word + icon, full text kept for aria', () => {
 
 test('UI.2 chat markup: icon-only controls are named, copy is voseo, labels Vos/Abito gone', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
-  for (const id of ['chat-models', 'chat-back', 'chat-send', 'chat-cancel', 'chat-new']) {
+  for (const id of ['chat-back', 'chat-send', 'chat-cancel', 'chat-new']) {
     assert.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html)[0], /aria-label="[^"]{3,}"/, id);
   }
   assert.match(html, /placeholder="Escribí…"/);
@@ -417,10 +417,10 @@ test('column: a settings screen is ONE row — title, connection chip and a clos
   assert.match(rule('#settings-title'), /text-overflow:\s*ellipsis/);
 });
 
-test('column: the three header buttons (Cuentas, Conectores, Ajustes) plus Modelos and Volver fit the 400 header', () => {
+test('column: #408 — the header keeps only Ajustes and Volver, so it fits the 400 header', () => {
   const header = html.slice(html.indexOf('id="chat-header"'), html.indexOf('id="chat-status-strip"'));
   const buttons = (header.match(/<button /g) || []).length;
-  assert.equal(buttons, 5, 'accounts, connectors, settings, models, back');
+  assert.equal(buttons, 2, 'settings, back');
   const gap = px(rule('#chat-header'), /gap:\s*(\d+)px/, 0);
   const inner = COLUMN_W - 24 /* gutters */ - 52 /* R6 */;
   const need = buttons * 44 + 70 /* the «local» chip */ + gap * buttons;
@@ -431,8 +431,8 @@ test('column: the models bar is two rows — [count, info, refresh, done] then t
   assert.match(rule('#models-bar'), /flex-wrap:\s*wrap/);
   const bar = html.slice(html.indexOf('id="models-bar"'), html.indexOf('id="models-note"'));
   const at = id => bar.indexOf(`id="${id}"`);
-  assert.ok(at('models-refresh') > -1 && at('models-close') > -1);
-  assert.ok(at('models-refresh') < at('models-meters') && at('models-close') < at('models-meters'), 'the buttons come BEFORE the meters, so wrapping pushes the meters down, never the buttons out');
+  assert.ok(at('models-refresh') > -1);
+  assert.ok(at('models-refresh') < at('models-meters'), 'the buttons come BEFORE the meters, so wrapping pushes the meters down, never the buttons out');
   assert.match(rule('#models-meters'), /(flex-basis:\s*100%|width:\s*100%|order:\s*\d)/, 'the meters take their own row');
   // first row: chip + 3 icon buttons (44px each) + gaps must fit
   const first = 44 * 3 + 44 /* chip, generous */ + 8 * 3;
@@ -456,7 +456,7 @@ test('column: with a screen open the chat header STAYS visible (gentle-dot): the
   assert.match(setCss, /left:\s*12px/);
   assert.match(setCss, /right:\s*12px/);
   assert.match(setCss, /top:\s*5\d px|top:\s*(5\d|6\d)px/, 'the panel starts BELOW the header');
-  assert.match(html, /id="open-screen-accounts"[^>]*aria-expanded="false"/);
+  assert.match(html, /id="open-screen-settings"[^>]*aria-expanded="false"/);
 });
 
 test('column: an open panel (Modelos, Ajustes) hides the chat status strip, so «Bloqueado» never overlaps the panel', () => {
@@ -571,6 +571,78 @@ test('greeting: the page writes the greeting with textContent and never puts the
   // elsewhere retain their previous implementation.
   const code = fn.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.doesNotMatch(code, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, 'no markup sink in the greeting renderer');
+});
+
+// ---- F024: the model row above the composer (R1/R2/R4/R5) -------------------
+const F024_TARGET = { alias: 'Abito-gpt', profile_id: 'local-abito-gpt', origin: 'http://127.0.0.1:11002' };
+const F024_READY = { target: F024_TARGET, availability: { state: 'ready', message: 'Modelo local listo.' }, active_turn: null };
+const F024_ROLE = { id: 'inv', name: 'Investigación', model: 'local-abito-gpt' };
+
+test('F024 row label: the effective local model; the role is named only when that role supplies this target (R1/R4)', () => {
+  assert.equal(V.modelButtonLabel(null, null), 'Sin modelo local elegido');
+  assert.equal(V.modelButtonLabel({ target: null }, null), 'Sin modelo local elegido');
+  assert.equal(V.modelButtonLabel(F024_READY, null), 'Abito-gpt');
+  assert.equal(V.modelButtonLabel(F024_READY, F024_ROLE), 'Abito-gpt · Investigación');
+  assert.equal(V.modelButtonLabel(F024_READY, { id: 'x', name: 'Otra', model: 'otro-id' }), 'Abito-gpt',
+    'a role on ANOTHER model does not claim this target');
+  assert.equal(
+    V.modelButtonLabel({ ...F024_READY, target: { profile_id: 'local-x', origin: F024_TARGET.origin } }, null),
+    'local-x', 'no alias: the profile id, never the origin');
+  assert.equal(
+    V.modelButtonLabel({ ...F024_READY, target: { profile_id: '', origin: F024_TARGET.origin } }, null),
+    'Sin modelo local elegido', 'nothing identifiable: the empty label');
+});
+
+test('F024 row aria: origin without its scheme plus the role ownership sentence — never an endpoint, key or provider (R4/R5)', () => {
+  assert.equal(V.modelButtonAria(F024_READY, null), 'Abito-gpt, sólo local, 127.0.0.1:11002');
+  const withRole = V.modelButtonAria(F024_READY, F024_ROLE);
+  assert.match(withRole, /^Abito-gpt, sólo local, 127\.0\.0\.1:11002/);
+  assert.match(withRole, /Investigación/, 'the role that fixes the model is part of what the row announces');
+  assert.doesNotMatch(V.modelButtonAria(F024_READY, null), /https?:\/\//, 'no scheme in the accessible name');
+  for (const text of [V.modelButtonLabel(F024_READY, F024_ROLE), withRole, V.modelRoleNote(F024_READY, F024_ROLE)]) {
+    assert.doesNotMatch(text, /api[_-]?key|Bearer|accounts\.json|anthropic|openai|openrouter|lmstudio|ollama/i, `no daemon/provider material: ${text}`);
+    assert.doesNotMatch(text, /https?:\/\//, `no endpoint: ${text}`);
+  }
+});
+
+test('F024 role note: ONE line, only while the active role is what fixes this exact target (R4)', () => {
+  const note = V.modelRoleNote(F024_READY, F024_ROLE);
+  assert.ok(note.length > 0);
+  assert.equal(note.includes('\n'), false);
+  assert.match(note, /Investigación/);
+  assert.match(note, /picker/i, 'the note says the picker does not override the role');
+  assert.equal(V.modelRoleNote(F024_READY, null), '');
+  assert.equal(V.modelRoleNote(F024_READY, { id: 'x', name: 'Otra', model: 'otro-id' }), '');
+  assert.equal(V.modelRoleNote({ ...F024_READY, target: null }, F024_ROLE), '');
+});
+
+test('F024 row interactivity: a running turn freezes it; an unchosen model stays choosable; a chosen one must be sendable (R2)', () => {
+  assert.equal(V.modelButtonEnabled({ ...F024_READY, active_turn: 't-1' }), false, 'a running turn disables the row');
+  assert.equal(V.modelButtonEnabled(F024_READY), true);
+  assert.equal(V.modelButtonEnabled({ ...F024_READY, availability: { state: 'busy' } }), true);
+  assert.equal(V.modelButtonEnabled({ ...F024_READY, availability: { state: 'unchecked' } }), true,
+    'no preflight verdict yet: nothing to protect');
+  assert.equal(V.modelButtonEnabled({ ...F024_READY, availability: { state: 'unavailable' } }), false);
+  assert.equal(V.modelButtonEnabled({ ...F024_READY, availability: { state: 'blocked' } }), false);
+  assert.equal(V.modelButtonEnabled({ target: null, availability: { state: 'blocked' }, active_turn: null }), true,
+    'nothing chosen: opening the row is what lets the human choose');
+  assert.equal(V.modelButtonEnabled(null), false);
+});
+
+test('F024 markup: the row sits between «Respuesta nueva» and the composer, with its named controls (R1)', () => {
+  for (const id of ['chat-model-row', 'chat-model-btn', 'chat-model-name', 'chat-model-picker', 'chat-model-note']) {
+    assert.ok(html.includes(`id="${id}"`), id);
+  }
+  const newer = html.indexOf('id="chat-new"');
+  const row = html.indexOf('id="chat-model-row"');
+  const composer = html.indexOf('id="chat-composer"');
+  assert.ok(newer > -1 && row > newer, 'the row comes after «Respuesta nueva»');
+  assert.ok(composer > row, 'the row comes directly above the composer');
+  const button = /<button[^>]*id="chat-model-btn"[^>]*>[\s\S]*?<\/button>/.exec(html);
+  assert.ok(button, 'the row is a real button');
+  assert.match(button[0], /aria-expanded="false"/);
+  assert.match(button[0], /aria-controls="chat-model-picker"/);
+  assert.match(/id="chat-model-picker"[^>]*/.exec(html)[0], /hidden/, 'the picker starts closed');
 });
 
 console.log(`chat-view-check: ${passed} passed`);

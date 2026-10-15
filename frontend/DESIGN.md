@@ -12,7 +12,19 @@ TaskView #328 / phase #323. Uncommitted isolated candidate; no install/runtime a
 | Preview JS | d04d995a5aff76e2d928972752bbbd087806c041afd2f7ee36316c1c9af0ec76 |
 | Frozen preview DESIGN (including §43) | 3496aaaebe43c6448ec5c785eeb00bc5dd82c9bf43212978a62b19ceaa521d85 |
 | Preview tests | d541a931e1fce002cff1cda0abce4f3a392826c810e27d617f5bf68d057f317f |
-| R6 clay engine, byte-exact | e2dc5db38832d7f162b7991e5ea0518f7743d20a48d9a557347c507afe9a2ad8 |
+| R7 clay engine (#347 authorized extension, seven legacy poses preserved) | b699ebbc9e4d92b7a0ffbb213af32c58e0b164715f20dde25709ee14a9ccf76e |
+
+## R7 character amendment (#347)
+
+Coordinator 01a13c61 approved T0/D1–D4 on 2026-10-14. Only the Tauri engine freeze is lifted:
+seven public R6 names/order and poses stay, eight own clay semantics are appended. Human
+pending requests outrank existing chat/error facts; new finished presentation is neutral,
+never success. Preserve #304 effective motion policy and #384 independent identity colors.
+MIT Coucou mechanics only, no Mochi shapes/expressions/media/sounds/hands or new dependencies.
+`character-motion.js` observes existing producer snapshots and owns one cancellable deadline;
+far-future expiry is capped/rechecked rather than overflowing browser timers. Debug preview
+is test-only, no IPC/persisted changes. Per-unit suites and commits live in the #347 task log;
+no native rendering/CPU, install, delivery or shared runtime acceptance is implied.
 
 ## Sileo reconciliation
 
@@ -98,4 +110,4 @@ Node or Cargo results do not prove WebKit/native rendering, transport roundtrip 
 
 ## Geometry ruling (parent, 2026-10-13)
 
-Preview geometry was adapted to native dimensions during the port: 66px compact dot, 640×160 overview, 400×640 work-area chat (native-owned; resize/geometry guards own these numbers). Model and settings render as chat-internal tall vertical panels. Real host-backed models/accounts replace preview demo groups. The tall-column and vertical-account INTENT carries over; exact preview px values are not authority here. A 72px right safety gutter for notices and the native R6 ~128px were retained rather than breaking the existing overview contract.
+Preview geometry was adapted to native dimensions during the port: 66px compact dot, 640×160 overview, 400×640 work-area chat (native-owned; resize/geometry guards own these numbers). Settings (#408) is ONE panel, Ajustes, with a tablist (Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General; names live in `settings-view.js` `TABS`); the model picker is its tab. While it is open the island grows to the Rust-owned Settings size (720 × min(680, work area)) and gives the chat rectangle back on close. Tabs reuse the existing tokens (`--go` selected, `--line-soft`, 44px targets); provider cards (`.scard`) use `--fill-soft`, `--island-live` for in-progress and `--red-11` for errors, no new palette. Real host-backed models/accounts replace preview demo groups. The tall-column and vertical-account INTENT carries over; exact preview px values are not authority here. A 72px right safety gutter for notices and the native R6 ~128px were retained rather than breaking the existing overview contract.

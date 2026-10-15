@@ -72,6 +72,12 @@
   if (typeof AbitoClay !== 'undefined') {
     clay = AbitoClay.create(clayEl, { seed: 505, viewBox: '0 20 200 160' });
   }
+  // #347: presentation-only producers; pending human requests outrank decorations.
+  const character = window.AbitoCharacter.create({
+    clay, applyState: next => { if (clay && clay.state !== next) clay.setState(next); }, choosePose: (chat, host) => O.choosePose(chat, host), validCard, setTimer: setTimeout, clearTimer: clearTimeout,
+    notification: snap => snap && snap.available !== false ? NV.fromPending(snap.pending) : null,
+    blocked: () => motionReduced() || document.hidden || (typeof AbitoClay !== 'undefined' && AbitoClay.paused),
+  });
   applyMotion(); // from the first frame: Abito's own motion state, never the inherited one (#304)
 
   // ---- R6 pose (Q2): only REAL events drive it, through the engine's own
@@ -89,6 +95,7 @@
     const r = O.hostPoseView(snapshot, hostTracker, Date.now());
     hostTracker = r.tracker;
     hostPose = r.pose;
+    character.snapshot(snapshot);
     clearTimeout(hostTimer);
     if (r.pose && r.expiresAt) hostTimer = setTimeout(() => refreshHost(current), Math.max(50, r.expiresAt - Date.now() + 50));
     applyPose();
@@ -98,7 +105,8 @@
     // Priority (night review): active chat turn > time-boxed host error > the
     // chat's own error > rest (see O.choosePose).
     const next = O ? O.choosePose(chatPose, hostPose) : (chatPose || 'idle');
-    if (clay && clay.state !== next) clay.setState(next);
+    // Keep the legacy resolver unchanged; the controller layers real human requests above it.
+    character.chat(next);
   }
   document.addEventListener('abito:pose', event => {
     const state = event.detail;
@@ -325,6 +333,7 @@
   const release = (pt, cancelled) => {
     if (!pressed) return;
     pressed = false;
+    character.dragEnd();
     document.body.classList.remove('is-dragging');
     send('drag_release', { x: pt.x, y: pt.y, cancelled });
   };
@@ -336,6 +345,7 @@
     // the chat — drag never attaches to text or composer controls.
     if (e.target && e.target.closest && e.target.closest('button, textarea, input, #chat-log, #chat-composer')) return;
     pressed = true;
+    character.dragStart(e.screenX);
     lastPoint = { x: e.clientX, y: e.clientY };
     document.body.classList.add('is-dragging');
     try { if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId); }
@@ -352,11 +362,13 @@
     const box = { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
     const next = O.hoverScale(point, box, { reduced: motionReduced(), dragging: pressed });
     if (next !== scale) clayEl.style.setProperty('--hover', String(next));
+    character.hover(!!point && !pressed && next > 1);
   }
   window.addEventListener('pointermove', e => {
     if (!pressed) { updateHover({ x: e.clientX, y: e.clientY }); return; }
     updateHover(null);
     lastPoint = { x: e.clientX, y: e.clientY };
+    character.dragMove(e.screenX);
     send('drag_move', { x: e.clientX, y: e.clientY });
   });
   document.addEventListener('pointerleave', () => updateHover(null));
@@ -383,6 +395,21 @@
   const NV = window.AbitoNotify;
   const ICONS = window.AbitoIcons;
   const icon = name => (ICONS ? ICONS.svg(name) : '');
+  // #411 (S2 of settings.js): icons are DOM NODES built from the CLOSED own
+  // registry through DOMParser — the parser only ever receives ICONS literal
+  // markup (`icon(name)` / `ICONS.ring(fraction)`), never data, so no string
+  // can become markup. An empty/unknown registry entry answers null and
+  // clears the host, exactly like the empty string the old write got.
+  const svgParser = new DOMParser();
+  function iconNode(markup) {
+    if (!markup) return null;
+    const doc = svgParser.parseFromString(markup, 'image/svg+xml');
+    return doc.documentElement && doc.documentElement.nodeName === 'svg'
+      ? document.importNode(doc.documentElement, true) : null;
+  }
+  const putIcon = (host, node) => { if (host) host.replaceChildren(...(node ? [node] : [])); };
+  // The waiting/status dot is an element too, never a literal `<span>`.
+  const dotNode = () => { const dot = document.createElement('span'); dot.className = 'dot'; return dot; };
   // #266: incoming-event reveal (Sileo-style). The pure gates in notify-view.js
   // decide WHICH snapshots are events (boot replays and churn are not); the pure
   // revealAction decides whether this capsule may act: a resting compact island
@@ -407,7 +434,7 @@
     }, () => { revealFlight = false; });
   }
   // Static own icons: closed registry, never data.
-  for (const el of document.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
+  for (const el of document.querySelectorAll('[data-icon]')) putIcon(el, iconNode(icon(el.dataset.icon)));
 
   // «i» buttons reveal the long sentence that used to be on screen (§2.1);
   // the same text is also the aria name/description of the chip.
@@ -440,7 +467,7 @@
 
   function paintRing(notices) {
     const view = O && O.noticeView(notices, Date.now());
-    if (view) $('notice-ring').innerHTML = ICONS.ring(view.fraction);
+    if (view) putIcon($('notice-ring'), iconNode(ICONS.ring(view.fraction)));
     return view;
   }
   function renderNotices(snapshot) {
@@ -455,7 +482,7 @@
     if (overviewDetail) overviewDetail.textContent = conn.detail;
     connectionEl.dataset.tone = conn.tone;
     connectionEl.setAttribute('aria-label', conn.aria);
-    $('connection-icon').innerHTML = icon(conn.icon);
+    putIcon($('connection-icon'), iconNode(icon(conn.icon)));
     $('connection-word').textContent = conn.word;
     const bridge = O.bridgeView(snapshot);
     const bridgeChip = $('bridge');
@@ -463,7 +490,7 @@
     if (bridge) {
       bridgeChip.dataset.tone = bridge.tone;
       bridgeChip.setAttribute('aria-label', bridge.aria);
-      $('bridge-icon').innerHTML = icon(bridge.icon);
+      putIcon($('bridge-icon'), iconNode(icon(bridge.icon)));
       $('bridge-word').textContent = bridge.word;
     }
     const first = notices[0] || null;
@@ -497,7 +524,7 @@
       if (bridge) {
         bchip.dataset.tone = bridge.tone;
         bchip.setAttribute('aria-label', bridge.aria);
-        $('card-bridge-icon').innerHTML = icon(bridge.icon);
+        putIcon($('card-bridge-icon'), iconNode(icon(bridge.icon)));
         $('card-bridge-word').textContent = bridge.word;
       }
     }
@@ -508,7 +535,7 @@
     if (!shown) return;
     chip.dataset.tone = shown.tone;
     chip.setAttribute('aria-label', shown.aria);
-    $('card-conn-icon').innerHTML = icon(shown.icon);
+    putIcon($('card-conn-icon'), iconNode(icon(shown.icon)));
     $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
@@ -523,7 +550,7 @@
     if (!h) return;
     chip.dataset.tone = h.tone;
     chip.setAttribute('aria-label', h.aria);
-    $('hotkey-icon').innerHTML = icon(h.icon);
+    putIcon($('hotkey-icon'), iconNode(icon(h.icon)));
     $('hotkey-word').textContent = h.word;
   }
   if (invoke) {
@@ -639,7 +666,7 @@
     if (flag.hidden) return;
     flag.dataset.tone = (waiting || questionWaiting) ? 'sun' : 'red';
     flag.setAttribute('aria-label', questionWaiting && !waiting ? 'Pi espera tu respuesta' : waiting ? 'Algo espera tu decisión' : (bridgeDown ? 'Sin puente' : 'Avisos caídos'));
-    $('compact-flag-icon').innerHTML = (waiting || questionWaiting) ? '<span class="dot"></span>' : icon('triangle');
+    putIcon($('compact-flag-icon'), (waiting || questionWaiting) ? dotNode() : iconNode(icon('triangle')));
   }
   function renderCard() {
     paintCompactFlag();
@@ -667,7 +694,7 @@
     status.dataset.tone = view.tone;
     status.dataset.kind = view.kind;
     status.setAttribute('aria-label', view.aria);
-    $('card-status-icon').innerHTML = view.icon ? icon(view.icon) : '<span class="dot"></span>';
+    putIcon($('card-status-icon'), view.icon ? iconNode(icon(view.icon)) : dotNode());
     $('card-status-word').textContent = view.word;
     capsule.dataset.card = view.kind;
     capsule.dataset.cardTone = view.tone;
@@ -722,6 +749,21 @@
   const denyButton = $('deny');
   if (allowButton) allowButton.addEventListener('click', event => { void decideCard('allow', event); });
   if (denyButton) denyButton.addEventListener('click', event => { void decideCard('deny', event); });
+
+  // F014 (#338): fold the waiting card down to the compact island WITHOUT
+  // deciding it (upstream `foldApproval`, windows/src/island/island.ts:144-154
+  // and the "Later — keep it waiting" button, views.ts:496-504). `close` is
+  // the host's own collapse verb and never touches the decision lane: the host
+  // keeps the card, the request keeps waiting (the compact sun flag carries
+  // it), and reopening the island shows the same card again.
+  const foldButton = $('card-fold');
+  if (foldButton) foldButton.addEventListener('click', event => {
+    if (event.isTrusted !== true || !window.desktop || !current || current.state !== 'expanded') return;
+    focusAfterPhase = 'island-toggle'; // folding moves focus with the view, like Escape
+    window.desktop.close().then(snap => {
+      if (snap) { current = snap; syncToggle(snap.state); }
+    }, () => { /* host refused the collapse: the card stays exactly as it was */ });
+  });
 
   // U1: the card's actionability depends on the visible view too.
   document.addEventListener('island:view', () => { if (current) renderCard(); });
@@ -802,7 +844,48 @@
     new MutationObserver(filterModels).observe(modelList, { childList: true });
   }
 
+  // #347 idle clock: real interaction, queued turns and focused/drafted composer keep Abito awake.
+  let characterTurnBusy = false;
+  function characterBusy() {
+    const field = $('chat-input');
+    character.busy(characterTurnBusy || !!(field && (field.value || document.activeElement === field)));
+  }
+  for (const name of ['pointerdown', 'pointermove', 'keydown', 'input', 'focusin', 'focusout']) {
+    document.addEventListener(name, () => { character.activity(); characterBusy(); });
+  }
+  for (const name of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(name, characterBusy);
+  const characterListen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  let questionStreamSeen = false, chatStreamSeen = false;
+  const characterQuestion = snap => { character.question(snap); };
+  // #347 mini-bots: only in the overview; leaving it (or the page) releases every instance.
+  let characterView = null;
+  const minisEl = $('minibots');
+  const minis = minisEl && window.AbitoMinis && typeof AbitoClay !== 'undefined'
+    ? AbitoMinis.create({ container: minisEl, doc: document, makeClay: (svg, seed) => AbitoClay.create(svg, { seed, viewBox: '36 32 128 128', shadow: false }) }) : null;
+  const syncMinis = () => {
+    if (!minis) return;
+    if (capsule.dataset.phase === 'expanded' && capsule.dataset.view === 'overview') minis.sync(characterView); else minis.clear();
+  };
+  new MutationObserver(syncMinis).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view'] });
+  const characterChat = view => {
+    characterView = view;
+    syncMinis();
+    characterTurnBusy = !!(view && view.active_turn && Array.isArray(view.turns) &&
+      view.turns.some(t => t.turn_id === view.active_turn && ['queued', 'thinking', 'streaming', 'waiting_approval'].includes(t.state)));
+    characterBusy();
+  };
+  if (characterListen) {
+    characterListen('question:state', event => { questionStreamSeen = true; characterQuestion(event && event.payload); }).catch(() => {});
+    characterListen('chat:state', event => { chatStreamSeen = true; characterChat(event && event.payload); }).catch(() => {});
+  }
+  if (invoke) {
+    invoke('question_action', { payload: { action: 'view' } }).then(snap => { if (!questionStreamSeen) characterQuestion(snap); }, () => {});
+    invoke('chat_action', { payload: { action: 'view' } }).then(view => { if (!chatStreamSeen) characterChat(view); }, () => {});
+  }
+  window.addEventListener('pagehide', () => { character.destroy(); if (minis) minis.clear(); });
   // ---- boot ---------------------------------------------------------------
+  if (typeof AbitoClay !== 'undefined') AbitoClay.onChange(() => character.motionChanged());
+  character.activity();
   render();
   renderCard();
   requestAnimationFrame(() => reportEvidence(0));

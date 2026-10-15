@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use crate::chat::{ChatError, Conversation, Event, FinishReason, ProfileRef};
+use crate::conversations::{Store, Summary, SpecialistRef, PAGE_SIZE};
 use crate::localmodel::{self, Cancel, Deadlines, Ended, Finish, LocalEndpoint, StreamItem};
 
 /// Output cap for one island answer (bounded; the profile may lower it).
@@ -225,6 +226,13 @@ pub struct Lane {
     pub queue_note: Option<String>,
     /// Last availability read (metadata only).
     pub availability: Availability,
+    history: Option<Store>,
+    summary: Option<Summary>,
+    restored_page: Vec<crate::chat::Turn>,
+    history_before: Option<u64>,
+    history_skipped: usize,
+    history_problem: Option<String>,
+    role_notice: Option<String>,
 }
 
 pub type SharedLane = Arc<Mutex<Lane>>;
@@ -236,15 +244,110 @@ impl Lane {
             cancel: None,
             queue_note: None,
             availability: Availability::unchecked(),
+            history: None, summary: None, restored_page: Vec::new(), history_before: None, history_skipped: 0, history_problem: None, role_notice: None,
         }))
     }
 
+    pub fn init_history(&mut self, dir: &std::path::Path) -> Result<(), ChatError> {
+        match Store::open(dir) {
+            Ok(store) => { self.history = Some(store); Ok(()) },
+            Err(_) => { self.history_problem = Some("No se pudo abrir el historial privado; los mensajes de esta sesión no se guardarán.".into()); Err(history_error()) }
+        }
+    }
+    pub fn new_conversation(&mut self, specialist: Option<SpecialistRef>, now: u64) -> Result<Value, ChatError> {
+        if self.convo.active().is_some() { return Err(ChatError::queue_full()); }
+        // In probe/no-store mode the previous in-memory chat remains usable, never real-user I/O.
+        let summary = match &mut self.history {
+            Some(store) => Some(store.create(specialist, now).map_err(|_| history_error())?),
+            None if self.history_problem.is_some() => return Err(history_error()),
+            None => None,
+        };
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = summary.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| format!("c-memory-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        self.convo = Conversation::new(&id); self.summary = summary;
+        self.restored_page.clear(); self.role_notice = None;
+        self.history_before = None; self.history_skipped = 0; self.queue_note = None; self.cancel = None;
+        Ok(self.view())
+    }
+    pub fn conversation_summary(&self, id: &str) -> Result<Summary, ChatError> {
+        if self.convo.active().is_some() { return Err(ChatError::queue_full()); }
+        self.history.as_ref().ok_or_else(history_error)?.summary(id).map_err(|_| history_error())
+    }
+    pub fn prepare_conversation(&self, id: &str) -> Result<(Summary, crate::conversations::Page), ChatError> {
+        let summary = self.conversation_summary(id)?;
+        let page = self.history.as_ref().unwrap().page(id, None, PAGE_SIZE).map_err(|_| history_error())?;
+        Ok((summary, page))
+    }
+    pub fn activate_conversation(&mut self, summary: Summary, page: crate::conversations::Page) {
+        self.restored_page = page.turns.clone();
+        self.convo = Conversation::restore(&summary.id, page.turns);
+        self.summary = Some(summary); self.history_before = page.before; self.history_skipped = page.skipped;
+        self.queue_note = None; self.cancel = None; self.role_notice = None;
+    }
+    pub fn restore_conversation(&mut self, id: &str) -> Result<Summary, ChatError> {
+        let (summary, page) = self.prepare_conversation(id)?;
+        self.activate_conversation(summary.clone(), page);
+        Ok(summary)
+    }
+    pub fn history_page(&self, id: &str, before: Option<u64>) -> Result<Value, ChatError> {
+        let page = self.history.as_ref().ok_or_else(history_error)?.page(id, before, PAGE_SIZE).map_err(|_| history_error())?;
+        let projection = Conversation::project_history(id, page.turns);
+        Ok(json!({"conversation_id":id,"turns":projection["turns"],"before":page.before,"skipped":page.skipped}))
+    }
+    pub fn list_conversations(&self) -> Result<Value, ChatError> {
+        match &self.history {
+            Some(store) => { let (items, skipped) = store.list().map_err(|_| history_error())?; Ok(json!({"conversations":items,"skipped":skipped})) },
+            None if self.history_problem.is_some() => Err(history_error()),
+            None => Ok(json!({"conversations":[],"skipped":0})),
+        }
+    }
+    pub fn submit(&mut self, text: &str, client: &str, profile: &ProfileRef, specialist: Option<SpecialistRef>, now: u64) -> Result<crate::chat::Accepted, ChatError> {
+        if let Some(accepted) = self.convo.lookup(client) { return Ok(accepted); }
+        // Refused input never creates a file, advances IDs or changes the visible context.
+        if !crate::chat::valid_client_request_id(client) { return Err(ChatError::invalid_input("Identificador de envío inválido.")); }
+        if self.convo.active().is_some() { return Err(ChatError::queue_full()); }
+        crate::chat::validate_text(text)?;
+        if self.history.is_some() && self.summary.is_none() { self.new_conversation(specialist, now)?; }
+        let accepted = self.convo.submit(text, client, profile)?;
+        self.persist_turn(&accepted.turn_id, now);
+        Ok(accepted)
+    }
+    pub fn persist_turn(&mut self, turn_id: &str, now: u64) {
+        let Some(turn) = self.convo.turn(turn_id) else { return; };
+        let Some(store) = &mut self.history else { return; };
+        if store.append(self.convo.id(), turn, now).is_err() {
+            self.history_problem = Some("No se pudo guardar todo el historial; conservá una copia de los mensajes de esta sesión.".into());
+        }
+    }
+    pub fn history_notice(&mut self, text: &str) { self.role_notice = Some(text.into()); }
+    pub fn history_failure(&mut self, text: &str) { self.history_problem = Some(text.into()); }
+
     pub fn view(&self) -> Value {
         let mut v = self.convo.view();
+        if !self.restored_page.is_empty() {
+            let page = Conversation::project_history(self.convo.id(), self.restored_page.clone());
+            let mut turns = std::collections::BTreeMap::new();
+            for t in page["turns"].as_array().unwrap().iter().chain(v["turns"].as_array().unwrap()) {
+                if let Some(n) = t["turn_id"].as_str().and_then(|id| id.strip_prefix("t-")?.parse::<u64>().ok()) { turns.insert(n, t.clone()); }
+            }
+            v["turns"] = json!(turns.into_values().collect::<Vec<_>>());
+        }
         v["queue_note"] = json!(self.queue_note);
         v["availability"] = json!(self.availability);
+        v["history_before"] = json!(self.history_before);
+        v["history_skipped"] = json!(self.history_skipped);
+        v["history_problem"] = json!(self.history_problem.as_ref().or(self.role_notice.as_ref()));
+        v["history_persisted"] = json!(self.history.is_some());
+        v["conversation_specialist"] = json!(self.summary.as_ref().and_then(|s| s.specialist.as_ref()));
         v
     }
+}
+
+fn history_error() -> ChatError {
+    ChatError { code: "history_unavailable".into(), safe_message: "No se pudo leer o guardar el historial de conversaciones.".into(), retryable: false }
+}
+pub fn history_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// Read availability (metadata only) and store it. Never sends a prompt.
@@ -267,6 +370,7 @@ pub fn cancel(lane: &SharedLane, turn_id: &str) -> bool {
     }
     if done {
         l.queue_note = None;
+        l.persist_turn(turn_id, history_now());
     }
     done
 }
@@ -284,26 +388,37 @@ pub fn run_turn(
     deadlines: Deadlines,
     publish: &(dyn Fn() + Send + Sync),
 ) {
+    let conversation_id = lane.lock().expect("chat lane lock").convo.id().to_owned();
+    run_turn_scoped(lane, &conversation_id, turn_id, target, system, deadlines, publish);
+}
+
+/// Frozen conversation identity prevents a cancelled worker from touching a new conversation's t-1.
+#[allow(clippy::too_many_arguments)]
+pub fn run_turn_scoped(
+    lane: &SharedLane, conversation_id: &str, turn_id: &str, target: &Target,
+    system: &str, deadlines: Deadlines, publish: &(dyn Fn() + Send + Sync),
+) {
     let handle = Arc::new(Cancel::new());
     {
         let mut l = lane.lock().expect("chat lane lock");
+        if l.convo.id() != conversation_id || l.convo.turn(turn_id).is_none_or(|t| t.state.is_terminal()) { return; }
         l.cancel = Some((turn_id.to_string(), Arc::clone(&handle)));
     }
     let apply = |event: Event| -> bool {
         let mut l = lane.lock().expect("chat lane lock");
+        if l.convo.id() != conversation_id { return false; }
         let Some(seq) = l.convo.turn(turn_id).map(|t| t.seq + 1) else {
             return false;
         };
-        let truncated = matches!(
-            l.convo.apply(turn_id, seq, event),
-            Ok(crate::chat::Applied::Truncated)
-        );
+        let applied = l.convo.apply(turn_id, seq, event);
+        let truncated = matches!(applied, Ok(crate::chat::Applied::Truncated));
         let terminal = l
             .convo
             .turn(turn_id)
             .is_none_or(|t| t.state.is_terminal());
         if terminal {
             l.queue_note = None;
+            if applied.is_ok() { l.persist_turn(turn_id, history_now()); }
         }
         drop(l);
         publish();
@@ -318,7 +433,11 @@ pub fn run_turn(
         return;
     }
     let checked = preflight(target);
-    lane.lock().expect("chat lane lock").availability = availability_of(&checked);
+    {
+        let mut l = lane.lock().expect("chat lane lock");
+        if l.convo.id() != conversation_id { return; }
+        l.availability = availability_of(&checked);
+    }
     let ready = match checked {
         Ok(r) => r,
         Err(e) => {
@@ -328,6 +447,7 @@ pub fn run_turn(
     };
     {
         let mut l = lane.lock().expect("chat lane lock");
+        if l.convo.id() != conversation_id { return; }
         l.queue_note = ready.busy.then(|| {
             "El modelo local está atendiendo otro pedido: tu mensaje espera en su cola.".to_string()
         });
@@ -335,6 +455,7 @@ pub fn run_turn(
     publish();
     let prompt = {
         let mut l = lane.lock().expect("chat lane lock");
+        if l.convo.id() != conversation_id { return; }
         l.convo.prompt_for(
             turn_id,
             system,
@@ -357,6 +478,7 @@ pub fn run_turn(
     let mut on_item = |item: &StreamItem| {
         if let StreamItem::Content(text) = item {
             let mut l = lane.lock().expect("chat lane lock");
+            if l.convo.id() != conversation_id { return; }
             l.queue_note = None;
             drop(l);
             apply(Event::Delta(text.clone()));
@@ -385,13 +507,14 @@ pub fn run_turn(
         }
         Ended::Failed(e) => {
             if e.code == "local_model_unavailable" {
-                lane.lock().expect("chat lane lock").availability = availability_of(&Err(e.clone()));
+                let mut l = lane.lock().expect("chat lane lock");
+                if l.convo.id() == conversation_id { l.availability = availability_of(&Err(e.clone())); }
             }
             apply(Event::Error(e));
         }
     }
     let mut l = lane.lock().expect("chat lane lock");
-    if l.cancel.as_ref().is_some_and(|(id, _)| id == turn_id) {
+    if l.convo.id() == conversation_id && l.cancel.as_ref().is_some_and(|(id, _)| id == turn_id) {
         l.cancel = None;
     }
 }
@@ -399,3 +522,6 @@ pub fn run_turn(
 #[cfg(test)]
 #[path = "chatlane_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "chat_history_tests.rs"]
+mod history_tests;
