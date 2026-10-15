@@ -912,3 +912,69 @@ test('#409 T3 docs and source pins: manual editor fields, row removal, and the p
   assert.ok(pills.includes('No se pudo quitar la conexión') && pills.includes('No se cambió nada'), 'pills-check pins the removal failure sentence');
   assert.ok(pills.includes('account-credential'), 'pills-check drives the manual credential options');
 });
+
+// ---- #410 Conexiones compacta (S1-S3): denser type and spacing INSIDE that tab only -----------------
+const bareCss = () => fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const COMPACT_SCOPE = '#settings-body[data-screen="accounts"]';
+const compactBlock = () => {
+  const bare = bareCss();
+  const at = bare.indexOf(COMPACT_SCOPE);
+  assert.ok(at >= 0, 'the #410 compact block exists (scoped to the Conexiones tabpanel)');
+  return bare.slice(at);
+};
+
+test('#410 scope: the open sub-tab is a public DOM attribute, and every compact rule is scoped to Conexiones', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /body\.dataset\.screen = id/, 'settings.js publishes the open screen on the tabpanel');
+  const bare = bareCss();
+  // written AFTER the #408 rail rules it densifies, so it wins at equal specificity
+  assert.ok(bare.indexOf(COMPACT_SCOPE) > bare.indexOf('#settings[data-rail="true"] .scard'),
+    'the compact block comes after the rail block');
+  const rules = [...compactBlock().matchAll(/(^|\n)([^{}\n][^{}]*)\{([^}]*)\}/g)];
+  assert.ok(rules.length >= 12, `compact rules found: ${rules.length}`);
+  for (const m of rules) {
+    assert.match(m[2], new RegExp(COMPACT_SCOPE.replace(/[.\[\]"]/g, c => '\\' + c)),
+      `unscoped rule: ${m[2].trim()} — the other Ajustes tabs keep their look (S3)`);
+  }
+  // the bar (title + connection chip) and the per-tab hint live OUTSIDE the tabpanel, so the block
+  // never names them: the shared chrome keeps its size on every tab
+  assert.doesNotMatch(compactBlock(), /#settings-(?:conn|hint|bar|title)/, 'shared chrome is not compacted');
+});
+
+test('#410 compact sizing: V1 tokens only, one type step down, tighter rows — and every control keeps its 44px target', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const block = compactBlock();
+  const rule = sel => {
+    const hits = [...block.matchAll(/(^|\n)([^{}\n][^{}]*)\{([^}]*)\}/g)]
+      .filter(m => m[2].split(',').map(x => x.trim()).includes(sel));
+    assert.ok(hits.length, `rule ${sel}`);
+    return hits[hits.length - 1][3]; // the LAST matching rule wins in CSS
+  };
+  // S3: the compact block stays on the V1 --fs-* tokens (12px floor): no raw px font size at all
+  assert.doesNotMatch(block, /font(?:-size)?:[^;}]*\d+(?:\.\d+)?px/, 'raw px font-size inside the compact block');
+  assert.match(rule(`${COMPACT_SCOPE} .srow-title`), /font-size: var\(--fs-label\)/);  // 14px -> 13px
+  assert.match(rule(`${COMPACT_SCOPE} .snote`), /font-size: var\(--fs-caption\)/);     // 13px -> 12px
+  assert.match(rule(`${COMPACT_SCOPE} .sline`), /font-size: var\(--fs-label\)/);       // 14px -> 13px
+  assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /font: 600 var\(--fs-label\)/);         // 14px -> 13px
+  assert.match(rule(`${COMPACT_SCOPE} .chip`), /font-size: var\(--fs-caption\)/);      // 13px -> 12px
+  // tighter than the same selectors outside the tab (V1 / #408 rail), which the rules above keep
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 44px/);   // was 48px (V1)
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /gap: 6px/);           // was 10px (V1)
+  assert.match(rule(`${COMPACT_SCOPE} .srows`), /gap: 4px/);          // was 6px
+  assert.match(rule(`${COMPACT_SCOPE} .ssec`), /margin-top: 12px/);   // was 20px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .ssection`), /line-height: 16px/); // was 18px (V1)
+  assert.match(rule(`${COMPACT_SCOPE} .scard`), /padding: 10px 12px/);// was 16px 18px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .scard`), /gap: 4px/);          // was 8px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .sagent`), /padding: 6px 0/);   // was 12px 0 (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .sfilter`), /gap: 4px/);        // was 6px
+  assert.match(rule(`${COMPACT_SCOPE} .srow-actions`), /gap: 4px/);   // was 6px
+  assert.match(rule(`${COMPACT_SCOPE} .chip`), /min-height: 24px/);   // was 28px
+  // S3 click targets kept: the compact block densifies spacing/type, never the 44px floor
+  assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-height: 44px/);
+  assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-width: 44px/);
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 44px/);
+  assert.match(css.match(/#settings-filter \{([^}]*)\}/)[1], /height: 44px/, 'the Conexiones search keeps its target');
+  assert.match(css.match(/\.sfield \{([^}]*)\}/)[1], /min-height: 44px/, 'fields keep their target');
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /node\.style\.minHeight = '44px'/, 'the owned-account buttons keep their 44px anchor (#308)');
+});

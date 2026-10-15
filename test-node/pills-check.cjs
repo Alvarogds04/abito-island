@@ -432,3 +432,45 @@ test('#409 T3 the manual masked editor: full field set, credential options, writ
   assert.equal(withKey.length, 1, 'the synthetic key crosses the IPC exactly once, in its own save');
   assert.equal(withKey[0].payload.action, 'abito_account_save');
 });
+
+// #410 Conexiones compacta (S2/S3): the compaction is scoped by a public DOM attribute, and the one
+// plain-text status of the owned-account row rides a chip from the closed icon registry.
+const findWhere = (node, pred) => {
+  if (!node) return null;
+  if (pred(node)) return node;
+  for (const child of node.children || []) { const hit = findWhere(child, pred); if (hit) return hit; }
+  return null;
+};
+
+test('#410 the open sub-tab is published on the tabpanel: only Conexiones carries the compact screen', async () => {
+  const b = await settingsBoot({}, 'accounts');
+  assert.equal(b.get('settings-body').dataset.screen, 'accounts', 'Conexiones marks the tabpanel');
+  b.click('settings-tab-pills'); await flush();
+  assert.equal(b.get('settings-body').dataset.screen, 'pills', 'another tab carries its own screen, so its look is untouched');
+  for (const fn of b.events['abito:settings-select'] || []) fn({ detail: 'connectors' });
+  await flush();
+  assert.equal(b.get('settings-body').dataset.screen, 'accounts', 'the old connectors deep link marks Conexiones again');
+  assert.equal(b.get('settings-tab-accounts').getAttribute('aria-selected'), 'true');
+});
+
+test('#410 the credential state is an icon chip from the closed registry (same words as before)', async () => {
+  const account = { accountId: 'nan', provider: 'nan', hasCredential: true, config: { nombre: 'nan (Pi)', baseUrl: 'https://api.nan.builders/v1', api: 'openai-completions', compat: {}, models: ['m0'], defaultModel: 'm0' } };
+  const b = boot({ store: fakeStore({ accounts: [account] }) }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  const chip = findWhere(b.get('owned-accounts'), n => String(n.className || '').split(/\s+/).includes('chip'));
+  assert.ok(chip, 'the row says the credential state with a chip, not a bare line of text');
+  assert.equal(allText(chip), 'Clave guardada', 'the words are unchanged');
+  assert.ok(findWhere(chip, n => String(n.className || '').split(/\s+/).includes('ico') && n.children.length),
+    'the icon comes from the closed registry (an unknown name renders nothing)');
+  // cleared credential: same row, the other registry icon
+  const store = fakeStore({ accounts: [account] });
+  const c = boot({ store }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) c.load(file);
+  c.click('open-screen-settings'); await flush();
+  c.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Editar').fire('click'); await flush();
+  c.get('account-credential').value = 'clear'; c.get('account-form').fire('submit'); await flush();
+  const cleared = findWhere(c.get('owned-accounts'), n => String(n.className || '').split(/\s+/).includes('chip'));
+  assert.equal(allText(cleared), 'Sin clave', 'the cleared state keeps its exact word');
+  assert.ok(findWhere(cleared, n => String(n.className || '').split(/\s+/).includes('ico') && n.children.length), 'registry icon for «Sin clave»');
+});
