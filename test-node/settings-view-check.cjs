@@ -867,33 +867,25 @@ test('#408 S9 spacing at the Settings size: wider rail, roomier panel and sectio
   assert.match(rule('#settings[data-rail="true"] .scard .sagent-head'), /align-items:\s*center/);
 });
 
-test('#408 T8 piConnection: the card exists only when Pi has a nan provider; the page only ever sees status + counts', () => {
-  assert.equal(S.piConnection(null, null), null, 'no answer yet: no card');
-  assert.equal(S.piConnection({ exists: false, models: 0 }, null), null, 'Pi has no nan: no card');
-  const offer = S.piConnection({ exists: true, models: 4 }, null);
-  assert.deepEqual([offer.kind, offer.action.label, offer.action.replace], ['offer', 'Usar la conexión de Pi', false]);
-  assert.match(offer.note, /4 modelos/); assert.match(offer.note, /copia una sola vez/i);
-  const owned = { accounts: [{ accountId: 'nan', provider: 'nan', hasCredential: true, config: { nombre: 'nan (Pi)', models: ['a', 'b'] } }] };
-  const have = S.piConnection({ exists: true, models: 4 }, owned);
-  assert.deepEqual([have.kind, have.status.word, have.status.tone], ['connected', 'Conectado', 'go']);
-  assert.equal(have.action.label, 'Volver a copiar desde Pi'); assert.equal(have.action.replace, true);
-  assert.match(have.action.warning, /reemplaza/i, 'a second import says it replaces');
-  assert.deepEqual(have.remove, { label: 'Quitar conexión', accountId: 'nan' });
-  assert.deepEqual(have.edit, { label: 'Cambiar clave', accountId: 'nan' });
-  // an owned nan account stays manageable even when Pi no longer has the provider
-  const gone = S.piConnection({ exists: false, models: 0 }, owned);
-  assert.equal(gone.kind, 'connected'); assert.equal(gone.action, null);
-  const sans = S.piConnection({ exists: true, models: 1 }, { accounts: [{ accountId: 'nan', provider: 'nan', hasCredential: false, config: { nombre: 'nan', models: ['a'] } }] });
-  assert.equal(sans.status.word, 'Sin clave'); assert.equal(sans.status.tone, 'sun');
-});
-
-test('#408 T8 piOutcome: only our own sentences, never an engine/host string', () => {
-  assert.match(S.piOutcome({ imported: true, replaced: false, models: 2 }).say, /2 modelos/);
-  assert.match(S.piOutcome({ imported: true, replaced: true, models: 2 }).say, /reemplazó/i);
-  for (const code of ['pi_missing', 'pi_unsafe', 'pi_invalid', 'save_failed', 'whatever sk-leak']) {
-    const out = S.piOutcome(null, { code, message: 'sk-leak raw host text' });
-    assert.ok(!out.say.includes('sk-leak'), code);
-    assert.equal(out.tone, 'red');
+test('#409 T1 the copy-from-Pi surface is gone end to end: no view export, no page/host/module/doc remnant', () => {
+  // the view module no longer exports the Pi card/outcome helpers
+  assert.equal(S.piConnection, undefined, 'piConnection export removed');
+  assert.equal(S.piOutcome, undefined, 'piOutcome export removed');
+  const root = path.join(__dirname, '..');
+  const read = p => fs.readFileSync(p, 'utf8');
+  for (const [name, src] of [['settings-view.js', read(path.join(frontend, 'settings-view.js'))], ['settings.js', read(path.join(frontend, 'settings.js'))]]) {
+    for (const gone of ['Usar la conexión de Pi', 'Volver a copiar desde Pi', 'pi_connection', 'importFromPi', 'renderPiCard', 'refreshPi']) {
+      assert.ok(!src.includes(gone), `${name} must not contain ${gone}`);
+    }
   }
-  assert.match(S.piOutcome(null, { code: 'pi_unsafe' }).say, /privados/);
+  // host: the command, its registration, the module and its tests are deleted; no store writer left
+  assert.ok(!fs.existsSync(path.join(root, 'src', 'piimport.rs')), 'src/piimport.rs deleted');
+  assert.ok(!fs.existsSync(path.join(root, 'src', 'piimport_tests.rs')), 'src/piimport_tests.rs deleted');
+  for (const [name, gone] of [['main.rs', 'pi_connection'], ['lib.rs', 'piimport'], ['settingshost.rs', 'pi_connection'], ['settingshost.rs', 'piimport'], ['agentclient.rs', 'import_pi_nan'], ['agentclient.rs', 'piimport']]) {
+    assert.ok(!read(path.join(root, 'src', name)).includes(gone), `src/${name} must not contain ${gone}`);
+  }
+  const readme = read(path.join(root, 'README.md'));
+  for (const gone of ['Usar la conexión de Pi', 'pi_connection', 'piimport']) {
+    assert.ok(!readme.includes(gone), `README.md must not contain ${gone}`);
+  }
 });

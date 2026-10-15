@@ -293,37 +293,6 @@
         };
       });
   }
-  // #408 T8: the Pi `nan` connection. The page only ever holds `{exists, models}` from the host (never a path,
-  // a key, its length or a prefix) and the masked projection of Abito's own accounts. Option B: an explicit
-  // click copies Pi's connection ONCE into Abito's private store; afterwards the key is write-only here.
-  function piConnection(status, owned) {
-    const have = ((owned && owned.accounts) || []).find(a => a.accountId === 'nan' && a.provider === 'nan') || null;
-    const pi = !!status && status.exists === true;
-    const count = pi && Number.isInteger(status.models) ? status.models : 0;
-    if (!have && !pi) return null;
-    const noun = n => `${n} modelo${n === 1 ? '' : 's'}`;
-    if (!have) {
-      return { kind: 'offer', name: 'nan', status: { word: 'Disponible en Pi', icon: 'info', tone: 'faint' },
-        note: `Pi ya usa nan (${noun(count)}). Abito copia una sola vez la dirección, los modelos y la clave a su almacén privado y después no depende de los archivos de Pi.`,
-        action: { label: 'Usar la conexión de Pi', replace: false, warning: '' }, remove: null, edit: null };
-    }
-    const models = Array.isArray(have.config && have.config.models) ? have.config.models.length : 0;
-    return { kind: 'connected', name: 'nan', note: `${noun(models)} en Abito. La clave se guarda sólo en este equipo y no se vuelve a mostrar.`,
-      status: have.hasCredential ? { word: 'Conectado', icon: 'check', tone: 'go' } : { word: 'Sin clave', icon: 'triangle', tone: 'sun' },
-      action: pi ? { label: 'Volver a copiar desde Pi', replace: true, warning: 'Esto reemplaza la conexión de nan que ya guardó Abito (modelos y clave).' } : null,
-      remove: { label: 'Quitar conexión', accountId: 'nan' }, edit: { label: 'Cambiar clave', accountId: 'nan' } };
-  }
-  const PI_ERRORS = Object.freeze({
-    pi_missing: 'Pi no tiene una conexión de nan.',
-    pi_unsafe: 'Los archivos de Pi no son privados o no son de este usuario; no se leyó nada.',
-    pi_invalid: 'Pi no tiene una clave de API válida para nan.',
-  });
-  function piOutcome(result, error) {
-    if (error) return { tone: 'red', icon: 'triangle', say: Object.prototype.hasOwnProperty.call(PI_ERRORS, error.code) ? PI_ERRORS[error.code] : 'No se pudo guardar la conexión de nan. No se cambió nada.' };
-    const n = Number.isInteger(result && result.models) ? result.models : 0;
-    const noun = `${n} modelo${n === 1 ? '' : 's'}`;
-    return { tone: 'go', icon: 'check', say: result && result.replaced ? `Se reemplazó la conexión de nan (${noun}).` : `Conexión de nan copiada desde Pi (${noun}).` };
-  }
   function labelFor(name, fallback) {
     const clean = Array.from(String(name || '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim()).slice(0, 80).join('').trim();
     return clean || String(fallback || '');
@@ -541,7 +510,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, piConnection, piOutcome, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     THEME_MODES, THEME_LABELS, themeView };
 });

@@ -1547,7 +1547,6 @@ fn main() {
             settingshost::agent_action,
             settingshost::prefs_action,
             settingshost::settings_view,
-            settingshost::pi_connection,
             specialistshost::specialists_action,
             record_facade_evidence,
             record_chat_evidence,

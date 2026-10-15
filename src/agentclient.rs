@@ -628,27 +628,6 @@ impl AccountStore {
         })).collect();
         json!({"accounts":accounts})
     }
-    /// #408 T8: the click-scoped copy of Pi's `nan` connection into THIS store (see `piimport`). Replaces an
-    /// existing `nan` account (the caller says so); the key never leaves this function except to disk.
-    pub fn import_pi_nan(&mut self, pi_dir: &std::path::Path, publish: impl FnOnce(Value)) -> Result<PiImported, crate::bridge::BridgeError> {
-        use crate::piimport::{read_nan, PiError, PROVIDER};
-        let code = |e: PiError| match e { PiError::Missing => "pi_missing", PiError::Unsafe => "pi_unsafe", PiError::Invalid => "pi_invalid" };
-        let nan = read_nan(pi_dir).map_err(|e| pi_error(code(e)))?;
-        let payload = json!({"action":"abito_account_create","accountId":PROVIDER,"provider":PROVIDER,"config":{
-            "nombre":"nan (Pi)","baseUrl":nan.base_url,"api":nan.api,"compat":{},"models":nan.models,
-            "defaultModel":nan.models[0],"apiKey":nan.key()}});
-        // the store's own rules (HTTPS-only remote URL, key shape, model ids) judge what Pi provided
-        let command = parse_account(&payload).map_err(|_| pi_error("pi_invalid"))?;
-        let at = self.records.iter().position(|r| r.account_id == PROVIDER);
-        if at.is_none() && self.records.len() >= 64 { return Err(account_error("account_limit")); }
-        let models = command.record.config.models.len();
-        let mut next = self.records.clone();
-        match at { Some(at) => next[at] = command.record, None => next.push(command.record) }
-        self.persist(&next).map_err(|_| pi_error("save_failed"))?;
-        self.records = next;
-        publish(self.view());
-        Ok(PiImported { replaced: at.is_some(), models })
-    }
     fn remove(&mut self, account_id: &str, publish: impl FnOnce(Value)) -> Result<Value, crate::bridge::BridgeError> {
         let at = self.records.iter().position(|r| r.account_id == account_id).ok_or_else(|| account_error("account_missing"))?;
         let mut next = self.records.clone();
@@ -726,18 +705,6 @@ fn private_account_file(meta: &std::fs::Metadata) -> bool {
             && meta.uid() == unsafe { libc::geteuid() } && meta.nlink() == 1
     }
     #[cfg(not(unix))] { let _ = meta; false }
-}
-/// Result of [`AccountStore::import_pi_nan`]: never carries a value, only counts and a flag.
-#[derive(Debug, PartialEq, Eq)]
-pub struct PiImported { pub replaced: bool, pub models: usize }
-fn pi_error(code: &str) -> crate::bridge::BridgeError {
-    let message = match code {
-        "pi_missing" => "Pi no tiene una conexión de nan.",
-        "pi_unsafe" => "Los archivos de Pi no son privados o no son de este usuario; no se leyó nada.",
-        "pi_invalid" => "Pi no tiene una clave de API válida para nan.",
-        _ => "No se pudo guardar la conexión de nan.",
-    };
-    crate::bridge::BridgeError { code: code.into(), message: message.into() }
 }
 fn account_error(code: &str) -> crate::bridge::BridgeError {
     crate::bridge::BridgeError { code: code.into(), message: "No se pudo guardar la cuenta. Revisá los datos y la URL (HTTPS remota o HTTP de loopback local).".into() }
