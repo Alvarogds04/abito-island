@@ -38,13 +38,15 @@ function boot() {
     getBoundingClientRect() { return { left: 0, top: 0, width: 50, height: 50 }; }
     fire(kind, fields = {}) { for (const fn of this.handlers[kind] || []) fn({ preventDefault() {}, ...fields }); }
     focus() {}
+    // #411: the shipped island writes icon NODES with replaceChildren, never markup.
+    replaceChildren(...children) { this.children = children; }
   }
   const get = id => { if (!nodes.has(id)) nodes.set(id, new Element(id)); return nodes.get(id); };
   const events = {}, native = {}, calls = [], windowEvents = {}, timers = new Map();
   let timerId = 0;
   const setTimer = (fn, ms) => { const id = ++timerId; timers.set(id, { fn, ms }); return id; };
   const clearTimer = id => timers.delete(id);
-  const doc = { getElementById: get, querySelectorAll: () => [], body: new Element('body'), documentElement: new Element('html'), addEventListener(k, fn) { (events[k] ||= []).push(fn); }, dispatchEvent(e) { for (const fn of events[e.type] || []) fn(e); } };
+  const doc = { getElementById: get, querySelectorAll: () => [], createElement: tag => new Element(tag), body: new Element('body'), documentElement: new Element('html'), addEventListener(k, fn) { (events[k] ||= []).push(fn); }, dispatchEvent(e) { for (const fn of events[e.type] || []) fn(e); } };
   const stateHandlers = [];
   const resolved = value => ({ then(fn) { if (fn) fn(value); return { catch() {} }; } });
   const window = {
@@ -68,7 +70,10 @@ function boot() {
   const clay = h.api.create(h.svg);
   const AbitoClay = { create: () => clay, get forced() { return h.api.forced; }, setForced: value => h.api.setForced(value), onChange: fn => h.api.onChange(fn) };
   get('capsule').dataset = { phase: 'compact', view: 'overview' };
-  vm.runInNewContext(read('island.js'), { AbitoClay, window, document: doc, matchMedia: () => ({ matches: true, addEventListener() {} }), performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: setTimer, clearTimeout: clearTimer, setInterval() {}, MutationObserver: class { observe() {} }, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } }, console });
+  // #411: the shipped island parses its closed-registry icons, so the vm gets the
+  // same DOMParser stub convention as test-node/pills-check.cjs:91.
+  vm.runInNewContext(read('island.js'), { AbitoClay, window, document: doc,
+    DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } }, matchMedia: () => ({ matches: true, addEventListener() {} }), performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: setTimer, clearTimeout: clearTimer, setInterval() {}, MutationObserver: class { observe() {} }, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } }, console });
   return { get, calls, window, native, clay, timers,
     fireWindow(name, event = {}) { for (const fn of windowEvents[name] || []) fn(event); },
     state(s) { for (const fn of stateHandlers) fn(s); } };

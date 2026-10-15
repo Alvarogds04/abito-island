@@ -395,6 +395,21 @@
   const NV = window.AbitoNotify;
   const ICONS = window.AbitoIcons;
   const icon = name => (ICONS ? ICONS.svg(name) : '');
+  // #411 (S2 of settings.js): icons are DOM NODES built from the CLOSED own
+  // registry through DOMParser — the parser only ever receives ICONS literal
+  // markup (`icon(name)` / `ICONS.ring(fraction)`), never data, so no string
+  // can become markup. An empty/unknown registry entry answers null and
+  // clears the host, exactly like the empty string the old write got.
+  const svgParser = new DOMParser();
+  function iconNode(markup) {
+    if (!markup) return null;
+    const doc = svgParser.parseFromString(markup, 'image/svg+xml');
+    return doc.documentElement && doc.documentElement.nodeName === 'svg'
+      ? document.importNode(doc.documentElement, true) : null;
+  }
+  const putIcon = (host, node) => { if (host) host.replaceChildren(...(node ? [node] : [])); };
+  // The waiting/status dot is an element too, never a literal `<span>`.
+  const dotNode = () => { const dot = document.createElement('span'); dot.className = 'dot'; return dot; };
   // #266: incoming-event reveal (Sileo-style). The pure gates in notify-view.js
   // decide WHICH snapshots are events (boot replays and churn are not); the pure
   // revealAction decides whether this capsule may act: a resting compact island
@@ -419,7 +434,7 @@
     }, () => { revealFlight = false; });
   }
   // Static own icons: closed registry, never data.
-  for (const el of document.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
+  for (const el of document.querySelectorAll('[data-icon]')) putIcon(el, iconNode(icon(el.dataset.icon)));
 
   // «i» buttons reveal the long sentence that used to be on screen (§2.1);
   // the same text is also the aria name/description of the chip.
@@ -452,7 +467,7 @@
 
   function paintRing(notices) {
     const view = O && O.noticeView(notices, Date.now());
-    if (view) $('notice-ring').innerHTML = ICONS.ring(view.fraction);
+    if (view) putIcon($('notice-ring'), iconNode(ICONS.ring(view.fraction)));
     return view;
   }
   function renderNotices(snapshot) {
@@ -467,7 +482,7 @@
     if (overviewDetail) overviewDetail.textContent = conn.detail;
     connectionEl.dataset.tone = conn.tone;
     connectionEl.setAttribute('aria-label', conn.aria);
-    $('connection-icon').innerHTML = icon(conn.icon);
+    putIcon($('connection-icon'), iconNode(icon(conn.icon)));
     $('connection-word').textContent = conn.word;
     const bridge = O.bridgeView(snapshot);
     const bridgeChip = $('bridge');
@@ -475,7 +490,7 @@
     if (bridge) {
       bridgeChip.dataset.tone = bridge.tone;
       bridgeChip.setAttribute('aria-label', bridge.aria);
-      $('bridge-icon').innerHTML = icon(bridge.icon);
+      putIcon($('bridge-icon'), iconNode(icon(bridge.icon)));
       $('bridge-word').textContent = bridge.word;
     }
     const first = notices[0] || null;
@@ -509,7 +524,7 @@
       if (bridge) {
         bchip.dataset.tone = bridge.tone;
         bchip.setAttribute('aria-label', bridge.aria);
-        $('card-bridge-icon').innerHTML = icon(bridge.icon);
+        putIcon($('card-bridge-icon'), iconNode(icon(bridge.icon)));
         $('card-bridge-word').textContent = bridge.word;
       }
     }
@@ -520,7 +535,7 @@
     if (!shown) return;
     chip.dataset.tone = shown.tone;
     chip.setAttribute('aria-label', shown.aria);
-    $('card-conn-icon').innerHTML = icon(shown.icon);
+    putIcon($('card-conn-icon'), iconNode(icon(shown.icon)));
     $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
@@ -535,7 +550,7 @@
     if (!h) return;
     chip.dataset.tone = h.tone;
     chip.setAttribute('aria-label', h.aria);
-    $('hotkey-icon').innerHTML = icon(h.icon);
+    putIcon($('hotkey-icon'), iconNode(icon(h.icon)));
     $('hotkey-word').textContent = h.word;
   }
   if (invoke) {
@@ -651,7 +666,7 @@
     if (flag.hidden) return;
     flag.dataset.tone = (waiting || questionWaiting) ? 'sun' : 'red';
     flag.setAttribute('aria-label', questionWaiting && !waiting ? 'Pi espera tu respuesta' : waiting ? 'Algo espera tu decisión' : (bridgeDown ? 'Sin puente' : 'Avisos caídos'));
-    $('compact-flag-icon').innerHTML = (waiting || questionWaiting) ? '<span class="dot"></span>' : icon('triangle');
+    putIcon($('compact-flag-icon'), (waiting || questionWaiting) ? dotNode() : iconNode(icon('triangle')));
   }
   function renderCard() {
     paintCompactFlag();
@@ -679,7 +694,7 @@
     status.dataset.tone = view.tone;
     status.dataset.kind = view.kind;
     status.setAttribute('aria-label', view.aria);
-    $('card-status-icon').innerHTML = view.icon ? icon(view.icon) : '<span class="dot"></span>';
+    putIcon($('card-status-icon'), view.icon ? iconNode(icon(view.icon)) : dotNode());
     $('card-status-word').textContent = view.word;
     capsule.dataset.card = view.kind;
     capsule.dataset.cardTone = view.tone;
