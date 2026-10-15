@@ -12,7 +12,7 @@ const I = require(path.join(frontend, 'icons.js'));
 const O = require(path.join(frontend, 'overview-view.js'));
 
 let passed = 0;
-const test = (name, fn) => { fn(); passed += 1; };
+const test = (_name, fn) => { fn(); passed += 1; };
 
 // ---- icons ---------------------------------------------------------------
 const CONTRACT = ['bubble', 'arrow-up', 'square', 'arrow-left', 'chip', 'plug', 'plug-off',
@@ -282,18 +282,93 @@ test('44px: every control (incl. the card «i») measures >= 44x44', () => {
   }
 });
 
-test('notices strip: its content never touches the chat bubble or the pill border', () => {
+// ---- #335 F002 composition — RED first, one per rule (S6.4 / S7.2) ----------
+// Frames: .agentline/.overview-detail/.pill-summary live inside .card-left (the
+// content column, 318px of the 558x140 overview box) and #pill-choices lives in
+// the same 558x140 box; #notices is anchored to the ISLAND (640x160) through
+// calc(50% + 20px), so island = overview + 10 on both axes.
+const OVH = 140; // overview box height; island = OVH + 20
+
+test('R2: the active content keeps its vertical budget in the central column', () => {
+  const a = decls('.agentline'), d = decls('.overview-detail'), s = decls('.pill-summary');
+  assert.equal(px(a.left), 148, 'agentline opens the central column (island x158)');
+  assert.equal(px(a.top), 16, 'agentline y16..34');
+  assert.equal(px(d.left), 148);
+  assert.equal(px(d.top), 42, 'connection detail y42..60');
+  assert.equal(String(decls('#overview-detail')['-webkit-line-clamp']), '1', 'one line; the rest lives behind the «i»');
+  assert.equal(px(s.left), 148);
+  assert.equal(px(s.top), 64, 'pill summary y64');
+  assert.equal(s.overflow, 'hidden', 'the slot clips: its text can never claim the band below');
+  const cap = px(s['max-height']);
+  assert.ok(cap > 0, '.pill-summary needs an explicit max-height (a bounded slot, not content height)');
+  assert.ok(px(s.top) + cap <= 106, `summary ${px(s.top)}+${cap} exceeds the 106px budget (island <=116) — R3's zero-overlap is the binding rule`);
+});
+
+test('R3: the pill-summary slot never reaches the mini-bots band (zero overlap)', () => {
+  const s = decls('.pill-summary'), mb = decls('#minibots');
+  assert.equal(px(mb.bottom), 6, '#347 keeps its band anchor (bottom:6)');
+  const row = px(decls('.minibot svg')['height']); // 24px mini-Abot, NOT an 18px text row
+  assert.ok(row >= 18, 'mini-bot row height readable');
+  const mbTop = OVH - px(mb.bottom) - row; // 140-6-24 = 110: the flex band grows UP from bottom:6
+  const end = px(s.top) + px(s['max-height']);
+  assert.ok(end <= mbTop - 4, `summary ends at ${end}, mini-bots start at ${mbTop}: they must not touch (4px gap)`);
+});
+
+test('R4: the strip band and the pills grid own disjoint rects (right card uncovered)', () => {
+  const n = decls('#notices'), p = decls('#pill-choices'), mb = decls('#minibots');
+  assert.equal(p.display, 'grid');
+  assert.equal(p['pointer-events'], 'auto', 'the other-bot choices stay clickable');
+  // #notices sits in the island frame, #pill-choices in the overview frame (+10)
+  const bandBottomOv = px(n.top) - 10 + px(n.height);
+  assert.ok(px(p.top) >= bandBottomOv,
+    `pills top ${px(p.top)} < band bottom ${bandBottomOv}: the strip covers the grid — the F002 "partial" bug`);
+  assert.equal(n.right, '72px', 'the 72px gutter stays (coucou-presentation-check pins it too)');
+  // mini-bots are content-column only: with the right card now visible they must
+  // never draw over it (their old right:14 spanned x148..544 of the 558px box)
+  assert.ok(px(mb.right) >= 254, `#minibots right ${mb.right} reaches into the right card`);
+});
+
+test('R5: two stacked notices stay inside the fixed 44px band and never reach the grid', () => {
+  const n = decls('#notices'), p = decls('#pill-choices');
+  assert.equal(px(n.height), 44, 'band = the approved one-row 44px (island y10..54)');
+  assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/,
+    'overflow scrolls INSIDE the band instead of growing the box');
+  // model of two stacked notices, from the real boxes: row + gap + pill
+  const stacked = px(decls('#notice-row')['min-height']) + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
+  assert.equal(stacked, 96, 'model: chips row + gap + notice pill stack to 96px');
+  assert.ok(stacked > px(n.height), 'the stacked content exceeds the band, so it must scroll');
+  assert.ok(px(n.top) - 10 + px(n.height) <= px(p.top), 'even stacked, the band box ends before the grid: zero touch');
+  assert.equal(px(decls('#notice-info').top), 0, 'the «i» fits the band: no phantom 4px scroll');
+  assert.equal(String(decls('#notice-pill').order), '-1', 'the actionable notice sits in the first visible row of the band');
+  assert.equal(p.overflow, 'hidden', 'the grid clips its own box, it never grows upward');
+  assert.equal(p['grid-template-rows'], '40px 40px', 'exactly two 40px rows (2x2)');
+  assert.match(css, /#pill-choices \.pill-choice:nth-child\(n\+5\) \{[^}]*display:\s*none/,
+    'the fifth of pills.visible() stays in the data only — visible() untouched (S6.2)');
+});
+
+test('notices strip: its box never touches the chat bubble or the pill border, and its content never escapes the box', () => {
+  // #335 F002 re-scope (S6.3 — allowed ONCE, and only this block). The strip
+  // used to be a full-height 140px pane whose 92px of content (row 44 + pill 44
+  // + margin) fit inside it; F002 option A turns it into the approved 44px band
+  // on top of the right card, so the SAME assertion — content/height of the
+  // strip may never reach the chat bubble or the pill border — is now proven
+  // through the new box: the box stays in the safe zone, one visible row fits
+  // the band exactly, and the stacked content is carried by internal overflow
+  // (it scrolls inside; it can never grow the box toward the bubble/border).
   const n = decls('#notices');
   const bubble = decls('#open-chat');
   const H = 160; // overview height
-  const top = px(n.top), bottom = px(n.bottom), right = px(n.right);
-  const contentH = 44 /* #notice-row */ + 44 /* #notice-pill */ + (px(decls('#notice-pill')['margin-top']) || 0);
-  assert.ok(H - top - bottom >= contentH, `strip ${H - top - bottom}px < content ${contentH}px`);
+  const top = px(n.top), height = px(n.height), right = px(n.right);
+  const row = px(decls('#notice-row')['min-height']); // 44px: what ONE visible row needs
+  const contentH = row + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']); // 96px stacked
+  assert.ok(height >= row, `band ${height}px < one row ${row}px`);
+  assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/, 'stacked content must scroll INSIDE the box');
+  assert.ok(contentH > height, 'model: stacked content exceeds the band, so the box (not the content) is the bound');
   const bubbleTop = H - px(bubble.bottom) - px(bubble.height);
   const bubbleLeftGap = px(bubble.right) + px(bubble.width) + 8; // strip must stop 8px before the bubble
-  const verticallyClear = top + contentH <= bubbleTop - 4;
+  const verticallyClear = top + height <= bubbleTop - 4;
   assert.ok(verticallyClear || right >= bubbleLeftGap, 'strip overlaps the bubble');
-  assert.ok(top + contentH <= H - 12, 'content reaches the pill border zone');
+  assert.ok(top + height <= H - 12, 'content reaches the pill border zone');
   assert.ok(right >= bubbleLeftGap, 'dismiss cross must stay clear of the bubble column');
 });
 
