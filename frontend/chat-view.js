@@ -320,5 +320,61 @@
     });
   }
 
-  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn };
+  // ---- F024: the model row above the composer --------------------------------
+  // What the row shows and when it may be used. Pure text: the page writes it
+  // with textContent only. `view.target` is already the EFFECTIVE target
+  // (chathost::current_target → specialistshost: the active role's own model
+  // wins), so the row shows ONE model: the one the next turn will use (R1).
+  const NO_MODEL_LABEL = 'Sin modelo local elegido';
+
+  // The active role in the only shape the row needs, or null: a role that names
+  // no local model changes nothing here (R4).
+  function activeRole(specialists) {
+    if (!specialists || !Array.isArray(specialists.specialists)) return null;
+    const role = specialists.specialists.find(s => s && s.id === specialists.active);
+    return role && typeof role.model === 'string' && role.model
+      ? { id: role.id, name: role.name, model: role.model }
+      : null;
+  }
+
+  // R1/R4: the target's alias (its profile id when it has none); the role is
+  // named only when that role is what supplies THIS target.
+  function modelButtonLabel(view, role) {
+    const t = view && view.target;
+    const name = t && (t.alias || t.profile_id || '');
+    if (!name) return NO_MODEL_LABEL;
+    return role && role.model && t.profile_id === role.model ? `${name} · ${role.name}` : name;
+  }
+
+  // R4: the ONE line the picker shows while the active role fixes the model.
+  function modelRoleNote(view, role) {
+    const t = view && view.target;
+    if (!role || !t || t.profile_id !== role.model) return '';
+    return `«${role.name}» fija este modelo: elegir acá no reemplaza el rol (el picker no lo cambia).`;
+  }
+
+  // R4/R5: the same identity as the accessible name — the origin without its
+  // scheme (targetAria) plus who owns the model. Never an endpoint, a key, an
+  // account or a provider name (S5).
+  function modelButtonAria(view, role) {
+    const base = targetAria(view && view.target);
+    const note = modelRoleNote(view, role);
+    return note ? `${base}. ${note}` : base;
+  }
+
+  // R2: the row is usable while no turn is running — the running turn keeps the
+  // target it froze at submit and a selection applies to the NEXT turn, so a
+  // frozen row protects nothing but still must not pretend to switch anything.
+  // With no target chosen (or no preflight verdict) it stays open: that is
+  // exactly the state where choosing is what unblocks the chat; an unavailable
+  // or blocked CHOSEN target closes it, the same refusal Send shows.
+  function modelButtonEnabled(view) {
+    if (!view || view.active_turn) return false;
+    if (!view.target) return true;
+    const state = view.availability && view.availability.state;
+    if (!state || state === 'unchecked') return true;
+    return SENDABLE.has(state);
+  }
+
+  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote };
 });
