@@ -148,7 +148,17 @@
         <div id="chat-status-strip">
           <span id="chat-state" class="chip" role="img"><span class="ico" id="chat-state-icon"></span><span class="word" id="chat-state-word"></span></span>
         </div>
+        <p id="chat-history-warning" role="status" hidden></p>
+        <div id="conversations" role="dialog" aria-label="Conversaciones guardadas" hidden inert>
+          <div id="conversations-bar"><h2>Conversaciones</h2><button id="conversations-close" class="icon-btn" type="button" aria-label="Volver al chat"><span class="ico" data-icon="cross"></span></button></div>
+          <p id="conversations-note" role="status"></p>
+          <ul id="conversations-list" aria-label="Conversaciones guardadas"></ul>
+        </div>
         <div id="chat-body">
+          <div id="chat-history-controls" role="group" aria-label="Conversaciones">
+            <button id="chat-create" class="icon-btn" type="button" aria-label="Nueva conversación (Ctrl+N)" title="Nueva conversación (Ctrl+N)"><span class="ico" data-icon="bubble"></span></button>
+            <button id="chat-conversations" class="icon-btn" type="button" aria-label="Conversaciones guardadas" aria-expanded="false" aria-controls="conversations"><span class="ico" data-icon="clock"></span></button>
+          </div>
           <ol id="chat-log" tabindex="0" aria-label="Historial de la conversación"></ol>
           <button id="chat-new" type="button" hidden aria-label="Respuesta nueva"><span class="ico" data-icon="arrow-down"></span><span class="dot"></span></button>
           <form id="chat-composer" novalidate>
@@ -156,7 +166,7 @@
             <textarea id="chat-input" rows="1" maxlength="8000" spellcheck="true"
               aria-describedby="chat-help chat-problem" placeholder="Escribí…"></textarea>
             <span id="chat-draft-word" class="chip" data-tone="red" hidden></span>
-            <span id="chat-help" class="sr-only">Enter envía. Mayúsculas más Enter agrega una línea. Escape sale del campo; otro Escape cierra la isla.</span>
+            <span id="chat-help" class="sr-only">Enter envía. Mayúsculas más Enter agrega una línea. Ctrl+N crea una conversación sin borrar el historial. Escape sale del campo; otro Escape cierra la isla.</span>
             <button id="chat-cancel" class="round" type="button" hidden aria-label="Cancelar"><span class="ico" data-icon="square"></span></button>
             <button id="chat-send" class="round" type="submit" disabled aria-label="Enviar"><span class="ico" data-icon="arrow-up"></span></button>
           </form>

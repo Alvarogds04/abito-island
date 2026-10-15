@@ -15,6 +15,7 @@ use abito_island::bridge::{self, BridgeError};
 use abito_island::chat::{self, Command};
 use abito_island::chatlane::{self, Target};
 use abito_island::core::ViewPlan;
+use abito_island::conversations::SpecialistRef;
 use abito_island::desktop::IslandState;
 use abito_island::geometry;
 use abito_island::localmodel::DEFAULT_DEADLINES;
@@ -174,19 +175,18 @@ pub fn submit(
         return Ok(serde_json::to_value(dup).unwrap_or(Value::Null)); // same turn, no new job
     }
     // #327: one role snapshot supplies both model and system. Later changes affect the next turn.
-    let (target, system) = specialistshost::turn_configuration(state, chatlane::SYSTEM_PROMPT)
+    let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
     let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
     let gate = crate::model_gate(state, &target);
     if let Err(e) = gate {
         return Err(chat_error(e));
     }
-    let accepted = lane
-        .lock()
-        .expect("chat lane lock")
-        .convo
-        .submit(text, client_request_id, &target.profile)
-        .map_err(chat_error)?;
+    let (accepted, conversation_id) = {
+        let mut l = lane.lock().expect("chat lane lock");
+        let accepted = l.submit(text, client_request_id, &target.profile, specialist, chatlane::history_now()).map_err(chat_error)?;
+        (accepted, l.convo.id().to_owned())
+    };
     publish_chat(app);
     if !accepted.duplicate {
         let app = app.clone();
@@ -195,7 +195,7 @@ pub fn submit(
         std::thread::spawn(move || {
             let publish_app = app.clone();
             let publish = move || publish_chat(&publish_app);
-            chatlane::run_turn(&lane, &turn, &target, &system, deadlines, &publish);
+            chatlane::run_turn_scoped(&lane, &conversation_id, &turn, &target, &system, deadlines, &publish);
         });
     }
     Ok(serde_json::to_value(accepted).unwrap_or(Value::Null))
@@ -215,6 +215,26 @@ pub async fn chat_action(
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
     match command {
         Command::View => Ok(chat_view(&app, &state)),
+        Command::List => state.chat.lock().expect("chat lane lock").list_conversations().map_err(chat_error),
+        Command::History { conversation_id, before } => state.chat.lock().expect("chat lane lock").history_page(&conversation_id, before).map_err(chat_error),
+        Command::New => {
+            let specialist = state.specialists.role().map(|s| SpecialistRef { id: s.id, name: s.name });
+            state.chat.lock().expect("chat lane lock").new_conversation(specialist, chatlane::history_now()).map_err(chat_error)?;
+            publish_chat(&app);
+            Ok(chat_view(&app, &state))
+        }
+        Command::Restore { conversation_id } => {
+            // Hold the lane across role restoration: another send cannot slip into the old context.
+            let mut l = state.chat.lock().expect("chat lane lock");
+            let (summary, page) = l.prepare_conversation(&conversation_id).map_err(chat_error)?;
+            let role_id = summary.specialist.as_ref().map(|s| s.id.as_str());
+            let missing = specialistshost::select_conversation_role(&app, &state, role_id)?;
+            l.activate_conversation(summary, page);
+            if missing { l.history_notice("El especialista de esta conversación ya no existe; ahora responde Abito principal."); }
+            drop(l);
+            publish_chat(&app);
+            Ok(chat_view(&app, &state))
+        }
         Command::Check => {
             // metadata only, off the main thread; never a prompt
             if let Some(target) = current_target(&state) {
@@ -244,6 +264,18 @@ pub async fn chat_action(
             Ok(json!({ "cancelled": cancelled }))
         }
     }
+}
+
+/// Initialize private local history; probes are memory-only unless explicitly isolated.
+pub fn start_history(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let dir = if let Ok(dir) = std::env::var("ABITO_CONVERSATIONS_DATA_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        if !dir.is_absolute() { state.chat.lock().expect("chat lane lock").history_failure("El directorio de historial de prueba no es válido; los mensajes no se guardarán."); return; }
+        Some(dir)
+    } else if crate::probe_requested() { None }
+    else { app.path().app_data_dir().ok().map(|p| p.join("conversations")) };
+    if let Some(dir) = dir { let _ = state.chat.lock().expect("chat lane lock").init_history(&dir); }
 }
 
 /// Default deadlines for production turns.

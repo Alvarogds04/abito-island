@@ -24,7 +24,7 @@ pub const DRAFT_MAX_SCALARS: usize = 8_000;
 /// with `finish_reason: limit`, never with another automatic request.
 pub const RESPONSE_MAX_SCALARS: usize = 32_000;
 /// Presentation cache: ≤100 turns or 256 KiB of text, whichever first.
-/// Eviction is presentation-only (page/process memory, nothing persisted).
+/// Eviction is presentation-only; #341 persists history independently.
 pub const CACHE_MAX_TURNS: usize = 100;
 pub const CACHE_MAX_BYTES: usize = 256 * 1024;
 /// Per-message chat-template overhead in the token estimate.
@@ -247,7 +247,7 @@ pub struct Prompt {
     pub trimmed_turns: usize,
 }
 
-/// One conversation (V1: one per process, page/process memory only).
+/// The bounded active context of one conversation. #341 stores history separately.
 #[derive(Debug)]
 pub struct Conversation {
     id: String,
@@ -264,6 +264,19 @@ impl Conversation {
             next: 0,
             evicted: 0,
         }
+    }
+
+    /// Restore the newest page; older presentation pages never enlarge model context.
+    pub fn restore(id: &str, turns: Vec<Turn>) -> Self {
+        let next = turns.iter().filter_map(|t| t.turn_id.strip_prefix("t-")?.parse::<u64>().ok()).max().unwrap_or(0);
+        let mut convo = Self { id: id.into(), turns: turns.into(), next, evicted: 0 };
+        convo.enforce_cache();
+        convo
+    }
+
+    /// Project a bounded disk page without applying the active model-context cache.
+    pub fn project_history(id: &str, turns: Vec<Turn>) -> Value {
+        Self { id: id.into(), turns: turns.into(), next: 0, evicted: 0 }.view()
     }
 
     pub fn id(&self) -> &str {
@@ -561,6 +574,10 @@ pub enum Command {
     Back,
     /// Re-read the local model's availability (metadata only, no inference).
     Check,
+    New,
+    List,
+    Restore { conversation_id: String },
+    History { conversation_id: String, before: Option<u64> },
     Submit {
         text: String,
         client_request_id: String,
@@ -595,6 +612,21 @@ pub fn parse_command(payload: &Value) -> Result<Command, ChatError> {
         "open" if keys(&["action"]) => Ok(Command::Open),
         "back" if keys(&["action"]) => Ok(Command::Back),
         "check" if keys(&["action"]) => Ok(Command::Check),
+        "new" if keys(&["action"]) => Ok(Command::New),
+        "list" if keys(&["action"]) => Ok(Command::List),
+        "restore" if keys(&["action", "conversation_id"]) => {
+            let conversation_id = text_of("conversation_id").filter(|id| crate::conversations::valid_id(id)).ok_or_else(bad)?;
+            Ok(Command::Restore { conversation_id })
+        }
+        "history" if keys(&["action", "conversation_id", "before"]) => {
+            let conversation_id = text_of("conversation_id").filter(|id| crate::conversations::valid_id(id)).ok_or_else(bad)?;
+            let before = match map.get("before") {
+                Some(Value::Null) => None,
+                Some(n) => Some(n.as_u64().filter(|n| *n > 0).ok_or_else(bad)?),
+                None => return Err(bad()),
+            };
+            Ok(Command::History { conversation_id, before })
+        }
         "submit" if keys(&["action", "text", "client_request_id"]) => {
             let text = text_of("text").ok_or_else(bad)?;
             let client_request_id = text_of("client_request_id")
