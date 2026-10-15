@@ -852,3 +852,17 @@ test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row o
   assert.match(css, /#settings\[data-rail="true"\] #settings-tabs\s*\{[^}]*flex-direction:\s*column/);
   assert.match(css, /#settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/, 'the row fallback wraps');
 });
+
+test('#408 S9 spacing at the Settings size: wider rail, roomier panel and sections, 2-column cards, tall rail items', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, sel); return css.slice(i, css.indexOf('}', i)); };
+  assert.match(rule('#settings[data-rail="true"]'), /grid-template-columns:\s*200px/);
+  assert.match(rule('#settings[data-rail="true"]'), /padding:\s*20px 24px/);
+  assert.match(rule('#settings[data-rail="true"] .ssec'), /margin-top:\s*20px/);
+  assert.match(rule('#settings[data-rail="true"] #settings-tabs'), /gap:\s*6px/);
+  assert.match(rule('#settings[data-rail="true"] .stab'), /min-height:\s*48px/);
+  assert.match(rule('#settings[data-rail="true"] .scard'), /padding:\s*16px 18px/);
+  assert.match(rule('#settings[data-rail="true"] .scards'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(rule('#settings[data-rail="true"] .scards'), /gap:\s*12px/);
+  assert.match(rule('#settings[data-rail="true"] .scard .sagent-head'), /align-items:\s*center/);
+});
