@@ -195,10 +195,47 @@ pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<
     .map_err(|_| err("agent_aborted"))?
 }
 
+/// #408 — `settings_view`: the page tells Rust that Ajustes opened (`{"open":true}`) or closed. Rust owns
+/// the size (geometry::settings_visible, clamped to the work area) and restores the previous chat
+/// rectangle on close; the page never sends a number. Same sender gate and rate limiter as the others.
+#[tauri::command]
+pub async fn settings_view(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    bridge::sender_ok(webview.label(), &url)?;
+    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    let open = parse_settings_view(&payload).ok_or_else(|| err("invalid_schema"))?;
+    crate::chathost::switch_settings(&app, &state, open);
+    Ok(json!({"open": open}))
+}
+
+/// The closed payload: exactly `{"open": <bool>}`.
+pub(crate) fn parse_settings_view(payload: &Value) -> Option<bool> {
+    let obj = payload.as_object()?;
+    if obj.len() != 1 {
+        return None;
+    }
+    obj.get("open")?.as_bool()
+}
+
 pub fn stop(app: &AppHandle) {
     let state = app.state::<AppState>();
     let conn = state.settings.agent.lock().expect("agent lock").take();
     if let Some(c) = conn {
         c.close();
+    }
+}
+
+#[cfg(test)]
+mod settings_view_tests {
+    use super::parse_settings_view;
+    use serde_json::json;
+
+    #[test]
+    fn the_settings_view_payload_is_exactly_one_boolean() {
+        assert_eq!(parse_settings_view(&json!({"open": true})), Some(true));
+        assert_eq!(parse_settings_view(&json!({"open": false})), Some(false));
+        for bad in [json!({}), json!({"open": 1}), json!({"open": "true"}), json!({"open": true, "w": 900}), json!(true), json!(null), json!({"width": 900})] {
+            assert_eq!(parse_settings_view(&bad), None, "{bad}");
+        }
     }
 }

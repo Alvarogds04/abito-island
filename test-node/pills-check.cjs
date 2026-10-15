@@ -93,7 +93,7 @@ function boot({ prefs = {}, failView = false, deferView = false } = {}) {
   for (const file of ['pill-catalog.js', 'pills.js', 'icons.js', 'pills-view.js']) load(file);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { get, calls, backend, doc, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
+  return { get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
 }
 
 test('S3/S4 actual shipped overview starts with main+four default choices and named states', async () => {
@@ -169,10 +169,11 @@ test('S6 initial prefs read cannot overwrite a newer pushed choice snapshot', as
 });
 
 
-async function settingsBoot(options) {
+async function settingsBoot(options, tab = 'pills') {
   const b = boot(options); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
   b.click('open-screen-settings'); await flush();
+  b.click('settings-tab-' + tab); await flush(); // #408: every section lives in its sub-tab
   return b;
 }
 const writes = b => b.calls.filter(x => x.cmd === 'prefs_action' && x.payload.action !== 'view');
@@ -249,15 +250,49 @@ test('S6 failed main save keeps previous snapshot and focus; explicit retry succ
 });
 
 test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices', async () => {
-  const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}});
+  const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}}, 'general');
   b.click('sw-sound'); await flush(); assert.equal(b.backend.prefs.sound,true);
   const gain=b.get('settings-sound-gain'); gain.value='0.2'; gain.fire('input'); gain.parentNode.fire('submit'); await flush();
   assert.equal(b.backend.prefs.gain,0.2);
+  b.click('settings-tab-appearance'); await flush();
   const name=b.get('settings-display-name'); name.value='Bea'; name.fire('input'); name.parentNode.fire('submit'); await flush();
   assert.equal(b.backend.prefs.displayName,'Bea');
   b.click('dot-color-abito-blue'); await flush(); assert.equal(b.backend.prefs.avatarColors.abito,'blue');
   assert.equal(b.backend.prefs.mainPill,'agent_codex'); assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']);
   assert.deepEqual(writes(b).map(x=>x.payload.action),['sound_on','set_sound_gain','set_display_name','set_avatar_color']);
   assert.equal(b.get('pill-name').textContent,'Codex');
-  assert.ok(b.get('open-screen-accounts')); assert.ok(b.get('open-screen-connectors'));
+  assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(b.get('settings-tab-connectors'));
+});
+
+test('#408 Cuentas renders the provider-cards section (and tab selection follows the click) without an engine', async () => {
+  const b = await settingsBoot({}, 'accounts');
+  assert.ok(b.get('provider-cards'), 'one provider list');
+  assert.equal(b.get('settings-tab-accounts').getAttribute('aria-selected'), 'true');
+  assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'false');
+  assert.equal(b.get('settings-tab-pills').tabIndex, -1, 'roving tabindex');
+  b.click('settings-tab-pills'); await flush();
+  assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'true');
+  assert.ok(!b.get('provider-cards'), 'only the selected tab is rendered');
+});
+
+test('#408 opening Ajustes asks Rust for the Settings size (open only, no numbers) and closing gives it back', async () => {
+  const b = await settingsBoot({}, 'general');
+  const sizes = () => b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload);
+  assert.deepEqual(sizes(), [{ open: true }]);
+  b.click('settings-close'); await flush();
+  assert.deepEqual(sizes(), [{ open: true }, { open: false }]);
+  b.click('settings-close'); await flush();
+  assert.equal(sizes().length, 2, 'closing a closed panel asks nothing');
+});
+
+test('#408 Escape closes Ajustes and focus returns to the gear that opened it', async () => {
+  const b = await settingsBoot({}, 'general');
+  b.get('settings-close').focus();
+  const keydown = b.events.keydown || [];
+  assert.ok(keydown.length, 'settings.js listens for keydown');
+  for (const fn of keydown) fn({ key: 'Escape', isComposing: false, preventDefault() {}, stopPropagation() {} });
+  await flush();
+  assert.equal(b.get('settings').inert, true, 'panel closed');
+  assert.equal(b.doc.activeElement, b.get('open-screen-settings'), 'focus is back on the gear');
+  assert.deepEqual(b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload).pop(), { open: false });
 });

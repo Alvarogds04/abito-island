@@ -1190,3 +1190,12 @@ running binary can be replaced), and writes
 `$HOME/Apps/sb-second-brain` (`--project-root` to change). Idempotent; `--uninstall`
 removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 (11, toy stage in temp dirs). Never touches `com.abitog.Abito*` roots.
+
+## #408 — Unified Ajustes with sub-tabs and an island that grows to fit
+
+- **One entry:** the gear (overview and chat header) opens **Ajustes**. The separate Cuentas, Conectores and Modelo header buttons are gone; the old open events (`abito:settings-select` with a tab id) still deep-link into the matching tab.
+- **Sub-tabs** (a real `role="tablist"`: arrows wrap, Home/End, roving tabindex, `aria-selected`, 44 px, visible focus): Cuentas · Conectores · Modelos · Especialistas · Pills · Apariencia · General. Names, order, icons and hints live in one table, `settings-view.js` `TABS`; rename or reorder there.
+- **Where things went:** atajo + sonido → General; saludo, movimiento, tema, colores → Apariencia; the local-models picker (`#models`, same `models.js`) → Modelos.
+- **Cuentas / providers:** one card per provider (`providerCards`): status **Conectado / No conectado / En curso / Error**, one primary action (Iniciar sesión · Usar una clave de API · Cancelar · Reintentar), the device code / URL / masked key prompt inside the card. Errors are the UI's own sentences; engine text is never rendered. Same daemon protocol and the same masked-field → `auth_reply` → cleared path; approvals stay UI-only.
+- **Auto-expand (S4):** opening Ajustes calls `settings_view {open:true}`; Rust (`geometry::settings_visible`: 720 wide, height `min(680, work area − gaps)`, ≥ 240, narrower on small screens) stages the resize on the docked edge and clamps it to the work area. Closing sends `{open:false}` and the previous chat rectangle is restored. The page never sends a size; the payload is exactly one boolean. Compact and overview sizes are untouched.
+- **Tests:** `test-node/settings-view-check.cjs` (tabs table, tablist keys, provider cards), `test-node/pills-check.cjs` (tab routing, size request), `src/core.rs` tests (grow, exact restore, small work areas, forget on leave) and `settingshost` payload test.

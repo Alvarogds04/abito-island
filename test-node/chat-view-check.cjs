@@ -190,7 +190,7 @@ test('UI.2 rows: short word + icon, full text kept for aria', () => {
 
 test('UI.2 chat markup: icon-only controls are named, copy is voseo, labels Vos/Abito gone', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
-  for (const id of ['chat-models', 'chat-back', 'chat-send', 'chat-cancel', 'chat-new']) {
+  for (const id of ['chat-back', 'chat-send', 'chat-cancel', 'chat-new']) {
     assert.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html)[0], /aria-label="[^"]{3,}"/, id);
   }
   assert.match(html, /placeholder="Escribí…"/);
@@ -417,10 +417,10 @@ test('column: a settings screen is ONE row — title, connection chip and a clos
   assert.match(rule('#settings-title'), /text-overflow:\s*ellipsis/);
 });
 
-test('column: the three header buttons (Cuentas, Conectores, Ajustes) plus Modelos and Volver fit the 400 header', () => {
+test('column: #408 — the header keeps only Ajustes and Volver, so it fits the 400 header', () => {
   const header = html.slice(html.indexOf('id="chat-header"'), html.indexOf('id="chat-status-strip"'));
   const buttons = (header.match(/<button /g) || []).length;
-  assert.equal(buttons, 5, 'accounts, connectors, settings, models, back');
+  assert.equal(buttons, 2, 'settings, back');
   const gap = px(rule('#chat-header'), /gap:\s*(\d+)px/, 0);
   const inner = COLUMN_W - 24 /* gutters */ - 52 /* R6 */;
   const need = buttons * 44 + 70 /* the «local» chip */ + gap * buttons;
@@ -431,8 +431,8 @@ test('column: the models bar is two rows — [count, info, refresh, done] then t
   assert.match(rule('#models-bar'), /flex-wrap:\s*wrap/);
   const bar = html.slice(html.indexOf('id="models-bar"'), html.indexOf('id="models-note"'));
   const at = id => bar.indexOf(`id="${id}"`);
-  assert.ok(at('models-refresh') > -1 && at('models-close') > -1);
-  assert.ok(at('models-refresh') < at('models-meters') && at('models-close') < at('models-meters'), 'the buttons come BEFORE the meters, so wrapping pushes the meters down, never the buttons out');
+  assert.ok(at('models-refresh') > -1);
+  assert.ok(at('models-refresh') < at('models-meters'), 'the buttons come BEFORE the meters, so wrapping pushes the meters down, never the buttons out');
   assert.match(rule('#models-meters'), /(flex-basis:\s*100%|width:\s*100%|order:\s*\d)/, 'the meters take their own row');
   // first row: chip + 3 icon buttons (44px each) + gaps must fit
   const first = 44 * 3 + 44 /* chip, generous */ + 8 * 3;
@@ -456,7 +456,7 @@ test('column: with a screen open the chat header STAYS visible (gentle-dot): the
   assert.match(setCss, /left:\s*12px/);
   assert.match(setCss, /right:\s*12px/);
   assert.match(setCss, /top:\s*5\d px|top:\s*(5\d|6\d)px/, 'the panel starts BELOW the header');
-  assert.match(html, /id="open-screen-accounts"[^>]*aria-expanded="false"/);
+  assert.match(html, /id="open-screen-settings"[^>]*aria-expanded="false"/);
 });
 
 test('column: an open panel (Modelos, Ajustes) hides the chat status strip, so «Bloqueado» never overlaps the panel', () => {

@@ -54,7 +54,12 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     // #309: the column's height follows the work area, so Rust computes it from the current one
     let area = *state.work_area.lock().expect("work area lock");
     let scale = main_window(app).scale_factor().unwrap_or(1.0);
-    let (cw, ch) = geometry::chat_visible(area.h, scale);
+    let settings_open = state.core.lock().expect("core lock").settings;
+    let (cw, ch) = if settings_open {
+        geometry::settings_visible(area.w, area.h, scale)
+    } else {
+        geometry::chat_visible(area.h, scale)
+    };
     v["chat_visible"] = json!([cw, ch]);
     v["target"] = match current_target(state) {
         Some(t) => json!({
@@ -159,6 +164,22 @@ pub fn switch_view(app: &AppHandle, state: &AppState, chat: bool) {
                 publish_chat(&app);
             });
         }
+    }
+}
+
+/// #408: give the chat column the Settings size while Ajustes is open (`open`) and take it back on close.
+/// Only from the chat view; anchored to the docked edge and clamped to the work area like every view.
+pub fn switch_settings(app: &AppHandle, state: &AppState, open: bool) {
+    if *state.phase.lock().expect("phase lock") != IslandState::Expanded {
+        return;
+    }
+    let area = refresh_work_area(app, state);
+    let win = main_window(app);
+    let io = TauriIo(&win);
+    let plan = state.core.lock().expect("core lock").plan_settings(&io, area, open);
+    if let Some(plan) = plan {
+        apply_view(app, state, plan);
+        publish_chat(app);
     }
 }
 

@@ -22,13 +22,23 @@ test('F055 general volume uses default and inclusive boundaries without coercion
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('three screens in gentle-dot order — Cuentas, Conectores, Ajustes — each with title, icon and a one-line hint', () => {
-  assert.deepEqual(S.SCREENS.map(x => x.id), ['accounts', 'connectors', 'settings']);
-  assert.deepEqual(S.SCREENS.map(x => x.title), ['Cuentas', 'Conectores', 'Ajustes']);
-  for (const x of S.SCREENS) { assert.ok(x.icon, x.id); assert.ok(x.id === 'settings' || x.hint.length > 20, x.id); }
-  assert.equal(S.screenById('connectors').title, 'Conectores');
-  assert.equal(S.screenById('nope'), null);
-  assert.equal(S.SECTIONS, undefined, 'the tab strip is gone');
+test('#408 seven sub-tabs of ONE Ajustes entry, in one table: Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General', () => {
+  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'connectors', 'models', 'specialists', 'pills', 'appearance', 'general']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['Cuentas', 'Conectores', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+  for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
+  assert.equal(S.tabById('connectors').title, 'Conectores');
+  assert.equal(S.tabById('nope'), null);
+  assert.equal(S.SCREENS, undefined);
+});
+
+test('#408 tablist keyboard: arrows wrap, Home/End jump, other keys are ignored', () => {
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'connectors');
+  assert.equal(S.tabKeyTarget('general', 'ArrowRight'), 'accounts');
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowLeft'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'Home'), 'accounts');
+  assert.equal(S.tabKeyTarget('pills', 'End'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'a'), null);
+  assert.equal(S.tabKeyTarget('nope', 'ArrowRight'), null);
 });
 
 // ---- connection chip -------------------------------------------------------------
@@ -200,11 +210,11 @@ test('markup: gear + every icon-only control is named; sections are real tabs; t
   assert.match(html, /<script defer src="settings\.js"><\/script>/);
   assert.match(html, /id="open-settings"[^>]*aria-label="Ajustes"/);
   assert.match(html, /id="settings"[^>]*role="dialog"[^>]*aria-label="Ajustes"/);
-  assert.doesNotMatch(html, /role="tablist"/, 'no tab strip: each screen has its own header button');
-  for (const id of ['accounts', 'connectors', 'settings']) {
-    const tag = new RegExp(`<button[^>]*id="open-screen-${id}"[^>]*>`).exec(html);
-    assert.ok(tag, id); assert.match(tag[0], /aria-label="[^"]{3,}"/, id); assert.match(tag[0], /aria-expanded="false"/, id);
-  }
+  assert.match(html, /id="settings-tabs"[^>]*role="tablist"[^>]*aria-label="[^"]{3,}"/, '#408: a real tablist');
+  for (const id of ['accounts', 'connectors']) assert.doesNotMatch(html, new RegExp(`id="open-screen-${id}"`), id + ' has no header button of its own');
+  assert.doesNotMatch(html, /id="chat-models"/, 'the Modelo header button moved into the Modelos tab');
+  const gear = /<button[^>]*id="open-screen-settings"[^>]*>/.exec(html);
+  assert.ok(gear); assert.match(gear[0], /aria-label="Ajustes"/); assert.match(gear[0], /aria-expanded="false"/);
   assert.match(html, /<h2[^>]*id="settings-title"/, 'the screen title is a real heading');
   assert.match(html, /id="settings-close"[^>]*aria-label="[^"]{3,}"/);
 });
@@ -345,10 +355,10 @@ test('style: the rules that HIDE the gear are at least as specific as the rule t
   }
 });
 
-test('focus: closing the panel by keyboard lands on something visible in the CHAT view (the gear is overview-only)', () => {
+test('focus: closing the panel by keyboard lands on the chat-header gear, which stays visible in the CHAT view (#408; #open-settings is overview-only)', () => {
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   const close = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
-  assert.match(close, /chat-input/, 'focus goes back to the chat input');
+  assert.match(close, /open-screen-settings/, 'focus goes back to the gear that opened Ajustes');
   assert.doesNotMatch(close, /AbitoFocusHome/);
 });
 
@@ -387,6 +397,45 @@ test('accounts: the provider list is filtered by method and by the search box', 
   assert.equal(S.providerList(st2(), 'oauth', '')[1].connected, false);
   assert.equal(S.providerList(st2(), 'oauth', '')[0].actionLabel, 'Iniciar sesión');
   assert.equal(S.providerList(st2(), 'api_key', '')[0].actionLabel, 'Usar una clave de API');
+});
+
+test('#408 provider cards: every provider has ONE status and ONE obvious primary action', () => {
+  const cards = S.providerCards(st2(), {});
+  assert.deepEqual(cards.map(c => c.id), ['anthropic', 'openai', 'groq'], 'one list, all providers');
+  const [anthropic, openai, groq] = cards;
+  assert.deepEqual([anthropic.status.kind, anthropic.status.word, anthropic.status.tone], ['connected', 'Conectado', 'go']);
+  assert.equal(anthropic.primary, null, 'a connected provider has no connect button');
+  assert.equal(anthropic.logout, true);
+  assert.deepEqual([openai.status.kind, openai.status.word, openai.status.tone], ['idle', 'No conectado', 'faint']);
+  assert.deepEqual([openai.primary.label, openai.primary.method], ['Iniciar sesión', 'oauth']);
+  assert.deepEqual([groq.primary.label, groq.primary.method], ['Usar una clave de API', 'api_key']);
+  assert.equal(openai.alt, null, 'single-method provider: no second action');
+  const both = S.providerCards(st2({ providers: [{ id: 'newco', name: 'NewCo', methods: ['api_key', 'oauth'], configured: false }] }), {})[0];
+  assert.equal(both.primary.method, 'oauth'); assert.equal(both.alt.method, 'api_key'); assert.equal(both.alt.label, 'Usar una clave');
+});
+
+test('#408 provider cards: in-progress, error and cancelled belong to the provider that started the login', () => {
+  const run = flow => S.providerCards(st2(), { flow });
+  const busy = run({ providerId: 'openai', phase: 'active' });
+  assert.deepEqual([busy[1].status.kind, busy[1].status.word, busy[1].status.icon], ['progress', 'En curso', 'ring']);
+  assert.equal(busy[1].primary.label, 'Cancelar'); assert.equal(busy[1].primary.cancel, true);
+  assert.equal(busy[2].primary.disabled, true, 'other providers cannot start a second flow');
+  assert.equal(busy[0].status.kind, 'connected', 'others keep their own status');
+  const failed = run({ providerId: 'openai', phase: 'error' });
+  assert.deepEqual([failed[1].status.kind, failed[1].status.word, failed[1].status.tone], ['error', 'Error', 'red']);
+  assert.match(failed[1].error, /No se pudo iniciar sesión/); assert.equal(failed[1].primary.label, 'Reintentar');
+  assert.equal(failed[2].error, '', 'only the target shows the error');
+  const cancelled = run({ providerId: 'openai', phase: 'cancelled' });
+  assert.equal(cancelled[1].status.kind, 'idle'); assert.match(cancelled[1].note, /Cancelado/);
+  assert.equal(S.providerCards(st2({ connection: 'no_daemon' }), {})[1].primary.disabled, true, 'no engine, no login');
+});
+
+test('#408 provider cards: method filter and search narrow the list; error text is ours, never the engine\'s', () => {
+  assert.deepEqual(S.providerCards(st2(), { method: 'api_key' }).map(c => c.id), ['anthropic', 'groq']);
+  assert.equal(S.providerCards(st2(), { method: 'api_key' })[1].alt, null);
+  assert.deepEqual(S.providerCards(st2(), { filter: ' GRO ' }).map(c => c.id), ['groq']);
+  const err = S.providerCards(st2(), { flow: { providerId: 'groq', phase: 'error', detail: 'sk-secret-123 stack trace' } })[2];
+  assert.ok(!JSON.stringify(err).includes('sk-secret'), 'engine detail is never rendered');
 });
 
 test('accounts: «Iniciar sesión» uses the provider\'s account, or creates one named after the provider first', () => {
@@ -513,9 +562,9 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 });
 
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
-  const all = JSON.stringify(S.SCREENS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.screenById('connectors').hint, /Preguntá antes de enviar/);
+  assert.match(S.tabById('connectors').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 
@@ -788,3 +837,13 @@ test('#380 theme wiring: one closed sender, no local paint, and a failed save ke
 });
 
 console.log(`settings-view-check: ${passed} passed`);
+
+test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row only as the 400 column fallback', () => {
+  assert.equal(S.tabKeyTarget('pills', 'ArrowDown'), 'appearance');
+  assert.equal(S.tabKeyTarget('pills', 'ArrowUp'), 'specialists');
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /setAttribute\('aria-orientation', wide \? 'vertical' : 'horizontal'\)/);
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(css, /#settings\[data-rail="true"\] #settings-tabs\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(css, /#settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/, 'the row fallback wraps');
+});

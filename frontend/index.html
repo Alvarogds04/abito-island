@@ -152,10 +152,7 @@
                chosen in Ajustes -> Especialistas, and a role never appears here by itself. -->
           <span id="chat-specialist" class="chip" role="img" hidden><span class="ico" id="chat-specialist-icon" data-icon="user"></span><span class="word" id="chat-specialist-word"></span></span>
           <p id="chat-status" class="sr-only"></p>
-          <button id="open-screen-accounts" class="icon-btn" type="button" aria-label="Cuentas" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="user"></span></button>
-          <button id="open-screen-connectors" class="icon-btn" type="button" aria-label="Conectores" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="plug"></span></button>
           <button id="open-screen-settings" class="icon-btn" type="button" aria-label="Ajustes" aria-expanded="false" aria-controls="settings"><span class="ico" data-icon="gear"></span></button>
-          <button id="chat-models" class="icon-btn" type="button" aria-label="Modelo local" aria-expanded="false" aria-controls="models"><span class="ico" data-icon="chip"></span></button>
           <button id="chat-back" class="icon-btn" type="button" aria-label="Volver"><span class="ico" data-icon="arrow-left"></span></button>
         </header>
         <!-- #309: the agent state is its own full-width strip between the header and the history -->
@@ -186,25 +183,8 @@
           </form>
           <p id="chat-problem" class="sr-only" aria-live="polite"></p>
         </div>
-        <!-- U2: self-hosted model choice — an internal panel of the same
-             island (replaces the transcript while open). Local only, no
-             keys; listed is never shown as ready. -->
-        <div id="models" inert aria-label="Modelo local">
-          <!-- #309: the buttons come first so wrapping pushes the meters to a second row, never a button out of the island -->
-          <div id="models-bar">
-            <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
-            <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>
-            <button id="models-refresh" class="icon-btn" type="button" aria-label="Actualizar modelos locales"><span class="ico" data-icon="refresh"></span></button>
-            <button id="models-close" class="icon-btn" type="button" aria-label="Listo, volver a la conversación"><span class="ico" data-icon="check"></span></button>
-            <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
-          </div>
-          <p id="models-note" class="sr-only"></p>
-          <label class="models-search-field" for="models-search"><span class="sr-only">Buscar modelos locales</span><input id="models-search" type="search" placeholder="Buscar modelos" autocomplete="off"></label>
-          <ul id="models-list" aria-label="Modelos locales"></ul>
-          <p id="models-resources" class="sr-only"></p>
-        </div>
-        <!-- #310: settings, copied from gentle-dot (MIT). Three SCREENS (Cuentas, Conectores, Ajustes), one header
-             button each; a screen covers the chat body with a title, a close button and a one-line hint. Plain text
+        <!-- #408: ONE Ajustes entry (the gear) with sub-tabs (settings-view.js TABS: Cuentas, Conectores, Modelos,
+             Especialistas, Pills, Apariencia, General); the panel covers the chat body with a title, a tablist, a close button and a one-line hint. Plain text
              only (textContent); a key is typed into a masked field, sent once as `auth_reply` and cleared. -->
         <div id="settings" inert role="dialog" aria-labelledby="settings-title" aria-label="Ajustes">
           <div id="settings-bar">
@@ -212,8 +192,25 @@
             <span id="settings-conn" class="chip" role="img" hidden><span class="ico" id="settings-conn-icon"></span><span class="word" id="settings-conn-word"></span></span>
             <button id="settings-close" class="icon-btn" type="button" aria-label="Cerrar ajustes"><span class="ico" data-icon="cross"></span></button>
           </div>
+          <div id="settings-tabs" role="tablist" aria-label="Secciones de Ajustes" aria-orientation="horizontal"></div>
           <p id="settings-hint" class="snote"></p>
-          <div id="settings-body" tabindex="-1"></div>
+          <div id="settings-body" tabindex="-1" role="tabpanel"></div>
+          <!-- U2: self-hosted model choice — an internal panel of the same
+               island (replaces the transcript while open). Local only, no
+               keys; listed is never shown as ready. -->
+          <div id="models" inert role="tabpanel" aria-labelledby="settings-tab-models" aria-label="Modelo local">
+            <!-- #309: the buttons come first so wrapping pushes the meters to a second row, never a button out of the island -->
+            <div id="models-bar">
+              <span id="models-count" class="chip" role="img"><span class="ico" data-icon="chip"></span><span class="word" id="models-count-word"></span></span>
+              <button id="models-info" class="icon-btn" type="button" aria-label="Ver detalle de los modelos" aria-expanded="false" aria-controls="models-note"><span class="ico" data-icon="info"></span></button>
+              <button id="models-refresh" class="icon-btn" type="button" aria-label="Actualizar modelos locales"><span class="ico" data-icon="refresh"></span></button>
+              <ul id="models-meters" aria-label="Recursos de esta máquina"></ul>
+            </div>
+            <p id="models-note" class="sr-only"></p>
+            <label class="models-search-field" for="models-search"><span class="sr-only">Buscar modelos locales</span><input id="models-search" type="search" placeholder="Buscar modelos" autocomplete="off"></label>
+            <ul id="models-list" aria-label="Modelos locales"></ul>
+            <p id="models-resources" class="sr-only"></p>
+          </div>
           <p id="settings-live" class="sr-only" role="status" aria-live="polite"></p>
         </div>
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>

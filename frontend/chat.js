@@ -403,8 +403,7 @@
     }
     if (event.key === 'Escape') {
       if (conversationsPanel && !conversationsPanel.hidden) { event.preventDefault(); closeConversations(); conversationsButton.focus(); return; }
-      // The model panel is the innermost layer: Escape closes it first.
-      if (capsule.dataset.models === 'open') { event.preventDefault(); $('models-close').click(); return; }
+      // #408: the model picker is a tab of Ajustes; settings.js closes Ajustes on Escape (capture phase) before this runs.
       if (typing) { input.blur(); log.focus(); event.preventDefault(); return; } // leave typing mode
       if (expanded && window.desktop) { event.preventDefault(); window.desktop.close().catch(() => {}); }
       return;
