@@ -404,43 +404,68 @@ test('accounts: the provider list is filtered by method and by the search box', 
   assert.equal(S.providerList(st2(), 'api_key', '')[0].actionLabel, 'Usar una clave de API');
 });
 
-test('#408 provider cards: every provider has ONE status and ONE obvious primary action', () => {
-  const cards = S.providerCards(st2(), {});
-  assert.deepEqual(cards.map(c => c.id), ['anthropic', 'openai', 'groq'], 'one list, all providers');
-  const [anthropic, openai, groq] = cards;
+// ---- #410 round 2: the compact provider LIST — one row per provider, two buttons: API / Auth -------
+
+test('#410 rows: one row per provider, in the engine\'s order, with OUR names and the honest status', () => {
+  const rows = S.providerRows(st2(), {});
+  assert.deepEqual(rows.map(r => r.id), ['anthropic', 'openai', 'groq']);
+  assert.deepEqual([rows[0].name, rows[1].name, rows[2].name], ['Anthropic', 'OpenAI', 'Groq']);
+  assert.deepEqual([rows[1].status.kind, rows[1].status.word, rows[1].status.tone], ['idle', 'No conectado', 'faint']);
+});
+
+test('#410 rows: the two connect buttons read exactly «API» and «Auth», only for a method the provider offers', () => {
+  const [, openai, groq] = S.providerRows(st2(), {});
+  assert.deepEqual([openai.api, openai.auth.word, openai.auth.method], [null, 'Auth', 'oauth'], 'no API method, no API button');
+  assert.deepEqual([groq.auth, groq.api.word, groq.api.method], [null, 'API', 'api_key'], 'no oauth method, no Auth button');
+  const both = S.providerRows(st2({ providers: [{ id: 'newco', name: 'NewCo', methods: ['api_key', 'oauth'], configured: false }] }), {})[0];
+  assert.deepEqual([both.api.word, both.api.method, both.auth.word, both.auth.method], ['API', 'api_key', 'Auth', 'oauth']);
+  for (const b of [both.api, both.auth, openai.auth, groq.api]) assert.ok(b.aria.includes('NewCo') || b.aria.includes('OpenAI') || b.aria.includes('Groq'), 'each button names its provider for the screen reader');
+  // a provider without methods does not exist in the list (nothing to connect with)
+  assert.deepEqual(S.providerRows(st2({ providers: [{ id: 'x', name: 'X', methods: [], configured: false }] }), {}), []);
+});
+
+test('#410 rows: a connected row offers NO connect buttons, only «Cerrar sesión»; an unconnected one has no logout', () => {
+  const [anthropic, openai] = S.providerRows(st2(), {});
+  assert.deepEqual([anthropic.api, anthropic.auth, anthropic.logout], [null, null, true]);
   assert.deepEqual([anthropic.status.kind, anthropic.status.word, anthropic.status.tone], ['connected', 'Conectado', 'go']);
-  assert.equal(anthropic.primary, null, 'a connected provider has no connect button');
-  assert.equal(anthropic.logout, true);
-  assert.deepEqual([openai.status.kind, openai.status.word, openai.status.tone], ['idle', 'No conectado', 'faint']);
-  assert.deepEqual([openai.primary.label, openai.primary.method], ['Iniciar sesión', 'oauth']);
-  assert.deepEqual([groq.primary.label, groq.primary.method], ['Usar una clave de API', 'api_key']);
-  assert.equal(openai.alt, null, 'single-method provider: no second action');
-  const both = S.providerCards(st2({ providers: [{ id: 'newco', name: 'NewCo', methods: ['api_key', 'oauth'], configured: false }] }), {})[0];
-  assert.equal(both.primary.method, 'oauth'); assert.equal(both.alt.method, 'api_key'); assert.equal(both.alt.label, 'Usar una clave');
+  assert.equal(openai.logout, false);
 });
 
-test('#408 provider cards: in-progress, error and cancelled belong to the provider that started the login', () => {
-  const run = flow => S.providerCards(st2(), { flow });
-  const busy = run({ providerId: 'openai', phase: 'active' });
-  assert.deepEqual([busy[1].status.kind, busy[1].status.word, busy[1].status.icon], ['progress', 'En curso', 'ring']);
-  assert.equal(busy[1].primary.label, 'Cancelar'); assert.equal(busy[1].primary.cancel, true);
-  assert.equal(busy[2].primary.disabled, true, 'other providers cannot start a second flow');
-  assert.equal(busy[0].status.kind, 'connected', 'others keep their own status');
-  const failed = run({ providerId: 'openai', phase: 'error' });
-  assert.deepEqual([failed[1].status.kind, failed[1].status.word, failed[1].status.tone], ['error', 'Error', 'red']);
-  assert.match(failed[1].error, /No se pudo iniciar sesión/); assert.equal(failed[1].primary.label, 'Reintentar');
-  assert.equal(failed[2].error, '', 'only the target shows the error');
-  const cancelled = run({ providerId: 'openai', phase: 'cancelled' });
-  assert.equal(cancelled[1].status.kind, 'idle'); assert.match(cancelled[1].note, /Cancelado/);
-  assert.equal(S.providerCards(st2({ connection: 'no_daemon' }), {})[1].primary.disabled, true, 'no engine, no login');
+test('#410 rows: buttons need a login plan — no engine disables them, a working one does not', () => {
+  assert.equal(S.providerRows(st2({ connection: 'no_daemon' }), {})[1].auth.disabled, true, 'no engine, no login');
+  assert.equal(S.providerRows(st2({ connection: 'no_daemon' }), {})[2].api.disabled, true, 'no engine, no key');
+  assert.equal(S.providerRows(st2(), {})[1].auth.disabled, false);
 });
 
-test('#408 provider cards: method filter and search narrow the list; error text is ours, never the engine\'s', () => {
-  assert.deepEqual(S.providerCards(st2(), { method: 'api_key' }).map(c => c.id), ['anthropic', 'groq']);
-  assert.equal(S.providerCards(st2(), { method: 'api_key' })[1].alt, null);
-  assert.deepEqual(S.providerCards(st2(), { filter: ' GRO ' }).map(c => c.id), ['groq']);
-  const err = S.providerCards(st2(), { flow: { providerId: 'groq', phase: 'error', detail: 'sk-secret-123 stack trace' } })[2];
-  assert.ok(!JSON.stringify(err).includes('sk-secret'), 'engine detail is never rendered');
+test('#410 rows: a live login collapses its row to «Cancelar»; no other row can start a second flow', () => {
+  const rows = S.providerRows(st2(), { flow: { providerId: 'openai', phase: 'active' } });
+  assert.deepEqual([rows[1].status.kind, rows[1].status.word, rows[1].status.icon], ['progress', 'En curso', 'ring']);
+  assert.deepEqual([rows[1].api, rows[1].auth], [null, null], 'no second connect while the flow runs');
+  assert.equal(rows[1].cancel.word, 'Cancelar');
+  assert.equal(rows[1].cancel.method, undefined, 'cancel carries no login method');
+  assert.equal(rows[1].logout, false);
+  assert.deepEqual([rows[0].api, rows[0].auth], [null, null], 'a connected row keeps no connect buttons');
+  assert.equal(rows[0].logout, true, 'others keep their own state');
+  assert.equal(rows[2].api.disabled, true, 'no second flow at once');
+  assert.equal(rows[2].cancel, null);
+});
+
+test('#410 rows: an error stays on the row that caused it, in OUR words; the same buttons retry; the cancel note too', () => {
+  const rows = S.providerRows(st2(), { flow: { providerId: 'groq', phase: 'error', detail: 'sk-secret-123 stack trace' } });
+  assert.deepEqual([rows[2].status.kind, rows[2].status.word, rows[2].status.tone], ['error', 'Error', 'red']);
+  assert.match(rows[2].error, /No se pudo iniciar sesión/);
+  assert.equal(rows[0].error, '', 'only the target shows the error');
+  assert.equal(rows[2].api.word, 'API', 'the retry is the same button, not a new wording');
+  assert.ok(!JSON.stringify(rows).includes('sk-secret'), 'engine detail is never rendered');
+  const cancelled = S.providerRows(st2(), { flow: { providerId: 'groq', phase: 'cancelled' } });
+  assert.equal(cancelled[2].status.kind, 'idle');
+  assert.match(cancelled[2].note, /Cancelado/);
+});
+
+test('#410 rows: the search narrows the list; the method filter is gone from the contract', () => {
+  assert.deepEqual(S.providerRows(st2(), { filter: ' GRO ' }).map(r => r.id), ['groq'], 'case-insensitive, trimmed');
+  assert.deepEqual(S.providerRows(st2(), { filter: 'zzz' }), []);
+  assert.equal(S.providerRows(st2(), { filter: '' }).length, 3);
 });
 
 test('accounts: «Iniciar sesión» uses the provider\'s account, or creates one named after the provider first', () => {
@@ -861,10 +886,9 @@ test('#408 S9 spacing at the Settings size: wider rail, roomier panel and sectio
   assert.match(rule('#settings[data-rail="true"] .ssec'), /margin-top:\s*20px/);
   assert.match(rule('#settings[data-rail="true"] #settings-tabs'), /gap:\s*6px/);
   assert.match(rule('#settings[data-rail="true"] .stab'), /min-height:\s*48px/);
-  assert.match(rule('#settings[data-rail="true"] .scard'), /padding:\s*16px 18px/);
-  assert.match(rule('#settings[data-rail="true"] .scards'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
-  assert.match(rule('#settings[data-rail="true"] .scards'), /gap:\s*12px/);
-  assert.match(rule('#settings[data-rail="true"] .scard .sagent-head'), /align-items:\s*center/);
+  // #410 r2: the provider cards are gone (the compact list replaced them); the rail keeps its
+  // roomier sections, tabs and rows, which the assertions above and below still pin.
+  assert.match(rule('#settings[data-rail="true"] .sagent'), /padding:\s*12px 0/);
 });
 
 test('#409 T1 the copy-from-Pi surface is gone end to end: no view export, no page/host/module/doc remnant', () => {
@@ -928,7 +952,7 @@ test('#410 scope: the open sub-tab is a public DOM attribute, and every compact 
   assert.match(src, /body\.dataset\.screen = id/, 'settings.js publishes the open screen on the tabpanel');
   const bare = bareCss();
   // written AFTER the #408 rail rules it densifies, so it wins at equal specificity
-  assert.ok(bare.indexOf(COMPACT_SCOPE) > bare.indexOf('#settings[data-rail="true"] .scard'),
+  assert.ok(bare.indexOf(COMPACT_SCOPE) > bare.indexOf('#settings[data-rail="true"] .sagent'),
     'the compact block comes after the rail block');
   const rules = [...compactBlock().matchAll(/(^|\n)([^{}\n][^{}]*)\{([^}]*)\}/g)];
   assert.ok(rules.length >= 12, `compact rules found: ${rules.length}`);
@@ -963,12 +987,13 @@ test('#410 compact sizing: V1 tokens only, one type step down, tighter rows — 
   assert.match(rule(`${COMPACT_SCOPE} .srows`), /gap: 4px/);          // was 6px
   assert.match(rule(`${COMPACT_SCOPE} .ssec`), /margin-top: 12px/);   // was 20px (rail)
   assert.match(rule(`${COMPACT_SCOPE} .ssection`), /line-height: 16px/); // was 18px (V1)
-  assert.match(rule(`${COMPACT_SCOPE} .scard`), /padding: 10px 12px/);// was 16px 18px (rail)
-  assert.match(rule(`${COMPACT_SCOPE} .scard`), /gap: 4px/);          // was 8px (rail)
+  assert.match(rule(`${COMPACT_SCOPE} .sconn`), /margin: 0/);            // the list, not a card grid
+  assert.match(rule(`${COMPACT_SCOPE} .sconn-row`), /flex-wrap: wrap/);  // a live login wraps to line 2
+  assert.match(rule(`${COMPACT_SCOPE} .sconn-head .srow-title`), /text-overflow: ellipsis/);
   assert.match(rule(`${COMPACT_SCOPE} .sagent`), /padding: 6px 0/);   // was 12px 0 (rail)
-  assert.match(rule(`${COMPACT_SCOPE} .sfilter`), /gap: 4px/);        // was 6px
   assert.match(rule(`${COMPACT_SCOPE} .srow-actions`), /gap: 4px/);   // was 6px
   assert.match(rule(`${COMPACT_SCOPE} .chip`), /min-height: 24px/);   // was 28px
+  assert.match(rule(`${COMPACT_SCOPE} .sconn-row`), /flex-wrap: wrap/, '#410 r2: the compact list rows wrap their actions');
   // S3 click targets kept: the compact block densifies spacing/type, never the 44px floor
   assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-height: 44px/);
   assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-width: 44px/);

@@ -1175,22 +1175,10 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings #models { position: static; padding: 0; background: none; border-radius: 0; flex: 1; min-height: 0; transform: none; transition: none; opacity: 1; visibility: visible; }
 #settings #models:not([data-open="true"]) { display: none; }
 
-/* ---- #408: provider cards (Cuentas). One card per provider: name + status chip, an error or note in plain
-   text, the in-progress flow (code/URL) inside the card with room, and ONE primary action. */
-.sfilter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
-.scards { gap: 8px; }
-.scard {
-  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
-  border-radius: var(--radius-xl); border: 1px solid var(--line-soft); background: var(--fill-soft);
-}
-.scard[data-state="progress"] { border-color: var(--island-live); }
-.scard[data-state="error"] { border-color: var(--red-11); }
-.scard .sagent-head { justify-content: space-between; flex-wrap: wrap; }
-.scard .srow-actions { margin-left: 0; justify-content: flex-end; flex-wrap: wrap; }
+/* ---- #410 r2: the compact Conexiones LIST. One row per provider: name + status chip, the two
+   connect words (API / Auth) from the view-model, and the row's own flow (code/URL) wrapped below.
+   All rules live in the #410 compact block below, so the rail keeps its cascade position. */
 .sproblem { color: var(--red-11); }
-.scard .sflow { border: 0; padding: 4px 0; }
-.scard .scode { font-size: calc(var(--fs-title) * 1.25); padding: 8px 14px; }
-.scard .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
 
 /* ---- #408: at the Settings size the tabs become a LEFT vertical rail (settings.js sets data-rail from the
    panel width); the 400 column keeps the wrapping row. */
@@ -1217,13 +1205,9 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings[data-rail="true"] .ssec { margin-top: 20px; }
 #settings[data-rail="true"] .ssec:first-child { margin-top: 4px; }
 #settings[data-rail="true"] .ssection { margin-bottom: 8px; }
-#settings[data-rail="true"] .scard { padding: 16px 18px; gap: 8px; }
-#settings[data-rail="true"] .scards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
-#settings[data-rail="true"] .scards > .sempty { grid-column: 1 / -1; }
-#settings[data-rail="true"] .scard .sagent-head { align-items: center; }
-#settings[data-rail="true"] .scard .srow-actions { margin-top: auto; }
 #settings[data-rail="true"] .sagent { padding: 12px 0; }
 #settings[data-rail="true"] #settings-body { padding-right: 8px; gap: 0; }
+#settings[data-rail="true"] .sconn-row .srow-actions { margin-left: 0; justify-content: flex-end; }
 
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
@@ -1243,11 +1227,18 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings-body[data-screen="accounts"] .srow-actions { gap: 4px; }
 #settings-body[data-screen="accounts"] .sbtn { min-height: 44px; min-width: 44px; gap: 4px; padding: 0 10px 0 8px; font: 600 var(--fs-label)/1.2 var(--font-ui); }
 #settings-body[data-screen="accounts"] .sbtn .ico svg { width: 16px; height: 16px; }
-#settings-body[data-screen="accounts"] .sfilter { gap: 4px; margin: 0 0 4px; }
-#settings-body[data-screen="accounts"] .scards { gap: 6px; }
-#settings-body[data-screen="accounts"] .scard { gap: 4px; padding: 10px 12px; }
-#settings-body[data-screen="accounts"] .scard .scode { font-size: var(--fs-title); padding: 6px 10px; }
 #settings-body[data-screen="accounts"] .sagent { gap: 2px; padding: 6px 0; }
 #settings-body[data-screen="accounts"] .sagent-head { gap: 6px; }
 #settings-body[data-screen="accounts"] .chip { min-height: 24px; font-size: var(--fs-caption); }
 #settings-body[data-screen="accounts"] .chip .ico svg { width: 16px; height: 16px; }
+
+/* ---- #410 r2: the compact LIST itself. One row per provider: name + state on the left, its two
+   connect words (API / Auth) on the right; a live login or a long name wraps to a second line.
+   Tokens only, so «claro» y «oscuro» both keep working (S5). */
+#settings-body[data-screen="accounts"] .sconn { margin: 0; }
+#settings-body[data-screen="accounts"] .sconn-row { flex-wrap: wrap; }
+#settings-body[data-screen="accounts"] .sconn-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#settings-body[data-screen="accounts"] .sconn-head .srow-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-body[data-screen="accounts"] .sconn-row .srow-actions { justify-content: flex-end; }
+#settings-body[data-screen="accounts"] .sconn-row .sflow { border: 0; padding: 4px 0 0; width: 100%; }
+#settings-body[data-screen="accounts"] .sconn-row .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }

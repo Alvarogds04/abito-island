@@ -44,7 +44,6 @@
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
   let screen = 'accounts';
-  let method = null;      // Cuentas: null = the two method cards, else 'oauth' | 'api_key' (the provider list)
   let filter = '';
   let agentsAsk = null;   // { at: engine error counter when agents_list was sent, timer, timedOut }
   let loginTarget = null;  // #408: { providerId, phase: 'active'|'error'|'cancelled', sawFlow } — the login this page started
@@ -228,7 +227,7 @@
     screen = id;
     id = V.tabAlias(id) || 'accounts';
     screen = id;
-    if (id !== 'accounts') { method = null; filter = ''; discardAccountForm(); }
+    if (id !== 'accounts') { filter = ''; discardAccountForm(); }
     const def = V.tabById(id);
     $('settings-title').textContent = 'Ajustes';
     $('settings-hint').textContent = def.hint;
@@ -278,7 +277,7 @@
     if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
-    capturing = false; method = null; filter = ''; pendingLogin = null; loginTarget = null; accountNote = null;
+    capturing = false; filter = ''; pendingLogin = null; loginTarget = null; accountNote = null;
     if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
     for (const b of openers) b.setAttribute('aria-expanded', 'false');
     discardAccountForm();
@@ -309,8 +308,9 @@
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
     if (e.detail === 'open') { pendingOpen = screen; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
-    else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { method = null; filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
-    else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { method = e.detail.split(':')[1]; if (isOpen()) showScreen('accounts'); else open('accounts'); }
+    else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
+    // the old accounts:<method> deep links still land on Conexiones; the method choice now lives in each row
+    else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { if (isOpen()) showScreen('accounts'); else open('accounts'); }
   });
   // Escape: the shortcut capture first, then the panel (never the island)
   document.addEventListener('keydown', e => {
@@ -627,42 +627,36 @@
     if (flowLive && !loginTarget) { body.append(renderFlow(auth, prompt, eventV)); return; } // a flow started elsewhere
     const outcome = loginTarget ? null : V.flowOutcome(auth.last);
     if (outcome && outcome.word === 'Conectada') body.append(chipNode({ tone: outcome.tone, icon: outcome.icon, word: outcome.word, aria: `Inicio de sesión: ${outcome.word}` }));
-    // method filter (all / subscription / API key) + search
-    const bar = el('div', 'sfilter'); bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Tipo de conexión');
-    for (const [id, word] of [[null, 'Todos'], ['oauth', 'Suscripción'], ['api_key', 'Clave de API']]) {
-      const b = el('button', 'sbtn' + (method === id ? ' primary' : ''), word); b.type = 'button';
-      b.setAttribute('aria-pressed', method === id ? 'true' : 'false');
-      b.addEventListener('click', e => { if (e.isTrusted === true) { method = id; render(); } });
-      bar.append(b);
-    }
-    body.append(bar);
+    // #410 round 2: the compact provider LIST (one row per provider, two buttons: API / Auth).
+    // The method filter bar is gone: the two per-row buttons ARE the method choice. The search
+    // stays, so a long engine list is still usable.
     const search = el('input', 'sfield'); search.type = 'search'; search.id = 'settings-filter'; search.placeholder = 'Buscar proveedor';
     search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
     search.addEventListener('input', () => { filter = search.value; render(); });
     body.append(search);
-    const sec = el('section', 'ssec'); sec.id = 'provider-cards'; sec.append(sectionTitle('Proveedores de IA'));
-    const cards = V.providerCards(st, { method, filter, flow: loginTarget });
-    const list = el('ul', 'srows scards'); list.setAttribute('aria-label', 'Proveedores');
-    for (const c of cards) {
-      const li = el('li', 'scard'); li.dataset.state = c.status.kind; li.dataset.provider = c.id;
-      const head = el('span', 'sagent-head'); head.append(el('b', 'srow-title', c.name), chipNode({ tone: c.status.tone, icon: c.status.icon, word: c.status.word, aria: `${c.name}: ${c.status.word}` }));
+    const sec = el('section', 'ssec'); sec.id = 'provider-list'; sec.append(sectionTitle('Proveedores de IA'));
+    const rows = V.providerRows(st, { filter, flow: loginTarget });
+    const list = el('ul', 'srows sconn'); list.setAttribute('aria-label', 'Proveedores');
+    for (const r of rows) {
+      const li = el('li', 'srow sconn-row'); li.dataset.state = r.status.kind; li.dataset.provider = r.id;
+      const head = el('span', 'sconn-head'); head.append(el('b', 'srow-title', r.name), chipNode({ tone: r.status.tone, icon: r.status.icon, word: r.status.word, aria: `${r.name}: ${r.status.word}` }));
       li.append(head);
-      if (c.error) { const e = el('p', 'snote sproblem', c.error); e.setAttribute('role', 'alert'); li.append(e); }
-      if (c.note) li.append(el('p', 'snote', c.note));
-      if (c.status.kind === 'progress' && flowLive) li.append(renderFlow(auth, prompt, eventV, true));
-      else if (c.status.kind === 'progress') li.append(el('p', 'snote', 'Preparando el inicio de sesión…'));
+      if (r.error) { const e = el('p', 'snote sproblem', r.error); e.setAttribute('role', 'alert'); li.append(e); }
+      if (r.note) li.append(el('p', 'snote', r.note));
+      if (r.status.kind === 'progress' && flowLive) li.append(renderFlow(auth, prompt, eventV, true));
+      else if (r.status.kind === 'progress') li.append(el('p', 'snote', 'Preparando el inicio de sesión…'));
       const actions = el('span', 'srow-actions');
-      const act = (a, primary) => wordBtn(a.label, () => {
-        if (a.cancel) { send({ action: 'auth_cancel', flowId: String((auth && auth.flowId) || '') }); return; }
-        loginWith(c.id, a.method);
-      }, { primary, aria: `${a.label}: ${c.name}`, disabled: a.disabled });
-      if (c.primary && !(c.primary.cancel && flowLive)) actions.append(act(c.primary, true));
-      if (c.alt) actions.append(act(c.alt, false));
-      if (c.logout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: c.accountId }, `${c.name}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${c.name}` }));
+      // the two connect words ride the view-model (the human's own: API / Auth); the row's
+      // cancel/logout are the same closed verbs as before, just behind state
+      const connect = a => wordBtn(a.word, () => loginWith(r.id, a.method), { aria: a.aria, disabled: a.disabled });
+      if (r.api) actions.append(connect(r.api));
+      if (r.auth) actions.append(connect(r.auth));
+      if (r.cancel) actions.append(wordBtn(r.cancel.word, () => send({ action: 'auth_cancel', flowId: String((auth && auth.flowId) || '') }), { icon: 'cross', aria: r.cancel.aria }));
+      if (r.logout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${r.name}` }));
       if (actions.children.length) li.append(actions);
       list.append(li);
     }
-    if (!cards.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
+    if (!rows.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
     sec.append(list); body.append(sec);
   }
   // «Iniciar sesión» / «Usar una clave»: reuse the provider's account, or create one named after the provider first

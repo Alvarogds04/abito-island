@@ -267,15 +267,15 @@ test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices
   assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(!b.get('settings-tab-connectors'), 'S8: merged into Conexiones');
 });
 
-test('#408 Cuentas renders the provider-cards section (and tab selection follows the click) without an engine', async () => {
+test('#408 Cuentas renders the provider-list section (and tab selection follows the click) without an engine', async () => {
   const b = await settingsBoot({}, 'accounts');
-  assert.ok(b.get('provider-cards'), 'one provider list');
+  assert.ok(b.get('provider-list'), 'one provider list');
   assert.equal(b.get('settings-tab-accounts').getAttribute('aria-selected'), 'true');
   assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'false');
   assert.equal(b.get('settings-tab-pills').tabIndex, -1, 'roving tabindex');
   b.click('settings-tab-pills'); await flush();
   assert.equal(b.get('settings-tab-pills').getAttribute('aria-selected'), 'true');
-  assert.ok(!b.get('provider-cards'), 'only the selected tab is rendered');
+  assert.ok(!b.get('provider-list'), 'only the selected tab is rendered');
 });
 
 test('#408 opening Ajustes asks Rust for the Settings size (open only, no numbers) and closing gives it back', async () => {
@@ -302,7 +302,7 @@ test('#408 Escape closes Ajustes and focus returns to the gear that opened it', 
 
 test('#408 S8 Conexiones holds providers, agents and services together; the old connectors deep link lands there', async () => {
   const b = await settingsBoot({}, 'accounts');
-  assert.ok(b.get('provider-cards'), 'providers group');
+  assert.ok(b.get('provider-list'), 'providers group');
   assert.ok(b.get('connections-agents'), 'agents group');
   assert.ok(b.get('connections-services'), 'services group');
   b.click('settings-tab-pills'); await flush();
