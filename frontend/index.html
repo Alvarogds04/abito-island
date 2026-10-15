@@ -17,6 +17,9 @@
   <!-- #384: the Dot's colour contract (pure) — loaded before the island and the settings panel,
        the two places that consume it. -->
   <script defer src="avatar-colors.js"></script>
+  <!-- #380: system/light/dark theme — paints <html data-theme> from the saved preference
+       before the island draws, so the palette is never flashed wrong. -->
+  <script defer src="theme.js"></script>
   <script defer src="overview-view.js"></script>
   <!-- #345 catalog choices are local preferences, never live connector claims. -->
   <script defer src="pill-catalog.js"></script>

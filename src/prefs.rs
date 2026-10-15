@@ -1,6 +1,6 @@
 //! Non-secret island preferences, stored as v1. Missing or invalid fields use
-//! their own defaults: sound OFF, no display name, no color overrides and no remembered
-//! island position. Names are explicit input,
+//! their own defaults: sound OFF, no display name, no color overrides, no remembered
+//! island position and the system theme (#380). Names are explicit input,
 //! never obtained from accounts, the OS, or another profile.
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -48,6 +48,41 @@ const POSITION: &str = "position";
 /// A plausible virtual-desktop coordinate in physical px: no real monitor
 /// arrangement reaches this, so a larger value is corrupt data, never a desktop.
 const POSITION_LIMIT: u32 = 1_000_000;
+/// The optional theme mode key (#380). Absent = `system`, and absence is preserved.
+const THEME: &str = "theme";
+
+/// #380: the closed theme mode. `System` is the DEFAULT and is also what an absent
+/// `theme` field means, so a file nobody changed never grows the key.
+pub const THEMES: [&str; 3] = ["system", "light", "dark"];
+
+/// The stored theme mode: an explicit choice, or nothing at all (= system).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+
+    /// Closed enum: only the three known modes parse, everything else is refused.
+    pub fn parse(value: &str) -> Option<Theme> {
+        match value {
+            "system" => Some(Theme::System),
+            "light" => Some(Theme::Light),
+            "dark" => Some(Theme::Dark),
+            _ => None,
+        }
+    }
+}
 
 /// Identities are the same closed slug shape the frontend enforces (avatar-colors.js
 /// `IDENTITY`): bounded, lowercase, no path or control characters.
@@ -76,6 +111,9 @@ pub struct Prefs {
     /// Absent keys retain defaults without growing untouched v1 files.
     pub main_pill: Option<String>,
     pub declared_pills: Option<Vec<String>>,
+    /// #380 optional theme mode. `None` means the default (`system`) and is never written,
+    /// so an untouched or unknown-valued file keeps the bytes it had.
+    pub theme: Option<Theme>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -160,6 +198,8 @@ impl Prefs {
         self.main_pill.as_deref().is_none_or(|id| MAIN_PILLS.contains(&id)) &&
             self.declared_pills.as_ref().is_none_or(|ids| *ids == self.declared_pills())
     }
+    /// The effective mode: an absent or unreadable field is `system`.
+    pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
 
     pub fn from_text(text: Option<&str>) -> Prefs {
         let v = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
@@ -178,6 +218,7 @@ impl Prefs {
                 .filter(|id| MAIN_PILLS.contains(id)).map(str::to_owned),
             declared_pills: v.get("declared_pills").and_then(Value::as_array)
                 .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect()),
+            theme: v.get(THEME).and_then(Value::as_str).and_then(Theme::parse),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         prefs
@@ -199,6 +240,9 @@ impl Prefs {
         }
         if self.main_pill.is_some() { v["main_pill"] = json!(self.main_pill()); }
         if self.declared_pills.is_some() { v["declared_pills"] = json!(self.declared_pills()); }
+        if let Some(theme) = self.theme {
+            v[THEME] = json!(theme.as_str());
+        }
         v.to_string()
     }
 }
@@ -220,6 +264,7 @@ pub enum Command {
     SetPosition(i32, i32),
     SetMainPill(String),
     ToggleDeclaredPill(String),
+    SetTheme(Theme),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +276,9 @@ pub struct CommandError;
 /// takes exactly action + identity. Pill choices take exactly action + id:
 /// set_main_pill (workspace only), toggle_declared_pill (offered catalog only).
 /// apply checks main exclusion/capacity under the transaction gate. All writers
-/// retain the other known typed optional fields; unknown file keys are dropped.
+/// apply checks main exclusion/capacity under the transaction gate. set_theme takes exactly
+/// action + theme with one of the three closed modes. All writers retain the other known
+/// typed optional fields; unknown file keys are dropped.
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let map = payload.as_object().ok_or(CommandError)?;
     match map.get("action").and_then(Value::as_str) {
@@ -272,6 +319,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
                 if !pill_offered(id) { return Err(CommandError); }
                 Ok(Command::ToggleDeclaredPill(id.to_owned()))
             }
+        }
+        Some("set_theme") if map.len() == 2 => {
+            let theme = map.get("theme").and_then(Value::as_str).ok_or(CommandError)?;
+            Ok(Command::SetTheme(Theme::parse(theme).ok_or(CommandError)?))
         }
         _ => Err(CommandError),
     }
@@ -322,6 +373,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             }
             next.declared_pills = Some(ids);
         }
+        Command::SetTheme(theme) => next.theme = Some(*theme),
     }
     Ok(next)
 }

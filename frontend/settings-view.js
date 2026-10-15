@@ -144,6 +144,27 @@
 
   // ---- general --------------------------------------------------------------------------------------------
   const soundDefault = () => false; // the island contract is silence until the human opts in
+
+  // ---- #380: the theme, a closed shape the panel can render -------------------------------------------------
+  // Exactly three choices. The saved mode is the truth; anything the host cannot persist
+  // (an old file, a damaged value) reads as «system», so the panel never offers a fourth
+  // theme. Labels are ours (Spanish, voseo-free nouns), never taken from any payload.
+  const THEME_MODES = Object.freeze(['system', 'light', 'dark']);
+  const THEME_LABELS = Object.freeze({ system: 'Sistema', light: 'Claro', dark: 'Oscuro' });
+  const THEME_ARIA = Object.freeze({
+    system: 'Tema: sigue el sistema. Cambia cuando tu computadora cambia de claro u oscuro.',
+    light: 'Tema: claro. Fijo, no sigue al sistema.',
+    dark: 'Tema: oscuro. Fijo, no sigue al sistema.',
+  });
+  function themeView(prefs) {
+    const saved = prefs && typeof prefs === 'object' && typeof prefs.theme === 'string' ? prefs.theme : undefined;
+    const mode = THEME_MODES.includes(saved) ? saved : 'system';
+    return {
+      mode,
+      options: THEME_MODES.map(id => ({ id, label: THEME_LABELS[id], selected: id === mode, aria: THEME_ARIA[id] })),
+      aria: THEME_ARIA[mode],
+    };
+  }
   function generalView(input) {
     const i = input || {};
     const h = i.hotkey || null;
@@ -424,5 +445,6 @@
   }
 
   return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, SCREENS, screenById, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
-    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo };
+    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
+    THEME_MODES, THEME_LABELS, themeView };
 });

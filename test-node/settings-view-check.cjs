@@ -754,4 +754,37 @@ test('#308 configuration is not connection readiness and commands are namespaced
   assert.match(src, /account-secret/);
   assert.match(src, /accountError/);
 });
+// ---- #380: the theme row of Ajustes (the painting itself lives in theme.js / theme-check) ----------
+test('#380 theme: the panel offers exactly the three closed modes from the SAVED prefs, in voseo-free nouns', () => {
+  assert.deepEqual([...S.THEME_MODES], ['system', 'light', 'dark']);
+  assert.deepEqual(S.themeView({ theme: 'dark' }).options.map(o => o.id), ['system', 'light', 'dark']);
+  assert.deepEqual(S.themeView({ theme: 'dark' }).options.filter(o => o.selected).map(o => o.id), ['dark']);
+  assert.deepEqual(S.themeView({ theme: 'light' }).options.filter(o => o.selected).map(o => o.id), ['light']);
+  // an absent or damaged stored value is «Sistema»: the panel never shows a mode it cannot persist
+  assert.equal(S.themeView({}).mode, 'system');
+  assert.equal(S.themeView({ theme: 'chartreuse' }).mode, 'system');
+  assert.equal(S.themeView(null).mode, 'system');
+  for (const option of S.themeView({}).options) assert.ok(option.label && option.aria, option.id);
+  assert.equal(S.THEME_LABELS.system, 'Sistema');
+  assert.equal(S.THEME_LABELS.light, 'Claro');
+  assert.equal(S.THEME_LABELS.dark, 'Oscuro');
+});
+
+test('#380 theme wiring: one closed sender, no local paint, and a failed save keeps the old theme in words', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.equal((src.match(/action: 'set_theme'/g) || []).length, 1, 'set_theme is sent through prefs_action only');
+  assert.match(src, /\{ action: 'set_theme', theme: mode \}/);
+  assert.doesNotMatch(src, /dataset\.theme|data-theme|setAttribute\('data-theme'/, 'only theme.js paints <html data-theme>');
+  assert.match(src, /No se pudo guardar el tema; se mantuvo el anterior\./);
+  assert.match(src, /const themePick = V\.themeView\(prefs\)/, 'the row renders from the saved prefs, so a refused save re-renders the truth');
+  assert.match(src, /role', 'radiogroup'/);
+  assert.match(src, /b\.tabIndex = option\.selected \? 0 : -1/, 'roving tabindex, like the colour radios');
+  // the picker ships with the page and its styles exist on both palettes
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(css, /\.stheme \{[^}]*min-height: 44px/);
+  assert.match(css, /\.stheme\[aria-checked="true"\]/, 'selection is filled + aria-checked, never colour alone');
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /<script defer src="theme\.js"><\/script>/);
+});
+
 console.log(`settings-view-check: ${passed} passed`);
