@@ -51,6 +51,16 @@ impl HostSlot {
     /// Exit status of a host child that died by itself (early exit, crash, external kill);
     /// `None` while it lives or after a normal `stop()`.
     pub fn exit_status(&self) -> Option<std::process::ExitStatus> { *self.exited.lock().expect("host exit lock") }
+    /// The pid of the CURRENT app-owned child, or `None` when the spawn failed or the
+    /// runtime reap already took a child that died. Read only for the restart verdict
+    /// (#390 fix); it is never exposed to the page.
+    pub fn pid(&self) -> Option<u32> {
+        #[cfg(target_os = "linux")]
+        let pid = self.child.lock().expect("host child lock").as_ref().map(Host::pid);
+        #[cfg(not(target_os = "linux"))]
+        let pid = None;
+        pid
+    }
     /// Take ownership of a spawned host and reap it at runtime if it exits by itself:
     /// a bounded `try_wait` poll (no unbounded `wait`), so a dead daemon is never left
     /// as a zombie and its early exit becomes visible via [`exit_status`].

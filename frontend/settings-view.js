@@ -65,6 +65,40 @@
   }
   const connected = state => !!state && state.connection === 'connected';
 
+  // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
+  // Closed shape and OUR words only: the engine never writes this panel (and #305's
+  // `portal_rejected` wording belongs to that worker — nothing here ever renders it).
+  const DAEMON_RESTART = Object.freeze({
+    title: 'Motor del agente',
+    hint: 'El motor local que ejecuta los proveedores y los agentes. Reiniciar corta lo que esté en curso y vuelve a conectar.',
+    label: 'Reiniciar motor',
+    busyLabel: 'Reiniciando…',
+    ok: 'Motor reiniciado.',
+    refused: 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.',
+    late: 'El motor no respondió a tiempo; volvé a probar en un momento.',
+    failed: 'No se pudo reiniciar el motor.',
+  });
+  // `busy` is the page's own in-flight flag: the button disables ITSELF while a restart runs.
+  function daemonRestartView(busy) {
+    return {
+      title: DAEMON_RESTART.title,
+      hint: DAEMON_RESTART.hint,
+      action: { label: busy === true ? DAEMON_RESTART.busyLabel : DAEMON_RESTART.label, disabled: busy === true,
+        aria: 'Reiniciar el motor del agente' },
+    };
+  }
+  // Success only for the closed `outcome` of the restart: `restarted` is the ONLY success,
+  // `refused` names a foreign motor that we never touch (GD029), `timeout` is a timeout —
+  // never a success. A reply without the closed outcome falls back to the connection truth.
+  function daemonRestartOutcome(result, error) {
+    if (!result || error) return { tone: 'red', icon: 'triangle', say: DAEMON_RESTART.failed };
+    if (result.outcome === 'restarted') return { tone: 'go', icon: 'check', say: DAEMON_RESTART.ok };
+    if (result.outcome === 'refused') return { tone: 'sun', icon: 'info', say: DAEMON_RESTART.refused };
+    if (result.outcome === 'timeout') return { tone: 'sun', icon: 'clock', say: DAEMON_RESTART.late };
+    if (result.ready === true) return { tone: 'go', icon: 'check', say: DAEMON_RESTART.ok };
+    return { tone: 'sun', icon: 'clock', say: DAEMON_RESTART.late };
+  }
+
   // ---- providers / accounts --------------------------------------------------------------
   const METHOD_ORDER = ['api_key', 'oauth'];
   function providerOf(state, id) {
@@ -512,5 +546,6 @@
 
   return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
+    daemonRestartView, daemonRestartOutcome,
     THEME_MODES, THEME_LABELS, themeView };
 });
