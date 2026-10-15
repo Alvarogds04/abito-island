@@ -22,17 +22,22 @@ test('F055 general volume uses default and inclusive boundaries without coercion
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('#408 seven sub-tabs of ONE Ajustes entry, in one table: Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General', () => {
-  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'connectors', 'models', 'specialists', 'pills', 'appearance', 'general']);
-  assert.deepEqual(S.TABS.map(x => x.title), ['Cuentas', 'Conectores', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Pills, Apariencia, General', () => {
+  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'models', 'specialists', 'pills', 'appearance', 'general']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['Conexiones', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+  // S8: the old ids still resolve (deep links), to the merged tab
+  assert.equal(S.tabAlias('connectors'), 'accounts');
+  assert.equal(S.tabAlias('accounts'), 'accounts');
+  assert.equal(S.tabAlias('models'), 'models');
+  assert.equal(S.tabAlias('nope'), null);
   for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
-  assert.equal(S.tabById('connectors').title, 'Conectores');
+  assert.equal(S.tabById('connectors'), null, 'resolved through tabAlias, not a tab of its own');
   assert.equal(S.tabById('nope'), null);
   assert.equal(S.SCREENS, undefined);
 });
 
 test('#408 tablist keyboard: arrows wrap, Home/End jump, other keys are ignored', () => {
-  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'connectors');
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'models');
   assert.equal(S.tabKeyTarget('general', 'ArrowRight'), 'accounts');
   assert.equal(S.tabKeyTarget('accounts', 'ArrowLeft'), 'general');
   assert.equal(S.tabKeyTarget('pills', 'Home'), 'accounts');
@@ -564,7 +569,7 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
   const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.tabById('connectors').hint, /Preguntá antes de enviar/);
+  assert.match(S.tabById('accounts').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 

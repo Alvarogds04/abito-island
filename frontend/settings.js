@@ -222,6 +222,8 @@
   window.addEventListener('resize', syncRail);
   function showScreen(id) {
     screen = id;
+    id = V.tabAlias(id) || 'accounts';
+    screen = id;
     if (id !== 'accounts') { method = null; filter = ''; discardAccountForm(); }
     const def = V.tabById(id);
     $('settings-title').textContent = 'Ajustes';
@@ -235,7 +237,7 @@
     }
     body.hidden = id === 'models'; // the model picker is its own panel (models.js), shown by the event below
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: id }));
-    if (id === 'connectors') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
+    if (id === 'accounts') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
     render();
   }
   // The engine answers `agents_list` with an `agents` frame — or, if it does not know the command, with
@@ -243,7 +245,7 @@
   function askAgents() {
     if (agentsAsk) clearTimeout(agentsAsk.timer);
     const ask = { at: (agentState && agentState.last_error && agentState.last_error.n) || 0, timedOut: false, timer: 0 };
-    ask.timer = setTimeout(() => { ask.timedOut = true; if (isOpen() && screen === 'connectors') render(); }, V.AGENTS_WAIT_MS);
+    ask.timer = setTimeout(() => { ask.timedOut = true; if (isOpen() && screen === 'accounts') render(); }, V.AGENTS_WAIT_MS);
     agentsAsk = ask;
     agent({ action: 'agents_list' }).catch(() => {});
   }
@@ -300,7 +302,7 @@
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
     if (e.detail === 'open') { pendingOpen = screen; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
-    else if (V.tabById(e.detail)) { method = null; filter = ''; if (isOpen()) showScreen(e.detail); else open(e.detail); }
+    else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { method = null; filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
     else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { method = e.detail.split(':')[1]; if (isOpen()) showScreen('accounts'); else open('accounts'); }
   });
   // Escape: the shortcut capture first, then the panel (never the island)
@@ -397,10 +399,9 @@
     body.textContent = '';
     const conn = V.connectionView(agentState);
     const chip = $('settings-conn');
-    chip.hidden = !conn || (screen !== 'accounts' && screen !== 'connectors');
+    chip.hidden = !conn || screen !== 'accounts';
     if (conn) { chip.dataset.tone = conn.tone; chip.setAttribute('aria-label', conn.aria); putIcon($('settings-conn-icon'), conn.icon); $('settings-conn-word').textContent = conn.word; }
-    if (screen === 'accounts') renderAccounts();
-    else if (screen === 'connectors') renderConnectors();
+    if (screen === 'accounts') { renderAccounts(); renderConnectors(); }
     else if (screen === 'models') { /* models.js owns this panel */ }
     else if (screen === 'specialists') {
       // #327: the human creates a role, chooses it and goes back to the principal from here.
@@ -575,7 +576,7 @@
     search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
     search.addEventListener('input', () => { filter = search.value; render(); });
     body.append(search);
-    const sec = el('section', 'ssec'); sec.id = 'provider-cards'; sec.append(sectionTitle('Proveedores'));
+    const sec = el('section', 'ssec'); sec.id = 'provider-cards'; sec.append(sectionTitle('Proveedores de IA'));
     const cards = V.providerCards(st, { method, filter, flow: loginTarget });
     const list = el('ul', 'srows scards'); list.setAttribute('aria-label', 'Proveedores');
     for (const c of cards) {
@@ -661,7 +662,7 @@
     // 1) agents: Conectar / Actualizar / Desconectar. The click IS the confirmation; the engine installs with a
     //    backup. Nothing here asks the human to open a terminal.
     const av = V.agentsView(agentState, agentsAsk ? { askedAtError: agentsAsk.at, timedOut: agentsAsk.timedOut } : {});
-    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código'));
+    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código')); sec.id = 'connections-agents';
     if (av.kind === 'unsupported') { sec.append(chipNode(av), el('p', 'snote', av.note)); }
     else if (av.kind !== 'ready') sec.append(chipNode(av.kind === 'loading' ? { tone: 'live', icon: 'ring', word: '', aria: 'Leyendo agentes' } : av));
     else {
@@ -684,7 +685,7 @@
     body.append(sec);
     // 2) services (read-only until the engine can connect them)
     const v = V.connectorsView(agentState);
-    const svc = el('section', 'ssec'); svc.append(sectionTitle('Servicios'));
+    const svc = el('section', 'ssec'); svc.append(sectionTitle('Servicios')); svc.id = 'connections-services';
     if (v.kind !== 'ready') svc.append(chipNode(v));
     else {
       const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Servicios');

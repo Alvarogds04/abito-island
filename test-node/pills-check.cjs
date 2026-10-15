@@ -261,7 +261,7 @@ test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices
   assert.equal(b.backend.prefs.mainPill,'agent_codex'); assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']);
   assert.deepEqual(writes(b).map(x=>x.payload.action),['sound_on','set_sound_gain','set_display_name','set_avatar_color']);
   assert.equal(b.get('pill-name').textContent,'Codex');
-  assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(b.get('settings-tab-connectors'));
+  assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(!b.get('settings-tab-connectors'), 'S8: merged into Conexiones');
 });
 
 test('#408 Cuentas renders the provider-cards section (and tab selection follows the click) without an engine', async () => {
@@ -295,4 +295,15 @@ test('#408 Escape closes Ajustes and focus returns to the gear that opened it', 
   assert.equal(b.get('settings').inert, true, 'panel closed');
   assert.equal(b.doc.activeElement, b.get('open-screen-settings'), 'focus is back on the gear');
   assert.deepEqual(b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload).pop(), { open: false });
+});
+
+test('#408 S8 Conexiones holds providers, agents and services together; the old connectors deep link lands there', async () => {
+  const b = await settingsBoot({}, 'accounts');
+  assert.ok(b.get('provider-cards'), 'providers group');
+  assert.ok(b.get('connections-agents'), 'agents group');
+  assert.ok(b.get('connections-services'), 'services group');
+  b.click('settings-tab-pills'); await flush();
+  for (const fn of b.events['abito:settings-select'] || []) fn({ detail: 'connectors' });
+  await flush();
+  assert.equal(b.get('settings-tab-accounts').getAttribute('aria-selected'), 'true');
 });

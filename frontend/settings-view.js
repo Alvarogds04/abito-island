@@ -16,10 +16,8 @@
   // #408: ONE entry point (Ajustes), seven sub-tabs. This table is the single place to rename or
   // reorder them: the tab strip, the title/hint and the deep-link seam all read it.
   const TABS = Object.freeze([
-    Object.freeze({ id: 'accounts', title: 'Cuentas', icon: 'user', label: 'Cuentas',
-      hint: 'Conectá el servicio de IA que ya pagás o pegá una clave de API. Tu inicio de sesión queda en esta computadora.' }),
-    Object.freeze({ id: 'connectors', title: 'Conectores', icon: 'plug', label: 'Conectores',
-      hint: 'Conectá tus agentes de código y dejá que Abito lea tus apps. Preguntá antes de enviar o cambiar algo.' }),
+    Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones',
+      hint: 'Proveedores de IA, agentes de código y servicios en un solo lugar. Tu inicio de sesión queda en esta computadora. Preguntá antes de enviar o cambiar algo.' }),
     Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
       hint: 'Elegí el modelo local con el que charlás. Se usa desde el próximo mensaje.' }),
     Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
@@ -32,6 +30,9 @@
       hint: 'Atajo de teclado y sonido.' }),
   ]);
   const tabById = id => TABS.find(x => x.id === id) || null;
+  // S8: Cuentas + Conectores are ONE tab now. Old ids (deep links, probe seam) resolve through this table.
+  const TAB_ALIASES = Object.freeze({ connectors: 'accounts' });
+  const tabAlias = id => (Object.prototype.hasOwnProperty.call(TAB_ALIASES, id) ? TAB_ALIASES[id] : (tabById(id) ? id : null));
   // Tablist keyboard (WAI-ARIA): arrows wrap, Home/End jump. Returns the id to focus, or null for any other key.
   function tabKeyTarget(current, key) {
     const at = TABS.findIndex(x => x.id === current);
@@ -509,7 +510,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     THEME_MODES, THEME_LABELS, themeView };
 });
