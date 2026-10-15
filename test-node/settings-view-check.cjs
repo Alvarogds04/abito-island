@@ -10,7 +10,7 @@ const path = require('node:path');
 const frontend = path.join(__dirname, '..', 'frontend');
 const S = require(path.join(frontend, 'settings-view.js'));
 let passed = 0;
-const test = (name, fn) => { fn(); passed += 1; };
+const test = (_name, fn) => { fn(); passed += 1; };
 
 test('F055 general volume uses default and inclusive boundaries without coercion', () => {
   assert.equal(S.generalView({}).sound.gain, 0.12);
@@ -630,7 +630,7 @@ test('connecting: the screen draws «Conectando» while the first state is on it
 const HASH = 'a'.repeat(64);
 const plan = (extra = {}) => ({ id: 'claude-code', state: 'not_connected', backup: false, detail: null, plan_hash: HASH,
   summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first.', reviewable: true, trust_review: false, ...extra });
-const rowOf = (entry, id) => S.agentsView(agentsState([entry])).rows[0];
+const rowOf = (entry, _id) => S.agentsView(agentsState([entry])).rows[0];
 
 test('plan: the closed summary is shown next to the button, and the click carries the hash the human saw', () => {
   const r = rowOf(plan());
@@ -888,4 +888,27 @@ test('#409 T1 the copy-from-Pi surface is gone end to end: no view export, no pa
   for (const gone of ['Usar la conexión de Pi', 'pi_connection', 'piimport']) {
     assert.ok(!readme.includes(gone), `README.md must not contain ${gone}`);
   }
+});
+
+test('#409 T3 docs and source pins: manual editor fields, row removal, and the public checks that pin both', () => {
+  const root = path.join(__dirname, '..');
+  const read = p => fs.readFileSync(p, 'utf8');
+  // S5 documented: deletion is reachable from the owned-account row
+  const readme = read(path.join(root, 'README.md'));
+  assert.match(readme, /«Quitar conexión»/, 'README documents deletion from the owned-account row');
+  assert.match(readme, /abito_account_remove/, 'README names the closed verb behind it');
+  // S4 pinned at the source: every field, the three credential options, clear-before-IPC
+  const src = read(path.join(frontend, 'settings.js'));
+  for (const field of ['account-provider', 'account-name', 'account-url', 'account-api', 'account-models', 'account-default', 'account-credential', 'account-secret', 'account-save', 'account-endpoint']) {
+    assert.ok(src.includes(field), `manual editor field ${field}`);
+  }
+  for (const label of ['Conservar', 'Establecer clave', 'Borrar clave']) assert.ok(src.includes(label), `credential option ${label}`);
+  assert.match(src, /secret\.value = ''/, 'the secret field is cleared, never retained');
+  assert.match(src, /removeAccount\(account\.accountId\)/, 'the row wires removal through the closed verb');
+  // a public check must keep pinning the removal sentences (S5) and the manual path (S4)
+  const pills = read(path.join(__dirname, 'pills-check.cjs'));
+  assert.ok(pills.includes('Conexión quitada. La clave se borró del almacén de Abito.'), 'pills-check pins the removal success sentence');
+  // the failure sentence lives in a regex literal in pills-check (backslash-escaped dots)
+  assert.ok(pills.includes('No se pudo quitar la conexión') && pills.includes('No se cambió nada'), 'pills-check pins the removal failure sentence');
+  assert.ok(pills.includes('account-credential'), 'pills-check drives the manual credential options');
 });

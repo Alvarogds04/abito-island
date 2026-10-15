@@ -80,6 +80,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
         return Promise.resolve(clone(backend.prefs));
       }
       if (cmd === 'agent_action' && payload.action === 'abito_account_remove' && store) return store.remove(payload.accountId);
+      if (cmd === 'agent_action' && store && ['abito_account_create', 'abito_account_save', 'abito_account_endpoint_set'].includes(payload.action)) return Promise.resolve({ ownedAccounts: store.apply(payload) });
       if (cmd === 'agent_action' && payload.action === 'view') return Promise.resolve({ connection: 'no_daemon', ownedAccounts: store ? store.view() : undefined });
       if (cmd === 'hotkey_action' && payload.action === 'view') return Promise.resolve({ enabled: false });
       return Promise.reject(new Error('unexpected IPC'));
@@ -313,7 +314,21 @@ test('#408 S8 Conexiones holds providers, agents and services together; the old 
 function fakeStore({ accounts = [], failRemove = false } = {}) {
   let owned = accounts.map(a => clone(a));
   const view = () => ({ accounts: owned.map(a => clone(a)) });
-  return { view, removes: [],
+  return { view, removes: [], saves: [],
+    apply(payload) { // the masked host's account verbs: remember the command, never a raw key
+      this.saves.push(payload);
+      const cfg = payload.config || {};
+      const at = owned.findIndex(a => a.accountId === payload.accountId);
+      const prev = at >= 0 ? owned[at] : null;
+      const hasCredential = Object.hasOwn(cfg, 'apiKey')
+        ? typeof cfg.apiKey === 'string' && cfg.apiKey.length > 0
+        : (prev ? prev.hasCredential : false);
+      const record = { accountId: payload.accountId, provider: payload.provider, hasCredential,
+        config: { nombre: cfg.nombre || (prev && prev.config.nombre), baseUrl: cfg.baseUrl, api: cfg.api,
+          compat: cfg.compat || {}, models: cfg.models || [], defaultModel: cfg.defaultModel } };
+      if (at >= 0) owned[at] = record; else owned.push(record);
+      return { accounts: owned.map(a => clone(a)) };
+    },
     remove(accountId) {
       this.removes.push(accountId);
       if (failRemove) return Promise.reject({ code: 'save_failed' });
@@ -358,4 +373,62 @@ test('#409 T2 «Quitar conexión» lives on the owned-account row: exact sentenc
   assert.equal(failing.view().accounts.length, 1, 'the store did not change');
   assert.ok(buttons(c).includes('Quitar conexión'), 'the row is still there');
   assert.match(allText(c.get('owned-accounts')), /No se pudo quitar la conexión\. No se cambió nada\./);
+});
+
+test('#409 T3 the manual masked editor: full field set, credential options, write-only secret, closed verbs', async () => {
+  const KEY = ['synthetic', 'manual', 'key', '0042'].join('-');
+  const store = fakeStore({ accounts: [{ accountId: 'nan', provider: 'nan', hasCredential: true, config: { nombre: 'nan (Pi)', baseUrl: 'https://api.nan.builders/v1', api: 'openai-completions', compat: {}, models: ['m0'], defaultModel: 'm0' } }] });
+  const b = boot({ store }); await flush();
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  const openEditor = async () => {
+    b.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Editar').fire('click'); await flush();
+    const form = b.get('account-form'); assert.ok(form, 'the masked editor opens from the row'); return form;
+  };
+  // S4: every field of makeAccountForm, the identity locked for a saved account, the credential options
+  const form = await openEditor();
+  for (const id of ['account-provider', 'account-name', 'account-url', 'account-api', 'account-models', 'account-default', 'account-credential', 'account-secret', 'account-save', 'account-endpoint']) {
+    assert.ok(b.get(id), `field ${id} exists`);
+  }
+  assert.equal(b.get('account-provider').disabled, true, 'provider identity cannot be rewritten for a saved account');
+  const credential = b.get('account-credential');
+  assert.deepEqual(credential.children.map(x => allText(x)), ['Conservar', 'Establecer clave', 'Borrar clave']);
+  const secret = b.get('account-secret');
+  assert.equal(secret.type, 'password');
+  assert.equal(secret.disabled, true, 'the secret stays masked and inert until Establecer clave');
+  // «Establecer clave»: the key crosses in the save IPC only, is cleared from the field immediately,
+  // and never reaches any rendered text
+  credential.value = 'set'; credential.fire('change');
+  assert.equal(secret.disabled, false, 'Establecer clave enables the masked field');
+  secret.value = KEY;
+  form.fire('submit'); await flush();
+  const save = b.calls.find(c => c.cmd === 'agent_action' && c.payload.action === 'abito_account_save');
+  assert.ok(save, 'saved through the closed verb');
+  assert.equal(save.payload.accountId, 'nan');
+  assert.equal(save.payload.config.apiKey, KEY, 'the key travels once, in the save request');
+  assert.equal(secret.value, '', 'the field is cleared BEFORE the IPC, on every path');
+  assert.ok(!b.get('account-form'), 'the editor closes after a save');
+  assert.ok(!allText(b.get('settings-body')).includes(KEY), 'the key is nowhere on the page');
+  assert.ok(allText(b.get('owned-accounts')).includes('Clave guardada'), 'the row reports the stored credential');
+  // «Conservar»: no apiKey in the payload, the stored credential survives
+  await openEditor();
+  b.get('account-credential').value = 'keep'; b.get('account-form').fire('submit'); await flush();
+  const keep = b.calls.filter(c => c.cmd === 'agent_action' && c.payload.action === 'abito_account_save').pop();
+  assert.ok(!Object.hasOwn(keep.payload.config, 'apiKey'), 'Conservar sends no key at all');
+  assert.ok(allText(b.get('owned-accounts')).includes('Clave guardada'), 'Conservar keeps the stored key');
+  // «Borrar clave»: apiKey null clears the stored credential, the row says so
+  await openEditor();
+  b.get('account-credential').value = 'clear'; b.get('account-form').fire('submit'); await flush();
+  const clear = b.calls.filter(c => c.cmd === 'agent_action' && c.payload.action === 'abito_account_save').pop();
+  assert.equal(clear.payload.config.apiKey, null, 'Borrar clave sends an explicit null');
+  assert.ok(allText(b.get('owned-accounts')).includes('Sin clave'), 'the row reports the cleared credential');
+  // the endpoint verb stays reachable from the same editor
+  await openEditor();
+  b.get('account-endpoint').fire('click'); await flush();
+  assert.ok(b.calls.some(c => c.cmd === 'agent_action' && c.payload.action === 'abito_account_endpoint_set'), 'endpoint_set sent from the editor');
+  // write-only, not never-sent: the manual path crosses the IPC exactly once, in its own save —
+  // and the earlier assertions proved it reaches no rendered text and no reply
+  const withKey = b.calls.filter(c => JSON.stringify(c.payload).includes(KEY));
+  assert.equal(withKey.length, 1, 'the synthetic key crosses the IPC exactly once, in its own save');
+  assert.equal(withKey[0].payload.action, 'abito_account_save');
 });

@@ -1220,5 +1220,6 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 
 - **Conexiones** replaces Cuentas + Conectores: «Proveedores de IA», «Agentes de código» and «Servicios» in one tab (`connectors` still resolves to it through `tabAlias`).
 - **The key is write-only:** never shown back, logged, put in a view/IPC payload or sent to the WebView (`hasCredential` only). The masked editor behind «Editar» in the owned-account row is the only way to set, keep or clear it; it saves through `abito_account_create|abito_account_save|abito_account_endpoint_set` into Abito's own 0600 `accounts.json`.
+- **Deleting an account:** «Quitar conexión» on the owned-account row (`abito_account_remove`) deletes the account and its key from `accounts.json`. Failure changes nothing and says so: «No se pudo quitar la conexión. No se cambió nada.»
 - **No copy from Pi (#409):** there is no import of Pi's `nan` connection; the key is entered by hand in the UI. The daemon, its protocol and `desktop-daemon/src/auth.cjs` are unchanged and still never read the user's Pi credentials.
 - **Tests:** `test-node/pills-check.cjs` and `settings-view-check.cjs` (no Pi card, no Pi IPC command, the owned-account row).
