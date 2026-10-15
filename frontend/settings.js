@@ -212,6 +212,14 @@
     }
   }
   buildTabs();
+  // #408: at the Settings size (wide) the tabs are a vertical rail; in the 400 column a wrapping row.
+  const RAIL_MIN_W = 600;
+  function syncRail() {
+    const wide = typeof panel.clientWidth === 'number' && panel.clientWidth >= RAIL_MIN_W;
+    panel.dataset.rail = wide ? 'true' : 'false';
+    if (tabsHost) tabsHost.setAttribute('aria-orientation', wide ? 'vertical' : 'horizontal');
+  }
+  window.addEventListener('resize', syncRail);
   function showScreen(id) {
     screen = id;
     if (id !== 'accounts') { method = null; filter = ''; discardAccountForm(); }
@@ -252,6 +260,7 @@
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
     for (const b of openers) b.setAttribute('aria-expanded', 'true');
     askSize(true);
+    syncRail();
     refreshAll();
     showScreen(id || screen);
     $('settings-close').focus();
@@ -266,8 +275,8 @@
     discardAccountForm();
     drafts.reset(); // a half-typed key never outlives the panel
     if (waiting) { clearTimeout(waiting.timer); waiting = null; }
-    // the panel lives in the chat view: focus returns to the chat input
-    if (byKeyboard) { const c = $('chat-input'); if (c && !c.disabled) c.focus(); }
+    // #408: focus returns to the control that opened Ajustes (the gear in the chat header)
+    if (byKeyboard) { const g = $('open-screen-settings'); if (g) g.focus(); }
   }
   const isOpen = () => panel.dataset.open === 'true';
 

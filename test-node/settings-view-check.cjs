@@ -355,10 +355,10 @@ test('style: the rules that HIDE the gear are at least as specific as the rule t
   }
 });
 
-test('focus: closing the panel by keyboard lands on something visible in the CHAT view (the gear is overview-only)', () => {
+test('focus: closing the panel by keyboard lands on the chat-header gear, which stays visible in the CHAT view (#408; #open-settings is overview-only)', () => {
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   const close = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
-  assert.match(close, /chat-input/, 'focus goes back to the chat input');
+  assert.match(close, /open-screen-settings/, 'focus goes back to the gear that opened Ajustes');
   assert.doesNotMatch(close, /AbitoFocusHome/);
 });
 
@@ -837,3 +837,13 @@ test('#380 theme wiring: one closed sender, no local paint, and a failed save ke
 });
 
 console.log(`settings-view-check: ${passed} passed`);
+
+test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row only as the 400 column fallback', () => {
+  assert.equal(S.tabKeyTarget('pills', 'ArrowDown'), 'appearance');
+  assert.equal(S.tabKeyTarget('pills', 'ArrowUp'), 'specialists');
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /setAttribute\('aria-orientation', wide \? 'vertical' : 'horizontal'\)/);
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.match(css, /#settings\[data-rail="true"\] #settings-tabs\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(css, /#settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/, 'the row fallback wraps');
+});

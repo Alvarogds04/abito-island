@@ -1113,3 +1113,15 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 .scard .sflow { border: 0; padding: 4px 0; }
 .scard .scode { font-size: calc(var(--fs-title) * 1.25); padding: 8px 14px; }
 .scard .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+
+/* ---- #408: at the Settings size the tabs become a LEFT vertical rail (settings.js sets data-rail from the
+   panel width); the 400 column keeps the wrapping row. */
+#settings[data-rail="true"] {
+  display: grid; grid-template-columns: 188px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 12px;
+}
+#settings[data-rail="true"] #settings-bar { grid-column: 1 / -1; }
+#settings[data-rail="true"] #settings-hint { grid-column: 2; grid-row: 2; }
+#settings[data-rail="true"] #settings-tabs { grid-column: 1; grid-row: 2 / 4; flex-direction: column; flex-wrap: nowrap; align-self: start; }
+#settings[data-rail="true"] .stab { justify-content: flex-start; width: 100%; border-radius: var(--radius-xl); }
+#settings[data-rail="true"] #settings-body, #settings[data-rail="true"] #models { grid-column: 2; grid-row: 3; min-height: 0; }
+#settings[data-rail="true"] #settings-live { grid-column: 1 / -1; }

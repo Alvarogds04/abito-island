@@ -93,7 +93,7 @@ function boot({ prefs = {}, failView = false, deferView = false } = {}) {
   for (const file of ['pill-catalog.js', 'pills.js', 'icons.js', 'pills-view.js']) load(file);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { get, calls, backend, doc, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
+  return { get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
 }
 
 test('S3/S4 actual shipped overview starts with main+four default choices and named states', async () => {
@@ -283,4 +283,16 @@ test('#408 opening Ajustes asks Rust for the Settings size (open only, no number
   assert.deepEqual(sizes(), [{ open: true }, { open: false }]);
   b.click('settings-close'); await flush();
   assert.equal(sizes().length, 2, 'closing a closed panel asks nothing');
+});
+
+test('#408 Escape closes Ajustes and focus returns to the gear that opened it', async () => {
+  const b = await settingsBoot({}, 'general');
+  b.get('settings-close').focus();
+  const keydown = b.events.keydown || [];
+  assert.ok(keydown.length, 'settings.js listens for keydown');
+  for (const fn of keydown) fn({ key: 'Escape', isComposing: false, preventDefault() {}, stopPropagation() {} });
+  await flush();
+  assert.equal(b.get('settings').inert, true, 'panel closed');
+  assert.equal(b.doc.activeElement, b.get('open-screen-settings'), 'focus is back on the gear');
+  assert.deepEqual(b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload).pop(), { open: false });
 });
