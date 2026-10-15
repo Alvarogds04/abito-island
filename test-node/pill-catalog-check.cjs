@@ -52,8 +52,8 @@ test('S6 only23 Linux declarations; Apple Music excluded and desktop unsupported
 
 test('S4 default main and four default declarations; explicit empty list stays empty', () => {
   const m = M();
-  assert.deepEqual(m.normalize({}), { mainPill: ids[0], declaredPills: defaults });
-  assert.deepEqual(m.normalize({ declaredPills: [] }), { mainPill: ids[0], declaredPills: [] });
+  assert.deepEqual(m.normalize({}), { mainPill: ids[0], declaredPills: defaults, pillColors: {} });
+  assert.deepEqual(m.normalize({ declaredPills: [] }), { mainPill: ids[0], declaredPills: [], pillColors: {} });
   assert.equal(m.MAX_DECLARED, 4);
   const a = m.normalize({}); a.declaredPills.pop();
   assert.deepEqual(m.normalize({}).declaredPills, defaults, 'defaults are never mutable shared state');
@@ -67,7 +67,7 @@ test('S6 damaged saved input keeps first4 valid distinct choices, excluding main
     'ai_google', 'agent_amp', 'integration_notion', 'integration_spotify'] };
   const before = JSON.stringify(raw);
   assert.deepEqual(m.normalize(raw), { mainPill: ids[0],
-    declaredPills: ['agent_gemini', 'ai_google', 'agent_amp', 'integration_notion'] });
+    declaredPills: ['agent_gemini', 'ai_google', 'agent_amp', 'integration_notion'], pillColors: {} });
   assert.equal(JSON.stringify(raw), before, 'load normalization does not mutate input');
   assert.deepEqual(m.normalize({ mainPill: 'agent_codex', declaredPills: defaults }).declaredPills, defaults);
 });
@@ -129,4 +129,48 @@ test('S6 offline detail never claims provider credentials/URL imply connection',
   assert.equal(m.detail('integration_music').offered, false);
   assert.equal(m.detail('agent_claude-desktop').offered, false);
   assert.equal(m.detail('unknown'), null);
+});
+
+// #346 F033 — per-pill colours: the closed palette is avatar-colors.js PALETTE, and raw
+// input never survives normalize/colorOf/setColor/clearColor.
+test('#346 normalize keeps only catalog ids carrying palette names; empty means no colour', () => {
+  const m = M();
+  assert.deepEqual(m.normalize({}).pillColors, {});
+  const raw = JSON.parse('{"pillColors":{"agent_amp":"mint","agent_cursor":"#ff0000","agent_muse":"MINT","integration_claude":"expression(alert(1))","ai_google":7,"unknown_pill":"blue","__proto__":"purple","constructor":"red"}}');
+  assert.deepEqual(m.normalize(raw).pillColors, { agent_amp: 'mint' });
+  for (const bad of [null, [], 7, 'green', true]) assert.deepEqual(m.normalize({ pillColors: bad }).pillColors, {});
+  const before = JSON.stringify(raw);
+  m.normalize(raw);
+  assert.equal(JSON.stringify(raw), before, 'colour normalization does not mutate input');
+});
+
+test('#346 colorOf answers only an already-validated palette name, never raw input', () => {
+  const m = M();
+  const state = m.normalize({ pillColors: { agent_amp: 'mint', agent_cursor: 'nope' } });
+  assert.equal(m.colorOf(state, 'agent_amp'), 'mint');
+  assert.equal(m.colorOf(state, 'agent_cursor'), '');
+  assert.equal(m.colorOf(state, 'unknown_pill'), '');
+  assert.equal(m.colorOf(m.normalize({}), 'agent_amp'), '');
+  assert.equal(m.colorOf(null, 'agent_amp'), '');
+  assert.equal(m.colorOf({ mainPill: ids[0], declaredPills: [],
+    pillColors: JSON.parse('{"agent_amp":"<img src=x>"}') }, 'agent_amp'), '');
+});
+
+test('#346 setColor/clearColor gate on offered catalog ids and the closed palette; state is never mutated', () => {
+  const m = M();
+  const state = m.normalize({});
+  assert.deepEqual(m.setColor(state, 'agent_amp', 'purple'),
+    { mainPill: state.mainPill, declaredPills: state.declaredPills, pillColors: { agent_amp: 'purple' } });
+  assert.deepEqual(m.clearColor(state, 'agent_amp'),
+    { mainPill: state.mainPill, declaredPills: state.declaredPills, pillColors: {} });
+  const withColor = m.normalize({ pillColors: { agent_amp: 'purple', agent_cursor: 'mint' } });
+  assert.deepEqual(m.clearColor(withColor, 'agent_amp').pillColors, { agent_cursor: 'mint' });
+  for (const [id, color] of [['integration_music', 'purple'], ['unknown_pill', 'purple'],
+    ['agent_amp', '#0f0'], ['agent_amp', 'MINT'], ['agent_amp', 'green;background:url(x)'],
+    ['agent_amp', ''], ['agent_amp', 'rgb(0,255,0)'], ['__proto__', 'purple'],
+    [7, 'purple'], ['agent_amp', null], [null, 'purple']])
+    assert.equal(m.setColor(state, id, color), null, `${String(id)}/${String(color)}`);
+  for (const id of ['integration_music', 'unknown_pill', '__proto__', 7, null])
+    assert.equal(m.clearColor(state, id), null, String(id));
+  assert.deepEqual(state.pillColors, {}, 'the inputs were never mutated');
 });

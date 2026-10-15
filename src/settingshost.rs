@@ -87,6 +87,7 @@ pub fn start(app: &AppHandle) {
 fn view_prefs(p: &Prefs) -> Value {
     json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors,
         "mainPill": p.main_pill(), "declaredPills": p.declared_pills(),
+        "pillColors": p.pill_colors,
         "theme": p.theme().as_str()})
 }
 
@@ -369,6 +370,7 @@ mod settings_view_tests {
     use super::parse_settings_view;
     use super::restart_outcome;
     use super::restart_response;
+    use super::view_prefs;
     use serde_json::json;
 
     #[test]
@@ -421,6 +423,23 @@ mod settings_view_tests {
         for banned in ["token", "pid", "endpoint", "procStart", "/home/", "/proc/"] {
             assert!(!text.contains(banned), "{banned} leaked: {text}");
         }
+    }
+
+    /// #346 F033: `pillColors` is the same projection shape as `avatarColors` — already
+    /// validated colour names only, and a cleared pill simply has no key.
+    #[test]
+    fn f033_the_webview_projection_carries_validated_pill_colours_and_a_clear_drops_the_key() {
+        use abito_island::prefs::{parse_command, update, Prefs};
+        let prefs = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"mint"}}"#));
+        let view = view_prefs(&prefs);
+        assert_eq!(view["pillColors"], json!({"agent_amp":"mint"}), "same shape as avatarColors");
+        assert_eq!(view["avatarColors"], json!({}), "the established field keeps its shape");
+        let cleared = update(&prefs,
+            &parse_command(&json!({"action":"clear_pill_color","id":"agent_amp"})).unwrap(), |_| true).unwrap();
+        assert_eq!(view_prefs(&cleared)["pillColors"], json!({}), "a cleared pill projects no colour");
+        // A hostile stored value is already dropped at load, so it never reaches the projection.
+        let hostile = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"<img src=x>"}}"#));
+        assert_eq!(view_prefs(&hostile)["pillColors"], json!({}));
     }
 
     /// #390 GD027: `daemon_action` is closed — exactly {"action":"status"|"restart"}.

@@ -48,7 +48,50 @@ for the offline model checks; `node apps/desktop-tauri/test-node/pills-check.cjs
 executes the actual overview/settings scripts against a local fake DOM/IPC.
 Use **Ajustes → Pills** to set the main and declare/remove choices. The overview
 shows main plus declarations in catalog order and keeps its existing host
-connection, notices and decision controls. #346 color overrides are separate.
+connection, notices and decision controls. Per-pill colour overrides are
+documented in the next section (#346).
+
+## #346 — per-pill colours (F033 palette override)
+
+Every visible pill may wear one of the five palette colours, chosen by the human
+in **Ajustes → Pills**. The mechanism is closed end to end and the model lives
+with the rest of the pill docs in [docs/pills.md](../../docs/pills.md).
+
+- **One vocabulary, no raw values.** The only accepted colours are the five names
+  `green | blue | mint | orange | purple`: `COLORS` in `src/prefs.rs` and
+  `PALETTE` in `frontend/avatar-colors.js` — the same set the Dot uses. No hex,
+  rgb, CSS text or user string is ever stored, transported or painted; the model
+  answers only an already-validated name or the empty string (`colorOf`).
+- **Typed field.** `prefs.json` gains an optional `pill_colors` map
+  (pill id → palette name). Unknown pill ids and off-set colours drop on load —
+  the `main_pill` reading rule mirrored — and absent or empty never writes the
+  key, so untouched files keep their bytes and a hostile value can never destroy
+  the stored catalogue or any other known field.
+- **Two closed commands.** `{"action":"set_pill_color","id":"agent_amp","color":"purple"}`
+  (exactly three keys) and `{"action":"clear_pill_color","id":"agent_amp"}` (exactly
+  two). Both validate the offered catalog id and the palette name in
+  `parse_command` and again in `apply`; wrong arity, an unoffered id (Apple Music,
+  Claude Desktop on Linux), a sixth name, `""`, a prototype key or a non-string is
+  `invalid_schema` with no persistence and no publication.
+- **Projection.** The `prefs_action` view and the `prefs:state` event carry
+  `pillColors` beside `avatarColors`: already-validated names only, nothing new or
+  sensitive crosses the wire.
+- **UI.** Each offered row in **Ajustes → Pills** gets a closed select with the
+  five colour names plus a selectable **Sin color**, which dispatches
+  `clear_pill_color` — the escape hatch the avatar does not need, because there
+  the default is itself one of the five while a colourless pill must stay
+  reversible. The overview paints `data-color` only from the validated name, and
+  `style.css` maps the five names to the never-themed `--dot-*-2` identity tokens
+  as borders: both #380 palettes show the same colour, hover/pressed pill rules
+  stay untouched, and the pill keeps its name text and aria — colour never
+  carries meaning alone.
+- **Checks.** `pill-catalog-check.cjs` and `pills-check.cjs` pin the model gates
+  and the DOM/event boundary (set/clear writes, hostile values never paint);
+  `settings-view-check.cjs`, `theme-check.cjs` and `avatar-colors-check.cjs` stay
+  green as regression evidence; `sound-wiring-check.cjs` pins the `pillColors`
+  DTO shape beside `avatarColors`; `cargo test --lib f033_` (from
+  `apps/desktop-tauri`) pins catalogue survival, arity and field isolation. Only
+  a human on a real preview can prove legibility of each colour on both palettes.
 
 ## Run
 

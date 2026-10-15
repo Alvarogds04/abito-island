@@ -1026,6 +1026,23 @@ html[data-motion="reduce"] #overview-view { transition: none !important; }
 .pill-choice[aria-pressed="true"] { background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.3); }
 .pill-choice:focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
 
+/* ---- #346 F033: per-pill palette override — closed data-color set (avatar-colors.js PALETTE);
+   the identity colours are NEVER themed, so both #380 palettes paint the same name. Only an
+   already-validated name can put the attribute on the element (pills-view.js / pill-settings.js).
+   Borders only: hover/pressed above keep their background and box-shadow untouched. ---- */
+.pill-choice[data-color="green"] { border: 1.5px solid var(--dot-green-2); }
+.pill-choice[data-color="blue"] { border: 1.5px solid var(--dot-blue-2); }
+.pill-choice[data-color="mint"] { border: 1.5px solid var(--dot-mint-2); }
+.pill-choice[data-color="orange"] { border: 1.5px solid var(--dot-orange-2); }
+.pill-choice[data-color="purple"] { border: 1.5px solid var(--dot-purple-2); }
+#pill-settings-rows .srow[data-color] .srow-title { border-left: 4px solid transparent; padding-left: 6px; }
+#pill-settings-rows .srow[data-color="green"] .srow-title { border-left-color: var(--dot-green-2); }
+#pill-settings-rows .srow[data-color="blue"] .srow-title { border-left-color: var(--dot-blue-2); }
+#pill-settings-rows .srow[data-color="mint"] .srow-title { border-left-color: var(--dot-mint-2); }
+#pill-settings-rows .srow[data-color="orange"] .srow-title { border-left-color: var(--dot-orange-2); }
+#pill-settings-rows .srow[data-color="purple"] .srow-title { border-left-color: var(--dot-purple-2); }
+#pill-settings-rows .pill-color { flex: none; width: 150px; }
+
 /* outcome -> overview is a cross-fade (no delay); the island ring eases instead of cutting */
 #capsule[data-crossfade][data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-question="pending"]):not([data-question="expired"]):not([data-question="outcome"]) #overview-view {
   transition: opacity var(--dur-state) var(--ease-out), visibility 0s;

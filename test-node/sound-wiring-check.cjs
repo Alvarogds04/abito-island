@@ -89,6 +89,7 @@ function hostDtoFixture(host) {
     assert.ok(main && declared, 'actual typed pill defaults must be available');
     const values = {
       'p.sound': true, 'p.display_name': null, 'p.avatar_colors': {},
+      'p.pill_colors': {},
       'p.gain': 0, 'p.gain()': 0,
       'p.main_pill()': JSON.parse(main[1]),
       'p.declared_pills()': JSON.parse(declared[1]),
@@ -108,6 +109,7 @@ test('Host DTO fixture extracts complete legacy and multiline typed projections 
   const host = fs.readFileSync(path.join(__dirname, '..', 'src', 'settingshost.rs'), 'utf8');
   const dto = hostDtoFixture(host);
   assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
+    pillColors: {},
     mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system' });
   const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
   assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });

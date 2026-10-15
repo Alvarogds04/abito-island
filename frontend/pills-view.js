@@ -27,6 +27,9 @@
     for (const def of P.visible(prefs)) {
       const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
       button.id = `pill-choice-${def.id}`; button.dataset.pillId = def.id;
+      // #346 F033: only an already-validated palette name ever reaches the DOM.
+      const color = P.colorOf(prefs, def.id);
+      if (color) button.dataset.color = color;
       button.setAttribute('aria-pressed', selected === def.id ? 'true' : 'false');
       button.setAttribute('aria-label', `${def.name}${def.id === prefs.mainPill ? ', principal' : ''}: sin conexión`);
       const glyph = parser.parseFromString(I.svg('plug-off'), 'image/svg+xml').documentElement;

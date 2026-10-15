@@ -783,6 +783,92 @@ fn f032_every_legacy_writer_keeps_typed_pill_choices_and_drops_unknown_json() {
     }
 }
 
+// #346 F033 — per-pill colours: the closed five-name palette is the ONLY colour vocabulary.
+#[test]
+fn f033_pill_colors_keep_the_closed_palette_and_never_destroy_the_catalogue() {
+    let raw = r##"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_amp":"mint","agent_cursor":"#ff0000","agent_muse":"MINT","integration_claude":"expression(alert(1))","integration_n8n":"<img src=x onerror=alert(1)>","ai_google":7,"unknown_pill":"blue","__proto__":"purple"},"future_unvalidated":{"secret":"not retained"}}"##;
+    let loaded = Prefs::from_text(Some(raw));
+    let v: Value = serde_json::from_str(&loaded.to_text()).unwrap();
+    assert_eq!(v["pill_colors"], json!({"agent_amp":"mint"}), "only a catalog id carrying a palette name survives");
+    assert_eq!(v["main_pill"], json!("agent_codex"));
+    assert_eq!(v["declared_pills"], json!(["ai_google"]));
+    assert_eq!(v["avatar_colors"], json!({"abito":"mint"}));
+    assert!(loaded.sound);
+    assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded, "the kept entries round-trip");
+    // Absent/unusable pill_colors never writes the key: «ausente/vacío nunca escribe».
+    for text in [r#"{"v":1}"#, r#"{"v":1,"pill_colors":{}}"#, r#"{"v":1,"pill_colors":null}"#,
+                 r#"{"v":1,"pill_colors":"green"}"#, r#"{"v":1,"pill_colors":["green"]}"#,
+                 r#"{"v":1,"pill_colors":{"agent_amp":"nope"}}"#,
+                 r#"{"v":1,"pill_colors":{"unknown_pill":"green"}}"#] {
+        let out = Prefs::from_text(Some(text)).to_text();
+        assert!(!out.contains("pill_colors"), "{text} → {out}");
+    }
+}
+
+#[test]
+fn f033_set_pill_color_is_exact_arity_and_only_touches_its_own_field() {
+    let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_cursor":"blue"}}"#));
+    let command = parse_command(&json!({"action":"set_pill_color","id":"agent_amp","color":"purple"}))
+        .expect("closed three-key pill colour command accepted");
+    let next = update(&current, &command, |_| true).expect("a palette colour applies");
+    let written: Value = serde_json::from_str(&next.to_text()).unwrap();
+    assert_eq!(written["pill_colors"], json!({"agent_amp":"purple","agent_cursor":"blue"}), "the new key lands beside the kept one");
+    let mut before: Value = serde_json::from_str(&current.to_text()).unwrap();
+    let mut after: Value = serde_json::from_str(&next.to_text()).unwrap();
+    before.as_object_mut().unwrap().remove("pill_colors");
+    after.as_object_mut().unwrap().remove("pill_colors");
+    assert_eq!(before, after, "set_pill_color changes nothing but its own field");
+    for bad in [
+        json!({"action":"set_pill_color"}),
+        json!({"action":"set_pill_color","id":"agent_amp"}),
+        json!({"action":"set_pill_color","color":"purple"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"purple","extra":1}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"#9fdb7f"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"MINT"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"rgb(0,255,0)"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"green;background:url(https://evil)"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":""}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":null}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":7}),
+        json!({"action":"set_pill_color","id":"integration_music","color":"purple"}),
+        json!({"action":"set_pill_color","id":"unknown_pill","color":"purple"}),
+        json!({"action":"set_pill_color","id":"__proto__","color":"purple"}),
+        json!({"action":"set_pill_color","id":7,"color":"purple"}),
+        json!({"action":"set_pill_color","id":["agent_amp"],"color":"purple"}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn f033_clear_pill_color_is_exact_arity_and_only_removes_its_own_key() {
+    let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_amp":"mint","agent_cursor":"blue"}}"#));
+    let command = parse_command(&json!({"action":"clear_pill_color","id":"agent_amp"}))
+        .expect("closed two-key pill colour clear accepted");
+    let next = update(&current, &command, |_| true).expect("the key is removable");
+    let v: Value = serde_json::from_str(&next.to_text()).unwrap();
+    assert_eq!(v["pill_colors"], json!({"agent_cursor":"blue"}), "only that pill loses its colour");
+    assert_eq!(next.declared_pills(), current.declared_pills());
+    assert_eq!(next.main_pill(), current.main_pill());
+    assert!(next.sound && next.display_name.is_some() && !next.avatar_colors.is_empty());
+    let untouched = update(&current,
+        &parse_command(&json!({"action":"clear_pill_color","id":"integration_n8n"})).unwrap(), |_| true).unwrap();
+    let untouched_text: Value = serde_json::from_str(&untouched.to_text()).unwrap();
+    assert_eq!(untouched_text["pill_colors"], json!({"agent_amp":"mint","agent_cursor":"blue"}), "clearing an absent colour changes nothing");
+    for bad in [
+        json!({"action":"clear_pill_color"}),
+        json!({"action":"clear_pill_color","color":"blue"}),
+        json!({"action":"clear_pill_color","id":"agent_amp","color":"blue"}),
+        json!({"action":"clear_pill_color","id":"unknown_pill"}),
+        json!({"action":"clear_pill_color","id":"integration_music"}),
+        json!({"action":"clear_pill_color","id":7}),
+        json!({"action":"clear_pill_color","id":null}),
+        json!({"action":"clear_pill_color","id":["agent_amp"]}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad}");
+    }
+}
+
 #[test]
 fn theme_defaults_to_system_and_an_absent_field_never_rewrites_an_old_file() {
     use std::sync::Mutex;
