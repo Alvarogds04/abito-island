@@ -174,3 +174,36 @@ fn host_failure_does_not_exit_its_app_or_restart_host() {
     assert!(host.try_wait().unwrap().is_some());
     drop(host); // the test/app remains alive
 }
+
+// #390 GD014/check (4): a child that exits ON ITS OWN must be reaped at runtime
+// (never left as a zombie while the app lives) and its early exit must become
+// visible through the slot. Explicit bound, no unbounded waits.
+#[test]
+fn early_child_exit_is_reaped_at_runtime_and_reported() {
+    let root = TestDir::new().unwrap();
+    let script = root.path().join("host.sh");
+    executable(&script, "#!/bin/sh\nexit 17\n");
+    let host = Host::spawn_command(Command::new(script)).unwrap();
+    let pid = host.pid();
+    let slot = abito_island::daemonhost::HostSlot::default();
+    slot.adopt(host);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // 1) the early exit is observed and reported
+    loop {
+        if let Some(status) = slot.exit_status() {
+            assert_eq!(status.code(), Some(17), "the early child exit is visible to the host");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the child exit was never reported");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // 2) reaped, not a zombie: /proc/<pid> is gone while the app keeps running
+    loop {
+        if !Path::new(&format!("/proc/{pid}")).exists() { break }
+        assert!(std::time::Instant::now() < deadline, "zombie left behind: /proc/{pid} still exists");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // 3) stop() after a runtime reap is a clean no-op (no double signal, no panic)
+    slot.stop();
+    slot.stop();
+}
