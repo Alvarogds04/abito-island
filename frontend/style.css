@@ -897,8 +897,11 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 #capsule[data-question="outcome"] #question-body, #capsule[data-question="outcome"] #question-asker, #capsule[data-question="outcome"] #question-options { display: none; }
 #question-state { font-size: var(--fs-title); font-weight: 600; gap: 10px; }
 #question-state .ico svg { width: 22px; height: 22px; }
-#card-head { gap: 12px; min-height: 28px; padding-right: 48px; }
+#card-head { gap: 12px; min-height: 28px; padding-right: 104px; }
 #card-info { position: absolute; top: 4px; right: 8px; margin: 0; }
+/* F014 (#338): the fold control sits left of #card-info inside the strip the
+   head already clears for absolute controls (48px for one, 104px for two). */
+#card-fold { position: absolute; top: 4px; right: 60px; margin: 0; }
 #permission #operation { font-size: var(--fs-body); line-height: 18px; margin-top: 4px; }
 #allow, #deny { font-size: var(--fs-body); }
 #card-actions { gap: 10px; }
