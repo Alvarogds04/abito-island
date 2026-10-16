@@ -110,6 +110,14 @@ const MAX_MODEL_ID: usize = 200;
 const MAX_MODELS_PER_PROVIDER: usize = 64;
 const MAX_PROVIDERS: usize = 32;
 
+/// #389 (GD012): the monitor the human chose for the island (Ajustes → Panel), stored as
+/// the platform's stable monitor name (see `workarea::monitor_key`). Absent = the island's
+/// current monitor (the behaviour before #389), and absence is preserved. A stored key the
+/// island cannot see right now is NOT dropped: the fallback happens at placement, so a
+/// redocked laptop restores the choice; only a hostile shape is refused here.
+const MONITOR: &str = "monitor";
+pub const MAX_MONITOR_KEY: usize = 64;
+
 /// #380: the closed theme mode. `System` is the DEFAULT and is also what an absent
 /// `theme` field means, so a file nobody changed never grows the key.
 pub const THEMES: [&str; 3] = ["system", "light", "dark"];
@@ -189,6 +197,10 @@ pub struct Prefs {
     /// in creation order. `None` means none, and nothing is written for it, so an
     /// untouched file keeps its bytes.
     pub custom_blobs: Option<Vec<CustomBlob>>,
+    /// #389: the platform monitor name the island was pinned to (Ajustes → Panel).
+    /// `None` means the default placement (the island's current monitor) and is never
+    /// written, so an untouched file keeps its bytes.
+    pub monitor: Option<String>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -269,6 +281,18 @@ fn chosen_models_from(value: Option<&Value>) -> BTreeMap<String, Vec<String>> {
         }
     }
     out
+}
+
+/// The stored monitor key is the platform monitor name verbatim: bounded, trimmed,
+/// no control characters and never a prototype key. Unknown or disconnected names
+/// still parse — the placement fallback owns "unknown" (`workarea::chosen_area`),
+/// never the store; only hostile shapes are refused.
+fn valid_monitor_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.chars().count() <= MAX_MONITOR_KEY
+        && key.trim() == key
+        && !key.chars().any(char::is_control)
+        && !RESERVED.contains(&key)
 }
 
 /// `unsigned_abs` instead of `abs`: `i32::MIN.abs()` overflows, and a damaged file
@@ -388,6 +412,8 @@ impl Prefs {
                 let blobs = custom_blobs_from(v.get(CUSTOM_BLOBS));
                 (!blobs.is_empty()).then_some(blobs)
             },
+            monitor: v.get(MONITOR).and_then(Value::as_str)
+                .filter(|key| valid_monitor_key(key)).map(str::to_owned),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -436,6 +462,9 @@ impl Prefs {
                 }).collect::<Vec<_>>());
             }
         }
+        if let Some(monitor) = &self.monitor {
+            v[MONITOR] = json!(monitor);
+        }
         v.to_string()
     }
 }
@@ -474,6 +503,12 @@ pub enum Command {
     /// #336 T1b-a: the island's inactivity interaction as one exact closed
     /// shape — integer `auto_close_seconds` 5..=120 and `open_on_hover`.
     SetIslandInteraction { auto_close_seconds: u16, open_on_hover: bool },
+    /// #389: the platform monitor name the island is pinned to (Ajustes → Panel).
+    /// A choice is only ever one of the keys the island itself saw and offered;
+    /// falling back when a stored key is no longer connected is placement's job.
+    SetMonitor(String),
+    /// #389: back to the default behaviour — the island's current monitor.
+    ClearMonitor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +527,8 @@ pub struct CommandError;
 /// typed optional fields; unknown file keys are dropped. #415 WU2: create_blob takes
 /// exactly action + name (+ optional color, a COLORS name), delete_blob exactly
 /// action + name, set_blob_color exactly action + name + color (a COLORS name or "").
+/// #389: set_monitor takes exactly action + monitor (a bounded platform monitor name),
+/// clear_monitor exactly action.
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let map = payload.as_object().ok_or(CommandError)?;
     match map.get("action").and_then(Value::as_str) {
@@ -610,6 +647,15 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             let hover = map.get("open_on_hover").and_then(Value::as_bool).ok_or(CommandError)?;
             Ok(Command::SetIslandInteraction { auto_close_seconds: seconds as u16, open_on_hover: hover })
         }
+        // #389: the chosen panel monitor. The value gate runs at parse AND at apply.
+        Some("set_monitor") if map.len() == 2 => {
+            let monitor = map.get("monitor").and_then(Value::as_str).ok_or(CommandError)?;
+            if !valid_monitor_key(monitor) {
+                return Err(CommandError);
+            }
+            Ok(Command::SetMonitor(monitor.to_owned()))
+        }
+        Some("clear_monitor") if map.len() == 1 => Ok(Command::ClearMonitor),
         _ => Err(CommandError),
     }
 }
@@ -733,6 +779,13 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             blob.color = (!color.is_empty()).then(|| color.clone());
             next.custom_blobs = Some(blobs);
         }
+        // #389: the value gate ran at parse and runs again here for direct
+        // callers; clearing always succeeds and never writes the key.
+        Command::SetMonitor(monitor) => {
+            if !valid_monitor_key(monitor) { return Err(CommandError); }
+            next.monitor = Some(monitor.clone());
+        }
+        Command::ClearMonitor => next.monitor = None,
     }
     Ok(next)
 }
