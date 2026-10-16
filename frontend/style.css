@@ -1428,7 +1428,8 @@ html[data-motion="reduce"] .sseg-btn { transition: none; }
   left: 12px;
   right: 12px;
   bottom: 4px;
-  height: 2px;
+  /* #437 D11: the design draws a 3 px countdown bar (was 2 px). */
+  height: 3px;
   border-radius: var(--radius-full);
   background: var(--faint);
   overflow: hidden;

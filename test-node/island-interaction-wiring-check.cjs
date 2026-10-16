@@ -305,6 +305,7 @@ test('#419 style.css rules: theme tokens, transform token, reduced motion, no sy
   assert.match(block, /position:\s*absolute/, 'no layout shift: the bar never reflows the island');
   assert.match(block, /pointer-events:\s*none/, 'decoration never intercepts input');
   assert.match(block, /var\(--faint\)/, 'track uses an existing theme token');
+  assert.match(block, /height:\s*3px/, '#437 D11: the design draws a 3 px countdown bar at the bottom (was 2 px)');
   assert.ok(/#island-countdown::before \{[^}]*var\(--island-live\)/.test(css), 'fill uses an existing theme token');
   assert.doesNotMatch(css.slice(css.indexOf('#island-countdown')), /@media[^{]*prefers-reduced-motion/,
     'no system media query: island.js paints data-motion');
