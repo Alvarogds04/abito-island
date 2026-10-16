@@ -54,6 +54,74 @@ test('this module carries no colour logic: avatar_colors (#384) owns assignment 
 const model = 'local-abito-gpt';
 const draft = extra => Object.assign({ name: 'Investigador', instructions: 'Buscá fuentes y citá.', model }, extra);
 
+// ---- #375: declarative Space name and closed, read-only-by-default permission set ------------------
+test('#375: the permission vocabulary is closed and read-only is the default', () => {
+  assert.deepEqual(S.PERMISSIONS, ['read', 'write', 'network', 'execute']);
+  assert.deepEqual(S.READ_ONLY, ['read']);
+  assert.equal(Object.isFrozen(S.PERMISSIONS), true, 'the closed set must not be extendable');
+  assert.equal(Object.isFrozen(S.READ_ONLY), true);
+});
+
+test('#375: a Space name is optional bounded plain text, like the display name', () => {
+  assert.equal(S.validateDraft(draft({ space: 'Investigación' }), [model]).ok, true);
+  assert.equal(S.validateDraft(draft({ space: null }), [model]).ok, true, 'absent = the old behaviour');
+  assert.equal(S.validateDraft(draft({ space: '' }), [model]).ok, true, 'empty clears the Space');
+  assert.equal(S.validateDraft(draft({ space: '   ' }), [model]).ok, true, 'whitespace-only clears the Space');
+  assert.equal(S.validateDraft(draft({ space: 'x'.repeat(S.MAX_SPACE) }), [model]).ok, true);
+  const over = S.validateDraft(draft({ space: 'x'.repeat(S.MAX_SPACE + 1) }), [model]);
+  assert.equal(over.ok, false);
+  assert.equal(over.field, 'space');
+  for (const bad of [7, 'nulo\u0000', 'salto\n', 'tab\t', 'del\u007f', 'escape\u001b']) {
+    assert.equal(S.validateDraft(draft({ space: bad }), [model]).ok, false, JSON.stringify(bad));
+  }
+});
+
+test('#375: permissions accept only the closed vocabulary, without duplicates', () => {
+  assert.equal(S.validateDraft(draft({ permissions: ['read'] }), [model]).ok, true);
+  assert.equal(S.validateDraft(draft({ permissions: ['network', 'read'] }), [model]).ok, true);
+  assert.equal(S.validateDraft(draft({ permissions: [] }), [model]).ok, true, 'empty = the read-only default');
+  const bad = S.validateDraft(draft({ permissions: 'read' }), [model]);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.field, 'permissions');
+  for (const bad of [['root'], ['read', 'read'], ['read', 7], [null], ['READ']]) {
+    assert.equal(S.validateDraft(draft({ permissions: bad }), [model]).ok, false, JSON.stringify(bad));
+  }
+});
+
+test('#375: stored records sanitize: hostile Space is dropped, hostile permissions degrade to read-only, absent keeps the old shape', () => {
+  const v = S.storeView({ v: 1, active: null, persisted: true, specialists: [
+    { id: 'esp-0011223344556677', name: 'Viejo', instructions: 'x', model: null },
+    { id: 'esp-8899aabbccddeeff', name: 'Hostil', instructions: 'x', model: null, space: 'x\u0000', permissions: ['read', 'root'] },
+    { id: 'esp-ffeeddccbbaa9988', name: 'Rico', instructions: 'x', model: null, space: '  Mi espacio  ', permissions: ['execute', 'network', 'execute'] },
+  ] }, null);
+  assert.deepEqual(v.rows.map(r => r.space), [null, null, 'Mi espacio'], 'a hostile stored Space value is dropped, never shown as data');
+  assert.deepEqual(v.rows.map(r => r.permissions), [['read'], ['read'], ['network', 'execute']], 'every hostile, empty or absent set degrades to read-only; stored duplicates collapse');
+  assert.deepEqual(v.rows.map(r => r.permissionWords), [['Lectura'], ['Lectura'], ['Red', 'Ejecución']]);
+});
+
+test('#375: the form carries space and permissions like every other field', () => {
+  const f = S.makeForm();
+  f.openNew();
+  assert.equal(f.state.draft.space, '');
+  assert.deepEqual(f.state.draft.permissions, ['read'], 'a new specialist starts read-only');
+  f.input('space', 'Investigación');
+  f.input('permissions', ['network', 'read']);
+  f.input('name', 'Investigador');
+  f.input('instructions', 'Buscá.');
+  const sent = f.submit([model]);
+  assert.equal(sent.ok, true);
+  assert.deepEqual(sent.draft, { name: 'Investigador', instructions: 'Buscá.', model: null, space: 'Investigación', permissions: ['read', 'network'] }, 'canonical order wins over input order');
+  f.settle(true, '');
+  f.openEdit({ id: 'esp-0011223344556677', name: 'Editor', instructions: 'x', model: null, space: 'Mi espacio', permissions: ['read', 'write'] });
+  assert.equal(f.state.draft.space, 'Mi espacio');
+  assert.deepEqual(f.state.draft.permissions, ['read', 'write']);
+  f.input('space', '  ');
+  assert.equal(f.submit([model]).draft.space, null, 'whitespace-only clears the Space name');
+  f.settle(false, 'x');
+  f.input('space', 'x\u0000');
+  assert.equal(f.submit([model]).ok, false, 'a hostile draft is never sent');
+});
+
 test('a valid draft passes; name and instructions are required, trimmed and bounded', () => {
   assert.deepEqual(S.validateDraft(draft(), [model]), { ok: true, word: '' });
   assert.equal(S.validateDraft(draft({ name: '   ' }), [model]).ok, false);
@@ -214,7 +282,7 @@ test('saving keeps the form and the draft until the backend CONFIRMS; a failure 
   f.input('instructions', 'Buscá fuentes\ny citá.');
   const sent = f.submit([model]);
   assert.equal(sent.ok, true);
-  assert.deepEqual(sent.draft, { name: 'Investigador', instructions: 'Buscá fuentes\ny citá.', model: null });
+  assert.deepEqual(sent.draft, { name: 'Investigador', instructions: 'Buscá fuentes\ny citá.', model: null, space: null, permissions: ['read'] }, 'absent #375 fields travel as null space and the read-only default');
   assert.equal(f.state.open, true, 'the form does not close when the click is sent');
   assert.equal(f.state.pending, true);
   assert.equal(f.submit([model]).ok, false, 'a second click while pending sends nothing');

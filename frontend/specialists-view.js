@@ -21,6 +21,13 @@
   const MAX_SPECIALISTS = 24;
   const MAX_NAME = 40;
   const MAX_INSTRUCTIONS = 2000;
+  // #375 — the dot's default Space NAME: bounded plain text, declarative only. Nothing resolves,
+  // applies or executes it; absent is the old behaviour.
+  const MAX_SPACE = 80;
+  // #375 — the closed permission vocabulary and its floor. DECLARATIVE ONLY: nothing here grants,
+  // executes, injects or enforces anything.
+  const PERMISSIONS = Object.freeze(['read', 'write', 'network', 'execute']);
+  const READ_ONLY = Object.freeze(['read']);
   const ID_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
   // Never a specialist id: the principal of the island and the engine CLIs the connectors
   // screen already talks to (#306), plus the prototype keys no plain object should ever take.
@@ -34,6 +41,8 @@
   // and hides. The name refuses all of them, line breaks included.
   const NAME_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
   const INSTRUCTIONS_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
+  // #375 — a Space NAME refuses every control, like the display name.
+  const SPACE_CONTROL = NAME_CONTROL;
   const chars = s => Array.from(s).length;
 
   function validId(id) {
@@ -64,6 +73,38 @@
 
   const cleanName = name => (isStr(name) ? name.trim() : '');
   const cleanInstructions = text => (isStr(text) ? text.trim() : '');
+  const permissionLabel = p => ({ read: 'Lectura', write: 'Escritura', network: 'Red', execute: 'Ejecución' }[p] || p);
+
+  // #375 — a stored Space value: absent/non-string/hostile (controls, overlong, whitespace-only)
+  // is dropped to null; a valid one is trimmed. The record itself survives either way.
+  function storedSpace(raw) {
+    if (!isStr(raw)) return null;
+    const t = raw.trim();
+    if (!t || chars(t) > MAX_SPACE || SPACE_CONTROL.test(raw)) return null;
+    return t;
+  }
+
+  // #375 — a stored permission set: every hostile, empty or absent set degrades to the read-only
+  // default; recognised values are deduplicated into the canonical order. DECLARATIVE ONLY.
+  function sanitizePermissions(raw) {
+    if (!Array.isArray(raw)) return READ_ONLY.slice();
+    const out = [];
+    for (const item of raw) {
+      if (!isStr(item) || !PERMISSIONS.includes(item)) return READ_ONLY.slice();
+      if (!out.includes(item)) out.push(item);
+    }
+    return out.length ? PERMISSIONS.filter(p => out.includes(p)) : READ_ONLY.slice();
+  }
+
+  function spaceProblem(text) {
+    if (text === null || text === undefined) return ''; // absent = the old behaviour
+    if (!isStr(text)) return 'El espacio tiene un valor que no se entiende.';
+    if (SPACE_CONTROL.test(text)) return 'El espacio tiene caracteres que no se pueden mostrar.';
+    const t = text.trim();
+    if (!t) return ''; // cleared: the draft sends null
+    if (chars(t) > MAX_SPACE) return `El espacio no puede pasar de ${MAX_SPACE} caracteres.`;
+    return '';
+  }
 
   // The controls are looked for in the RAW text, before trimming: a control character that trim()
   // would swallow is still refused, so nothing is silently mangled on the way to the store.
@@ -87,6 +128,8 @@
 
   // The draft the page is about to send. `models` = the profile ids the registry verified as
   // selectable; a model outside that list is refused here (Rust refuses it again).
+  // #375 — `space` and `permissions` are optional like the model: absent is the old behaviour;
+  // a hostile value is refused here (Rust refuses it again) and nothing sends it.
   function validateDraft(draft, models) {
     const fail = (field, word) => ({ ok: false, field, word });
     if (!draft || typeof draft !== 'object') return fail('name', 'Falta el especialista.');
@@ -95,8 +138,14 @@
     const instructions = instructionsProblem(draft.instructions);
     if (instructions) return fail('instructions', instructions);
     const m = draft.model;
-    if (m === null || m === undefined || m === '') return { ok: true, word: '' };
-    if (!isStr(m) || !Array.isArray(models) || !models.includes(m)) return fail('model', 'Ese modelo local no está verificado.');
+    const hasModel = !(m === null || m === undefined || m === '');
+    if (hasModel && (!isStr(m) || !Array.isArray(models) || !models.includes(m))) return fail('model', 'Ese modelo local no está verificado.');
+    const space = spaceProblem(draft.space);
+    if (space) return fail('space', space);
+    const p = draft.permissions;
+    if (p === null || p === undefined) return { ok: true, word: '' };
+    if (!Array.isArray(p) || p.some(x => !isStr(x) || !PERMISSIONS.includes(x))) return fail('permissions', 'Hay un permiso que no está en la lista cerrada.');
+    if (new Set(p).size !== p.length) return fail('permissions', 'Hay un permiso repetido.');
     return { ok: true, word: '' };
   }
 
@@ -109,7 +158,10 @@
     const name = cleanName(raw.name);
     if (nameProblem(name) || instructionsProblem(raw.instructions)) return null;
     const model = isStr(raw.model) && raw.model ? raw.model : null;
-    return { id: raw.id, name, instructions: cleanInstructions(raw.instructions), model };
+    // #375 — the new fields are optional: absent is the old shape; a hostile stored value is
+    // dropped (Space → null, permissions → read-only), never shown as trusted data.
+    return { id: raw.id, name, instructions: cleanInstructions(raw.instructions), model,
+      space: storedSpace(raw.space), permissions: sanitizePermissions(raw.permissions) };
   }
 
   function records(store) {
@@ -156,6 +208,8 @@
       kind: 'ready',
       rows: rows.map(r => ({
         id: r.id, name: r.name, instructions: r.instructions, model: r.model,
+        space: r.space, permissions: r.permissions,
+        permissionWords: r.permissions.map(permissionLabel),
         modelLabel: modelLabel(listing, r.model),
         modelReady: !r.model || !!selectableModels(listing).find(x => x.profile_id === r.model),
         active: !!active && active.id === r.id,
@@ -209,23 +263,32 @@
   // character the human typed, so a failed save never costs an edit. `canSave` is recomputed from
   // the draft on every call, which is what lets the page flip the button on each keystroke without
   // rebuilding the DOM (a rebuild loses focus and the caret).
-  const emptyDraft = () => ({ name: '', instructions: '', model: null });
+  const emptyDraft = () => ({ name: '', instructions: '', model: null, space: '', permissions: READ_ONLY.slice() });
   function makeForm() {
     const state = { open: false, editing: null, draft: emptyDraft(), pending: false, error: '', touched: false };
     const reset = () => { state.open = false; state.editing = null; state.draft = emptyDraft(); state.pending = false; state.error = ''; state.touched = false; };
-    const normalised = () => ({ name: state.draft.name, instructions: state.draft.instructions, model: state.draft.model || null });
+    // #375 — a cleared or whitespace-only Space name travels as null; permissions travel in the
+    // canonical closed order. Absent fields are the old behaviour.
+    const normalised = () => ({ name: state.draft.name, instructions: state.draft.instructions,
+      model: state.draft.model || null,
+      space: (isStr(state.draft.space) && state.draft.space.trim()) || null,
+      permissions: sanitizePermissions(state.draft.permissions) });
     return {
       state,
       openNew() { reset(); state.open = true; },
       openEdit(row) {
         reset();
         state.open = true; state.editing = row.id;
-        state.draft = { name: row.name, instructions: row.instructions, model: row.model || null };
+        state.draft = { name: row.name, instructions: row.instructions, model: row.model || null,
+          space: row.space || '', permissions: sanitizePermissions(row.permissions) };
       },
       cancel() { reset(); },
       input(field, value) {
-        if (field !== 'name' && field !== 'instructions' && field !== 'model') return;
-        state.draft[field] = field === 'model' ? (value || null) : String(value);
+        if (field !== 'name' && field !== 'instructions' && field !== 'model' && field !== 'space' && field !== 'permissions') return;
+        if (field === 'model') state.draft[field] = value || null;
+        else if (field === 'space') state.draft[field] = isStr(value) ? value : '';
+        else if (field === 'permissions') state.draft[field] = sanitizePermissions(value);
+        else state.draft[field] = String(value);
         state.touched = true;
       },
       status(models) {
@@ -265,7 +328,8 @@
   }
 
   return {
-    makeForm, roleChoices, roleKeyIndex, MAX_SPECIALISTS, MAX_NAME, MAX_INSTRUCTIONS, ID_RE, FORBIDDEN_IDS,
+    makeForm, roleChoices, roleKeyIndex, MAX_SPECIALISTS, MAX_NAME, MAX_INSTRUCTIONS, MAX_SPACE, ID_RE, FORBIDDEN_IDS,
+    PERMISSIONS, READ_ONLY, permissionLabel, sanitizePermissions,
     newId, randomId, validId, validateDraft, idTaken, storeView, identityView, roleChip, modelOptions, catalogNote, modelLabel, countWord,
   };
 });

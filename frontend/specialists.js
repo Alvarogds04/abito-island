@@ -84,11 +84,11 @@
     const out = form.submit(selectableIds());
     if (!out.ok) { paintForm(); return; }
     let payload;
-    if (out.editing) payload = { action: 'update', id: out.editing, name: out.draft.name, instructions: out.draft.instructions, model: out.draft.model };
+    if (out.editing) payload = { action: 'update', id: out.editing, name: out.draft.name, instructions: out.draft.instructions, model: out.draft.model, space: out.draft.space, permissions: out.draft.permissions };
     else {
       const id = V.randomId();
       if (!V.validId(id) || V.idTaken(store, id)) { form.settle(false, 'No se pudo generar la identidad del especialista.'); paintForm(); return; }
-      payload = { action: 'create', id, name: out.draft.name, instructions: out.draft.instructions, model: out.draft.model };
+      payload = { action: 'create', id, name: out.draft.name, instructions: out.draft.instructions, model: out.draft.model, space: out.draft.space, permissions: out.draft.permissions };
     }
     paintForm();
     call('specialists_action', payload).then(next => {
@@ -143,7 +143,7 @@
       word.hidden = !text;
       word.dataset.tone = form.state.error ? 'red' : 'sun';
     }
-    for (const id of ['specialists-name', 'specialists-instructions', 'specialists-model']) {
+    for (const id of ['specialists-name', 'specialists-instructions', 'specialists-model', 'specialists-space', ...V.PERMISSIONS.map(p => 'specialists-perm-' + p)]) {
       const f = $(id);
       if (f) f.disabled = form.state.pending || store?.load_error === true;
     }
@@ -179,6 +179,7 @@
     sec.append(el('p', 'snote', 'Un especialista es un rol que creás vos: un nombre, su especialidad y, si querés, uno de los modelos locales verificados. Lo elegís a mano; Abito no reparte trabajo ni se conecta solo a ningún lado.'));
     if (view.persistenceNote) sec.append(el('p', 'snote strust', view.persistenceNote));
     sec.append(el('p', 'snote', V.catalogNote(listing)));
+    sec.append(el('p', 'snote', 'Declarativo: todavía no se aplica. El espacio y los permisos (lectura, escritura, red, ejecución) quedan anotados en cada especialista, pero hoy no habilitan ni bloquean nada.'));
     sec.append(el('span', 'chip', view.countWord));
 
     // The explicit choice: a radiogroup, Abito first, exactly one checked. Arrow keys move AND choose
@@ -210,6 +211,8 @@
       if (row) {
         radio.append(el('span', 'chip', row.modelLabel));
         if (!row.modelReady) radio.append(el('span', 'chip', 'Modelo no disponible'));
+        if (row.space) radio.append(el('span', 'chip', 'Espacio: ' + row.space));
+        radio.append(el('span', 'chip', 'Permisos (declarativos): ' + row.permissionWords.join(', ')));
       } else radio.append(el('span', 'chip', 'Principal'));
       radio.addEventListener('click', e => {
         if (e.isTrusted !== true || radio.disabled) return;
@@ -289,6 +292,26 @@
       model.append(option);
     }
     model.addEventListener('change', () => { form.input('model', model.value); paintForm(); });
+    const space = el('input', 'sfield');
+    space.type = 'text'; space.id = 'specialists-space'; space.maxLength = V.MAX_SPACE; space.autocomplete = 'off';
+    space.placeholder = 'Espacio por defecto (opcional). Declarativo: todavía no se aplica.';
+    space.setAttribute('aria-label', 'Espacio por defecto del especialista, opcional y declarativo');
+    space.value = d.space;
+    space.addEventListener('input', () => { form.input('space', space.value); paintForm(); });
+    const perms = el('div', 'sfield');
+    perms.setAttribute('role', 'group');
+    perms.setAttribute('aria-label', 'Permisos del especialista, declarativos: todavía no se aplican');
+    perms.append(el('span', 'snote', 'Permisos (declarativos, todavía no se aplican):'));
+    for (const p of V.PERMISSIONS) {
+      const lab = el('label', 'sperm');
+      const box = el('input'); box.type = 'checkbox'; box.id = 'specialists-perm-' + p; box.checked = d.permissions.includes(p);
+      box.addEventListener('change', () => {
+        const picked = V.PERMISSIONS.filter(x => (x === p ? box.checked : $('specialists-perm-' + x)?.checked));
+        form.input('permissions', picked); paintForm();
+      });
+      lab.append(box, word(V.permissionLabel(p)));
+      perms.append(lab);
+    }
     const problem = el('p', 'snote strust');
     problem.id = 'specialists-problem'; problem.setAttribute('role', 'status'); problem.hidden = true;
     const actions = el('div', 'sform');
@@ -298,7 +321,7 @@
     cancelBtn.id = 'specialists-cancel';
     actions.append(saveBtn, cancelBtn);
     box.addEventListener('submit', e => { e.preventDefault(); if (e.isTrusted === true) save(); });
-    box.append(name, instructions, model, problem, actions);
+    box.append(name, instructions, model, space, perms, problem, actions);
     return box;
   }
 
