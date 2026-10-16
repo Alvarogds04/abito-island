@@ -12,10 +12,13 @@
   const BLOCKERS = Object.freeze(['question', 'approval', 'request', 'decision', 'card',
     'dragging', 'editing', 'composing', 'draft', 'settings', 'models']);
 
+  // #438: accepted values are {0} («Nunca») ∪ 5..=120 — the same closed shape
+  // the stored contract now knows. Everything else is refused.
   function validPreferences(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value) &&
       Object.keys(value).sort().join(',') === 'autoCloseSeconds,openOnHover' &&
-      Number.isInteger(value.autoCloseSeconds) && value.autoCloseSeconds >= 5 && value.autoCloseSeconds <= 120 &&
+      Number.isInteger(value.autoCloseSeconds) &&
+      (value.autoCloseSeconds === 0 || (value.autoCloseSeconds >= 5 && value.autoCloseSeconds <= 120)) &&
       typeof value.openOnHover === 'boolean';
   }
 
@@ -39,7 +42,10 @@
   }
 
   function countdown(deadline, now, seconds) {
-    if (!Number.isFinite(deadline) || !Number.isFinite(now) || !validPreferences({ autoCloseSeconds: seconds, openOnHover: false })) return null;
+    // #438: «Nunca» (0) never produces a countdown object — its window would be
+    // a zero-length bar of NaN noise, and the bar must stay away entirely.
+    if (!Number.isFinite(deadline) || !Number.isFinite(now) || seconds === 0 ||
+      !validPreferences({ autoCloseSeconds: seconds, openOnHover: false })) return null;
     const remainingMs = Math.max(0, Math.min(120000, deadline - now));
     const windowMs = Math.min(10000, seconds * 600);
     return { remainingMs, seconds: Math.ceil(remainingMs / 1000),
@@ -120,11 +126,19 @@
       if (stopped) return;
       if (restart) { cancelTimer(); deadline = null; }
       if (!eligible(facts) || inside || opening || closing || exhausted) { clearDeadline(); return; }
+      const seconds = preferences.autoCloseSeconds;
+      // #438: 0 («Nunca») disables ONLY the inactivity close. A pinned/clicked-open
+      // island never gets a deadline and never publishes a countdown. The hover-open
+      // grace below is the hover contract, not inactivity, and still closes.
+      if (seconds === 0 && !hoverOnly) { clearDeadline(); return; }
       const time = now();
-      if (deadline === null) deadline = time + (hoverOnly ? HOVER_DELAY_MS : preferences.autoCloseSeconds * 1000);
-      const value = countdown(deadline, time, preferences.autoCloseSeconds);
+      if (deadline === null) deadline = time + (hoverOnly ? HOVER_DELAY_MS : seconds * 1000);
+      // #438: with «Nunca» only the hover grace reaches here; countdown() is never
+      // called with 0 seconds, so the grace publishes NO countdown at all.
+      const value = seconds === 0 ? null : countdown(deadline, time, seconds);
+      const remainingMs = deadline - time;
       const epoch = generation, due = deadline;
-      if (value.remainingMs <= 0) {
+      if (remainingMs <= 0) {
         exhausted = true; clearDeadline();
         if (!stopped && epoch === generation && deadline === null && eligible(facts) && !inside && !opening && !closing)
           request('autoClose');
@@ -134,11 +148,12 @@
       // Publication may synchronously close/stop, change guards or re-arm.
       if (stopped || epoch !== generation || due !== deadline || !eligible(facts) ||
         inside || opening || closing || exhausted || timer !== null) return;
-      const windowMs = Math.min(10000, preferences.autoCloseSeconds * 600);
+      // #438: with «Nunca» there is no countdown window — 0 is never a windowMs.
+      const windowMs = value === null ? 0 : Math.min(10000, seconds * 600);
       // Sleep until the final countdown window, then integer-second changes.
       // Relative bounded delays avoid epoch/future-date timeout overflow.
-      const delay = value.remainingMs > windowMs ? value.remainingMs - windowMs :
-        Math.min(value.remainingMs, value.remainingMs % 1000 || 1000);
+      const delay = remainingMs > windowMs ? remainingMs - windowMs :
+        Math.min(remainingMs, remainingMs % 1000 || 1000);
       const serial = ++timerGeneration;
       timer = options.schedule(() => {
         if (stopped || serial !== timerGeneration) return;
