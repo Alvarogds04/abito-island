@@ -457,3 +457,41 @@ fn the_real_daemon_lists_agents_with_a_plan_the_page_can_carry_back() {
     assert!(row["summary"].as_str().unwrap().starts_with("Agrega los hooks de Abito"), "{row}");
     if let Some(o) = list.iter().find(|a| a["id"] == json!("opencode")) { assert_eq!(o["state"], json!("unavailable")); }
 }
+
+#[test]
+fn the_real_daemon_previews_hooks_read_only_and_the_page_sees_only_the_closed_view() {
+    // Same private-home scaffolding as the agents test (#436 T6.5): one clean machine with the
+    // tool installed and no hooks. The read-only preview must answer, and only the bounded
+    // closed view may reach the page: no plan hash, no diff, no summary, no daemon name.
+    static SWEPT_HK1: std::sync::Once = std::sync::Once::new();
+    SWEPT_HK1.call_once(sweep_abandoned);
+    let home = PathBuf::from(std::env::var("HOME").expect("HOME")).join(format!(".aisl{}-hk1", std::process::id() % 100000));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::DirBuilder::new().mode(0o700).create(&home).unwrap();
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { remove_ours(&self.0); } }
+    let _cleanup = Cleanup(home.clone());
+    let hook = strict_harness_copy(&home);
+    let island = Island::start_with(json!({"hookInstallerBin": hook}));
+    let daemon_home = island.root.parent().unwrap().to_path_buf();
+    std::fs::DirBuilder::new().mode(0o700).create(daemon_home.join(".claude")).unwrap();
+    let conn = AgentConn::new(|_| {});
+    conn.connect(&island.root);
+    wait_for(&conn, "connected", |v| v["connection"] == json!("connected"));
+    conn.command(&json!({"action":"hooks_preview"})).unwrap();
+    let v = wait_for(&conn, "hooks frame", |v| v["hooks"].is_array());
+    let list = v["hooks"].as_array().unwrap();
+    let claude = list.iter().find(|a| a["id"] == json!("claude-code")).unwrap_or_else(|| panic!("claude-code missing: {list:?}"));
+    assert!(matches!(claude["state"].as_str(), Some("not_connected" | "unavailable" | "connected")), "{claude}");
+    assert!(matches!(claude["mechanism"].as_str(), Some("harness" | "artifact")), "{claude}");
+    let text = v["hooks"].to_string();
+    for leaked in ["plan_hash", "diff", "summary", "install", "remove"] {
+        assert!(!text.contains(leaked), "{leaked} leaked into the page view: {text}");
+    }
+    // the page's pure view turns exactly this real frame into honest rows: state only, no buttons
+    let js = format!("const S=require('{}/frontend/settings-view.js'); const st={}; const r=S.agentsView(st).rows.find(x=>x.id==='claude-code'); process.stdout.write(JSON.stringify({{word:r.word,button:r.primary}}));", env!("CARGO_MANIFEST_DIR"), v);
+    let out = Command::new("node").arg("-e").arg(js).output().expect("node");
+    let row: Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&out.stderr)));
+    assert!(row["word"].is_string(), "a closed word for the real state: {row}");
+    assert!(row["button"].is_null(), "the preview never offers a button: {row}");
+}
