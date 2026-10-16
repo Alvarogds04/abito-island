@@ -236,6 +236,13 @@ pub struct DropSet {
 }
 
 impl DropSet {
+    /// An empty set, usable in a `static`.
+    pub const fn new() -> Self {
+        DropSet {
+            entries: Vec::new(),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -273,20 +280,6 @@ impl DropSet {
             None => false,
         }
     }
-}
-
-/// Attach a natively dropped file: refuses any path not in `set`.
-pub fn attach_dropped(
-    set: &mut DropSet,
-    dir: &Path,
-    path: &Path,
-    now_ms: u64,
-) -> Result<Attachment, ChatError> {
-    if !set.consume(path, now_ms) {
-        return Err(invalid("Ese archivo no llegó arrastrado a la ventana."));
-    }
-    let (name, bytes) = read_dropped(path)?;
-    attach(dir, &name, &bytes)
 }
 
 /// Split a raw `chat_attach_data` body into (display name, bytes): a

@@ -7,8 +7,9 @@
 //! request per turn (`chatlane`). Nothing in this file touches the desktop
 //! snapshot shape (`desktop:state` keeps its 13 keys).
 
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use abito_island::bridge::{self, BridgeError};
@@ -26,6 +27,21 @@ use crate::{
     main_window, now_ms, publish, refresh_work_area, specialistshost, store_requested, AppState, TauriIo,
     CHAT_SETTLE_DELAY_MS, COLLAPSE_RESIZE_DELAY_MS, QUITTING,
 };
+
+/// #343 hardening: paths the OS reported DROPPING on the main window,
+/// recorded natively by `main.rs`'s window event handler. `chat_attach`
+/// only ever honours a member of this set: short-lived (60 s TTL), bounded
+/// (16 entries) and one-shot, so the page can never name an arbitrary path.
+static NATIVE_DROPS: Mutex<abito_island::uploads::DropSet> =
+    Mutex::new(abito_island::uploads::DropSet::new());
+
+/// Record a native `WindowEvent::DragDrop(Drop)` on the main window.
+pub(crate) fn record_drops(paths: Vec<PathBuf>) {
+    NATIVE_DROPS
+        .lock()
+        .expect("native drop paths lock")
+        .record(paths, now_ms() as u64);
+}
 
 fn chat_error(e: chat::ChatError) -> BridgeError {
     BridgeError {
@@ -338,10 +354,14 @@ where
 }
 
 /// #343 — `chat_attach`: one file DROPPED into the chat. The page only ever
-/// sends the path it received from the window's drag-drop event: Rust reads
-/// it (capped), validates it against the allowlist and copies it into the
-/// island's own uploads directory. The original path is never stored or
-/// referenced afterwards. Same gate and rate limit as every chat command.
+/// sends the path it received from the window's drag-drop event: Rust
+/// consumes it ONE-SHOT from the NATIVE drop set recorded by the main
+/// window's drag-drop event (see `NATIVE_DROPS`) — a path the OS never
+/// dropped is refused before anything is read. Then the path is read
+/// (capped, symlinks refused), validated against the allowlist and copied
+/// into the island's own uploads directory. The original path is never
+/// stored or referenced afterwards. Same gate and rate limit as every chat
+/// command.
 #[tauri::command]
 pub async fn chat_attach(
     webview: tauri::Webview,
@@ -358,6 +378,18 @@ pub async fn chat_attach(
         .filter(|p| !p.is_empty())
         .ok_or_else(|| attach_error(chat::ChatError::invalid_input("Pedido de archivo inválido.")))?
         .to_string();
+    // The page may only attach a path the OS actually dropped natively:
+    // consume it one-shot from the native drop set, refusing anything else
+    // BEFORE any read or write happens.
+    if !NATIVE_DROPS
+        .lock()
+        .expect("native drop paths lock")
+        .consume(std::path::Path::new(&path), now_ms() as u64)
+    {
+        return Err(attach_error(chat::ChatError::invalid_input(
+            "Ese archivo no llegó arrastrado a la ventana.",
+        )));
+    }
     store_attachment(move |dir| {
         let (name, bytes) = abito_island::uploads::read_dropped(std::path::Path::new(&path))?;
         abito_island::uploads::attach(dir, &name, &bytes)

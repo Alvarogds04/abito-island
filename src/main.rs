@@ -1772,6 +1772,14 @@ fn main() {
         // Electron `win.on('close', preventDefault + quit)`: closing the
         // window quits cleanly instead of tearing the app down ad hoc.
         .on_window_event(|window, event| {
+            // #343 hardening: capture the OS-reported dropped file paths
+            // NATIVELY so `chat_attach` only ever accepts a path the OS
+            // actually dropped on the main window (one-shot, TTL, bounded).
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                if window.label() == "main" {
+                    chathost::record_drops(paths.clone());
+                }
+            }
             if window.label() == "main" {
                 if let tauri::WindowEvent::Resized(size) = event {
                     #[cfg(any(debug_assertions, feature = "probe"))]

@@ -630,6 +630,14 @@ stores nothing. The page references attachments by id only; submit
 carries the ids, prompt building inlines text files and sends images as
 `image_url` parts gated on the router's `/modalities/vision` (a
 vision-less model gets a safe error turn, never a silent drop).
+**Dropped-path hardening (R3 review finding):** `chat_attach` accepts ONLY
+a path the OS reported through the main window's native `DragDrop(Drop)`
+event (`main.rs` records it into a one-shot `uploads::DropSet`: bounded to
+16 entries, 60 s TTL, consumed on use). A path the page names that was
+never dropped — or dropped longer than 60 s ago, or already attached — is
+refused before anything is read. `read_dropped` stats with
+`symlink_metadata`, so symlinks (and any non-regular file) are refused
+instead of followed: a dropped symlink to a readable file stores nothing.
 
 **Accessibility/motion/silence:** named controls ≥44 px (probe-measured),
 text status independent of R6, polite live region once per state change or
@@ -641,7 +649,8 @@ keyboard open or a click; overview↔chat uses the contract spring/340 ms curve 
 `prefers-reduced-motion`; no audio elements, no sound. The island's own window drag never
 attaches to the transcript or composer; the ONLY drag the chat listens for is #343's file
 drop (`tauri://drag-drop`, chat view only, paths forwarded to `chat_attach` — malformed
-payloads are ignored and rejected files leave nothing behind). R6 is only scaled/positioned
+payloads are ignored, only paths the OS dropped natively are accepted (see
+the hardening note above) and rejected files leave nothing behind). R6 is only scaled/positioned
 (sha256 unchanged).
 
 **Local conversations (#341 / F026, OD003, OD004, GD022, GD037).** The

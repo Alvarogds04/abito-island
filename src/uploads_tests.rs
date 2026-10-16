@@ -287,6 +287,21 @@ fn read_dropped_refuses_symlinks() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// The exact composition `chat_attach` performs: the one-shot native gate,
+/// then the (symlink-refusing) read, then the same validated `attach`.
+fn attach_via_set(
+    set: &mut DropSet,
+    dir: &Path,
+    path: &Path,
+    now: u64,
+) -> Result<Attachment, ChatError> {
+    if !set.consume(path, now) {
+        return Err(invalid("Ese archivo no llegó arrastrado a la ventana."));
+    }
+    let (name, bytes) = read_dropped(path)?;
+    attach(dir, &name, &bytes)
+}
+
 #[test]
 fn never_dropped_path_is_refused_and_creates_nothing() {
     let root = temp_root("never-dropped");
@@ -294,8 +309,8 @@ fn never_dropped_path_is_refused_and_creates_nothing() {
     fs::write(&file, PNG).unwrap();
     let dir = root.join("uploads");
     fs::create_dir(&dir).unwrap();
-    let mut set = DropSet::default();
-    assert!(attach_dropped(&mut set, &dir, &file, 0).is_err());
+    let mut set = DropSet::new();
+    assert!(attach_via_set(&mut set, &dir, &file, 0).is_err());
     assert!(listing(&dir).is_empty());
     let _ = fs::remove_dir_all(&root);
 }
@@ -307,11 +322,11 @@ fn dropped_path_works_once_then_is_refused() {
     fs::write(&file, PNG).unwrap();
     let dir = root.join("uploads");
     fs::create_dir(&dir).unwrap();
-    let mut set = DropSet::default();
+    let mut set = DropSet::new();
     set.record(vec![file.clone()], 1_000);
-    assert!(attach_dropped(&mut set, &dir, &file, 2_000).is_ok());
+    assert!(attach_via_set(&mut set, &dir, &file, 2_000).is_ok());
     assert_eq!(listing(&dir).len(), 1);
-    assert!(attach_dropped(&mut set, &dir, &file, 2_001).is_err());
+    assert!(attach_via_set(&mut set, &dir, &file, 2_001).is_err());
     assert_eq!(listing(&dir).len(), 1);
     let _ = fs::remove_dir_all(&root);
 }
@@ -323,9 +338,9 @@ fn expired_drop_is_refused_and_set_is_bounded() {
     fs::write(&file, PNG).unwrap();
     let dir = root.join("uploads");
     fs::create_dir(&dir).unwrap();
-    let mut set = DropSet::default();
+    let mut set = DropSet::new();
     set.record(vec![file.clone()], 1_000);
-    assert!(attach_dropped(&mut set, &dir, &file, 1_000 + DROP_TTL_MS + 1).is_err());
+    assert!(attach_via_set(&mut set, &dir, &file, 1_000 + DROP_TTL_MS + 1).is_err());
     assert!(listing(&dir).is_empty());
 
     let many: Vec<PathBuf> = (0..40).map(|i| root.join(format!("f{i}.png"))).collect();
@@ -345,9 +360,9 @@ fn a_symlink_that_was_dropped_is_still_refused() {
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let dir = root.join("uploads");
     fs::create_dir(&dir).unwrap();
-    let mut set = DropSet::default();
+    let mut set = DropSet::new();
     set.record(vec![link.clone()], 0);
-    assert!(attach_dropped(&mut set, &dir, &link, 1).is_err());
+    assert!(attach_via_set(&mut set, &dir, &link, 1).is_err());
     assert!(listing(&dir).is_empty());
     let _ = fs::remove_dir_all(&root);
 }
