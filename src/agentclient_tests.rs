@@ -282,6 +282,61 @@ fn a_connection_that_drops_forgets_the_agents() {
     assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["agents"], json!(null));
 }
 
+// ---- #436 T6.5: the read-only hooks preview (R4): one closed ask, a bounded closed view ----------
+#[test]
+fn hooks_preview_is_a_closed_read_only_command_and_nothing_else() {
+    assert!(matches!(parse_ui_command(&json!({"action":"hooks_preview"})), Ok(UiCommand::Wire(w)) if w == "{\"type\":\"hooks_preview\"}\n"));
+    // read-only: install/remove never parse, and the ask carries no other field
+    for bad in [json!({"action":"hooks_preview","agentId":"codex"}), json!({"action":"hooks_preview","x":1}),
+                json!({"action":"hooks_install","clientId":"codex"}), json!({"action":"hooks_remove","clientId":"codex"}),
+                json!({"action":"hooks_preview","clientId":"codex"})] {
+        assert!(parse_ui_command(&bad).is_err(), "must refuse {bad}");
+    }
+}
+
+#[test]
+fn a_hooks_frame_is_folded_into_a_bounded_closed_view() {
+    let mut st = ClientState::connected();
+    assert_eq!(serde_json::to_value(&st).unwrap()["hooks"], json!(null), "unknown until the engine says so");
+    st.apply(&json!({"type":"hooks","clients":[
+        {"id":"claude-code","name":"Claude Code","mechanism":"harness","state":"connected","detail":null,"backup":true,
+         "install":{"summary":"Adds the Abito hooks","plan_hash":"0".repeat(64),"diff":["+ rm -rf /"]},
+         "remove":{"summary":"Removes","plan_hash":"0".repeat(64),"diff":["- /home/a/.claude/settings.json"]}},
+        {"id":"gemini-cli","name":"x","mechanism":"artifact","state":"not_connected","detail":null},
+        {"id":"amp","name":"x","mechanism":"artifact","state":"unavailable","detail":"unsupported_platform"}]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["hooks"][0], json!({"id":"claude-code","state":"connected","mechanism":"harness","detail":null,"backup":true}),
+        "no name, path, diff or plan ever reaches the page");
+    assert_eq!(v["hooks"][1], json!({"id":"gemini-cli","state":"not_connected","mechanism":"artifact","detail":null,"backup":false}));
+    assert_eq!(v["hooks"][2]["detail"], json!("unsupported_platform"), "the hooks detail set is wider than the agents one");
+    let text = v["hooks"].to_string();
+    assert!(!text.contains("rm -rf") && !text.contains("/home/") && !text.contains("Claude"), "{text}");
+}
+
+#[test]
+fn hostile_hook_entries_are_dropped_never_invented() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"hooks","clients":[
+        {"id":"evil","state":"connected"}, {"id":"codex","state":"<img>"}, {"id":"codex","state":"connected","mechanism":"carrier_pigeon"},
+        {"id":"codex","state":"connected","mechanism":"harness"}, {"id":7,"state":"connected"}, "junk", null]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    let list = v["hooks"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert_eq!(list[0], json!({"id":"codex","state":"connected","mechanism":"harness","detail":null,"backup":false}),
+        "an unknown state or mechanism drops the row; a duplicate keeps the first");
+    // a non-array leaves the previous view alone; the client-side cap is 8 like the daemon's
+    st.apply(&json!({"type":"hooks","clients":"nope"})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["hooks"].as_array().unwrap().len(), 1);
+    let many: Vec<_> = (0..12).map(|_| json!({"id":"amp","state":"connected","mechanism":"artifact"})).collect();
+    st.apply(&json!({"type":"hooks","clients":many})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["hooks"].as_array().unwrap().len(), 1, "one entry per known id");
+}
+
+#[test]
+fn a_connection_that_drops_forgets_the_hooks() {
+    assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["hooks"], json!(null));
+}
+
 // ---- #310 final contract (H2b): the plan the human sees travels back with the click ---------------------------
 const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 

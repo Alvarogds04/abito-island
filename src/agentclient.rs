@@ -223,6 +223,14 @@ pub fn parse_ui_command(payload: &Value) -> Result<UiCommand, CommandError> {
             exact(1)?;
             wire(&[("type", "sessions_list")])
         }
+        // #436 T6.5 (R4): the daemon's read-only hooks preview. One closed ask, no fields; the
+        // engine answers with a `hooks` frame, folded into a bounded closed view below. There is
+        // deliberately NO hooks_install / hooks_remove here: installing or removing from the UI
+        // is out of scope, so the page has no way to even ask.
+        "hooks_preview" => {
+            exact(1)?;
+            wire(&[("type", "hooks_preview")])
+        }
         "agent_connect" => {
             // The plan the human SAW travels back with the click; the engine previews again and refuses to apply
             // a different one. Optional (absent = the engine applies a fresh preview), and exactly 64 lowercase hex.
@@ -338,6 +346,9 @@ pub struct ClientState {
     /// #360: the engine's `sessions` frame (live agent sessions), folded to a bounded
     /// closed view (null until the engine answers a `sessions_list` ask).
     sessions: Value,
+    /// #436 T6.5: the engine's `hooks` frame (the read-only hooks preview), folded to a
+    /// bounded closed view (null until the engine answers a `hooks_preview` ask).
+    hooks: Value,
 }
 
 /// A plan hash from the engine: exactly 64 lowercase hex characters.
@@ -351,6 +362,13 @@ fn plan_summary_ok(s: &str) -> bool {
 
 /// The code agents the island can connect (the installers exist for these).
 pub const AGENT_IDS: [&str; 3] = ["claude-code", "codex", "opencode"];
+
+/// #436 T6.5: the six hook clients the daemon's `hooks` frame may name (its own closed
+/// list). Wider than AGENT_IDS on purpose: the page shows their state, and installs
+/// nothing (read-only preview, UI install/remove is out of scope).
+pub const HOOK_IDS: [&str; 6] = ["claude-code", "codex", "gemini-cli", "copilot-cli", "opencode", "amp"];
+const HOOK_MECHANISMS: [&str; 2] = ["harness", "artifact"];
+const HOOK_DETAILS: [&str; 10] = ["config_invalid", "not_writable", "backup_failed", "plan_changed", "audit_unavailable", "install_failed", "foreign_file", "unsafe_target", "unexpected_content", "unsupported_platform"];
 
 fn clip(v: &Value, key: &str, max: usize) -> Value {
     v.get(key).and_then(Value::as_str).map(|s| Value::from(s.chars().filter(|c| !c.is_control()).take(max).collect::<String>())).unwrap_or(Value::Null)
@@ -375,6 +393,7 @@ impl ClientState {
             agents: Value::Null,
             models: Value::Null,
             sessions: Value::Null,
+            hooks: Value::Null,
         }
     }
     pub fn connected() -> ClientState {
@@ -556,6 +575,31 @@ impl ClientState {
                     Some(json!({"id": id, "kind": kind, "cwd": cwd, "state": state, "origin": origin}))
                 }).collect();
                 self.sessions = json!({"rows": rows, "truncated": truncated});
+            }
+            "hooks" => {
+                // #436 T6.5: the read-only hooks preview, folded like the sessions arm: rows are
+                // rebuilt field by field, a present cell off its closed vocabulary drops the ROW
+                // (never sanitized into a lie), the first entry wins per id and the 8-row cap is
+                // the client's too. What never reaches the page: the daemon's name, paths, diffs,
+                // plan hashes and the install/remove plans themselves.
+                let Some(list) = frame.get("clients").and_then(Value::as_array) else { return Ok(()) };
+                let mut seen: Vec<&str> = Vec::new();
+                let mut out: Vec<Value> = Vec::new();
+                for c in list.iter().take(8) {
+                    let (Some(id), Some(state), Some(mechanism)) = (
+                        c.get("id").and_then(Value::as_str).and_then(|i| HOOK_IDS.iter().copied().find(|k| *k == i)),
+                        c.get("state").and_then(Value::as_str).filter(|s| matches!(*s, "not_connected" | "connected" | "outdated" | "working" | "unavailable" | "error")),
+                        c.get("mechanism").and_then(Value::as_str).filter(|m| HOOK_MECHANISMS.contains(m)),
+                    ) else { continue };
+                    if seen.contains(&id) { continue; }
+                    seen.push(id);
+                    let detail = c.get("detail").and_then(Value::as_str).filter(|d| HOOK_DETAILS.contains(d));
+                    out.push(json!({
+                        "id": id, "state": state, "mechanism": mechanism, "detail": detail,
+                        "backup": c.get("backup").and_then(Value::as_bool).unwrap_or(false),
+                    }));
+                }
+                self.hooks = Value::Array(out);
             }
             "error" => {
                 // the daemon's closed code set (anything else reads as plain `failed`), never free text
