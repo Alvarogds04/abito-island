@@ -606,6 +606,7 @@
     // warning → sun); plain dataset writes below, never markup.
     noticesEl.dataset.tone = (view && view.tone) || '';
     noticePill.hidden = !view;
+    noticesEl.dataset.count = view ? String(view.badge) : ''; // #423: the band hides a lone «1» badge
     if (view) {
       noticePill.setAttribute('aria-label', view.aria);
       noticeTitle.textContent = view.text;
