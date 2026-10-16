@@ -93,6 +93,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "theme": p.theme().as_str(),
         "chosenModels": p.chosen_models,
         "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
+        "settingsWindow": p.settings_window_on(),
         "customBlobs": p.custom_blobs_view()})
 }
 
@@ -443,6 +444,23 @@ mod settings_view_tests {
         let cmd = parse_command(&json!({"action":"set_chosen_models","provider":"openai","models":["gpt-5.2"]})).unwrap();
         let next = update(&prefs, &cmd, |_| true).unwrap();
         assert_eq!(view_prefs(&next)["chosenModels"], json!({"anthropic":["claude-sonnet-4-5"],"openai":["gpt-5.2"]}));
+    }
+
+    /// #366 F093: the projection carries the Ajustes placement choice — the
+    /// in-island default (false) when no key is stored, the choice when present,
+    /// and the default again when a hostile stored value was dropped at load.
+    #[test]
+    fn f093_the_webview_projection_carries_the_settings_window_choice() {
+        use abito_island::prefs::Prefs;
+        let defaults = view_prefs(&Prefs::default());
+        assert_eq!(defaults["settingsWindow"], json!(false), "absent reads as the in-island default");
+        let saved = Prefs::from_text(Some(r#"{"v":1,"settings_window":true}"#));
+        assert_eq!(view_prefs(&saved)["settingsWindow"], json!(true));
+        let hostile = Prefs::from_text(Some(r#"{"v":1,"settings_window":"yes"}"#));
+        assert_eq!(view_prefs(&hostile)["settingsWindow"], json!(false), "a dropped value reads as the default");
+        // the established projection shapes are untouched
+        assert_eq!(defaults["autoCloseSeconds"], json!(15));
+        assert_eq!(defaults["theme"], json!("system"));
     }
 
     /// #346 F033: `pillColors` is the same projection shape as `avatarColors` — already

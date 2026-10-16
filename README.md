@@ -1450,3 +1450,18 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 - **Gate order mirrors `focus_host`:** sender → payload validation → rate limiter → effect.
 - **Non-Linux** is an honest stub («Esta plataforma no permite abrir Claude Desktop.»); nothing is attempted.
 - **Tests:** `src/focushost_tests.rs` — closed payload shapes, gate order and budget, the not-installed / failed-launch decisions, and the closed deterministic probe (entry order, directory order, unrelated files invisible).
+
+## #366 / F093 — the typed Ajustes placement pref
+
+- **One optional v1 field.** `prefs.json` gains an optional `settings_window` bool (absent = the
+  in-island default of #408; a non-bool stored value is dropped on load, so a hostile or damaged
+  file reads as the default). `false` stores no key at all: an untouched file keeps its bytes.
+- **One closed command.** `prefs_action {action:"set_settings_window", settings_window:<bool>}` —
+  exactly two keys, no coercion (a number, string or null is refused and changes nothing). It
+  persists through the shared `prefs::transact` gate and atomic writer like every other pref.
+- **Projection.** The `prefs_action` view and the `prefs:state` event carry `settingsWindow`
+  (effective bool: the default `false` when nothing is stored).
+- **Where it is chosen.** Ajustes → General (added with the window itself, #366 T2); the in-island
+  panel remains the default and the fallback for any window failure.
+- **Tests:** `src/prefs_tests.rs` (`f093_*` — exact command shape, persistence and round-trip,
+  untouched-file bytes, hostile values dropped) and `src/settingshost.rs` (`f093` projection test).
