@@ -34,16 +34,19 @@ test('T6.3 volume slider projection: percent of the 0..0.2 range, honest default
 });
 
 // T6.3 #434 (coordinator split): the design's segmented Auto-cierre «8 s / 15 s / 30 s / Nunca»
-// with the EXISTING 5..120 contract. A stored value outside the presets stays honest as its own
-// selected segment; «Nunca» is drawn but visibly does not work yet (disabled, «Próximamente»).
-test('T6.3 auto-close segmented projection: presets, honest custom value, disabled Nunca', () => {
+// with the contract's {0} ∪ 5..=120. A stored value outside the presets stays honest as its own
+// selected segment; «Nunca» is a real value (stored 0), enabled and selected on a stored 0.
+test('T6.3 auto-close segmented projection: presets, honest custom value, enabled Nunca', () => {
   const segs = S.autoCloseSegments(15);
-  assert.deepEqual(segs.map(s => [s.seconds, s.selected]), [[8, false], [15, true], [30, false], [null, false]]);
+  assert.deepEqual(segs.map(s => [s.seconds, s.selected]), [[8, false], [15, true], [30, false], [0, false]]);
   assert.equal(segs[3].label, 'Nunca');
-  assert.equal(segs[3].disabled, true, 'Nunca is drawn but does not work yet (no contract behind it)');
-  assert.match(segs[3].title, /Próximamente/);
+  assert.equal(segs[3].disabled, false, '#438: «Nunca» is a real contract value now');
+  assert.equal(segs[3].title, '');
+  const never = S.autoCloseSegments(0);
+  assert.deepEqual(never.map(s => [s.seconds, s.selected]), [[8, false], [15, false], [30, false], [0, true]],
+    'a stored 0 selects «Nunca»');
   const custom = S.autoCloseSegments(20);
-  assert.deepEqual(custom.map(s => [s.seconds, s.selected]), [[8, false], [15, false], [30, false], [20, true], [null, false]]);
+  assert.deepEqual(custom.map(s => [s.seconds, s.selected]), [[8, false], [15, false], [30, false], [20, true], [0, false]]);
   assert.equal(custom[3].label, '20 s', 'a stored non-preset value is shown as its own selected segment');
   assert.equal(custom[3].disabled, false);
   const fallback = S.autoCloseSegments(4); // hostile -> the same default the view models (15)
@@ -1284,6 +1287,8 @@ test('F003 the interaction view-model reads the typed pair with 15s/hover-off de
   assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 45, openOnHover: true }), { autoCloseSeconds: 45, openOnHover: true });
   assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 5, openOnHover: false }), { autoCloseSeconds: 5, openOnHover: false });
   assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 120 }), { autoCloseSeconds: 120, openOnHover: false });
+  assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 0, openOnHover: true }),
+    { autoCloseSeconds: 0, openOnHover: true }, '#438: «Nunca» (0) reads as stored, never clamped');
   // hostile/foreign values read as the defaults, each field independently
   for (const bad of [{ autoCloseSeconds: 4 }, { autoCloseSeconds: 121 }, { autoCloseSeconds: 15.5 },
     { autoCloseSeconds: '15' }, { autoCloseSeconds: null }, { autoCloseSeconds: Infinity }, { autoCloseSeconds: NaN }]) {
@@ -1295,10 +1300,10 @@ test('F003 the interaction view-model reads the typed pair with 15s/hover-off de
     { autoCloseSeconds: 45, openOnHover: false }, 'the fields fall back independently');
 });
 
-test('F003 the delay field accepts only canonical integers 5..120 and says so honestly otherwise', () => {
-  for (const value of ['5', '45', '120', '15', 5, 15, 120, ' 15 ']) assert.equal(S.autoCloseProblem(value), '', JSON.stringify(value));
-  const message = 'Ingresá un entero entre 5 y 120 segundos.';
-  for (const value of ['', ' ', '4', '121', '0', '-5', '15.5', '1e2', '+5', 'junk', 'Infinity', 'NaN', null, undefined, 15.5, {}, true]) {
+test('F003 the delay field accepts 0 («Nunca») or canonical integers 5..120, and says so honestly otherwise', () => {
+  for (const value of ['0', 0, '5', '45', '120', '15', 5, 15, 120, ' 15 ']) assert.equal(S.autoCloseProblem(value), '', JSON.stringify(value));
+  const message = 'Ingresá 0 (nunca) o un entero entre 5 y 120 segundos.';
+  for (const value of ['', ' ', '4', '121', '-5', '15.5', '1e2', '+5', 'junk', 'Infinity', 'NaN', null, undefined, 15.5, {}, true]) {
     assert.equal(S.autoCloseProblem(value), message, JSON.stringify(value));
   }
 });
@@ -1337,9 +1342,9 @@ test('T6.3 General screen source contract: slider, segmented auto-close, groups,
   // validation gate and honest failure behaviour survive the slider swap
   assert.match(src, /V\.soundGainProblem\(/);
   assert.match(src, /No se pudo guardar\. El volumen sigue sin cambios/);
-  // segmented auto-close: presets render, Nunca is visibly not working, the closed pair stays
+  // segmented auto-close: presets render, «Nunca» is a real enabled choice (#438), the closed pair stays
   assert.match(src, /V\.autoCloseSegments\(/);
-  assert.match(src, /Próximamente/);
+  assert.doesNotMatch(src, /Próximamente/);
   assert.match(src, /action: 'set_island_interaction', auto_close_seconds: seconds, open_on_hover:/);
   assert.match(src, /settings-autoclose-error/);
   assert.match(src, /No se pudo guardar\. La interacción sigue sin cambios/);

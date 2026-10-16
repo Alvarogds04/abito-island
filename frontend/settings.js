@@ -944,11 +944,11 @@
     }
     // #336 F003/F004: la isla se cierra sola tras la inactividad configurada y se abre al
     // pasar el mouse. The closed command always carries the FULL typed pair (exact keys,
-    // integer 5..120 validated by the view-model BEFORE any rate or persistence).
-    // T6.3 #434 (coordinator split): Auto-cierre is the design's segmented control «8 s / 15 s /
-    // 30 s / Nunca» on the EXISTING contract: presets save through the closed pair, a stored
-    // non-preset value renders as its own selected segment (never rewritten), «Nunca» is visibly
-    // disabled («Próximamente») until the contract knows it.
+    // 0 («Nunca») or 5..120 validated by the view-model BEFORE any rate or persistence).
+    // T6.3 #434, #438 (coordinator split): Auto-cierre is the design's segmented control
+    // «8 s / 15 s / 30 s / Nunca» on the contract's {0} ∪ 5..=120: presets save through the
+    // closed pair, a stored non-preset value renders as its own selected segment (never
+    // rewritten), and «Nunca» is a real choice that stores 0.
     const island = V.islandInteractionView(prefs);
     const autoRow = el('div', 'srow');
     autoRow.append(el('span', 'srow-title', 'Auto-cierre'));
@@ -962,7 +962,7 @@
         const b = el('button', 'sseg-btn');
         b.type = 'button';
         b.textContent = seg.label;
-        b.id = `autoclose-${seg.seconds === null ? 'never' : seg.seconds}`;
+        b.id = `autoclose-${seg.seconds === 0 ? 'never' : seg.seconds}`;
         if (seg.disabled) {
           b.disabled = true;
           b.setAttribute('title', seg.title);
@@ -1133,7 +1133,7 @@
     const form = el('form', 'sname-form'); form.noValidate = true;
     const label = el('label', 'srow-title', 'Cerrar a los (segundos)'); label.htmlFor = 'quick-autoclose';
     const input = el('input', 'sfield'); input.type = 'number'; input.id = 'quick-autoclose';
-    input.min = '5'; input.max = '120'; input.step = '1'; input.value = String(v.autoCloseSeconds);
+    input.min = '0'; input.max = '120'; input.step = '1'; input.value = String(v.autoCloseSeconds); // 0 = «Nunca» (#438)
     const issue = el('p', 'snote'); issue.setAttribute('role', 'status');
     const save = el('button', 'sbtn primary', 'Guardar cierre'); save.type = 'submit';
     const paint = () => { const problem = V.autoCloseProblem(input.value); issue.textContent = problem; save.disabled = !!problem; };
