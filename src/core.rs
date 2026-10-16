@@ -239,11 +239,9 @@ impl Core {
 
     fn plan_toggle(&mut self, io: &dyn WindowIo, current: Rect, area: Rect) -> TogglePlan {
         let scale = io.scale();
-        let size = if self.expanded {
-            geometry::scaled_size(geometry::LOGICAL_COMPACT, scale)
-        } else {
-            geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale)
-        };
+        // F009: the size comes from the one view table, like every other view
+        let view = if self.expanded { geometry::View::Compact } else { geometry::View::Overview };
+        let size = geometry::scaled_size(geometry::view_sizes(view, area.w, area.h, scale).0, scale);
         let rect = geometry::anchor_toggle(self.edge, current, size, area);
         self.expanded = !self.expanded;
         self.in_flight = None;
@@ -275,11 +273,9 @@ impl Core {
             return None;
         }
         let scale = io.scale();
-        let (logical, visible) = if chat {
-            (geometry::chat_window(area.h, scale), geometry::chat_visible(area.h, scale))
-        } else {
-            (geometry::LOGICAL_OVERVIEW, geometry::OVERVIEW_VISIBLE)
-        };
+        // F009: both sizes come from the one view table
+        let view = if chat { geometry::View::Chat } else { geometry::View::Overview };
+        let (logical, visible) = geometry::view_sizes(view, area.w, area.h, scale);
         self.settings = false; // any view change forgets the Settings size
         self.settings_prev = None;
         Some(self.resize(io, area, chat, logical, visible, None))
@@ -303,7 +299,9 @@ impl Core {
             });
             (geometry::settings_window(area.w, area.h, scale), geometry::settings_visible(area.w, area.h, scale), None)
         } else {
-            (geometry::chat_window(area.h, scale), geometry::chat_visible(area.h, scale), self.settings_prev.take())
+            // F009: the plain column again, from the one view table
+            let (logical, visible) = geometry::view_sizes(geometry::View::Chat, area.w, area.h, scale);
+            (logical, visible, self.settings_prev.take())
         };
         self.settings = open;
         Some(self.resize(io, area, true, logical, visible, restore))

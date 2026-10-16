@@ -518,6 +518,24 @@ by the tests or the probe.
 
 ## What U1 proves — chat inside the island, answered by the LOCAL model
 
+**One table of logical sizes per view (#337 F009).** Every native window size the
+island ever takes — compact dot (#302), overview (#309 contract), chat column
+(#309), Ajustes column (#408) — is one entry of `geometry::view_sizes(View, area_w,
+area_h, scale)`, the single routing point for sizes; `core.rs` plans every toggle,
+view switch and Settings grow through it. The arms delegate to the per-view
+functions, so the frozen contracts keep owning their numbers; no view size is
+decided anywhere else.
+
+**Placement per screen (#337 F010).** The work area honours the monitor the island
+is on. `workarea::monitor_work_area(monitor, insets)` is the pure, injected-monitor
+decision: the monitor bounds minus the decorative frame the platform reports (menu
+bar / notch at the top, dock at a side or the bottom), refused when nothing usable
+remains. Win32's `rcWork` is exactly that subtraction (pinned by test); on unix no
+notch/menu-bar inset source exists today — GNOME publishes the panel-subtracted
+`_NET_WORKAREA`, which `pick_work_area` intersects with the monitor the island is
+on, so placement there is the usable work area unchanged. Single-monitor behavior
+is untouched.
+
 **Same island, a vertical column (#309).** A short click on the compact island still
 opens the approved **640×160 overview** (M1 contract, untouched). Its most
 prominent control, **Conversar** (≥44 px, also `Enter` in the overview),
