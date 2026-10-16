@@ -12,7 +12,7 @@ const path = require('node:path');
 const frontend = path.join(__dirname, '..', 'frontend');
 const read = file => fs.readFileSync(path.join(frontend, file), 'utf8');
 let passed = 0;
-const test = (name, fn) => { fn(); passed += 1; };
+const test = (_name, fn) => { fn(); passed += 1; };
 
 test('#336 index.html loads island-interaction.js exactly once, defer, before island.js', () => {
   const html = read('index.html');
@@ -75,6 +75,166 @@ test('#336 no innerHTML is reintroduced in island.js (#411) and the adapter owns
   const src = read('island.js');
   assert.doesNotMatch(src, /innerHTML/, 'icons stay DOM nodes, text stays textContent');
   assert.doesNotMatch(src, /setInterval\(.*interaction|requestAnimationFrame\(.*syncInteraction/, 'the scheduler never polls');
+});
+
+// ---- #336 L18: the engagement press through the facade spy ------------------
+// Executes the REAL island.js + the REAL interaction module in a VM with a
+// minimal host fixture; window.desktop and invoke are SPIES. isTrusted:true
+// here is HANDLER SIMULATION ONLY — no native gesture, focus or geometry is
+// proven (the module's own isTrusted rules stay pinned in
+// island-interaction-check.cjs).
+function engagementFixture(openOnHover) {
+  const vm = require('node:vm');
+  const moduleApi = require(path.join(frontend, 'island-interaction.js'));
+  const invocations = [];
+  const desktopCalls = [];
+  const byId = new Map();
+  const windowListeners = Object.create(null);
+  const documentListeners = Object.create(null);
+  const observers = [];
+  const resolved = value => ({
+    then(ok) { ok(value); return this; },
+    catch() { return this; },
+    finally(fn) { fn(); return this; },
+  });
+  const makeEl = () => {
+    const listeners = Object.create(null);
+    return {
+      hidden: true, inert: false, disabled: false, value: '', textContent: '', tabIndex: 0,
+      dataset: {},
+      style: { width: '', height: '', top: '', bottom: '', left: '', borderRadius: '',
+        setProperty() {}, getPropertyValue() { return '1'; } },
+      classList: { add() {}, remove() {}, toggle() {} },
+      setAttribute() {}, getAttribute() { return null; }, removeAttribute() {}, appendChild() {},
+      replaceChildren() {},
+      addEventListener(name, fn) { (listeners[name] ||= []).push(fn); },
+      removeEventListener() {},
+      fire(type, ev) { for (const fn of listeners[type] || []) fn(ev); },
+      focus() {},
+      querySelectorAll() { return []; }, querySelector() { return null; },
+      getBoundingClientRect() { return { left: 0, top: 0, width: 10, height: 10 }; },
+      closest() { return null; },
+    };
+  };
+  const documentStub = {
+    documentElement: makeEl(),
+    body: makeEl(),
+    activeElement: makeEl(), // no matches(): not a text field, so editing stays false
+    getElementById(id) { if (!byId.has(id)) byId.set(id, makeEl()); return byId.get(id); },
+    querySelectorAll() { return []; }, querySelector() { return null; },
+    createElement() { return makeEl(); }, importNode(n) { return n; },
+    addEventListener(name, fn) { (documentListeners[name] ||= []).push(fn); },
+    removeEventListener() {},
+    dispatchEvent(ev) { for (const fn of documentListeners[ev.type] || []) fn(ev); return true; },
+  };
+  let snapshotState = { state: 'compact', notices: [], card: null, request: null,
+    revision: 1, motionOverride: false, unavailable: false };
+  const desktopHandlers = [];
+  const desktop = {
+    onState(fn) { desktopHandlers.push(fn); return () => {}; },
+    snapshot() { return resolved(snapshotState); },
+    expand() { desktopCalls.push('expand'); return resolved(snapshotState); },
+    close() { desktopCalls.push('close'); return resolved(snapshotState); },
+    autoClose() { desktopCalls.push('autoClose'); return resolved(snapshotState); },
+    dismiss() { desktopCalls.push('dismiss'); return resolved(snapshotState); },
+    click() { return resolved(snapshotState); },
+    allow() { return resolved(snapshotState); },
+    deny() { return resolved(snapshotState); },
+  };
+  const sandbox = {
+    console,
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    performance: { now: () => 0 },
+    setTimeout() { return 1; }, clearTimeout() {}, setInterval() { return 1; }, clearInterval() {},
+    requestAnimationFrame() { return 1; },
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
+    DOMParser: class { parseFromString() { return { documentElement: { nodeName: 'svg' } }; } },
+    MutationObserver: class { constructor(cb) { this.cb = cb; observers.push(this); } observe() {} disconnect() {} },
+    AbitoOverview: {
+      motionState: () => 'full', honorSystemMotion: () => false, choosePose: () => 'idle',
+      hostPoseView: () => ({ tracker: { failing: false, since: 0 }, pose: null }),
+      connectionView: () => ({ word: '', detail: '', tone: '', aria: '', icon: '' }),
+      bridgeView: () => null, noticeView: () => null, hotkeyView: () => null,
+      cardConnection: () => null, expiryLabel: () => '', expiryAria: () => '',
+      cardView: () => ({ kind: 'inert', tone: '', icon: null, word: '', aria: '' }),
+      infoLabel: a => a, hoverScale: () => 1,
+    },
+    AbitoCharacter: { create: () => ({ chat() {}, dragStart() {}, dragMove() {}, dragEnd() {},
+      hover() {}, busy() {}, activity() {}, question() {}, snapshot() {}, destroy() {}, motionChanged() {} }) },
+    AbitoIcons: { svg: () => '', ring: () => '' },
+    AbitoIslandInteraction: moduleApi,
+    __TAURI__: { core: { invoke(cmd, args) {
+      invocations.push({ cmd, args });
+      if (cmd === 'prefs_action') return resolved({ sound: false, avatarColors: {}, autoCloseSeconds: 15, openOnHover });
+      if (cmd === 'hotkey_action') return resolved({ status: 'disabled' });
+      if (cmd === 'question_action') return resolved({ available: false, pending: null });
+      return resolved({});
+    } } },
+    desktop,
+    document: documentStub,
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.top = sandbox;
+  sandbox.addEventListener = (name, fn) => { (windowListeners[name] ||= []).push(fn); };
+  sandbox.removeEventListener = () => {};
+  sandbox.dispatchEvent = ev => { for (const fn of windowListeners[ev.type] || []) fn(ev); return true; };
+  vm.runInNewContext(read('island.js'), sandbox, { filename: 'island.js' });
+  const fire = (bag, type, ev) => { for (const fn of bag[type] || []) fn(ev); };
+  const pointer = extra => Object.assign({ isTrusted: true, pointerType: 'mouse', buttons: 0,
+    clientX: 5, clientY: 5, isPrimary: true, button: 0 }, extra);
+  return {
+    invocations, desktopCalls,
+    // the boot render mutates the observed attributes: fire them once
+    mutate() { for (const o of observers) o.cb([]); },
+    seed(state) {
+      snapshotState = { ...snapshotState, state };
+      for (const fn of desktopHandlers) fn(snapshotState);
+      byId.get('capsule').dataset.phase = state === 'expanded' ? 'expanded' : 'compact';
+      for (const o of observers) o.cb([]);
+    },
+    enter() { byId.get('capsule').fire('pointerenter', pointer({ type: 'pointerenter' })); },
+    leave() { byId.get('capsule').fire('pointerleave', pointer({ type: 'pointerleave' })); },
+    press() { fire(windowListeners, 'pointerdown', pointer({ type: 'pointerdown', target: { closest: () => null } })); },
+    release() { fire(windowListeners, 'pointerup', pointer({ type: 'pointerup' })); },
+    click() { fire(documentListeners, 'click', pointer({ type: 'click' })); },
+    dragReleases() { return invocations.filter(i => i.cmd === 'drag_release'); },
+  };
+}
+
+test('#336 L18 the first press after a hover-open releases as cancelled: engaged, never collapsed (facade spy)', () => {
+  const f = engagementFixture(true);
+  f.mutate(); // the observers exist before the boot render fires
+  f.enter();  // trusted mouse entry on the settled compact island -> hover open
+  assert.deepEqual(f.desktopCalls, ['expand'], 'the hover requests the existing expand verb');
+  f.seed('expanded'); // the native answer: snapshot + settled phase + fact sync
+  f.press();
+  f.release();
+  let releases = f.dragReleases();
+  assert.equal(releases.length, 1, 'one drag_release for the press/release pair');
+  assert.equal(releases[0].args.cancelled, true,
+    'the FIRST press after a hover-open consumes the engagement: cancelled:true skips the toggle (core.rs release)');
+  f.click(); // the deliberate click that converts hover-only into the normal delay
+  // the NEXT press toggles normally: no cancellation left to spend
+  f.press();
+  f.release();
+  releases = f.dragReleases();
+  assert.equal(releases.length, 2);
+  assert.equal(releases[1].args.cancelled, false, 'the next click keeps the legacy toggle');
+  f.click();
+});
+
+test('#336 L18 a click without a hover-open is unchanged: never cancelled (facade spy)', () => {
+  const f = engagementFixture(false); // default preference: hover does not open
+  f.mutate();
+  f.enter();
+  assert.deepEqual(f.desktopCalls, [], 'hover-off never requests an open');
+  f.press();
+  f.release();
+  const releases = f.dragReleases();
+  assert.equal(releases.length, 1);
+  assert.equal(releases[0].args.cancelled, false, 'a plain press/release keeps the legacy path byte for byte');
+  f.click();
 });
 
 console.log(`island-interaction-wiring-check: ${passed} passed`);

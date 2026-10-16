@@ -324,6 +324,8 @@
 
   // ---- pointer tracking (webview reports; Rust decides) ------------------
   let pressed = false;
+  // #336 L18: one press may carry a spent hover engagement (see release).
+  let hoverEngagePress = false;
   let lastPoint = { x: 0, y: 0 };
   const send = (cmd, args) => {
     if (!invoke) return;
@@ -333,9 +335,14 @@
   const release = (pt, cancelled) => {
     if (!pressed) return;
     pressed = false;
+    // #336 L18: a spent hover engagement cancels ONLY this release — core.rs
+    // release() applies the snap first and then skips the toggle on
+    // cancelled, so the island keeps open; every later press is legacy.
+    const engaged = hoverEngagePress;
+    hoverEngagePress = false;
     character.dragEnd();
     document.body.classList.remove('is-dragging');
-    send('drag_release', { x: pt.x, y: pt.y, cancelled });
+    send('drag_release', { x: pt.x, y: pt.y, cancelled: cancelled || engaged });
     syncInteraction();
   };
   window.addEventListener('pointerdown', e => {
@@ -346,6 +353,10 @@
     // the chat — drag never attaches to text or composer controls.
     if (e.target && e.target.closest && e.target.closest('button, textarea, input, #chat-log, #chat-composer')) return;
     pressed = true;
+    // #336 L18: capture the engagement at PRESS time (the native release
+    // happens before any click event): the module's hoverOnly state says
+    // whether this is the first press after a hover-open.
+    hoverEngagePress = !!(interaction && interaction.snapshot().hoverOnly);
     character.dragStart(e.screenX);
     syncInteraction();
     lastPoint = { x: e.clientX, y: e.clientY };
@@ -680,7 +691,7 @@
       event.preventDefault();
       // Wired with M2: clears the first notice; a dismissal is never a
       // decision and never reaches Pi as approval.
-      try { window.desktop && window.desktop.dismiss().then(renderNotices, () => {}); } catch { /* facade optional */ }
+      try { if (window.desktop) { window.desktop.dismiss().then(renderNotices, () => {}); } } catch { /* facade optional */ }
     });
   }
 
