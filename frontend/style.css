@@ -4,6 +4,11 @@
    cubic-bezier(.45,0,.2,1), Abito's own reduced-motion state snaps instantly. Fonts use
    the system stack on purpose: the legacy woff2 files are not copied. */
 
+/* T6.1 type + space scale (design §1), declared BEFORE every rule that uses them (the V1 block
+   used to declare the ramp late, ~line 917). One variable per role; spacing base 4/8.
+   Light and dark safe: values are theme-independent; themes only recolour. */
+:root { --fs-title: 16px; --fs-body: 14px; --fs-label: 13px; --fs-caption: 12px; --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-20: 20px; --space-24: 24px; --space-32: 32px; }
+
 :root {
   --island: #000;
   --island-ink: #fff;
@@ -668,21 +673,24 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #settings-close { margin-left: auto; flex: 0 0 auto; } /* always inside, pinned to the right */
 #settings-hint { margin: 0 0 6px; }
 #settings-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 0; padding-right: 2px; }
-.srows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.srow { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; flex-wrap: wrap; }
-.srow-title { color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); }
-.srow-sub { font-size: 12px; color: var(--island-muted); }
+.srows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-8); }
+.srow { display: flex; align-items: center; gap: var(--space-8); min-height: 40px; padding: 0 2px; flex-wrap: wrap; } /* design §3: row 40 */
+.srow-title { color: var(--island-ink); font: 600 var(--fs-label)/1.2 var(--font-ui); }
+.srow-sub { font-size: var(--fs-caption); color: var(--island-muted); }
 .srow-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
-.sempty, .snote { margin: 0; font-size: 12px; color: var(--island-muted); line-height: 1.35; }
-.sline { margin: 0; font-size: 13px; color: var(--island-ink); line-height: 1.35; overflow-wrap: anywhere; }
-.sline.sub { font-size: 12px; color: var(--island-muted); }
-.slink { font-size: 12px; color: var(--island-ink); text-decoration: underline; overflow-wrap: anywhere; cursor: pointer; -webkit-user-select: text; user-select: text; }
+.sempty, .snote { margin: 0; font-size: var(--fs-caption); color: var(--island-muted); line-height: 1.35; }
+.sline { margin: 0; font-size: var(--fs-body); color: var(--island-ink); line-height: 1.35; overflow-wrap: anywhere; }
+.sline.sub { font-size: var(--fs-caption); color: var(--island-muted); }
+.slink { font-size: var(--fs-caption); color: var(--island-ink); text-decoration: underline; overflow-wrap: anywhere; cursor: pointer; -webkit-user-select: text; user-select: text; }
 .scode { align-self: flex-start; padding: 4px 10px; border-radius: 8px; background: var(--surface); color: var(--island-ink); font: 700 15px/1.2 ui-monospace, monospace; letter-spacing: .08em; -webkit-user-select: text; user-select: text; cursor: text; }
 .sflow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-xl); border: 1px solid var(--island-live); }
-.sform { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
+.sform { display: flex; align-items: center; gap: var(--space-8); margin: 0; flex-wrap: wrap; }
 .sfield {
-  flex: 1; min-width: 120px; min-height: 44px; padding: 0 14px; border-radius: var(--radius-2xl); border: 1px solid var(--line-soft);
-  background: var(--fill); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui); -webkit-user-select: text; user-select: text; cursor: text;
+  /* T6.1: field 32px visual inside a 44px hit area — the 6px border is the invisible hit ring,
+     the background clips to the padding box so the visible field stays 32px (r10 = 16 − 6). */
+  flex: 1; min-width: 132px; min-height: 44px; padding: 0 14px; border: 6px solid transparent; border-radius: 16px;
+  background: var(--fill) padding-box; box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--island-ink); font: 400 var(--fs-body)/1.35 var(--font-ui); -webkit-user-select: text; user-select: text; cursor: text;
   color-scheme: dark;
 }
 select.sfield { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 34px;
@@ -694,16 +702,23 @@ select.sfield option { background: var(--surface); color: var(--island-ink); }
 #settings-body .sform select.sfield { flex: 1 1 100%; }
 #settings-body .sform .sbtn { order: 2; margin-left: auto; }
 .sbtn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px 0 10px;
-  border-radius: var(--radius-full); border: 1px solid var(--line); background: transparent; color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); cursor: pointer;
+  /* T6.1: button 32px visual inside a 44px hit area — the pill is drawn on the ::after inset
+     layer, so hover/primary paint the visible layer (z-index: 0 keeps the layer inside the
+     button's own stacking context). */
+  position: relative; z-index: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 20px 0 16px;
+  border: 0; background: transparent; color: var(--island-ink); font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
 }
+.sbtn::after { content: ""; position: absolute; inset: 6px; z-index: -1; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
+.sbtn:hover::after { background: var(--fill-hover); }
 .sname-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .sname-form .sfield { width: 100%; min-width: 0; flex: none; }
 .sname-form .sbtn { align-self: flex-end; }
 #settings-name-error:empty { display: none; }
 #settings-name-error { color: var(--red-11); }
-#settings-display-name[aria-invalid="true"] { border-color: var(--red-11); }
-.sbtn.primary { background: var(--go); border-color: var(--go); color: #000; }
+#settings-display-name[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--red-11); } /* rings the VISIBLE field, not the hit ring */
+.sbtn.primary { color: #000; }
+.sbtn.primary::after { background: var(--go); border-color: var(--go); }
+.sbtn.primary::after { background: var(--go); border-color: var(--go); }
 .sbtn:disabled { opacity: .4; cursor: default; }
 .skbd { padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-mid); background: var(--surface); color: var(--island-ink); font: 700 12px/1.2 ui-monospace, monospace; }
 .switch {
@@ -720,15 +735,15 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
    method cards, provider rows, agent cards. Every control >= 44px; every state is icon + one word. */
 .ssec { margin-top: 14px; }
 .ssec:first-child { margin-top: 4px; }
-.ssection { margin: 0 0 2px; font: 600 11px/16px var(--font-mono, ui-monospace, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--island-muted); }
+.ssection { margin: 0 0 2px; font: 600 var(--fs-caption)/18px var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--island-muted); } /* design §3: 12/600 sans, not 11 mono */
 .ssec > .snote { margin: 2px 0 6px; }
 .smethods { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .smethod {
   display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 44px; padding: 12px 14px; text-align: left;
   border-radius: var(--radius-xl); border: 1px solid var(--line-soft); background: var(--fill-soft); color: var(--island-ink); cursor: pointer;
 }
-.smethod b { font: 700 14px/1.2 var(--font-ui); }
-.smethod span { font: 400 12px/1.4 var(--font-ui); color: var(--island-muted); }
+.smethod b { font: 700 var(--fs-body)/1.2 var(--font-ui); }
+.smethod span { font: 400 var(--fs-caption)/1.4 var(--font-ui); color: var(--island-muted); }
 .smethod:hover b { color: var(--go); }
 .sback { align-self: flex-start; margin: 2px 0 8px; }
 #settings-filter { flex: 0 0 auto; width: 100%; height: 44px; min-height: 44px; max-height: 44px; margin-bottom: 4px; }
@@ -736,7 +751,7 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
 .sagent:first-child { border-top: 0; }
 .sagent-head { display: flex; align-items: center; gap: 8px; }
 .sagent .srow-actions { margin-left: 0; justify-content: flex-end; }
-.splan { margin: 2px 0 0; font: 400 12px/1.4 var(--font-ui); color: var(--island-ink); }
+.splan { margin: 2px 0 0; font: 400 var(--fs-caption)/1.4 var(--font-ui); color: var(--island-ink); }
 .strust { color: var(--sun); }
 
 /* ---- #327: manual specialists — the section lives in Ajustes and the chat shows the role in use.
@@ -745,7 +760,7 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
 #specialists-section .sagent-head { flex-wrap: wrap; }
 #specialists-section .sagent-head .srow-title { flex: 1 1 auto; min-width: 0; }
 #specialists-section .sagent-head .chip { min-height: 24px; font-size: 12px; }
-#settings-body textarea.sfield { min-height: 76px; padding: 10px 14px; resize: vertical; line-height: 1.35; }
+#settings-body textarea.sfield { border: 0; border-radius: 16px; min-height: 76px; padding: 10px 14px; resize: vertical; line-height: 1.35; }
 /* Identity colour never replaces the existing user icon, name or checked/focus shape. */
 #chat-specialist .ico { color: var(--identity-color, var(--island-muted)); }
 #chat-specialist[data-color="green"], .srole-dot[data-color="green"], .scolors[data-color="green"] { --identity-color: var(--dot-green-2); }
@@ -758,7 +773,7 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
 .sroles { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .srole { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; border-top: 1px solid var(--line-faint); }
 .srole:first-child { border-top: 0; }
-.srole-pick { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--island-ink); text-align: left; cursor: pointer; font: inherit; }
+.srole-pick { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: transparent; color: var(--island-ink); text-align: left; cursor: pointer; font: inherit; }
 .srole-pick:disabled { opacity: .5; cursor: default; }
 .srole-pick .srow-title { flex: 1 1 auto; min-width: 0; }
 .srole-pick .chip { min-height: 24px; font-size: 12px; }
@@ -896,9 +911,9 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #models-list .model-chips { grid-column: 1; grid-row: 2; flex-wrap: wrap; gap: 8px; }
 #models-list .choose { grid-column: 2; grid-row: 1 / 3; align-self: center; }
 #models-list li[hidden] { display: none; }
-#settings-title { font-weight: 600; font-size: 20px; }
+#settings-title { font-weight: 600; font-size: var(--fs-title); }
 #settings-close { border: 0; }
-.ssection { color: var(--muted); letter-spacing: .02em; }
+.ssection { color: var(--muted); letter-spacing: .06em; }
 .smethod { border-color: var(--card-line); background: var(--fill-alt); border-radius: 12px; }
 #settings-body { padding-right: 2px; }
 #settings-hint { text-wrap: pretty; }
@@ -912,9 +927,9 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
    gutter, cards use the full 140px height, the chat has ONE header row, type is
    13-15px (12px floor) and every control stays >= 44px.
    ========================================================================== */
-/* Type ramp tokens (Visual correction V1). One variable per role so a future
-   user typography setting is a one-variable change; no setting exists yet. */
-:root { --fs-title: 16px; --fs-body: 14px; --fs-label: 13px; --fs-caption: 12px; }
+/* Type ramp tokens (Visual correction V1) moved to the TOP of the file (T6.1, design §1): one
+   variable per role so a future user typography setting is a one-variable change; no setting
+   exists yet. They are declared before the rules that use them now. */
 /* ---- overview: rail in the gutter, two cards, 10px frame --------------- */
 #island-header { top: 10px; right: 8px; bottom: 10px; left: auto; width: 56px; height: auto; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; padding: 0; }
 .tabs { flex-direction: column; gap: 4px; height: auto; }
@@ -991,13 +1006,14 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 #settings-hint { margin: 0 0 10px; }
 .ssec { margin-top: 20px; }
 .ssection { font-size: var(--fs-caption); letter-spacing: .06em; line-height: 18px; margin-bottom: 4px; }
-.srow { gap: 10px; min-height: 48px; padding: 2px 0; }
-.srow-title, .sline { font-size: var(--fs-body); }
-.srow-sub, .sline.sub { font-size: var(--fs-label); }
-.srows { gap: 6px; }
+.srow { gap: var(--space-8); min-height: 40px; padding: 2px 0; } /* design §3: row 40, gap 8 */
+.srow-title { font-size: var(--fs-label); }
+.sline { font-size: var(--fs-body); }
+.srow-sub, .sline.sub { font-size: var(--fs-caption); }
+.srows { gap: var(--space-8); }
 .smethod { padding: 14px 16px; gap: 6px; }
 .smethod span { font-size: var(--fs-label); }
-.sbtn { font-size: var(--fs-body); }
+.sbtn { font-size: var(--fs-label); } /* design §1: label 13 for buttons */
 
 /* ==========================================================================
    Flash fix V2 (installed-build report: flicker while the island compresses/expands).
@@ -1176,12 +1192,16 @@ html[data-theme="light"] .sfield { color-scheme: light; }
    selection shown by border + colour + aria-selected (never colour alone: the selected tab is also bold). */
 #settings-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 4px; }
 .stab {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 12px 0 10px;
-  border-radius: var(--radius-full); border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
-  font: 600 13px/1.2 var(--font-ui); cursor: pointer;
+  /* T6.1: tab 36px visual r10 inside a 44px hit area — the tab is drawn on the ::after inset
+     layer, so hover/selected paint the visible layer. */
+  position: relative; z-index: 0; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 18px 0 14px;
+  border: 0; background: transparent; color: var(--island-muted); font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
 }
-.stab:hover { background: var(--fill-hover); color: var(--island-ink); }
-.stab[aria-selected="true"] { border-color: var(--go); color: var(--go); font-weight: 700; }
+.stab::after { content: ""; position: absolute; inset: 4px; z-index: -1; border-radius: 10px; border: 1px solid var(--line-soft); }
+.stab:hover { color: var(--island-ink); }
+.stab:hover::after { background: var(--fill-hover); }
+.stab[aria-selected="true"] { color: var(--go); font-weight: 700; }
+.stab[aria-selected="true"]::after { border-color: var(--go); }
 .stab:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 /* ---- #352: Integraciones — service cards (frontend/integrations-view.js, FAKE provider).
    APPEND-ONLY block: theme tokens only (--surface/--line/--fill/--go/--sun/--red-11/--muted,
@@ -1319,13 +1339,13 @@ body #capsule:not([data-notice-view="notices"]) #notices[data-count="1"] #notice
 /* ---- #408: at the Settings size the tabs become a LEFT vertical rail (settings.js sets data-rail from the
    panel width); the 400 column keeps the wrapping row. */
 #settings[data-rail="true"] {
-  display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 16px;
-  padding: 20px 24px;
+  display: grid; grid-template-columns: 184px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; column-gap: 16px;
+  padding: 20px 24px; /* design §3: rail 184, padding 24 side / 20 top */
 }
 #settings[data-rail="true"] #settings-bar { grid-column: 1 / -1; }
 #settings[data-rail="true"] #settings-hint { grid-column: 2; grid-row: 2; }
 #settings[data-rail="true"] #settings-tabs { grid-column: 1; grid-row: 2 / 4; flex-direction: column; flex-wrap: nowrap; align-self: start; gap: 6px; }
-#settings[data-rail="true"] .stab { justify-content: flex-start; width: 100%; min-height: 48px; border-radius: var(--radius-xl); }
+#settings[data-rail="true"] .stab { justify-content: flex-start; width: 100%; min-height: 44px; } /* design §3: tab 36 visual on ::after, r10 */
 #settings[data-rail="true"] #settings-body, #settings[data-rail="true"] #models { grid-column: 2; grid-row: 3; min-height: 0; }
 #settings[data-rail="true"] #settings-live { grid-column: 1 / -1; }
 
@@ -1621,17 +1641,17 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
    (--fs-label 13px / --fs-caption 12px, 12px floor, no raw px font-size) while the 44px click target
    of every control stays exactly where the rest of Ajustes keeps it. Written AFTER the #408 rail
    block so it wins at equal specificity (both are id + attribute + class). */
-#settings-body[data-screen="accounts"] .ssec { margin-top: 12px; }
+#settings-body[data-screen="accounts"] .ssec { margin-top: 20px; } /* design §3: group gap 20 */
 #settings-body[data-screen="accounts"] .ssec:first-child { margin-top: 2px; }
 #settings-body[data-screen="accounts"] .ssec > .snote { margin: 0 0 4px; }
-#settings-body[data-screen="accounts"] .ssection { line-height: 16px; margin-bottom: 2px; }
-#settings-body[data-screen="accounts"] .srows { gap: 4px; }
-#settings-body[data-screen="accounts"] .srow { gap: 6px; min-height: 44px; padding: 0; }
+#settings-body[data-screen="accounts"] .ssection { line-height: 18px; margin-bottom: 2px; }
+#settings-body[data-screen="accounts"] .srows { gap: var(--space-8); }
+#settings-body[data-screen="accounts"] .srow { gap: var(--space-8); min-height: 40px; padding: 0; }
 #settings-body[data-screen="accounts"] .srow-title { font-size: var(--fs-label); }
 #settings-body[data-screen="accounts"] .snote, #settings-body[data-screen="accounts"] .sempty { font-size: var(--fs-caption); }
 #settings-body[data-screen="accounts"] .sline { font-size: var(--fs-label); }
 #settings-body[data-screen="accounts"] .srow-actions { gap: 4px; }
-#settings-body[data-screen="accounts"] .sbtn { min-height: 44px; min-width: 44px; gap: 4px; padding: 0 10px 0 8px; font: 600 var(--fs-label)/1.2 var(--font-ui); }
+#settings-body[data-screen="accounts"] .sbtn { min-height: 44px; min-width: 44px; gap: 4px; padding: 0 16px 0 14px; font: 600 var(--fs-label)/1.2 var(--font-ui); }
 #settings-body[data-screen="accounts"] .sbtn .ico svg { width: 16px; height: 16px; }
 #settings-body[data-screen="accounts"] .sagent { gap: 2px; padding: 6px 0; }
 #settings-body[data-screen="accounts"] .sagent-head { gap: 6px; }
