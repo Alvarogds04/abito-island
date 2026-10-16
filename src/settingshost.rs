@@ -110,6 +110,16 @@ pub fn settings_window_on(host: &SettingsHost) -> bool {
     host.prefs.lock().expect("prefs lock").settings_window_on()
 }
 
+/// T6.2: the remembered inner size of the own Ajustes window (logical px), read
+/// when the window opens. Read-only: the WebView never receives it — the size is
+/// Rust's own decision (event payload only), like #264's position.
+pub fn settings_window_size(app: &AppHandle) -> Option<(u32, u32)> {
+    let state = app.state::<AppState>();
+    // the guard must drop before `state`: a tail expression would hold the borrow
+    let size = state.settings.prefs.lock().expect("prefs lock").settings_window_size;
+    size
+}
+
 /// #264 (GD049): the position the human last dragged the island to, read for the
 /// FIRST geometry decision of a launch (before the window is placed) and for the
 /// post-load pin. Read-only; the WebView never receives it.

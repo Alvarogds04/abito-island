@@ -23,6 +23,37 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 /// The gate is exact-string (approved): no other label shares the bridge.
 pub const SETTINGS_LABEL: &str = "settings";
 
+/// T6.2 (D2, design §3): the own window's contract sizes, in LOGICAL px — the
+/// unit `inner_size`/`min_inner_size` take. The default is the design size; the
+/// minimum matches `prefs::SETTINGS_WINDOW_SIZE_MIN`.
+pub(crate) const DEFAULT_INNER_SIZE: (f64, f64) = (960.0, 640.0);
+pub(crate) const MIN_INNER_SIZE: (f64, f64) = (720.0, 480.0);
+
+/// T6.2 (pure): the inner size the own Ajustes window opens at, in logical px.
+///
+/// A remembered size is used ONLY when it is within the stored bounds (already
+/// validated at load — re-checked here because this function is pure) AND fits
+/// the current work area; anything else falls back to the DEFAULT — never a
+/// guessed clamp of a size the current screen cannot show. Whatever was chosen
+/// is then clamped into the work area (never bigger than the screen) and never
+/// below the window minimum: on a screen smaller than the minimum, the minimum
+/// wins — the WM enforces `min_inner_size` anyway.
+pub(crate) fn opening_size(stored: Option<(u32, u32)>, work: (u32, u32)) -> (f64, f64) {
+    let (min_w, min_h) = abito_island::prefs::SETTINGS_WINDOW_SIZE_MIN;
+    let (max_w, max_h) = abito_island::prefs::SETTINGS_WINDOW_SIZE_MAX;
+    let usable = |(w, h): (u32, u32)| {
+        w >= min_w && w <= max_w && h >= min_h && h <= max_h && w <= work.0 && h <= work.1
+    };
+    let chosen = stored.filter(|s| usable(*s))
+        .map(|(w, h)| (w as f64, h as f64))
+        .unwrap_or(DEFAULT_INNER_SIZE);
+    // ceiling-then-floor, never f64::clamp: the work area may be SMALLER than
+    // the minimum, and there the minimum must win (not a panic, not zero) —
+    // the WM enforces min_inner_size anyway.
+    (chosen.0.min(work.0 as f64).max(MIN_INNER_SIZE.0),
+     chosen.1.min(work.1 as f64).max(MIN_INNER_SIZE.1))
+}
+
 /// #366 F093: commands that act on the MAIN island window (drag, desktop verbs)
 /// are for the island webview only. The settings window runs the same page, so
 /// these refuse any label that is not exactly `main` (exact, case-sensitive).
@@ -70,14 +101,25 @@ fn open_window(app: &AppHandle) -> tauri::Result<()> {
         win.set_focus()?;
         return Ok(());
     }
+    // T6.2: the remembered size (a typed pref, never page-supplied) when it fits
+    // the CURRENT screen, else the design default — clamped to the work area,
+    // never below the minimum. The main window's work area is the best available
+    // source before this window exists.
+    let work = app.get_webview_window("main")
+        .map(|main| {
+            let rect = crate::workarea::current(&main).rect;
+            (rect.w.max(0) as u32, rect.h.max(0) as u32)
+        })
+        .unwrap_or((u32::MAX, u32::MAX));
+    let (w, h) = opening_size(crate::settingshost::settings_window_size(app), work);
     WebviewWindowBuilder::new(
         app,
         SETTINGS_LABEL,
         WebviewUrl::App(std::path::PathBuf::from("index.html")),
     )
     .title("Ajustes")
-    .inner_size(760.0, 560.0)
-    .min_inner_size(420.0, 360.0)
+    .inner_size(w, h)
+    .min_inner_size(MIN_INNER_SIZE.0, MIN_INNER_SIZE.1)
     .resizable(true)
     .build()
     .map(|_| ())
@@ -217,5 +259,57 @@ mod tests {
     #[test]
     fn f093_the_label_is_the_exact_string_the_gate_admits() {
         assert_eq!(SETTINGS_LABEL, "settings");
+    }
+
+    // ---- T6.2: the opening size of the own window (pure, no window system) ---
+
+    use super::{opening_size, DEFAULT_INNER_SIZE, MIN_INNER_SIZE};
+
+    /// T6.2 (D2, design §3): the own window is 960x640 with min 720x480, both
+    /// in logical px — the unit `inner_size`/`min_inner_size` take.
+    #[test]
+    fn t62_the_window_opens_at_the_design_size_and_honors_the_minimum() {
+        assert_eq!(DEFAULT_INNER_SIZE, (960.0, 640.0));
+        assert_eq!(MIN_INNER_SIZE, (720.0, 480.0));
+        assert_eq!(opening_size(None, (1920, 1080)), (960.0, 640.0));
+        assert_eq!(opening_size(None, (7680, 4320)), (960.0, 640.0));
+    }
+
+    /// T6.2: a remembered size is used only when it is within the stored bounds
+    /// AND fits the current work area; anything else falls back to the default —
+    /// never a guessed clamp of a size the current screen cannot show.
+    #[test]
+    fn t62_a_remembered_size_is_used_only_when_it_fits_the_current_screen() {
+        assert_eq!(opening_size(Some((1100, 700)), (1920, 1080)), (1100.0, 700.0));
+        assert_eq!(opening_size(Some((720, 480)), (1920, 1080)), (720.0, 480.0), "the min is a usable memory");
+        // outside the current screen (either axis): the default, not a clamp
+        assert_eq!(opening_size(Some((2200, 1400)), (1920, 1080)), (960.0, 640.0));
+        assert_eq!(opening_size(Some((1100, 1400)), (1920, 1080)), (960.0, 640.0));
+        assert_eq!(opening_size(Some((1921, 1080)), (1920, 1080)), (960.0, 640.0));
+        // hostile stored values (already dropped at load; re-checked here because
+        // this function is pure) fall back to the default too
+        assert_eq!(opening_size(Some((100, 700)), (1920, 1080)), (960.0, 640.0));
+        assert_eq!(opening_size(Some((5000, 700)), (8000, 4000)), (960.0, 640.0));
+        assert_eq!(opening_size(Some((960, 100)), (8000, 4000)), (960.0, 640.0));
+    }
+
+    /// T6.2: whatever size was chosen (default or remembered) is clamped into
+    /// the work area so the window never opens bigger than the screen, and never
+    /// below the window minimum — on a screen smaller than the minimum, the
+    /// minimum wins (the WM enforces min_inner_size anyway).
+    #[test]
+    fn t62_the_opening_size_is_clamped_to_the_work_area_never_below_the_minimum() {
+        // the default fits: untouched
+        assert_eq!(opening_size(None, (1920, 1080)), (960.0, 640.0));
+        // work area shorter than the default: clamped down on that axis only
+        assert_eq!(opening_size(None, (900, 700)), (900.0, 640.0));
+        assert_eq!(opening_size(None, (1920, 500)), (960.0, 500.0), "clamped to the area, still above the minimum");
+        assert_eq!(opening_size(None, (1920, 470)), (960.0, 480.0), "the minimum floors the clamp");
+        // work area smaller than the minimum: the minimum wins on both axes
+        assert_eq!(opening_size(None, (600, 400)), (720.0, 480.0));
+        assert_eq!(opening_size(None, (720, 480)), (720.0, 480.0));
+        // a remembered size that fits is still clamped if the area shrank
+        // between runs in a way that leaves it inside — the boundary is exact
+        assert_eq!(opening_size(Some((900, 500)), (900, 500)), (900.0, 500.0));
     }
 }
