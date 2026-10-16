@@ -816,7 +816,9 @@ fn navigation_lock() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 // --- click-vs-drag, snap, clamp and anchor decision lives in core/geometry.
 
 #[tauri::command]
-fn drag_press(app: AppHandle, state: State<AppState>, x: f64, y: f64) {
+fn drag_press(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x: f64, y: f64) {
+    // #366: island-only; the settings window runs the same page and must not drive the island.
+    if settingswindow::main_window_only(webview.label()).is_err() { return; }
     state.user_touch.store(true, Ordering::SeqCst);
     let win = main_window(&app);
     let io = TauriIo(&win);
@@ -824,7 +826,8 @@ fn drag_press(app: AppHandle, state: State<AppState>, x: f64, y: f64) {
 }
 
 #[tauri::command]
-fn drag_move(app: AppHandle, state: State<AppState>, x: f64, y: f64) {
+fn drag_move(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x: f64, y: f64) {
+    if settingswindow::main_window_only(webview.label()).is_err() { return; }
     let win = main_window(&app);
     let io = TauriIo(&win);
     let area = *state.work_area.lock().expect("work area lock");
@@ -838,7 +841,8 @@ fn drag_move(app: AppHandle, state: State<AppState>, x: f64, y: f64) {
 }
 
 #[tauri::command]
-fn drag_release(app: AppHandle, state: State<AppState>, x: f64, y: f64, cancelled: bool) -> String {
+fn drag_release(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x: f64, y: f64, cancelled: bool) -> String {
+    if settingswindow::main_window_only(webview.label()).is_err() { return "ignored".to_string(); }
     let area = refresh_work_area(&app, &state);
     let win = main_window(&app);
     let io = TauriIo(&win);
@@ -973,6 +977,7 @@ async fn desktop_action(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<Value, BridgeError> {
+    settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     if payload.get("action").and_then(Value::as_str) == Some("click") {

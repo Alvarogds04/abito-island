@@ -23,6 +23,17 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 /// The gate is exact-string (approved): no other label shares the bridge.
 pub const SETTINGS_LABEL: &str = "settings";
 
+/// #366 F093: commands that act on the MAIN island window (drag, desktop verbs)
+/// are for the island webview only. The settings window runs the same page, so
+/// these refuse any label that is not exactly `main` (exact, case-sensitive).
+pub(crate) fn main_window_only(label: &str) -> Result<(), BridgeError> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err(BridgeError::denied("wrong window label"))
+    }
+}
+
 fn err(code: &str) -> BridgeError {
     BridgeError { code: code.into(), message: "No se pudo abrir Ajustes en su ventana.".into() }
 }
@@ -111,7 +122,7 @@ pub async fn settings_window_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{opens_own_window, parse_settings_window_action, SETTINGS_LABEL};
+    use super::{main_window_only, opens_own_window, parse_settings_window_action, SETTINGS_LABEL};
     use serde_json::json;
 
     /// #366 F093: the command payload is closed — exactly the two actions.
@@ -131,6 +142,30 @@ mod tests {
             json!({"action": "open", "w": 900}),
         ] {
             assert_eq!(parse_settings_window_action(&bad), None, "{bad} must be refused");
+        }
+    }
+
+    /// #366 F093: island-window commands refuse every label but the exact `main`.
+    #[test]
+    fn f093_main_window_commands_refuse_the_settings_label() {
+        assert!(main_window_only("main").is_ok());
+        for label in ["settings", "Main", "main2", "main ", "", "Settings"] {
+            let e = main_window_only(label).expect_err(label);
+            assert_eq!(e.code, "denied", "{label:?}");
+        }
+    }
+
+    /// #366 F093 source contract: each command acting on the MAIN island window
+    /// calls the label gate before touching anything.
+    #[test]
+    fn f093_the_four_island_commands_check_the_label_first() {
+        let src = include_str!("main.rs");
+        for name in ["fn drag_press(", "fn drag_move(", "fn drag_release(", "async fn desktop_action("] {
+            let at = src.find(name).unwrap_or_else(|| panic!("{name} missing"));
+            let body = &src[at..];
+            let end = body.find("\n}\n").unwrap_or(body.len());
+            let head: String = body[..end].lines().take(8).collect::<Vec<_>>().join("\n");
+            assert!(head.contains("main_window_only(webview.label())"), "{name} must gate on the label first:\n{head}");
         }
     }
 
