@@ -215,14 +215,143 @@
         hasTarget, canOpen: r.enabled && r.state === 'connected' && hasTarget,
       });
     });
-    return Object.freeze({ fake: store.fake, rows, enabledCount, connectedCount });
+    return Object.freeze({ fake: store.fake, banner: store.fake ? FAKE_BANNER : null,
+      rows, enabledCount, connectedCount });
+  }
+
+  // ---- renderer (textContent only; events live in mount) ----------------------
+  const FAKE_BANNER = 'Datos de ejemplo — nada está conectado todavía.';
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = text;
+    return n;
+  };
+  const btn = (cls, action, id, label, disabled, pressed) => {
+    const b = el('button', cls, label);
+    b.type = 'button';
+    b.dataset.action = action;
+    b.dataset.id = id;
+    if (disabled) b.disabled = true;
+    if (pressed !== undefined) b.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    return b;
+  };
+
+  /**
+   * Paints one closed view into `host` with textContent only — every node is
+   * built here, only textContent ever writes, so no data can ever become markup.
+   * The fake banner is LOUD: a frame the provider marked fake:true renders the
+   * visible «datos de ejemplo» line, never a plausible real-looking board.
+   * Buttons carry data-action/data-id; mount owns the (trusted) clicks.
+   */
+  function render(host, view) {
+    if (!(host && typeof host.appendChild === 'function') || !view || !Array.isArray(view.rows)) {
+      if (host && typeof host.appendChild === 'function') {
+        host.textContent = '';
+        host.hidden = true;
+      }
+      return;
+    }
+    host.textContent = '';
+    host.hidden = false;
+    const head = el('div', 'int-head');
+    head.append(el('span', 'int-title', 'Integraciones'));
+    head.append(el('span', 'int-count',
+      `${view.enabledCount} habilitados · ${view.connectedCount} conectados`));
+    host.append(head);
+    if (view.banner) host.append(el('p', 'int-fake', view.banner));
+    for (const row of view.rows) {
+      const card = el('article', 'int-service');
+      card.dataset.serviceId = row.id;
+      const info = el('div', 'int-info');
+      info.append(el('span', 'int-name', row.name));
+      info.append(el('span', `int-state int-state--${row.state}`, row.stateLabel));
+      card.append(info);
+      const actions = el('div', 'int-actions');
+      actions.append(btn('int-enable', 'enable', row.id,
+        row.enabled ? 'Deshabilitar' : 'Habilitar', false, row.enabled));
+      actions.append(btn('int-refresh', 'refresh', row.id, 'Actualizar', !row.enabled));
+      if (row.state === 'connected') actions.append(btn('int-pause', 'pause', row.id, 'Pausar'));
+      else if (row.state === 'paused') actions.append(btn('int-pause', 'pause', row.id, 'Reanudar'));
+      if (row.canOpen) actions.append(btn('int-open', 'open', row.id, 'Abrir'));
+      card.append(actions);
+      host.append(card);
+    }
   }
 
   // ---- fake provider (WU2) + renderer + mount follow at the tail ----
 
+  // ---- fake provider (LOUD, deterministic, no network) ------------------------
+  // The fake frame seeds two services; everything else stays disconnected. It is
+  // marked fake:true and the view carries the visible «datos de ejemplo» banner,
+  // so sample rows can never be mistaken for real connections. The refresh
+  // outcome cycles deterministically: the daemon's real frame replaces this
+  // provider at integration time, never this view-model.
+  const FAKE_ROWS = Object.freeze([
+    { id: 'github', enabled: true, state: 'connected' },
+    { id: 'n8n', enabled: true, state: 'error' },
+  ]);
+  const FAKE_OUTCOMES = Object.freeze(['connected', 'connected', 'error']);
+  function fakeFrame() {
+    return { type: 'integrations', schema: SCHEMA, fake: true,
+      services: FAKE_ROWS.map(r => ({ id: r.id, enabled: r.enabled, state: r.state })) };
+  }
+  function fakeOutcome(tick) {
+    if (!Number.isInteger(tick) || tick < 0) return null;
+    return FAKE_OUTCOMES[tick % FAKE_OUTCOMES.length];
+  }
+
   return {
-    SCHEMA, MAX_SERVICES, SERVICES, STATES, ALLOWLIST,
+    SCHEMA, MAX_SERVICES, SERVICES, STATES, ALLOWLIST, FAKE_ROWS,
     serviceById, stateLabel, createStore, storeFromFrame, isStore,
-    setEnabled, refresh, togglePause, openTarget, view,
+    setEnabled, refresh, togglePause, openTarget, view, fakeFrame, fakeOutcome, render,
   };
 });
+
+// ---- browser-only wiring: self-mount into #integrations, FAKE provider only ----
+
+function mount(V) {
+  if (typeof document === 'undefined') return;
+  const host = document.getElementById('integrations');
+  if (!host) return; // inert until index.html carries the container (mount contract)
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) || null;
+
+  let store = V.storeFromFrame(V.fakeFrame());
+  let tick = 0;
+  let busy = false; // at most one action in flight; refresh becomes async when the daemon replaces the fake provider
+
+  const paint = () => V.render(host, V.view(store, Date.now()));
+
+  host.addEventListener('click', e => {
+    if (!e || e.isTrusted !== true || busy) return; // only trusted gestures change anything
+    const target = e.target && typeof e.target.closest === 'function' ? e.target : null;
+    const button = target ? target.closest('[data-action]') : null;
+    if (!button || !host.contains(button)) return;
+    const id = button.dataset.id;
+    const action = button.dataset.action;
+    if (action === 'enable') {
+      const row = store.services[id];
+      if (!row) return;
+      const next = V.setEnabled(store, id, !row.enabled);
+      if (next) { store = next; paint(); }
+    } else if (action === 'refresh') {
+      const outcome = V.fakeOutcome(tick);
+      tick += 1;
+      const next = outcome && V.refresh(store, id, outcome, Date.now());
+      if (next) { store = next; paint(); }
+    } else if (action === 'pause') {
+      const next = V.togglePause(store, id);
+      if (next) { store = next; paint(); }
+    } else if (action === 'open') {
+      // The allowlisted URL goes through the EXISTING host command `open_chat_url`,
+      // which re-validates on the Rust side (F025). Without IPC: honest silence,
+      // never a fake success and never a browser-initiated popup.
+      const url = V.openTarget(store, id);
+      if (url && invoke) invoke('open_chat_url', { payload: { url } }).catch(() => {});
+    }
+  });
+
+  paint();
+}

@@ -228,5 +228,105 @@ test('the module exposes a frozen API and never embeds markup or secrets', () =>
   assert.doesNotMatch(src, /(api[_-]?key|secret|token)\s*[:=]\s*['"][^'"]{8,}/i, 'no embedded credentials');
 });
 
+// ---- fake provider ----------------------------------------------------------
+test('fake provider: FAKE data only, always marked, refresh outcomes are closed and deterministic', () => {
+  const frame = T.fakeFrame();
+  assert.equal(frame.type, 'integrations');
+  assert.equal(frame.schema, T.SCHEMA);
+  assert.equal(frame.fake, true, 'the frame is loud about being fake');
+  for (const row of frame.services) {
+    assert.ok(T.serviceById(row.id), row.id);
+    assert.ok(T.STATES.includes(row.state), row.state);
+    assert.equal(typeof row.enabled, 'boolean');
+    assert.equal(Object.keys(row).length, 3, 'the frame never smuggles a URL or anything else');
+  }
+  const store = T.storeFromFrame(frame);
+  assert.equal(store.fake, true);
+  // the fake outcome cycles inside the closed vocabulary, deterministically
+  assert.deepEqual([0, 1, 2, 3, 4].map(t => T.fakeOutcome(t)),
+    ['connected', 'connected', 'error', 'connected', 'connected']);
+  assert.equal(T.fakeOutcome(-1), null);
+  assert.equal(T.fakeOutcome('x'), null);
+  assert.equal(T.fakeOutcome(1.5), null);
+  // and every outcome the provider hands out is a real closed state, never invented
+  const enabled = T.setEnabled(store, 'n8n', true);
+  for (let t = 0; t < 6; t += 1) {
+    const next = T.refresh(enabled, 'n8n', T.fakeOutcome(t), 1000 + t);
+    assert.ok(next && T.STATES.includes(next.services.n8n.state), String(T.fakeOutcome(t)));
+  }
+});
+
+// ---- the fake marker is LOUD (never mistaken for real data) -------------------
+test('fake marker: a fake view carries the visible «datos de ejemplo» banner in its pure projection', () => {
+  const fake = T.view(T.storeFromFrame(T.fakeFrame()), 1700000000000);
+  assert.equal(fake.fake, true);
+  assert.equal(typeof fake.banner, 'string');
+  assert.match(fake.banner, /datos de ejemplo/i);
+  // and a REAL (non-fake) view never shows it
+  const real = T.storeFromFrame({ type: 'integrations', schema: T.SCHEMA, fake: false, services: [] });
+  const realView = T.view(real, 1700000000000);
+  assert.equal(realView.fake, false);
+  assert.equal(realView.banner, null);
+});
+
+test('render writes the banner as text, never markup; no window.open anywhere', () => {
+  const src = fs.readFileSync(path.join(frontend, 'integrations-view.js'), 'utf8');
+  assert.match(src, /Datos de ejemplo/, 'the banner copy lives in the module, loud');
+  assert.doesNotMatch(src, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/);
+  assert.doesNotMatch(src, /window\.open/, 'open target never bypasses the host command');
+});
+
+// ---- renderer (DOM-guarded: pure Node skips, browser runs them) ---------------
+test('render: builds the 9 cards in registry order, textContent only, buttons with closed actions', () => {
+  if (typeof document === 'undefined') return; // pure Node run: the DOM path runs in the browser
+  const host = document.createElement('div');
+  const view = T.view(T.storeFromFrame(T.fakeFrame()), 1700000000000);
+  T.render(host, view);
+  assert.equal(host.hidden, false);
+  const cards = [...host.querySelectorAll('[data-service-id]')];
+  assert.deepEqual(cards.map(c => c.dataset.serviceId), T.SERVICES.map(s => s.id));
+  assert.ok(host.querySelector('.int-fake').textContent.includes('datos de ejemplo'));
+  for (const name of ['GitHub', 'Despliegues', 'Correo', 'Pagos', 'Notion', 'n8n', 'Calendario', 'Slack', 'Finanzas']) {
+    assert.ok(cards.some(c => c.querySelector('.int-name').textContent === name), name);
+  }
+  for (const card of cards) {
+    for (const b of card.querySelectorAll('button')) {
+      assert.ok(['enable', 'refresh', 'pause', 'open'].includes(b.dataset.action), b.dataset.action);
+      assert.equal(b.dataset.id, card.dataset.serviceId);
+    }
+  }
+  const gh = cards.find(c => c.dataset.serviceId === 'github');
+  assert.equal(gh.querySelector('.int-state').textContent, 'conectado');
+  assert.equal(gh.querySelector('[data-action="open"]').textContent, 'Abrir');
+  assert.equal(gh.querySelector('[data-action="pause"]').textContent, 'Pausar');
+  const cal = cards.find(c => c.dataset.serviceId === 'calendar');
+  assert.equal(cal.querySelector('.int-state').textContent, 'sin conectar');
+  assert.equal(cal.querySelector('[data-action="open"]'), null, 'disconnected never offers Abrir');
+  assert.equal(cal.querySelector('[data-action="refresh"]').disabled, true, 'disabled service cannot refresh');
+});
+
+test('render: an invalid view clears and hides the host; a real view never shows the banner', () => {
+  if (typeof document === 'undefined') return;
+  const host = document.createElement('div');
+  T.render(host, T.view(T.storeFromFrame(T.fakeFrame()), 1700000000000));
+  assert.ok(host.children.length > 0);
+  T.render(host, null);
+  assert.equal(host.hidden, true);
+  assert.equal(host.children.length, 0);
+  T.render(host, T.view(T.storeFromFrame({ type: 'integrations', schema: T.SCHEMA, fake: false, services: [] }), 1700000000000));
+  assert.equal(host.hidden, false);
+  assert.equal(host.querySelector('.int-fake'), null, 'a real view never claims to be an example');
+  assert.equal(host.querySelector('.int-count').textContent, '0 habilitados · 0 conectados');
+});
+
+test('mount is wired: guarded on the container, trusted clicks only, open routes through open_chat_url', () => {
+  const src = fs.readFileSync(path.join(frontend, 'integrations-view.js'), 'utf8');
+  assert.match(src, /getElementById\('integrations'\)/, 'mount contract: the #integrations container');
+  assert.match(src, /if \(!host\) return/, 'inert until wired');
+  assert.match(src, /e\.isTrusted !== true/, 'synthetic clicks never change anything');
+  assert.match(src, /open_chat_url/, 'the open target uses the existing host command');
+  assert.match(src, /fakeFrame\(\)/, 'mount seeds the FAKE provider, nothing real');
+});
+
 Promise.all(async).then(() => { console.log(`integrations-view-check: ${passed} checks ok`); process.exit(0); },
   (e) => { console.error(e); process.exit(1); });
