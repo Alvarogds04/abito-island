@@ -384,9 +384,10 @@
     }
   }
   if (listen) {
-    listen('agent:state', e => applyAgent(e && e.payload)).catch(() => {});
-    listen('prefs:state', e => { if (e && e.payload) { prefs = e.payload; render(); } }).catch(() => {});
-    listen('hotkey:state', e => { if (e && e.payload) { hotkey = e.payload; render(); } }).catch(() => {});
+    const warnListen = name => err => console.error(`settings: live ${name} events unavailable`, err); // R1: never swallowed again
+    listen('agent:state', e => applyAgent(e && e.payload)).catch(warnListen('agent:state'));
+    listen('prefs:state', e => { if (e && e.payload) { prefs = e.payload; render(); } }).catch(warnListen('prefs:state'));
+    listen('hotkey:state', e => { if (e && e.payload) { hotkey = e.payload; render(); } }).catch(warnListen('hotkey:state'));
   }
   // A command is only «done» when the engine says so: the invoke result is the state at WRITE time, the answer
   // arrives later as `agent:state`. `waiting` holds what we sent; the next state either carries a newer
@@ -656,7 +657,7 @@
     const flowLive = !!(prompt || eventV || (auth.flowId && !auth.last));
     // #408: the page remembers WHICH provider started the login, so status, progress and error sit on its card.
     if (loginTarget && loginTarget.phase === 'active') {
-      if (flowLive) loginTarget.sawFlow = true;
+      if (flowLive) { loginTarget.sawFlow = true; if (!loginTarget.flowId && auth.flowId) loginTarget.flowId = String(auth.flowId); }
       else if (loginTarget.sawFlow && auth.last) {
         const out = V.flowOutcome(auth.last);
         if (out.word === 'Conectada') loginTarget = null;
@@ -690,13 +691,18 @@
       const connect = a => wordBtn(a.word, () => loginWith(r.id, a.method), { aria: a.aria, disabled: a.disabled });
       if (r.api) actions.append(connect(r.api));
       if (r.auth) actions.append(connect(r.auth));
-      if (r.cancel) actions.append(wordBtn(r.cancel.word, () => send({ action: 'auth_cancel', flowId: String((auth && auth.flowId) || '') }), { icon: 'cross', aria: r.cancel.aria }));
+      if (r.cancel) actions.append(wordBtn(r.cancel.word, () => cancelLogin(), { icon: 'cross', aria: r.cancel.aria }));
       if (r.logout) actions.append(wordBtn(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`), { icon: 'plug-off', aria: `${V.LOGOUT_WORD}: ${r.name}` }));
       if (actions.children.length) li.append(actions);
       list.append(li);
     }
     if (!rows.length) list.append(el('li', 'sempty', V.connectionView(st) ? V.connectionView(st).word : 'Sin resultados'));
     sec.append(list); body.append(sec);
+  }
+  function cancelLogin() {
+    const plan = V.cancelPlan(loginTarget);
+    if (plan.kind === 'send') { send({ action: 'auth_cancel', flowId: plan.flowId }); return; }
+    loginTarget = null; pendingLogin = null; render();
   }
   // «Iniciar sesión» / «Usar una clave»: reuse the provider's account, or create one named after the provider first
   function loginWith(providerId, m) {

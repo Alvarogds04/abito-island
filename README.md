@@ -30,6 +30,14 @@ limits, tested first (RED → GREEN) and integration-tested over real sockets,
 the now-wired `dismiss` verb, and display-only Sileo-style notice text in the
 island. The Node producer (`pi-extension.ts`/`adapter.cjs`) is unchanged.
 
+The least-privilege capability (`capabilities/main.json`) covers both native
+webviews: `"main"` (the island) and `"settings"` (created in Rust by
+`src/settingswindow.rs`). Both get exactly two permissions —
+`core:event:allow-listen` and `core:event:allow-unlisten` — so the settings
+window can subscribe to live state events; everything else stays denied. The
+packaging gate pins the exact window list and permission set
+(`packaging/lib.cjs`, `EXPECTED_WINDOWS`/`EXPECTED_PERMISSIONS`).
+
 Unit **M3** ports the approval lane — Electron's `main.cjs` HTTP authority —
 to Rust: the `bridge.json` credential read, the in-memory session cookie, the
 5 s-deadline HTTP client with manual redirects and abort-on-quit, the
