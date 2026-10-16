@@ -11,7 +11,7 @@ const R6_PREFIX = 'b699ebbc';
 const IDENTIFIER = 'com.abitog.AbitoTauri';
 const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop', 'abito-desktop-preview'];
 const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'character-minibots.js', 'character-motion.js', 'chat-cards.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'icons.js', 'index.html',
-  'integrations-view.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js'];
+  'integrations-payments.js', 'integrations-view.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
 // Inverted logic: EVERY ABITO_* variable is refused except the one the
 // installed app is meant to receive (ABITO_PROJECT_ROOT); plus the whole LD_*

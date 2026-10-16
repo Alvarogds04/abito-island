@@ -1285,6 +1285,47 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 }
 html[data-motion="reduce"] #island-countdown::before { transition: none; }
 
+/* ---- #356/#369: money cards — Pagos (integrations-payments.js) and Finanzas (integrations-finance.js),
+   FAKE providers, read-only. APPEND-ONLY block placed BEFORE the #410 compact slice (a #410 test slices
+   style.css from that block to EOF). Theme tokens only, so light and dark resolve with zero raw colors;
+   44px click targets like Ajustes. */
+#integrations-payments { display: grid; gap: 8px; }
+#integrations-payments[hidden] { display: none; }
+.pay-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pay-title { font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); flex: 1; }
+.pay-state { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.pay-state--connected { color: var(--go); }
+.pay-state--error { color: var(--red-11); }
+.pay-state--paused { color: var(--sun); }
+.pay-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
+.pay-note { margin: 0; font: 400 var(--fs-label)/1.4 var(--font-ui); color: var(--muted); }
+.pay-sums { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+.pay-sum {
+  display: grid; gap: 2px; padding: 8px 10px; border-radius: var(--radius-xl);
+  border: 1px solid var(--line-faint); background: var(--fill-alt);
+}
+.pay-sum-label { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); }
+.pay-sum-amount { font: 700 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); font-variant-numeric: tabular-nums; }
+.pay-sum--failed .pay-sum-amount { color: var(--red-11); }
+.pay-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pay-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; min-width: 0;
+  border-radius: var(--radius-xl); border: 1px solid var(--line-faint); background: var(--fill-alt);
+}
+.pay-label { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pay-status { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.pay-status--succeeded { color: var(--go); }
+.pay-status--failed { color: var(--red-11); }
+.pay-status--pending { color: var(--sun); }
+.pay-amount { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pay-refresh, .fin-refresh {
+  min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
+  font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
+}
+.pay-refresh:hover, .fin-refresh:hover { background: var(--fill-hover); color: var(--island-ink); }
+.pay-refresh:focus-visible, .fin-refresh:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
