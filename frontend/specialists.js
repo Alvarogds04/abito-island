@@ -87,6 +87,8 @@
       b.addEventListener('click', e => { if (e.isTrusted === true) chooseCardColor(id, color); });
       group.append(b);
     }
+    // the current colour repeated as a word: the meaning never rides on colour alone (C5)
+    group.append(el('span', 'srole-color-word', AVATAR.label(current)));
     return group;
   }
   function chooseCardColor(id, color) {

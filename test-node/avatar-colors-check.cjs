@@ -277,6 +277,11 @@ test('wiring: the specialist card offers the same palette through the same comma
   assert.match(src, /No se pudo guardar el color/, 'a failed save keeps the previous colour and says so');
   assert.doesNotMatch(src, /dot-green|#[0-9a-fA-F]{6}/, 'no colour values of its own');
   assert.match(src, /aria-pressed/, 'the selected choice never rides on colour alone');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const block = css.slice(0, css.indexOf('/* ---- #410:'));
+  assert.match(block, /\.srole-colors\s*\{/, 'the card swatches have their own compact rules, append-only before the #410 slice');
+  assert.match(block, /\.srole-colors \[data-color="green"\]|\.srole-colors .*sdot-swatch/, 'the swatch paints through the existing colour stops');
+  assert.doesNotMatch(block, /#436[^\n]*\n[^\n]*transform/, 'no layout surprises');
 });
 
 console.log(`avatar-colors-check: ${passed} passed`);
