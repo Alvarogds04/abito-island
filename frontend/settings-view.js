@@ -455,6 +455,49 @@
   // shown as text, only chosen from these closed tables.
   const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' });
   const AGENT_IDS = Object.freeze(Object.keys(AGENT_NAMES));
+  // #436 T6.5 (D7): all SIX hook clients the daemon's `hooks` frame may name. The three extra
+  // ones are DISPLAY-ONLY (no install/remove exists for them; a dead button would be a lie),
+  // and their names derive from OUR closed ids, never from engine text — the trailing segment
+  // reads as its upper-case product word (a client's proper name, not a terminal instruction).
+  const HOOK_IDS = Object.freeze(['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp']);
+  const agentName = id => AGENT_NAMES[id]
+    || id.split('-').map(s => (s ? s[0].toUpperCase() + s.slice(1) : s)).join(' ').replace(/Cli$/, 'CLI');
+  const HOOK_STATES = Object.freeze({
+    not_connected: ['Sin conectar', 'plug-off', 'faint'], connected: ['Hooks activos', 'check', 'go'],
+    outdated: ['Desactualizado', 'info', 'sun'], working: ['En curso', 'ring', 'live'],
+    unavailable: ['Sin instalar', 'plug-off', 'faint'], error: ['No se pudo', 'triangle', 'red'],
+  });
+  const UNKNOWN_HOOK = ['No disponible', 'plug-off', 'faint'];
+  const BACKUP_NOTE = 'Con respaldo.';
+  // The `hooks` frame folded once: first entry wins per known id, a row off the closed state
+  // vocabulary is dropped (never sanitized into a lie) — the same rules as the Rust fold.
+  const hookRows = state => {
+    const list = state && state.hooks;
+    if (!Array.isArray(list)) return null;
+    const map = new Map();
+    for (const c of list) {
+      if (!c || typeof c !== 'object' || !HOOK_IDS.includes(c.id) || map.has(c.id)) continue;
+      if (!Object.prototype.hasOwnProperty.call(HOOK_STATES, c.state)) continue;
+      map.set(c.id, c);
+    }
+    return map;
+  };
+  const displayRow = (id, st, word, icon, tone, note) => ({
+    id, name: agentName(id), state: st, word, icon, tone,
+    primary: null, secondary: null, note: note || '', summary: '', reviewable: false, trust: false, busy: st === 'working',
+    aria: `${agentName(id)}: ${word}${note ? '. ' + note : ''}`,
+  });
+  const hookRowOf = c => {
+    const [word, icon, tone] = HOOK_STATES[c.state];
+    return displayRow(c.id, c.state, word, icon, tone, c.backup === true ? BACKUP_NOTE : '');
+  };
+  const unknownRow = id => displayRow(id, 'unknown', UNKNOWN_HOOK[0], UNKNOWN_HOOK[1], UNKNOWN_HOOK[2], '');
+  // The six rows in OUR closed order: an engine row wins for its id (the buttons live there),
+  // the hooks frame fills the rest with honest state, and what nobody knows stays unknown.
+  const mergeSix = (rows, hooks) => {
+    const byId = new Map(rows.map(r => [r.id, r]));
+    return HOOK_IDS.map(id => byId.get(id) || (hooks && hooks.get(id) ? hookRowOf(hooks.get(id)) : unknownRow(id)));
+  };
   const AGENT_STATES = Object.freeze({
     not_connected: ['Sin conectar', 'plug-off', 'faint'], connected: ['Conectado', 'check', 'go'], outdated: ['Desactualizado', 'info', 'sun'],
     working: ['En curso', 'ring', 'live'], unavailable: ['No encontrado', 'plug-off', 'faint'], error: ['No se pudo', 'triangle', 'red'],
@@ -492,6 +535,8 @@
     }
     const list = state && state.agents;
     if (!Array.isArray(list)) {
+      const hooks = hookRows(state);
+      if (hooks) return { kind: 'ready', rows: mergeSix([], hooks) }; // hooks-only knowledge is enough
       // The engine of today may not know `agents_list`: it answers error{bad_request|unavailable}, or nothing.
       // Either way the wait ENDS, in words, with no ring (the same class as the services spinner).
       const code = state && state.last_error && state.last_error.code;
@@ -518,11 +563,12 @@
         if (st === 'outdated') secondary = { label: 'Desconectar', command: cmd('agent_disconnect') };
         if (!hash) note = 'No hay una vista previa del cambio; volvé a abrir esta pantalla.';
         else if (!reviewable) note = 'Es un cambio grande: revisalo en el archivo.';
-        else primary = { label: st === 'outdated' ? 'Actualizar' : 'Conectar', command: connectCmd() };
+        // #436 design: the connect word is the design's own «Agregar hooks» (was «Conectar»)
+        else primary = { label: st === 'outdated' ? 'Actualizar' : 'Agregar hooks', command: connectCmd() };
       }
       if (st === 'connected') {
         secondary = { label: 'Desconectar', command: cmd('agent_disconnect') };
-        if (a.backup === true) note = 'Hay un respaldo de tu configuración anterior.';
+        if (a.backup === true) note = 'Con respaldo.'; // #436 design: the design's own subtitle
       }
       if (st === 'unavailable') note = 'No está instalado en esta computadora.';
       if (st === 'error') {
@@ -534,7 +580,7 @@
       rows.push({ id: a.id, name: AGENT_NAMES[a.id], state: st, word, icon, tone, primary, secondary, note, summary, reviewable, trust, busy: st === 'working',
         aria: `${AGENT_NAMES[a.id]}: ${word}${summary ? '. ' + summary : ''}${note ? '. ' + note : ''}` });
     }
-    return { kind: 'ready', rows };
+    return { kind: 'ready', rows: mergeSix(rows, hookRows(state)) };
   }
 
   // ---- what to tell the human after a command ---------------------------------------------------------------------

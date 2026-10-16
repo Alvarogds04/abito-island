@@ -564,17 +564,21 @@ test('agents: three known agents, names from OUR table, never from the engine pa
   const v = S.agentsView(agentsState([{ id: 'claude-code', name: '<b>pwn</b>', state: 'not_connected', backup: false, detail: null }]));
   assert.equal(v.kind, 'ready');
   assert.equal(v.rows[0].name, 'Claude Code');
-  assert.deepEqual(v.rows.map(r => r.id), ['claude-code']);
+  // #436 D7: the design shows ALL SIX clients (was ['claude-code'] only); the engine row keeps its place
+  assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp']);
   // an id outside the allowlist is dropped, a duplicate keeps the first
   const odd = S.agentsView(agentsState([{ id: 'rm -rf', state: 'connected' }, { id: 'codex', state: 'connected' }, { id: 'codex', state: 'error' }]));
-  assert.deepEqual(odd.rows.map(r => r.id), ['codex']);
-  assert.equal(odd.rows[0].state, 'connected');
+  assert.deepEqual(odd.rows.filter(r => r.state !== 'unknown').map(r => r.id), ['codex']);
+  assert.equal(odd.rows[0].state, 'unknown', 'no invented state for an engine that says nothing');
+  assert.equal(odd.rows.find(r => r.id === 'codex').state, 'connected');
 });
 
-test('agents: each state is icon + one word with the right button — «Conectar», «Actualizar», «Desconectar» — never a terminal', () => {
-  const row = (state, extra = {}) => S.agentsView(agentsState([{ id: 'codex', state, backup: false, detail: null, plan_hash: 'b'.repeat(64), summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.codex/hooks.json. A backup is made first.', reviewable: true, ...extra }])).rows[0];
+test('agents: each state is icon + one word with the right button — «Agregar hooks», «Actualizar», «Desconectar» — never a terminal', () => {
+  // #436 D7: rows render in the design's closed six-order, so tests pick their row by id
+  const row = (state, extra = {}) => S.agentsView(agentsState([{ id: 'codex', state, backup: false, detail: null, plan_hash: 'b'.repeat(64), summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.codex/hooks.json. A backup is made first.', reviewable: true, ...extra }])).rows.find(r => r.id === 'codex');
   const nc = row('not_connected');
-  assert.deepEqual([nc.word, nc.tone, nc.primary && nc.primary.label], ['Sin conectar', 'faint', 'Conectar']);
+  // #436 design: the connect word is «Agregar hooks» (was «Conectar»)
+  assert.deepEqual([nc.word, nc.tone, nc.primary && nc.primary.label], ['Sin conectar', 'faint', 'Agregar hooks']);
   assert.deepEqual(nc.primary.command, { action: 'agent_connect', agentId: 'codex', plan_hash: 'b'.repeat(64) });
   assert.equal(nc.secondary, null);
   const ok = row('connected');
@@ -601,11 +605,70 @@ test('agents: each state is icon + one word with the right button — «Conectar
 
 test('agents: a backup is mentioned when there is one; the list is honest without an engine', () => {
   const ok = S.agentsView(agentsState([{ id: 'claude-code', state: 'connected', backup: true, detail: null }])).rows[0];
-  assert.match(ok.note, /respaldo/i);
+  assert.equal(ok.note, 'Con respaldo.'); // #436 design: the design's own subtitle (was a full sentence)
   assert.equal(S.agentsView(state({ connection: 'no_daemon', agents: null })).kind, 'no_engine');
   assert.equal(S.agentsView(state({ connection: 'connected', agents: null })).kind, 'loading');
   assert.equal(S.agentsView(agentsState([])).kind, 'ready');
-  assert.equal(S.agentsView(agentsState([])).rows.length, 0);
+  // #436 D7: an engine frame that names nobody leaves all SIX rows honestly unknown (was 0 rows)
+  assert.equal(S.agentsView(agentsState([])).rows.length, 6);
+  assert.ok(S.agentsView(agentsState([])).rows.every(r => r.word === 'No disponible' && !r.primary && !r.secondary));
+});
+
+// ---- #436 T6.5 (D7): SIX honest rows — real state where known, «No disponible» where not -----------
+const hooksState = (clients, extra = {}) => state({ agents: null, hooks: clients, ...extra });
+test('agents: all SIX clients render, in our closed order, with names derived from OUR ids', () => {
+  const v = S.agentsView(agentsState([{ id: 'claude-code', state: 'connected', backup: false, detail: null }]));
+  assert.equal(v.kind, 'ready');
+  assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp']);
+  assert.deepEqual(v.rows.map(r => r.name), ['Claude Code', 'Codex', 'Gemini CLI', 'Copilot CLI', 'OpenCode', 'Amp']);
+  // the connect allowlist is untouched: the three extra rows never offer a button
+  assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'opencode']);
+  const extras = v.rows.filter(r => !S.AGENT_IDS.includes(r.id));
+  assert.ok(extras.every(r => r.primary === null && r.secondary === null), 'state-only rows, no dead buttons');
+});
+
+test('agents: the daemon hooks frame fills the rows the engine agents frame does not name, state-only', () => {
+  const v = S.agentsView(state({
+    agents: [{ id: 'codex', state: 'connected', backup: false, detail: null }],
+    hooks: [
+      { id: 'claude-code', state: 'connected', mechanism: 'harness', detail: null, backup: true },
+      { id: 'gemini-cli', state: 'not_connected', mechanism: 'artifact', detail: null },
+      { id: 'copilot-cli', state: 'unavailable', mechanism: 'artifact', detail: null },
+      { id: 'amp', state: 'error', mechanism: 'artifact', detail: 'unsupported_platform' },
+    ],
+  }));
+  assert.equal(v.kind, 'ready');
+  const byId = Object.fromEntries(v.rows.map(r => [r.id, r]));
+  // the engine agents frame wins for the id it names (buttons live there)
+  assert.equal(byId['codex'].word, 'Conectado');
+  assert.equal(byId['codex'].secondary.label, 'Desconectar');
+  // hooks-derived rows: honest words, no buttons
+  assert.deepEqual([byId['gemini-cli'].word, byId['gemini-cli'].tone], ['Sin conectar', 'faint']);
+  assert.deepEqual([byId['copilot-cli'].word, byId['copilot-cli'].tone], ['Sin instalar', 'faint']);
+  assert.deepEqual([byId['amp'].word, byId['amp'].tone], ['No se pudo', 'red']);
+  assert.ok(byId['gemini-cli'].primary === null && byId['gemini-cli'].secondary === null);
+  assert.match(byId['claude-code'].note, /Con respaldo/);
+  assert.equal(byId['claude-code'].primary, null, 'a hooks-only row never offers a button, even connected with backup');
+});
+
+test('agents: hooks-only knowledge renders without an agents frame, and working reads «En curso»', () => {
+  const v = S.agentsView(hooksState([
+    { id: 'gemini-cli', state: 'working', mechanism: 'artifact', detail: null },
+    { id: 'amp', state: 'outdated', mechanism: 'artifact', detail: null },
+  ]));
+  assert.equal(v.kind, 'ready', 'hooks data is enough; no endless wait');
+  const byId = Object.fromEntries(v.rows.map(r => [r.id, r]));
+  assert.equal(byId['gemini-cli'].word, 'En curso');
+  assert.equal(byId['amp'].word, 'Desactualizado');
+  assert.equal(byId['claude-code'].word, 'No disponible', 'nothing is known about it: no invented state');
+  assert.equal(byId['claude-code'].primary, null);
+});
+
+test('agents: with neither frame the wait and the honest «No disponible» verdicts are unchanged', () => {
+  assert.equal(S.agentsView(state({ agents: null, hooks: null })).kind, 'loading');
+  const gone = S.agentsView(state({ agents: null, hooks: null, last_error: { code: 'bad_request', n: 3 } }), { askedAtError: 2 });
+  assert.equal(gone.kind, 'unsupported');
+  assert.equal(gone.word, 'No disponible');
 });
 
 // ---- verdict settings-gd ---------------------------------------------------------------------------------
@@ -638,9 +701,13 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
   const strip = t => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const literals = text => [...strip(text).matchAll(/(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g)].map(m => m[2]).filter(x => /[a-záéíóúñ]{3,}/i.test(x));
   const bad = /\b(terminal|consola|l[ií]nea de comandos|comando|shell|bash|cli|sudo|npm|install)\b/i;
+  // #436 D7: the closed hook client ids and the product word are NAMES of clients the design
+  // draws (Gemini CLI, Copilot CLI), not instructions to open a terminal; the guard keeps
+  // watching every other fixed string.
+  const CLIENT_NAMES = new Set(['claude-code', 'codex', 'opencode', 'gemini-cli', 'copilot-cli', 'amp', 'CLI']);
   const where = [];
   for (const f of ['settings.js', 'settings-view.js']) {
-    for (const lit of literals(fs.readFileSync(path.join(frontend, f), 'utf8'))) if (bad.test(lit) && !/^(agent_|abito:|settings|agents_)/.test(lit)) where.push(`${f}: ${lit}`);
+    for (const lit of literals(fs.readFileSync(path.join(frontend, f), 'utf8'))) if (bad.test(lit) && !/^(agent_|abito:|settings|agents_)/.test(lit) && !CLIENT_NAMES.has(lit)) where.push(`${f}: ${lit}`);
   }
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   const sect = html.slice(html.indexOf('id="settings"'), html.indexOf('id="chat-live"'));
@@ -660,7 +727,7 @@ test('verbs follow gentle-dot: «Cerrar sesión» for an account (its Sign out),
   assert.doesNotMatch(src, /wordBtn\('Salir'/, 'no «Salir» button');
   assert.match(src, /wordBtn\(V\.LOGOUT_WORD/, 'the button takes its word from the one constant');
   assert.equal(S.LOGOUT_WORD, 'Cerrar sesión');
-  assert.equal(S.agentsView(agentsState([{ id: 'codex', state: 'connected' }])).rows[0].secondary.label, 'Desconectar');
+  assert.equal(S.agentsView(agentsState([{ id: 'codex', state: 'connected' }])).rows.find(r => r.id === 'codex').secondary.label, 'Desconectar');
 });
 
 test('close glyph: the screen closes with a cross (gentle-dot ×), never the ✓ that means «allow» in our vocabulary', () => {
@@ -712,11 +779,11 @@ test('connecting: the screen draws «Conectando» while the first state is on it
 const HASH = 'a'.repeat(64);
 const plan = (extra = {}) => ({ id: 'claude-code', state: 'not_connected', backup: false, detail: null, plan_hash: HASH,
   summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.claude/settings.json. A backup is made first.', reviewable: true, trust_review: false, ...extra });
-const rowOf = (entry, _id) => S.agentsView(agentsState([entry])).rows[0];
+const rowOf = (entry, _id) => S.agentsView(agentsState([entry])).rows.find(r => r.id === entry.id);
 
 test('plan: the closed summary is shown next to the button, and the click carries the hash the human saw', () => {
   const r = rowOf(plan());
-  assert.equal(r.primary.label, 'Conectar');
+  assert.equal(r.primary.label, 'Agregar hooks'); // #436 design (was «Conectar»)
   assert.deepEqual(r.primary.command, { action: 'agent_connect', agentId: 'claude-code', plan_hash: HASH });
   assert.equal(r.summary, 'Agrega los hooks de Abito (PermissionRequest, Stop) a ~/.claude/settings.json. Antes se hace un respaldo.');
   assert.match(r.aria, /Agrega los hooks/);
@@ -784,6 +851,14 @@ test('trust: after Codex connects the human is told what to do next, in the pane
 test('opencode: always «No encontrado», never a button', () => {
   const r = rowOf({ id: 'opencode', state: 'unavailable', backup: false, detail: null });
   assert.equal(r.primary, null); assert.equal(r.secondary, null); assert.equal(r.word, 'No encontrado');
+});
+
+test('wiring: the agents group follows the design: «Agentes», hooks asked only on open — never on a timer', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /sectionTitle\('Agentes'\)/, 'the design section label');
+  assert.doesNotMatch(src, /Agentes de código/);
+  assert.match(src, /action: 'hooks_preview'/, 'the read-only preview is asked with the agents list');
+  assert.doesNotMatch(src, /setInterval/, 'no polling: the ask rides the tab opening, not a timer');
 });
 
 test('wiring: the plan summary is drawn above the button and the trust hint is its own highlighted line', () => {

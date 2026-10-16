@@ -258,12 +258,15 @@
   }
   // The engine answers `agents_list` with an `agents` frame — or, if it does not know the command, with
   // error{bad_request}, or with silence. All three end the wait (see V.agentsView).
+  // #436 T6.5: the read-only hooks preview rides the SAME ask: one extra closed command when the
+  // Conexiones tab opens (and never on a timer), so the six rows get their real state cheaply.
   function askAgents() {
     if (agentsAsk) clearTimeout(agentsAsk.timer);
     const ask = { at: (agentState && agentState.last_error && agentState.last_error.n) || 0, timedOut: false, timer: 0 };
     ask.timer = setTimeout(() => { ask.timedOut = true; if (isOpen() && screen === 'accounts') render(); }, V.AGENTS_WAIT_MS);
     agentsAsk = ask;
     agent({ action: 'agents_list' }).catch(() => {});
+    agent({ action: 'hooks_preview' }).catch(() => {});
   }
   // The first state normally arrives within a few ms. If it never does, stop saying «Conectando»: the engine
   // is not there, and the screen says so (the same honest word as before, just not before it was asked).
@@ -779,11 +782,11 @@
     // 1) agents: Conectar / Actualizar / Desconectar. The click IS the confirmation; the engine installs with a
     //    backup. Nothing here asks the human to open a terminal.
     const av = V.agentsView(agentState, agentsAsk ? { askedAtError: agentsAsk.at, timedOut: agentsAsk.timedOut } : {});
-    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes de código')); sec.id = 'connections-agents';
+    const sec = el('section', 'ssec'); sec.append(sectionTitle('Agentes')); sec.id = 'connections-agents';
     if (av.kind === 'unsupported') { sec.append(chipNode(av), el('p', 'snote', av.note)); }
     else if (av.kind !== 'ready') sec.append(chipNode(av.kind === 'loading' ? { tone: 'live', icon: 'ring', word: '', aria: 'Leyendo agentes' } : av));
     else {
-      const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Agentes de código');
+      const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Agentes');
       for (const r of av.rows) {
         const li = el('li', 'srow sagent'); li.dataset.state = r.state;
         const head = el('span', 'sagent-head'); head.append(el('b', 'srow-title', r.name), chipNode({ tone: r.tone, icon: r.icon, word: r.word, aria: r.aria }));

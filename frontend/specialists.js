@@ -65,6 +65,38 @@
 
   const selectableIds = () => ((listing && listing.profiles) || []).filter(p => p && p.selectable === true && typeof p.profile_id === 'string').map(p => p.profile_id);
 
+  // #436 D8: the card's colour is the SAME human choice the Apariencia tab edits — the palette
+  // and the resolution come from the one contract (#384) for the SAME stable id, and the write
+  // goes through the existing preferences command. A failed save keeps the previous colour and
+  // says so; the selected choice never rides on colour alone (aria-pressed + a visible word).
+  function colorChoices(id, name) {
+    if (!AVATAR || !Array.isArray(AVATAR.PALETTE)) return null;
+    const current = AVATAR.resolveColor(id, avatarColors);
+    const group = el('span', 'srole-colors');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', `Color de ${name}`);
+    for (const color of AVATAR.PALETTE) {
+      const b = el('button', 'sdot sm');
+      b.type = 'button';
+      b.dataset.color = color;
+      b.title = AVATAR.label(color);
+      b.setAttribute('aria-label', `${AVATAR.label(color)} para ${name}`);
+      b.setAttribute('aria-pressed', color === current ? 'true' : 'false');
+      b.disabled = busy || store?.load_error === true;
+      b.append(el('span', 'sdot-swatch'));
+      b.addEventListener('click', e => { if (e.isTrusted === true) chooseCardColor(id, color); });
+      group.append(b);
+    }
+    // the current colour repeated as a word: the meaning never rides on colour alone (C5)
+    group.append(el('span', 'srole-color-word', AVATAR.label(current)));
+    return group;
+  }
+  function chooseCardColor(id, color) {
+    call('prefs_action', { action: 'set_avatar_color', identity: id, color }).then(
+      p => { applyPrefs(p); say('Color guardado.'); },
+      () => say('No se pudo guardar el color; se mantuvo el anterior.'));
+  }
+
   // ---- IPC -------------------------------------------------------------------------------------------
   function apply(next) { if (next && typeof next === 'object') { store = next; renderSection(); renderChip(); notifyIdentities(); } }
   // select / delete: no form involved.
@@ -161,6 +193,11 @@
     host.textContent = '';
     const sec = el('section', 'ssec');
     sec.append(el('h3', 'ssection', 'Especialistas'));
+    // #436 design: the declarative disclaimer is ONE chip in the section header (was a fixed
+    // paragraph plus repeated wording in the Space/permissions fields).
+    const declarativo = el('span', 'chip', 'Declarativo: todavía no se aplica');
+    declarativo.id = 'specialists-declarativo';
+    sec.append(declarativo);
     if (view.kind === 'loading') {
       sec.append(el('p', 'snote', 'Leyendo tus especialistas…'));
       host.append(sec);
@@ -176,10 +213,8 @@
       host.append(sec); paintForm(); restoreFocus(host, focused, caret);
       return;
     }
-    sec.append(el('p', 'snote', 'Un especialista es un rol que creás vos: un nombre, su especialidad y, si querés, uno de los modelos locales verificados. Lo elegís a mano; Abito no reparte trabajo ni se conecta solo a ningún lado.'));
     if (view.persistenceNote) sec.append(el('p', 'snote strust', view.persistenceNote));
     sec.append(el('p', 'snote', V.catalogNote(listing)));
-    sec.append(el('p', 'snote', 'Declarativo: todavía no se aplica. El espacio y los permisos (lectura, escritura, red, ejecución) quedan anotados en cada especialista, pero hoy no habilitan ni bloquean nada.'));
     sec.append(el('span', 'chip', view.countWord));
 
     // The explicit choice: a radiogroup, Abito first, exactly one checked. Arrow keys move AND choose
@@ -211,8 +246,6 @@
       if (row) {
         radio.append(el('span', 'chip', row.modelLabel));
         if (!row.modelReady) radio.append(el('span', 'chip', 'Modelo no disponible'));
-        if (row.space) radio.append(el('span', 'chip', 'Espacio: ' + row.space));
-        radio.append(el('span', 'chip', 'Permisos (declarativos): ' + row.permissionWords.join(', ')));
       } else radio.append(el('span', 'chip', 'Principal'));
       radio.addEventListener('click', e => {
         if (e.isTrusted !== true || radio.disabled) return;
@@ -230,6 +263,9 @@
       rowEl.append(radio);
       if (row) {
         if (!(form.state.open && form.state.editing === row.id)) rowEl.append(el('p', 'srow-sub', row.instructions));
+        // #436 D8: the SAME colour choice the Apariencia tab edits, surfaced on the card so both stay in sync.
+        const colors = colorChoices(row.id, row.name);
+        if (colors) rowEl.append(colors);
         const actions = el('span', 'srow-actions');
         actions.append(wordBtn('Editar', () => openEdit(row), { aria: `Editar ${row.name}`, disabled: form.state.open }));
         actions.append(wordBtn('Borrar', () => send({ action: 'delete', id: row.id }, `${row.name}: borrado.`), { aria: `Borrar ${row.name}`, disabled: form.state.open }));
@@ -294,14 +330,14 @@
     model.addEventListener('change', () => { form.input('model', model.value); paintForm(); });
     const space = el('input', 'sfield');
     space.type = 'text'; space.id = 'specialists-space'; space.maxLength = V.MAX_SPACE; space.autocomplete = 'off';
-    space.placeholder = 'Espacio por defecto (opcional). Declarativo: todavía no se aplica.';
-    space.setAttribute('aria-label', 'Espacio por defecto del especialista, opcional y declarativo');
+    space.placeholder = 'Espacio por defecto (opcional)';
+    space.setAttribute('aria-label', 'Espacio por defecto del especialista, opcional');
     space.value = d.space;
     space.addEventListener('input', () => { form.input('space', space.value); paintForm(); });
     const perms = el('div', 'sfield');
     perms.setAttribute('role', 'group');
-    perms.setAttribute('aria-label', 'Permisos del especialista, declarativos: todavía no se aplican');
-    perms.append(el('span', 'snote', 'Permisos (declarativos, todavía no se aplican):'));
+    perms.setAttribute('aria-label', 'Permisos del especialista');
+    perms.append(el('span', 'snote', 'Permisos:'));
     for (const p of V.PERMISSIONS) {
       const lab = el('label', 'sperm');
       const box = el('input'); box.type = 'checkbox'; box.id = 'specialists-perm-' + p; box.checked = d.permissions.includes(p);

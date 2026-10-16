@@ -266,4 +266,22 @@ test('wiring: the panel offers the palette and writes through the existing prefe
   assert.doesNotMatch(src, /claude-code|opencode|codex/, 'the panel never turns a connector into a sub-Abito');
 });
 
+// #436 T6.5 (D8): the specialist card offers the SAME palette. Source-level wiring only:
+// specialists.js has no DOM harness (no jsdom anywhere in this suite), so the colour side
+// of the card is proven structurally and honestly stated as such.
+test('wiring: the specialist card offers the same palette through the same command, with no second colour store', () => {
+  const src = fs.readFileSync(path.join(frontend, 'specialists.js'), 'utf8');
+  assert.match(src, /set_avatar_color/, 'the card writes through the existing preferences command');
+  assert.match(src, /AVATAR\.PALETTE/, 'the choices come from the one palette contract');
+  assert.match(src, /AVATAR\.resolveColor\(/, 'the shown colour resolves through the contract for the SAME id');
+  assert.match(src, /No se pudo guardar el color/, 'a failed save keeps the previous colour and says so');
+  assert.doesNotMatch(src, /dot-green|#[0-9a-fA-F]{6}/, 'no colour values of its own');
+  assert.match(src, /aria-pressed/, 'the selected choice never rides on colour alone');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const block = css.slice(0, css.indexOf('/* ---- #410:'));
+  assert.match(block, /\.srole-colors\s*\{/, 'the card swatches have their own compact rules, append-only before the #410 slice');
+  assert.match(block, /\.srole-colors \[data-color="green"\]|\.srole-colors .*sdot-swatch/, 'the swatch paints through the existing colour stops');
+  assert.doesNotMatch(block, /#436[^\n]*\n[^\n]*transform/, 'no layout surprises');
+});
+
 console.log(`avatar-colors-check: ${passed} passed`);
