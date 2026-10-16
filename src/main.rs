@@ -819,6 +819,9 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
 fn open_chat_and_type(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _ = dispatch_verb(app, &state, Action::Expand, None);
+    // R2: keep the cached visibility honest at the call site too — the expand
+    // verb above may have revealed the island from Hidden.
+    sync_host_visible(&main_window(app));
     chathost::switch_view(app, &state, true);
     let win = main_window(app);
     let _ = win.set_focus();
