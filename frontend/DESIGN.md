@@ -132,3 +132,7 @@ and registry icons only, `chat-markdown.css` styles them from themed tokens
 on the #338 island card, so nothing here can trap focus. Public checks:
 `test-node/transcript-cards-check.cjs` (RED observed before each fix;
 packaging's curated `FRONTEND_FILES` list gained `chat-cards.js`).
+
+## Ajustes → Conexiones: «Servicios (datos de ejemplo)»
+
+The nine FAKE integration cards (`integrations-view.js` + `integrations-{github,deployments,email,mail,payments,finance,notion,n8n,calendar}.js`) are mounted in `#connections-more` (index.html, inside `#settings`, outside `#settings-body`). `settings.js` `render()` wipes the body, so it re-appends the group after the Conexiones sections and hides it on every other tab (`AbitoSettings.servicesGroupVisible`). Each card keeps its own sibling `<section id="integrations-…" hidden>`; every card shows the «Datos de ejemplo» banner. Nothing is connected: no network, no accounts. Checked by `test-node/integrations-mount-check.cjs`.

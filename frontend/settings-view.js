@@ -32,6 +32,8 @@
   const tabById = id => TABS.find(x => x.id === id) || null;
   // S8: Cuentas + Conectores are ONE tab now. Old ids (deep links, probe seam) resolve through this table.
   const TAB_ALIASES = Object.freeze({ connectors: 'accounts' });
+  // Ajustes -> Conexiones owns the FAKE services group; no other tab shows it.
+  const servicesGroupVisible = id => tabAlias(id) === 'accounts';
   const tabAlias = id => (Object.prototype.hasOwnProperty.call(TAB_ALIASES, id) ? TAB_ALIASES[id] : (tabById(id) ? id : null));
   // Tablist keyboard (WAI-ARIA): arrows wrap, Home/End jump. Returns the id to focus, or null for any other key.
   function tabKeyTarget(current, key) {
@@ -650,7 +652,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
