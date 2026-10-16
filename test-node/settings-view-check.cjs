@@ -21,6 +21,36 @@ test('F055 general volume uses default and inclusive boundaries without coercion
   for (const value of ['-0.01', '0.201', 'Infinity', 'NaN', 'junk']) assert.ok(S.soundGainProblem(value));
 });
 
+// T6.3 #434: the volume control becomes a SLIDER (design ajustes-ventana-general-*). The percent
+// shown is the position inside the 0..0.2 range (the design's «60%» is exactly the 0.12 default).
+test('T6.3 volume slider projection: percent of the 0..0.2 range, honest default for hostile input', () => {
+  assert.equal(S.gainPercent(0), 0);
+  assert.equal(S.gainPercent(0.12), 60);
+  assert.equal(S.gainPercent(0.05), 25);
+  assert.equal(S.gainPercent(0.2), 100);
+  for (const bad of [-0.1, 0.21, NaN, Infinity, '0.1', null, undefined, 'junk']) {
+    assert.equal(S.gainPercent(bad), 60, String(bad)); // the same default the view models (0.12)
+  }
+});
+
+// T6.3 #434 (coordinator split): the design's segmented Auto-cierre «8 s / 15 s / 30 s / Nunca»
+// with the EXISTING 5..120 contract. A stored value outside the presets stays honest as its own
+// selected segment; «Nunca» is drawn but visibly does not work yet (disabled, «Próximamente»).
+test('T6.3 auto-close segmented projection: presets, honest custom value, disabled Nunca', () => {
+  const segs = S.autoCloseSegments(15);
+  assert.deepEqual(segs.map(s => [s.seconds, s.selected]), [[8, false], [15, true], [30, false], [null, false]]);
+  assert.equal(segs[3].label, 'Nunca');
+  assert.equal(segs[3].disabled, true, 'Nunca is drawn but does not work yet (no contract behind it)');
+  assert.match(segs[3].title, /Próximamente/);
+  const custom = S.autoCloseSegments(20);
+  assert.deepEqual(custom.map(s => [s.seconds, s.selected]), [[8, false], [15, false], [30, false], [20, true], [null, false]]);
+  assert.equal(custom[3].label, '20 s', 'a stored non-preset value is shown as its own selected segment');
+  assert.equal(custom[3].disabled, false);
+  const fallback = S.autoCloseSegments(4); // hostile -> the same default the view models (15)
+  assert.equal(fallback.filter(s => s.selected).length, 1);
+  assert.equal(fallback.find(s => s.selected).seconds, 15);
+});
+
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
 test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Blobs, Apariencia, General', () => {
   assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'models', 'specialists', 'pills', 'appearance', 'general']);
@@ -1204,11 +1234,12 @@ test('#336 settings UI source contract: the closed pair payload, validation befo
   assert.match(src, /action: 'set_island_interaction', auto_close_seconds:/);
   assert.match(src, /open_on_hover:/);
   assert.doesNotMatch(src, /set_island_interaction[^\n]*auto_close_seconds:\s*autoCloseSeconds(?!,)/);
-  // validation gate: the view-model validator drives input, submit and the disabled save
+  // validation gate: the view-model validator drives the segmented choice before any save
   assert.match(src, /V\.autoCloseProblem\(/);
   assert.match(src, /settings-autoclose-error/);
-  // honest invalid values: the issue text is shown and the save stays disabled
-  assert.match(src, /aria-invalid[^\n]*auto|autoCloseIssue|problem \? 'true'/);
+  // honest invalid values: the issue text is shown in the segmented control's error line
+  // (T6.3 #434: the number field became a segmented control — before: aria-invalid on the input)
+  assert.match(src, /settings-autoclose-options/);
   // honest save failure: the value did not change
   assert.match(src, /No se pudo guardar\. La interacción sigue sin cambios/);
   // hover toggle through the same closed pair, with an honest failure too
@@ -1216,6 +1247,40 @@ test('#336 settings UI source contract: the closed pair payload, validation befo
   assert.match(src, /say\('No se pudo guardar\. La interacción sigue sin cambios/);
   // the new section never writes raw pixels
   assert.doesNotMatch(src, /auto[Cc]lose[^\n]*\d+px/);
+});
+
+// T6.3 #434 General screen contract: volume slider (design wins, D6), segmented auto-close with
+// the existing 5..120 contract, Perfil/Isla/Sonido groups, copy diet. Honest failure texts stay.
+test('T6.3 General screen source contract: slider, segmented auto-close, groups, copy diet', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  // volume slider through the closed command; the number field is gone
+  assert.match(src, /gainInput\.type = 'range'/);
+  assert.doesNotMatch(src, /gainInput\.type = 'number'/);
+  assert.match(src, /settings-sound-gain/);
+  assert.match(src, /aria-valuetext/);
+  assert.match(src, /V\.gainPercent\(/);
+  // validation gate and honest failure behaviour survive the slider swap
+  assert.match(src, /V\.soundGainProblem\(/);
+  assert.match(src, /No se pudo guardar\. El volumen sigue sin cambios/);
+  // segmented auto-close: presets render, Nunca is visibly not working, the closed pair stays
+  assert.match(src, /V\.autoCloseSegments\(/);
+  assert.match(src, /Próximamente/);
+  assert.match(src, /action: 'set_island_interaction', auto_close_seconds: seconds, open_on_hover:/);
+  assert.match(src, /settings-autoclose-error/);
+  assert.match(src, /No se pudo guardar\. La interacción sigue sin cambios/);
+  // groups exactly as the design shows them (PERFIL / ISLA / SONIDO Y ATAJO)
+  assert.match(src, /'Perfil'/);
+  assert.match(src, /'Isla'/);
+  assert.match(src, /'Sonido y atajo'/);
+  assert.match(src, /'Abrir Ajustes en ventana'/);
+  assert.match(src, /'Atajo global'/);
+  // copy diet: the explanatory paragraphs of the General screen are gone
+  assert.doesNotMatch(src, /Dónde se abre Ajustes/);
+  assert.doesNotMatch(src, /Avisos sonoros de la isla/);
+  assert.doesNotMatch(src, /Abre y oculta la isla/);
+  assert.doesNotMatch(src, /Sólo para saludarte/);
+  assert.doesNotMatch(src, /Se cierra sola después/);
+  assert.doesNotMatch(src, /De 0 a 0,2/);
 });
 
 // ---- #366 F093: the opt-in settings window ----------------------------------------------------------

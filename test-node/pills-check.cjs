@@ -71,6 +71,8 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
         else if (payload.action === 'set_sound_gain') backend.prefs.gain = payload.gain;
         else if (payload.action === 'set_display_name') backend.prefs.displayName = payload.display_name.trim();
         else if (payload.action === 'set_avatar_color') backend.prefs.avatarColors[payload.identity] = payload.color;
+        else if (payload.action === 'set_island_interaction') { backend.prefs.autoCloseSeconds = payload.auto_close_seconds; backend.prefs.openOnHover = payload.open_on_hover; }
+        else if (payload.action === 'set_settings_window') backend.prefs.settingsWindow = payload.settings_window === true;
         else return Promise.reject(new Error('invalid_schema'));
         if (JSON.stringify(backend.prefs) !== before) {
           backend.writes++; backend.publications++;
@@ -255,16 +257,102 @@ test('S6 failed main save keeps previous snapshot and focus; explicit retry succ
 test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices', async () => {
   const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}}, 'general');
   b.click('sw-sound'); await flush(); assert.equal(b.backend.prefs.sound,true);
-  const gain=b.get('settings-sound-gain'); gain.value='0.2'; gain.fire('input'); gain.parentNode.fire('submit'); await flush();
-  assert.equal(b.backend.prefs.gain,0.2);
-  b.click('settings-tab-appearance'); await flush();
+  // T6.3 #434: the gain field became a slider committed on change (before: number input + form submit)
+  const gain=b.get('settings-sound-gain'); gain.value='0.1'; gain.fire('change'); await flush();
+  assert.equal(b.backend.prefs.gain,0.1);
+  // T6.3 #434: the display name lives in PERFIL on the General tab now (before: appearance tab)
   const name=b.get('settings-display-name'); name.value='Bea'; name.fire('input'); name.parentNode.fire('submit'); await flush();
   assert.equal(b.backend.prefs.displayName,'Bea');
+  b.click('settings-tab-appearance'); await flush();
   b.click('dot-color-abito-blue'); await flush(); assert.equal(b.backend.prefs.avatarColors.abito,'blue');
   assert.equal(b.backend.prefs.mainPill,'agent_codex'); assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']);
   assert.deepEqual(writes(b).map(x=>x.payload.action),['sound_on','set_sound_gain','set_display_name','set_avatar_color']);
   assert.equal(b.get('pill-name').textContent,'Codex');
   assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(!b.get('settings-tab-connectors'), 'S8: merged into Conexiones');
+});
+
+// T6.3 #434: the volume control is a slider (design ajustes-ventana-general-*): native range
+// 0..0.2, keyboard accessible, value shown as text too, committed through the same closed
+// command with the same honest failure.
+test('T6.3 #434 volume slider: range 0..0.2, aria + percent text, commit on change, honest failure', async () => {
+  const b = await settingsBoot({}, 'general');
+  const gain = b.get('settings-sound-gain');
+  assert.equal(gain.tagName, 'INPUT');
+  assert.equal(gain.type, 'range');
+  assert.equal(gain.min, '0'); assert.equal(gain.max, '0.2'); assert.equal(gain.step, '0.01');
+  assert.equal(gain.getAttribute('aria-valuemin'), '0');
+  assert.equal(gain.getAttribute('aria-valuemax'), '0.2');
+  assert.equal(gain.getAttribute('aria-valuenow'), '0.12');
+  assert.equal(gain.getAttribute('aria-valuetext'), '60%', 'the percent is the position inside 0..0.2');
+  assert.equal(gain.getAttribute('aria-label'), 'Volumen');
+  assert.equal(b.get('settings-sound-gain-value').textContent, '60%', 'the value is shown as text too');
+  // commit on change through the same closed command
+  gain.value = '0.05'; gain.fire('change'); await flush();
+  assert.equal(b.backend.prefs.gain, 0.05);
+  assert.deepEqual(writes(b).map(x => x.payload.action), ['set_sound_gain']);
+  // honest failure: nothing saved, the issue is shown, focus returns to the slider
+  b.backend.rejectNext = true;
+  const retry = b.get('settings-sound-gain'); retry.value = '0.1'; retry.fire('change'); await flush();
+  assert.equal(b.backend.prefs.gain, 0.05, 'a failed save keeps the previous gain');
+  assert.equal(b.get('settings-sound-gain').getAttribute('aria-invalid'), 'true', 'the re-rendered slider is marked invalid');
+  assert.match(b.get('settings-gain-error').textContent, /No se pudo guardar/);
+  assert.equal(b.doc.activeElement && b.doc.activeElement.id, 'settings-sound-gain');
+});
+
+// T6.3 #434: General groups exactly as the design shows them, with the copy diet.
+test('T6.3 #434 General groups: Perfil / Isla / Sonido y atajo, name in Perfil, no hint walls', async () => {
+  const b = await settingsBoot({}, 'general');
+  const text = b.get('settings-body').textContent;
+  for (const word of ['Perfil', 'Isla', 'Sonido y atajo', 'Nombre', 'Auto-cierre', 'Abrir al pasar el mouse', 'Abrir Ajustes en ventana', 'Volumen', 'Atajo global']) {
+    assert.ok(text.includes(word), word);
+  }
+  const name = b.get('settings-display-name');
+  assert.ok(name, 'the display name moved into PERFIL on the General tab');
+  assert.equal(name.getAttribute('placeholder'), 'Tu nombre (opcional)');
+  const win = b.get('sw-settings-window');
+  assert.equal(win.getAttribute('aria-label'), 'Abrir Ajustes en ventana');
+  assert.equal(b.get('sw-island-hover').getAttribute('aria-label'), 'Abrir al pasar el mouse');
+  // the hint walls are gone; the ONE allowed hint is the limited-shortcut note
+  assert.ok(!text.includes('Avisos sonoros de la isla'));
+  assert.ok(!text.includes('Se cierra sola después'));
+  // the name is no longer on the appearance tab
+  b.click('settings-tab-appearance'); await flush();
+  assert.ok(!b.get('settings-display-name'), 'the name lives in PERFIL (General) now');
+});
+
+// T6.3 #434 (coordinator split): segmented Auto-cierre «8 s / 15 s / 30 s / Nunca» on the
+// EXISTING contract: presets save through the closed pair, a stored non-preset stays honest,
+// «Nunca» is visibly disabled (no contract behind it yet).
+test('T6.3 #434 auto-close segmented: presets save, custom value stays honest, Nunca disabled', async () => {
+  const b = await settingsBoot({}, 'general');
+  const group = b.get('settings-autoclose-options');
+  assert.equal(group.getAttribute('role'), 'radiogroup');
+  assert.equal(group.getAttribute('aria-label'), 'Auto-cierre');
+  const seg = id => b.get('autoclose-' + id);
+  for (const id of ['8', '15', '30']) {
+    assert.equal(seg(id).getAttribute('role'), 'radio', id);
+    assert.equal(seg(id).getAttribute('aria-checked'), id === '15' ? 'true' : 'false', id);
+  }
+  const never = seg('never');
+  assert.equal(never.disabled, true, 'Nunca is drawn but does not work yet');
+  assert.equal(never.getAttribute('title'), 'Próximamente');
+  // a preset saves through the closed pair
+  b.click('autoclose-8'); await flush();
+  assert.equal(b.backend.prefs.autoCloseSeconds, 8);
+  assert.deepEqual(writes(b).map(x => x.payload.action), ['set_island_interaction']);
+  assert.equal(writes(b)[0].payload.open_on_hover, false, 'the closed pair always carries both fields');
+  // a stored non-preset value renders as its own selected segment, never rewritten
+  b.emit({ autoCloseSeconds: 20 }); await flush();
+  const custom = b.get('autoclose-20');
+  assert.ok(custom, 'the custom value gets its own segment');
+  assert.equal(custom.getAttribute('aria-checked'), 'true');
+  assert.match(custom.textContent, /20 s/);
+  assert.equal(b.get('autoclose-15').getAttribute('aria-checked'), 'false');
+  // honest failure keeps the stored value
+  b.backend.rejectNext = true;
+  b.click('autoclose-30'); await flush();
+  assert.equal(b.backend.prefs.autoCloseSeconds, 20);
+  assert.match(b.get('settings-autoclose-error').textContent, /No se pudo guardar\. La interacción sigue sin cambios/);
 });
 
 test('#408 Cuentas renders the provider-list section (and tab selection follows the click) without an engine', async () => {

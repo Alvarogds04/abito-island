@@ -249,6 +249,30 @@
     };
   }
 
+  // T6.3 #434: the volume control is a slider (design ajustes-ventana-general-*). The percent
+  // shown is the position inside the 0..0.2 range: the design's «60%» is exactly the 0.12 default.
+  function gainPercent(gain) {
+    return typeof gain === 'number' && Number.isFinite(gain) && gain >= 0 && gain <= 0.2
+      ? Math.round((gain / 0.2) * 100)
+      : 60; // the same default generalView models (0.12)
+  }
+
+  // T6.3 #434 (coordinator split): the design draws Auto-cierre as a segmented control
+  // «8 s / 15 s / 30 s / Nunca», but the contract only knows integer seconds 5..120 (no «Nunca»
+  // behind it yet). Presets use the existing closed pair; a stored non-preset value stays honest
+  // as its own selected segment; «Nunca» renders visibly disabled («Próximamente»). Hostile
+  // input reads as the same 15 s default islandInteractionView models.
+  const AUTO_CLOSE_PRESETS = Object.freeze([8, 15, 30]);
+  function autoCloseSegments(seconds) {
+    const valid = Number.isInteger(seconds) && seconds >= 5 && seconds <= 120 ? seconds : 15;
+    const segments = AUTO_CLOSE_PRESETS.map(value => ({ seconds: value, label: `${value} s`, selected: value === valid, disabled: false, title: '' }));
+    if (!AUTO_CLOSE_PRESETS.includes(valid)) {
+      segments.push({ seconds: valid, label: `${valid} s`, selected: true, disabled: false, title: '' });
+    }
+    segments.push({ seconds: null, label: 'Nunca', selected: false, disabled: true, title: 'Próximamente' });
+    return segments;
+  }
+
   // ---- hotkey capture (a pressed combination -> canonical text) -------------------------------------------------------
   const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'OS', 'Super']);
   function captureCombo(event) {
@@ -665,7 +689,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,

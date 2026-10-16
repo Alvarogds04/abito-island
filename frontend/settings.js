@@ -74,7 +74,6 @@
   let gainSaving = false;
   let gainError = '';
   // #336 F003: same draft/saving/error pattern as the volume field.
-  let autoDraft = null;
   let autoSaving = false;
   let autoError = '';
   let nameDraft = null; // null follows saved prefs; edited text survives state pushes
@@ -837,37 +836,20 @@
     // #366 F093: where Ajustes opens — inside the island (default, #408) or in its own
     // window. The typed pref is the only chooser; a failed save keeps the previous
     // placement and says so.
-    const placement = group('general', 'Ventana', 'Dónde se abre Ajustes. La ventana es aparte; la isla sigue siendo lo de siempre.');
-    const placementOn = V.settingsWindowView(prefs).on;
-    placement.append(toggleRow('sw-settings-window', 'Abrir Ajustes en su ventana', placementOn, () => {
-      call('prefs_action', { action: 'set_settings_window', settings_window: !placementOn }).then(p => {
-        prefs = p; render();
-        say(!placementOn ? 'Ajustes se abre en su ventana.' : 'Ajustes se abre dentro de la isla.');
-      }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
-    }));
-    if (g.hotkey) {
-      const sec = group('general', 'Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
-      const h = g.hotkey;
-      const row = el('div', 'srow');
-      row.append(el('span', 'srow-title', 'Atajo'));
-      row.append(Object.assign(el('kbd', 'skbd', capturing ? 'Pulsá el atajo…' : h.combo), { id: 'settings-combo' }));
-      row.append(chipNode({ tone: h.status === 'active' ? 'go' : 'faint', icon: h.backend === 'portal' ? 'check' : 'info', word: h.backendLabel, aria: h.note ? `${h.backendLabel}. ${h.note}` : h.backendLabel }));
-      const actions = el('span', 'srow-actions');
-      actions.append(wordBtn(capturing ? 'Cancelar' : 'Cambiar', () => { capturing = !capturing; render(); if (capturing) say('Pulsá la combinación nueva; Escape cancela.'); }, { icon: 'refresh' }));
-      actions.append(wordBtn('Original', () => call('hotkey_action', { action: 'reset' }).then(r => { hotkey = r; render(); }, () => {})));
-      row.append(actions);
-      sec.append(row);
-      sec.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
-      if (h.note) sec.append(el('p', 'snote', h.note));
-    }
-    const personal = group('appearance', 'Saludo', 'Sólo para saludarte en el chat vacío. Dejalo en blanco para un saludo sin nombre.');
-    const nameForm = el('form', 'sname-form'); nameForm.noValidate = true;
-    const label = el('label', 'srow-title', 'Tu nombre (opcional)'); label.htmlFor = 'settings-display-name';
+    // T6.3 #434: General groups exactly as the design shows them: PERFIL / ISLA / SONIDO Y ATAJO
+    // (design ajustes-ventana-general-{dark,light}.png, DESIGN-NOTES §3). Created in the design's
+    // order, filled below. Copy diet: no hint walls, one hint at most.
+    const perfil = group('general', 'Perfil');
+    const isla = group('general', 'Isla');
+    const sound = group('general', 'Sonido y atajo');
+    const personal = perfil;
+    const nameForm = el('form', 'sname-form sperfil-form'); nameForm.noValidate = true;
+    const label = el('label', 'srow-title', 'Nombre'); label.htmlFor = 'settings-display-name';
     const nameInput = el('input', 'sfield'); nameInput.type = 'text'; nameInput.id = 'settings-display-name';
     nameInput.autocomplete = 'off'; nameInput.spellcheck = false;
+    nameInput.setAttribute('placeholder', 'Tu nombre (opcional)');
     nameInput.value = nameDraft === null ? (prefs.displayName || '') : nameDraft;
-    nameInput.setAttribute('aria-describedby', 'settings-name-help settings-name-error');
-    const hint = el('p', 'snote', 'Hasta 80 caracteres. Borrá el nombre y guardá para volver al saludo anónimo.'); hint.id = 'settings-name-help';
+    nameInput.setAttribute('aria-describedby', 'settings-name-error');
     const error = el('p', 'snote'); error.id = 'settings-name-error'; error.setAttribute('role', 'status');
     const save = el('button', 'sbtn primary', nameSaving ? 'Guardando…' : 'Guardar nombre'); save.type = 'submit';
     const paint = () => {
@@ -893,92 +875,139 @@
         const field = $('settings-display-name'); if (field) field.focus();
       });
     });
-    nameForm.append(label, nameInput, hint, error, save); personal.append(nameForm); paint();
-    const sound = group('general', 'Sonido', 'Avisos sonoros de la isla. Empieza apagado.');
+    nameForm.append(label, nameInput, error, save); personal.append(nameForm); paint();
+    // Sonido y atajo: the toggle keeps its contract; the volume is a SLIDER (D6/design). Same
+    // closed command, same validation gate, same honest failure — only the control changes.
     sound.append(toggleRow('sw-sound', 'Sonido', g.sound.on, () => call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); }, () => {})));
-    const gainForm = el('form', 'sname-form'); gainForm.noValidate = true;
-    const gainLabel = el('label', 'srow-title', 'Volumen'); gainLabel.htmlFor = 'settings-sound-gain';
-    const gainInput = el('input', 'sfield'); gainInput.type = 'number'; gainInput.id = 'settings-sound-gain';
-    gainInput.min = '0'; gainInput.max = '0.2'; gainInput.step = 'any';
+    const volRow = el('div', 'srow');
+    volRow.append(el('span', 'srow-title', 'Volumen'));
+    const volActions = el('span', 'srow-actions');
+    const gainInput = el('input', 'sfield srange'); gainInput.type = 'range'; gainInput.id = 'settings-sound-gain';
+    gainInput.min = '0'; gainInput.max = '0.2'; gainInput.step = '0.01';
     gainInput.value = gainDraft === null ? String(g.sound.gain) : gainDraft;
-    gainInput.setAttribute('aria-describedby', 'settings-gain-help settings-gain-error');
-    const gainHint = el('p', 'snote', 'De 0 a 0,2. El valor inicial es 0,12. En 0 no suena.'); gainHint.id = 'settings-gain-help';
+    gainInput.setAttribute('aria-label', 'Volumen');
+    gainInput.setAttribute('aria-describedby', 'settings-gain-error');
+    const gainValue = el('span', 'svolume-value'); gainValue.id = 'settings-sound-gain-value';
     const gainIssue = el('p', 'snote'); gainIssue.id = 'settings-gain-error'; gainIssue.setAttribute('role', 'status');
-    const gainSave = el('button', 'sbtn primary', gainSaving ? 'Guardando…' : 'Guardar volumen'); gainSave.type = 'submit';
     const paintGain = () => {
+      const percent = `${V.gainPercent(Number(gainInput.value))}%`;
+      gainValue.textContent = percent;
+      gainInput.setAttribute('aria-valuemin', '0');
+      gainInput.setAttribute('aria-valuemax', '0.2');
+      gainInput.setAttribute('aria-valuenow', String(gainInput.value));
+      gainInput.setAttribute('aria-valuetext', percent);
       const problem = V.soundGainProblem(gainInput.value);
       gainIssue.textContent = gainError || problem;
-      gainInput.setAttribute('aria-invalid', problem ? 'true' : 'false');
-      gainSave.disabled = gainSaving || !!problem;
+      gainInput.setAttribute('aria-invalid', (gainError || problem) ? 'true' : 'false');
     };
     gainInput.addEventListener('input', e => {
       if (!e.isTrusted) return;
       gainDraft = gainInput.value; gainError = ''; paintGain();
     });
-    gainForm.addEventListener('submit', e => {
-      e.preventDefault();
+    gainInput.addEventListener('change', e => {
       if (!e.isTrusted || gainSaving || V.soundGainProblem(gainInput.value)) return;
       const typed = gainInput.value;
-      gainDraft = typed; gainError = ''; gainSaving = true; paintGain(); gainSave.textContent = 'Guardando…';
+      gainDraft = typed; gainError = ''; gainSaving = true; paintGain();
       call('prefs_action', { action: 'set_sound_gain', gain: Number(typed) }).then(p => {
         gainSaving = false; prefs = p;
         if (gainDraft === typed) gainDraft = null;
         render(); say('Volumen guardado.');
-        const field = $('settings-sound-gain'); if (field) field.focus();
       }, () => {
         gainSaving = false; gainError = 'No se pudo guardar. El volumen sigue sin cambios; probá de nuevo.';
         render();
         const field = $('settings-sound-gain'); if (field) field.focus();
       });
     });
-    gainForm.append(gainLabel, gainInput, gainHint, gainIssue, gainSave); sound.append(gainForm); paintGain();
+    volActions.append(gainInput, gainValue);
+    volRow.append(volActions);
+    sound.append(volRow, gainIssue); paintGain();
+    // Atajo global: same behaviour (capture, reset, enable/disable), restyled to the design row;
+    // the backend note becomes the row's sub line instead of a paragraph.
+    if (g.hotkey) {
+      const h = g.hotkey;
+      const row = el('div', 'srow');
+      const titles = el('span', 'srow-titles');
+      titles.append(el('span', 'srow-title', 'Atajo global'));
+      if (h.note) titles.append(el('span', 'srow-sub', h.note));
+      row.append(titles);
+      row.append(Object.assign(el('kbd', 'skbd', capturing ? 'Pulsá el atajo…' : h.combo), { id: 'settings-combo' }));
+      row.append(chipNode({ tone: h.status === 'active' ? 'go' : 'faint', icon: h.backend === 'portal' ? 'check' : 'info', word: h.backendLabel, aria: h.note ? `${h.backendLabel}. ${h.note}` : h.backendLabel }));
+      const actions = el('span', 'srow-actions');
+      actions.append(wordBtn(capturing ? 'Cancelar' : 'Cambiar', () => { capturing = !capturing; render(); if (capturing) say('Pulsá la combinación nueva; Escape cancela.'); }, { icon: 'refresh' }));
+      actions.append(wordBtn('Original', () => call('hotkey_action', { action: 'reset' }).then(r => { hotkey = r; render(); }, () => {})));
+      row.append(actions);
+      sound.append(row);
+      sound.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
+    }
     // #336 F003/F004: la isla se cierra sola tras la inactividad configurada y se abre al
     // pasar el mouse. The closed command always carries the FULL typed pair (exact keys,
     // integer 5..120 validated by the view-model BEFORE any rate or persistence).
+    // T6.3 #434 (coordinator split): Auto-cierre is the design's segmented control «8 s / 15 s /
+    // 30 s / Nunca» on the EXISTING contract: presets save through the closed pair, a stored
+    // non-preset value renders as its own selected segment (never rewritten), «Nunca» is visibly
+    // disabled («Próximamente») until the contract knows it.
     const island = V.islandInteractionView(prefs);
-    const interaction = group('general', 'Isla', 'Se cierra sola después de un rato sin actividad y se abre al pasar el mouse sobre ella.');
-    const autoForm = el('form', 'sname-form'); autoForm.noValidate = true;
-    const autoLabel = el('label', 'srow-title', 'Cerrar a los'); autoLabel.htmlFor = 'settings-autoclose';
-    const autoInput = el('input', 'sfield'); autoInput.type = 'number'; autoInput.id = 'settings-autoclose';
-    autoInput.min = '5'; autoInput.max = '120'; autoInput.step = '1';
-    autoInput.value = autoDraft === null ? String(island.autoCloseSeconds) : autoDraft;
-    autoInput.setAttribute('aria-describedby', 'settings-autoclose-help settings-autoclose-error');
-    const autoHint = el('p', 'snote', 'Segundos enteros, de 5 a 120. El valor inicial es 15.'); autoHint.id = 'settings-autoclose-help';
+    const autoRow = el('div', 'srow');
+    autoRow.append(el('span', 'srow-title', 'Auto-cierre'));
+    const autoOptions = el('span', 'sseg'); autoOptions.id = 'settings-autoclose-options';
+    autoOptions.setAttribute('role', 'radiogroup');
+    autoOptions.setAttribute('aria-label', 'Auto-cierre');
     const autoIssue = el('p', 'snote'); autoIssue.id = 'settings-autoclose-error'; autoIssue.setAttribute('role', 'status');
-    const autoSave = el('button', 'sbtn primary', autoSaving ? 'Guardando…' : 'Guardar cierre'); autoSave.type = 'submit';
-    const paintAuto = () => {
-      const problem = V.autoCloseProblem(autoInput.value);
-      autoIssue.textContent = autoError || problem;
-      autoInput.setAttribute('aria-invalid', problem ? 'true' : 'false');
-      autoSave.disabled = autoSaving || !!problem;
+    const renderAutoSegments = () => {
+      autoOptions.textContent = '';
+      for (const seg of V.autoCloseSegments(island.autoCloseSeconds)) {
+        const b = el('button', 'sseg-btn');
+        b.type = 'button';
+        b.textContent = seg.label;
+        b.id = `autoclose-${seg.seconds === null ? 'never' : seg.seconds}`;
+        if (seg.disabled) {
+          b.disabled = true;
+          b.setAttribute('title', seg.title);
+        } else {
+          b.setAttribute('role', 'radio');
+          b.setAttribute('aria-checked', seg.selected ? 'true' : 'false');
+          b.tabIndex = seg.selected ? 0 : -1;
+          b.addEventListener('click', e => {
+            if (e.isTrusted !== true || autoSaving || seg.selected) return;
+            const seconds = seg.seconds;
+            const problem = V.autoCloseProblem(String(seconds));
+            if (problem) { autoError = problem; paintAuto(); return; }
+            autoSaving = true; autoError = ''; paintAuto();
+            call('prefs_action', { action: 'set_island_interaction', auto_close_seconds: seconds, open_on_hover: island.openOnHover }).then(p => {
+              autoSaving = false; prefs = p;
+              render(); say('Cierre automático guardado.');
+            }, () => {
+              autoSaving = false; autoError = 'No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.';
+              render();
+            });
+          });
+        }
+        autoOptions.append(b);
+      }
     };
-    autoInput.addEventListener('input', e => {
-      if (!e.isTrusted) return;
-      autoDraft = autoInput.value; autoError = ''; paintAuto();
-    });
-    autoForm.addEventListener('submit', e => {
-      e.preventDefault();
-      if (!e.isTrusted || autoSaving || V.autoCloseProblem(autoInput.value)) return;
-      const typed = autoInput.value;
-      autoDraft = typed; autoError = ''; autoSaving = true; paintAuto(); autoSave.textContent = 'Guardando…';
-      call('prefs_action', { action: 'set_island_interaction', auto_close_seconds: Number(typed), open_on_hover: island.openOnHover }).then(p => {
-        autoSaving = false; prefs = p;
-        if (autoDraft === typed) autoDraft = null;
-        render(); say('Cierre automático guardado.');
-        const field = $('settings-autoclose'); if (field) field.focus();
-      }, () => {
-        autoSaving = false; autoError = 'No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.';
-        render();
-        const field = $('settings-autoclose'); if (field) field.focus();
-      });
-    });
-    autoForm.append(autoLabel, autoInput, autoHint, autoIssue, autoSave); interaction.append(autoForm); paintAuto();
-    interaction.append(toggleRow('sw-island-hover', 'Abrir al pasar el mouse', island.openOnHover, () => {
+    const paintAuto = () => {
+      renderAutoSegments();
+      autoIssue.textContent = autoError;
+    };
+    autoRow.append(autoOptions);
+    isla.append(autoRow, autoIssue);
+    isla.append(toggleRow('sw-island-hover', 'Abrir al pasar el mouse', island.openOnHover, () => {
       const payload = { action: 'set_island_interaction', auto_close_seconds: island.autoCloseSeconds, open_on_hover: !island.openOnHover };
       call('prefs_action', payload).then(
         p => { prefs = p; render(); say(island.openOnHover ? 'La isla ya no se abre al pasar el mouse.' : 'La isla se abre al pasar el mouse.'); },
         () => say('No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'));
     }));
+    // #366 F093: where Ajustes opens — inside the island (default, #408) or in its own
+    // window. The typed pref is the only chooser; a failed save keeps the previous
+    // placement and says so.
+    const placementOn = V.settingsWindowView(prefs).on;
+    isla.append(toggleRow('sw-settings-window', 'Abrir Ajustes en ventana', placementOn, () => {
+      call('prefs_action', { action: 'set_settings_window', settings_window: !placementOn }).then(p => {
+        prefs = p; render();
+        say(!placementOn ? 'Ajustes se abre en su ventana.' : 'Ajustes se abre dentro de la isla.');
+      }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
+    }));
+    paintAuto();
     const motion = group('appearance', 'Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
     motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
       if (!window.desktop) return;

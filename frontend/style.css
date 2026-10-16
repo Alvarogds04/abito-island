@@ -1329,6 +1329,38 @@ body #capsule:not([data-notice-view="notices"]) #notices { scrollbar-width: none
 body #capsule:not([data-notice-view="notices"]) #notice-open { padding-inline: 6px; gap: 6px; }
 body #capsule:not([data-notice-view="notices"]) #notices[data-count="1"] #notice-count { display: none; }
 
+/* ---- T6.3 #434: Ajustes → General (design ajustes-ventana-general-{dark,light}.png). Groups
+   Perfil / Isla / Sonido y atajo, volume as a native range slider, segmented auto-close.
+   Placed BEFORE the #410 compact block, which a test slices from its first rule to EOF. ---- */
+/* Perfil: the name form renders as one 40px row (label left, field right), not a stacked form. */
+.sperfil-form { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: var(--space-8); margin-top: 0; }
+.sperfil-form > .srow-title { flex: none; }
+.sperfil-form .sfield { flex: 1 1 220px; min-width: 0; }
+.sperfil-form .sbtn { align-self: center; }
+.sperfil-form .snote { flex: 1 1 100%; margin: 0; }
+/* Sonido y atajo: the shortcut row keeps its title and the one allowed hint stacked. */
+.srow-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.srow-titles .srow-sub { margin: 0; }
+/* Volumen: native range (keyboard arrows for free), 32 visual inside the 44 hit height; the
+   accent paints the filled track in both themes because the ink flips with the theme. */
+.srange { flex: 0 1 180px; width: 180px; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; cursor: pointer; accent-color: var(--island-ink); }
+.svolume-value { flex: none; min-width: 40px; text-align: right; font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-ink); font-variant-numeric: tabular-nums; }
+/* Auto-cierre: segmented radiogroup, 32 visual inside a 44 hit, selected segment carries the
+   surface tone; «Nunca» renders disabled until the contract knows it. */
+.sseg { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.sseg-btn {
+  min-width: 44px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--island-muted); cursor: pointer;
+  font: 600 var(--fs-label)/1.2 var(--font-ui); font-variant-numeric: tabular-nums;
+  transition: background-color var(--dur-state) var(--ease-out), color var(--dur-state) var(--ease-out);
+}
+.sseg-btn:hover { background: var(--fill-hover); color: var(--island-ink); }
+.sseg-btn[aria-checked="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--island-ink); }
+.sseg-btn:disabled { cursor: default; opacity: .5; }
+.sseg-btn:disabled:hover { background: transparent; color: var(--island-muted); }
+.sseg-btn:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+html[data-motion="reduce"] .sseg-btn { transition: none; }
+
 /* ---- #410 r2: the compact Conexiones LIST. One row per provider: name + status chip, the two
    connect words (API / Auth) from the view-model, and the row's own flow (code/URL) wrapped below.
    All rules live in the #410 compact block below, so the rail keeps its cascade position. */

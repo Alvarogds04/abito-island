@@ -140,3 +140,13 @@ packaging's curated `FRONTEND_FILES` list gained `chat-cards.js`).
 ## Ajustes → Conexiones: «Servicios (datos de ejemplo)»
 
 The nine FAKE integration cards (`integrations-view.js` + `integrations-{github,deployments,email,mail,payments,finance,notion,n8n,calendar}.js`) are mounted in `#connections-more` (index.html, inside `#settings`, outside `#settings-body`). `settings.js` `render()` wipes the body, so it re-appends the group after the Conexiones sections and hides it on every other tab (`AbitoSettings.servicesGroupVisible`). Each card keeps its own sibling `<section id="integrations-…" hidden>`; every card shows the «Datos de ejemplo» banner. Nothing is connected: no network, no accounts. Checked by `test-node/integrations-mount-check.cjs`.
+
+## Ajustes → General: slider, groups, short copy (T6.3, #434)
+
+As-built, 2026-10-16, from `design/abito-ui.fig` page `2 Ajustes` (`ajustes-ventana-general-{dark,light}.png`, DESIGN-NOTES §3). General renders three groups in the design's order — **Perfil** (display name, moved from the Apariencia tab's «Saludo»; label «Nombre», placeholder «Tu nombre (opcional)», save-on-submit contract intact), **Isla** (window-mode toggle «Abrir Ajustes en ventana», hover toggle, auto-cierre) and **Sonido y atajo** (sound toggle, volumen, atajo global). Explanatory hint paragraphs are gone; the one hint that stays is the shortcut row's honest backend note as a sub line.
+
+Two controls changed shape without changing their contract:
+- **Volumen** is a native `<input type="range">` (D6) — min 0 / max 0.2 / step 0.01, keyboard arrows for free, `aria-valuemin/max/now/text` plus a visible text value as the percent of the range (the design's «60%» is exactly the 0.12 default; `settings-view.js` `gainPercent`). It commits on `change` through the same `set_sound_gain` closed command with the same `soundGainProblem` gate and the same honest failure (value kept, issue shown, focus back).
+- **Auto-cierre** is the design's segmented control «8 s / 15 s / 30 s / Nunca» on the EXISTING 5..120 contract (`settings-view.js` `autoCloseSegments`): presets save through the unchanged `set_island_interaction` closed pair; a stored non-preset value renders as its own selected segment (never rewritten); «Nunca» renders visibly disabled with «Próximamente» until the contract knows it (tracked separately — needs prefs.rs + scheduler).
+
+Styling: rows 40, segmented buttons and the slider 32 visual inside a 44 hit area, focus ring on the segmented buttons, all before the #410 compact block in `style.css`. Public checks: `test-node/settings-view-check.cjs` (`gainPercent`, `autoCloseSegments`, source contract) and `test-node/pills-check.cjs` (slider commit/failure, groups, segmented behaviour, updated S6 legacy flow).
