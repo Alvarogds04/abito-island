@@ -1675,7 +1675,7 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
 .srole-colors .sdot.sm .sdot-swatch { width: 16px; height: 16px; }
 .srole-colors .sdot.sm .sdot-label { display: none; }
 .srole-colors .srole-color-word { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-muted); }
-=======
+
 /* ---- #435: the Blobs visual customizer (page «3 Blobs»). Scoped to the Blobs tab via
    body.dataset.screen, so every other Ajustes tab keeps its look. Type steps follow the
    T6.1 scale (12 caption / 13 label / 14 body), controls 32 visual inside 44 hit areas
