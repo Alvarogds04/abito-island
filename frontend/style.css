@@ -676,6 +676,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 .sempty, .snote { margin: 0; font-size: 12px; color: var(--island-muted); line-height: 1.35; }
 .sline { margin: 0; font-size: 13px; color: var(--island-ink); line-height: 1.35; overflow-wrap: anywhere; }
 .sline.sub { font-size: 12px; color: var(--island-muted); }
+.slink { font-size: 12px; color: var(--island-ink); text-decoration: underline; overflow-wrap: anywhere; cursor: pointer; -webkit-user-select: text; user-select: text; }
 .scode { align-self: flex-start; padding: 4px 10px; border-radius: 8px; background: var(--surface); color: var(--island-ink); font: 700 15px/1.2 ui-monospace, monospace; letter-spacing: .08em; -webkit-user-select: text; user-select: text; cursor: text; }
 .sflow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-xl); border: 1px solid var(--island-live); }
 .sform { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }

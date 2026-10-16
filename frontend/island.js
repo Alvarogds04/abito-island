@@ -357,8 +357,8 @@
     // Interactive elements own their clicks: a press on the dismiss button
     // must not drag or toggle the island (Rust still owns every decision).
     // U1: so do the composer, the transcript (text selection) and links of
-    // the chat — drag never attaches to text or composer controls.
-    if (e.target && e.target.closest && e.target.closest('button, textarea, input, #chat-log, #chat-composer')) return;
+    // the chat and of the sign-in flow (#421) — drag never attaches to text or composer controls.
+    if (e.target && e.target.closest && e.target.closest('button, #settings a, textarea, input, #chat-log, #chat-composer')) return;
     pressed = true;
     // #336 L18: capture the engagement at PRESS time (the native release
     // happens before any click event): the module's hoverOnly state says

@@ -339,6 +339,33 @@ test('wiring: the motion switch, the clear-on-send of the secret and the draft a
   assert.match(src, /hotkeySetOutcome\(/);
 });
 
+test('#421 eventView validates like the host: https only, <=2000, no whitespace/control/credentials, else rejected', () => {
+  const ok = S.eventView({ url: 'https://auth.example.com/device?c=1' });
+  assert.equal(ok.link, 'https://auth.example.com/device?c=1'); assert.equal(ok.linkRejected, false);
+  assert.equal(S.eventView({ verificationUri: 'https://a.example/x' }).link, 'https://a.example/x');
+  for (const bad of ['http://a.example/x', 'javascript:alert(1)', 'file:///etc/passwd', 'https://u:p@a.example/', 'https://a.example/ x', 'https://a.example/\u0007', 'https://' + 'a'.repeat(2000) + '.com', 'not a url']) {
+    const v = S.eventView({ url: bad });
+    assert.equal(v.link, null, bad); assert.equal(v.linkRejected, true, bad);
+  }
+  assert.equal(S.eventView({ message: 'x' }).linkRejected, false);
+});
+
+test('#421 the sign-in link is a real anchor routed through open_chat_url, never navigating the webview (source contract)', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const flow = src.slice(src.indexOf('function renderFlow'), src.indexOf('function reply'));
+  assert.match(flow, /el\('a', 'slink'/, 'the link is an <a>, not plain text');
+  assert.match(flow, /setAttribute\('href', '#'\)/, 'href never carries the remote URL: the webview cannot navigate away');
+  assert.match(flow, /invoke\('open_chat_url', \{ payload: \{ url: eventV\.link \} \}\)/, 'opens through the validated host command');
+  assert.match(flow, /preventDefault\(\)/, 'the default navigation is always cancelled');
+  assert.match(flow, /addEventListener\('auxclick'/, 'middle click opens too');
+  assert.match(flow, /addEventListener\('contextmenu'/, 'context-menu open is cancelled too');
+  assert.doesNotMatch(flow, /\.href\s*=|setAttribute\('href', eventV/, 'the remote URL never reaches href');
+  assert.match(flow, /linkRejected/, 'a rejected URL gets a plain fallback');
+  assert.match(flow, /e\.isTrusted === true/, 'only trusted gestures open');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  assert.ok(css.indexOf('.slink') >= 0 && css.indexOf('.slink') < css.indexOf('#410'), 'style rule lives before the #410 compact block');
+});
+
 // ---- cheap UX defects found by the verifier -----------------------------------------------------
 // CSS specificity as (ids, classes+attributes+pseudo, types), enough for the selectors used here.
 const specificity = sel => {

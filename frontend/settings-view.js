@@ -165,11 +165,19 @@
   function replyValid(value) {
     return typeof value === 'string' && value.trim().length > 0 && Array.from(value).length <= MAX_REPLY && !/[\u0000-\u001f\u007f]/.test(value);
   }
+  // #421: the sign-in URL is engine data. Same rules as the host open_chat_url validator
+  // (desktop.rs validated_web_url): <= 2000 chars, no whitespace/control, credential-free, https only (an existing pin: plain http is not a login link; stricter than the host).
+  function safeWebUrl(raw) {
+    if (typeof raw !== 'string' || !raw || raw.length > 2000 || /[\s\u0000-\u001f\u007f-\u009f]/.test(raw)) return null;
+    let u; try { u = new URL(raw); } catch { return null; }
+    if (u.protocol !== 'https:' || !u.hostname || u.username || u.password) return null;
+    return u.href;
+  }
   function eventView(ev) {
     if (!ev || typeof ev !== 'object') return null;
-    const link = typeof ev.url === 'string' && ev.url.startsWith('https://') ? ev.url
-      : typeof ev.verificationUri === 'string' && ev.verificationUri.startsWith('https://') ? ev.verificationUri : null;
-    return { message: String(ev.message || ''), instructions: String(ev.instructions || ''), userCode: String(ev.userCode || ''), link };
+    const raw = typeof ev.url === 'string' && ev.url ? ev.url : typeof ev.verificationUri === 'string' ? ev.verificationUri : '';
+    const link = safeWebUrl(raw);
+    return { message: String(ev.message || ''), instructions: String(ev.instructions || ''), userCode: String(ev.userCode || ''), link, linkRejected: !!raw && !link };
   }
   function flowOutcome(last) {
     if (!last || typeof last !== 'object') return null;
@@ -654,8 +662,8 @@
 
   return { ownedAccounts, colorRows, soundGainProblem, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
-    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
-    maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
+    maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
+    maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     daemonRestartView, daemonRestartOutcome,
     THEME_MODES, THEME_LABELS, themeView };
 });
