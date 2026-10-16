@@ -19,6 +19,11 @@ const overview = extra => ({
 const mouse = extra => ({ isTrusted: true, pointerType: 'mouse', buttons: 0, ...extra });
 const click = extra => ({ isTrusted: true, type: 'click', button: 0, ...extra });
 const key = extra => ({ isTrusted: true, type: 'keydown', key: 'Enter', repeat: false, ...extra });
+// #419: a minimal stand-in for the decoration element (no real DOM in Node).
+const fakeElement = () => {
+  const written = [];
+  return { hidden: false, style: { setProperty: (name, value) => written.push([name, value]) }, written };
+};
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 function fixture(effects = {}) {
   let time = 0, raw = 0, nextId = 0;
@@ -212,6 +217,45 @@ function fixture(effects = {}) {
     f.controller.setPreferences(prefs(5)); const jobs = [...f.jobs];
     stale(); assert.deepEqual([...f.jobs], jobs);
     f.advance(5000); assert.deepEqual(f.calls, ['autoClose']);
+  });
+  await test('#419 countdown view: element required, hides without a visible published value', () => {
+    for (const bad of [null, undefined, 'el', 7, {}, { hidden: true }])
+      assert.throws(() => I.createCountdownView(bad), { name: 'TypeError', message: 'Countdown view element required.' });
+    const el = fakeElement();
+    const view = I.createCountdownView(el);
+    assert.ok(Object.isFrozen(view)); assert.equal(typeof view.update, 'function');
+    for (const value of [null, undefined, {}, { visible: false, fraction: 1 }, { visible: true, fraction: NaN },
+      { visible: true, fraction: Infinity }, { visible: true }, '0.5']) {
+      el.hidden = false; view.update(value);
+      assert.equal(el.hidden, true, JSON.stringify(value)); assert.deepEqual(el.written, [], JSON.stringify(value));
+    }
+  });
+  await test('#419 countdown view shows the final window and sets the clamped fraction token', () => {
+    const el = fakeElement();
+    const view = I.createCountdownView(el);
+    view.update({ remainingMs: 4000, seconds: 4, fraction: 0.4, visible: true });
+    assert.equal(el.hidden, false);
+    assert.deepEqual(el.written, [['--island-countdown-fraction', '0.4']]);
+    view.update({ remainingMs: 10000, seconds: 10, fraction: 1.5, visible: true });
+    assert.deepEqual(el.written.at(-1), ['--island-countdown-fraction', '1']);
+    view.update({ remainingMs: 1, seconds: 1, fraction: -0.5, visible: true });
+    assert.deepEqual(el.written.at(-1), ['--island-countdown-fraction', '0']);
+    view.update(null);
+    assert.equal(el.hidden, true);
+  });
+  await test('#419 published countdown values render through the view without touching the scheduler', () => {
+    const el = fakeElement();
+    const view = I.createCountdownView(el);
+    const f = fixture({ onCountdown: value => view.update(value) });
+    f.controller.setPreferences(prefs(5)); f.controller.update(overview());
+    f.advance(1500);
+    assert.equal(el.hidden, true, 'silent before the final window');
+    f.advance(1500); // remaining 2000 <= window min(10000, 5*600)=3000
+    assert.equal(el.hidden, false);
+    assert.ok(el.written.length > 0 && el.written.every(([n]) => n === '--island-countdown-fraction'));
+    f.controller.enter(mouse()); // pointer entry cancels the deadline
+    assert.equal(el.hidden, true, 'cancelled deadline hides the bar');
+    assert.equal(f.jobs.size, 0);
   });
   process.stdout.write(`island-interaction: ${passed} checks passed\n`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

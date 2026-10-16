@@ -46,6 +46,27 @@
       fraction: Math.min(1, remainingMs / windowMs), visible: remainingMs > 0 && remainingMs <= windowMs };
   }
 
+  // #419: pure decoration renderer for the published countdown values. The
+  // module still owns no DOM, listeners or rendering lifecycle: the adapter
+  // creates the view with its approved element and feeds it from onCountdown.
+  // update(null) and any value without a visible:true finite fraction hide
+  // the element; a visible value shows it and writes the clamped fraction as
+  // a CSS custom property (style.setProperty, CSP-safe). It never throws on
+  // values and never reads native/window state.
+  function createCountdownView(element) {
+    if (!element || typeof element !== 'object' || !element.style ||
+      typeof element.style.setProperty !== 'function')
+      throw new TypeError('Countdown view element required.');
+    function update(value) {
+      if (!value || typeof value !== 'object' || value.visible !== true ||
+        !Number.isFinite(value.fraction)) { element.hidden = true; return; }
+      element.hidden = false;
+      element.style.setProperty('--island-countdown-fraction',
+        String(Math.min(1, Math.max(0, value.fraction))));
+    }
+    return Object.freeze({ update });
+  }
+
   function mouse(event) {
     return !!event && event.isTrusted === true && event.pointerType === 'mouse' && event.buttons === 0;
   }
@@ -174,5 +195,5 @@
     }
     return Object.freeze({ update, setPreferences, enter, leave, engage, reset, stop, snapshot });
   }
-  return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, validPreferences, eligible, createClock, countdown, createController });
+  return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, validPreferences, eligible, createClock, countdown, createCountdownView, createController });
 });
