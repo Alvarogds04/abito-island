@@ -18,7 +18,10 @@
     || null;
   const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) || null;
 
-  if (!window.desktop && invoke) {
+  // #366 F093: the settings window never gets the island-driving facade.
+  const __label = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
+    && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+  if (!window.desktop && invoke && __label !== 'settings') {
     const action = name => invoke('desktop_action', { payload: { action: name } });
     window.desktop = Object.freeze({
       snapshot: () => action('snapshot'),
