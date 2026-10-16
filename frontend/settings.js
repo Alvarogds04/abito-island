@@ -1038,7 +1038,9 @@
     }
     const pills = window.AbitoPillSettings, model = window.AbitoPills;
     if (pills && model) {
-      const section = group('pills', 'Blobs', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
+      // #435: the design leaves no standing paragraph on the Blobs screen — the only
+      // disclaimer is the principal chip tooltip the renderer owns.
+      const section = group('pills', 'Blobs', '');
       pills.render(section, prefs, { saving: pillSaving, error: pillError, putIcon,
         onCommand(payload) {
           if (pillSaving || !isOpen() || screen !== 'pills') return;
@@ -1049,16 +1051,35 @@
             : payload.action === 'clear_pill_color' ? model.clearColor(current, payload.id)
             : payload.action === 'create_blob' ? model.createBlob(current, payload.name, payload.color || '')
             : payload.action === 'delete_blob' ? model.deleteBlob(current, payload.name)
-            : payload.action === 'set_blob_color' ? model.setBlobColor(current, payload.name, payload.color) : null;
+            : payload.action === 'set_blob_color' ? model.setBlobColor(current, payload.name, payload.color)
+            : payload.action === 'reorder_declared_pills' ? model.reorderDeclared(current, payload.order)
+            : payload.action === 'reorder_blobs' ? model.reorderBlobs(current, payload.order) : null;
           if (!next || (payload.action === 'set_main_pill' && payload.id === current.mainPill)) return;
           pillSaving = true; pillError = ''; render();
+          // D4: the principal blob's colour feeds the island CHARACTER through the
+          // existing typed pref (avatarColors['abito'] via set_avatar_color) — no new
+          // wire field. A promotion carries the promoted blob's palette colour; a
+          // recolour of the principal itself carries the new swatch. A colourless
+          // promotion changes nothing about the character.
+          const characterColor = payload.action === 'set_main_pill' ? model.colorOf(current, payload.id)
+            : payload.action === 'set_pill_color' && payload.id === current.mainPill ? payload.color : '';
           call('prefs_action', payload).then(saved => {
-            pillSaving = false; prefs = saved; render();
-            say(payload.action === 'create_blob' ? 'Blob creado. Elegir no conecta el servicio.'
-              : payload.action === 'delete_blob' ? 'Blob eliminado.'
-              : payload.action === 'set_pill_color' || payload.action === 'set_blob_color' ? 'Color de blob guardado.'
-              : payload.action === 'clear_pill_color' ? 'Color de blob quitado.'
-              : 'Blob guardado. Elegir no conecta el servicio.');
+            if (!characterColor) {
+              pillSaving = false; prefs = saved; render();
+              say(payload.action === 'create_blob' ? 'Blob creado. Elegir no conecta el servicio.'
+                : payload.action === 'delete_blob' ? 'Blob eliminado.'
+                : payload.action === 'set_pill_color' || payload.action === 'set_blob_color' ? 'Color de blob guardado.'
+                : payload.action === 'clear_pill_color' ? 'Color de blob quitado.'
+                : 'Blob guardado. Elegir no conecta el servicio.');
+              return;
+            }
+            call('prefs_action', { action: 'set_avatar_color', identity: 'abito', color: characterColor }).then(avatarSaved => {
+              pillSaving = false; prefs = avatarSaved; render();
+              say(payload.action === 'set_pill_color' ? 'Color de blob guardado.' : 'Blob guardado. Elegir no conecta el servicio.');
+            }, () => {
+              pillSaving = false; prefs = saved; render();
+              say('Blob guardado; no se pudo actualizar el color del personaje.');
+            });
           }, () => {
             pillSaving = false;
             pillError = payload.action === 'create_blob'

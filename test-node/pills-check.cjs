@@ -668,3 +668,43 @@ test('#415 synthetic gestures never create or delete blobs; a failed save keeps 
   assert.deepEqual(b.backend.prefs.blobs, [{ name: 'Abito GitHub', color: 'mint' }], 'a failed save keeps the stored list');
   assert.match(b.get('pill-settings-error').textContent, /No se pudo crear el blob/);
 });
+
+// #435 D4: «Principal» promotes a blob AND feeds the island character colour through
+// the existing typed pref (avatarColors['abito'] via set_avatar_color) — no new wire
+// field. A colourless promotion changes nothing about the character.
+test('#435 D4: promoting a coloured tile writes set_main_pill plus set_avatar_color for the character', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'], pillColors: { agent_cursor: 'mint' } } });
+  b.click('pill-tile-agent_cursor'); await flush();
+  b.click('pill-editor-main'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'set_main_pill', id: 'agent_cursor' },
+    { action: 'set_avatar_color', identity: 'abito', color: 'mint' },
+  ]);
+  assert.equal(b.backend.prefs.mainPill, 'agent_cursor');
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'mint' }, 'the character wears the promoted blob colour');
+});
+
+test('#435 D4: promoting a colourless tile changes nothing about the character colour', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'] } });
+  b.backend.prefs.avatarColors = { abito: 'purple' }; // the harness seeds legacy values after boot
+  b.click('pill-tile-agent_cursor'); await flush();
+  b.click('pill-editor-main'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_main_pill', id: 'agent_cursor' }]);
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'purple' }, 'the kept colour is untouched');
+});
+
+test('#435 D4: recolouring the principal itself also feeds the character colour', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'] } });
+  b.click('pill-principal-card'); await flush();
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'green').fire('click'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'set_pill_color', id: M.DEFAULT_MAIN, color: 'green' },
+    { action: 'set_avatar_color', identity: 'abito', color: 'green' },
+  ]);
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'green' });
+  // a recolour of a non-principal tile never touches the character
+  const other = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'] } });
+  other.click('pill-tile-ai_google'); await flush();
+  allByClass(other.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'mint').fire('click'); await flush();
+  assert.deepEqual(writes(other).map(x => x.payload), [{ action: 'set_pill_color', id: 'ai_google', color: 'mint' }]);
+});
