@@ -971,7 +971,7 @@
     }
     const pills = window.AbitoPillSettings, model = window.AbitoPills;
     if (pills && model) {
-      const section = group('pills', 'Pills', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
+      const section = group('pills', 'Blobs', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
       pills.render(section, prefs, { saving: pillSaving, error: pillError, putIcon,
         onCommand(payload) {
           if (pillSaving || !isOpen() || screen !== 'pills') return;
@@ -979,17 +979,24 @@
           const next = payload.action === 'set_main_pill' ? model.chooseMain(current, payload.id)
             : payload.action === 'toggle_declared_pill' ? model.toggle(current, payload.id)
             : payload.action === 'set_pill_color' ? model.setColor(current, payload.id, payload.color)
-            : payload.action === 'clear_pill_color' ? model.clearColor(current, payload.id) : null;
+            : payload.action === 'clear_pill_color' ? model.clearColor(current, payload.id)
+            : payload.action === 'create_blob' ? model.createBlob(current, payload.name, payload.color || '')
+            : payload.action === 'delete_blob' ? model.deleteBlob(current, payload.name)
+            : payload.action === 'set_blob_color' ? model.setBlobColor(current, payload.name, payload.color) : null;
           if (!next || (payload.action === 'set_main_pill' && payload.id === current.mainPill)) return;
           pillSaving = true; pillError = ''; render();
           call('prefs_action', payload).then(saved => {
             pillSaving = false; prefs = saved; render();
-            say(payload.action === 'set_pill_color' ? 'Color de pill guardado.'
-              : payload.action === 'clear_pill_color' ? 'Color de pill quitado.'
-              : 'Pill guardada. Elegir no conecta el servicio.');
+            say(payload.action === 'create_blob' ? 'Blob creado. Elegir no conecta el servicio.'
+              : payload.action === 'delete_blob' ? 'Blob eliminado.'
+              : payload.action === 'set_pill_color' || payload.action === 'set_blob_color' ? 'Color de blob guardado.'
+              : payload.action === 'clear_pill_color' ? 'Color de blob quitado.'
+              : 'Blob guardado. Elegir no conecta el servicio.');
           }, () => {
             pillSaving = false;
-            pillError = 'No se pudo guardar la pill; se mantuvo la elección anterior.';
+            pillError = payload.action === 'create_blob'
+              ? 'No se pudo crear el blob; se mantuvo la lista anterior.'
+              : 'No se pudo guardar el blob; se mantuvo la elección anterior.';
             render(); say(pillError);
           });
         },

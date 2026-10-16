@@ -92,7 +92,8 @@ fn view_prefs(p: &Prefs) -> Value {
         "pillColors": p.pill_colors,
         "theme": p.theme().as_str(),
         "chosenModels": p.chosen_models,
-        "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover()})
+        "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
+        "customBlobs": p.custom_blobs_view()})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -459,6 +460,31 @@ mod settings_view_tests {
         // A hostile stored value is already dropped at load, so it never reaches the projection.
         let hostile = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"<img src=x>"}}"#));
         assert_eq!(view_prefs(&hostile)["pillColors"], json!({}));
+    }
+
+    /// #415 WU2: created blobs reach the WebView only as validated name + palette
+    /// colour entries; nothing created projects as null, like every optional field.
+    #[test]
+    fn f415_the_webview_projection_carries_created_blobs_or_null() {
+        use abito_island::prefs::{parse_command, update, Prefs};
+        let defaults = view_prefs(&Prefs::default());
+        assert_eq!(defaults["customBlobs"], json!(null), "nothing created projects as null");
+        let prefs = Prefs::from_text(Some(
+            r#"{"v":1,"custom_blobs":[{"name":"Abito GitHub","color":"green"},{"name":"Abito correo"}]}"#,
+        ));
+        let view = view_prefs(&prefs);
+        assert_eq!(view["customBlobs"], json!([
+            {"name":"Abito GitHub","color":"green"},
+            {"name":"Abito correo","color":null},
+        ]));
+        // a round trip through the closed create command keeps the projection
+        let cmd = parse_command(&json!({"action":"create_blob","name":"Abito Reviewer"})).unwrap();
+        let next = update(&prefs, &cmd, |_| true).unwrap();
+        let view = view_prefs(&next);
+        assert_eq!(view["customBlobs"].as_array().unwrap().len(), 3);
+        // a hostile stored file never reaches the projection
+        let hostile = Prefs::from_text(Some(r#"{"v":1,"custom_blobs":[{"name":42},"junk"]}"#));
+        assert_eq!(view_prefs(&hostile)["customBlobs"], json!(null));
     }
 
     /// #390 GD027: `daemon_action` is closed — exactly {"action":"status"|"restart"}.

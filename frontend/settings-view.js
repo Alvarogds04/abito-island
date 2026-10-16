@@ -22,7 +22,7 @@
       hint: 'Elegí qué modelos de tus proveedores conectados usa Abito. Los locales están más abajo.' }),
     Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
       hint: 'Roles manuales con sus propias instrucciones. Sólo se usan si los elegís.' }),
-    Object.freeze({ id: 'pills', title: 'Pills', icon: 'ring', label: 'Pills',
+    Object.freeze({ id: 'pills', title: 'Blobs', icon: 'ring', label: 'Blobs',
       hint: 'Una principal y hasta cuatro declaradas; elegir no conecta.' }),
     Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia',
       hint: 'Tema, colores, movimiento y cómo te saluda Abito.' }),
