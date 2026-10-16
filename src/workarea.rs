@@ -24,6 +24,51 @@ fn valid(r: Rect) -> bool {
     r.w > 0 && r.h > 0
 }
 
+/// F010 — the decorative frame a platform reports around one monitor's usable
+/// area: a macOS-style notch / menu bar at the top, a dock along a side or the
+/// bottom. Absent means the platform reports none (`None` insets), NOT that
+/// there is no work area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Insets {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+/// F010 — the work area of ONE monitor, pure: the monitor bounds (injected;
+/// no window-system calls) minus the decorative insets the platform reports
+/// for that monitor. Without reported insets the monitor bounds themselves
+/// are the usable work area. Insets that leave nothing usable (or a
+/// degenerate monitor) are refused with `None` — the same `valid()` rule
+/// every other geometry seam here applies, so no caller ever receives a
+/// negative or empty rectangle.
+///
+/// This is the seam the production sources fill: Win32's `rcWork` is exactly
+/// the monitor minus the taskbar insets (see the pinning test), and on unix
+/// no notch/menu-bar inset source exists today — GNOME publishes the
+/// panel-subtracted `_NET_WORKAREA`, which [`pick_work_area`] intersects
+/// with the monitor the island is on.
+pub fn monitor_work_area(monitor: Rect, insets: Option<Insets>) -> Option<Rect> {
+    if !valid(monitor) {
+        return None;
+    }
+    let Some(i) = insets else { return Some(monitor) };
+    let left = monitor.x.checked_add(i.left)?;
+    let top = monitor.y.checked_add(i.top)?;
+    let right = monitor.right().checked_sub(i.right)?;
+    let bottom = monitor.bottom().checked_sub(i.bottom)?;
+    if right <= left || bottom <= top {
+        return None;
+    }
+    Some(Rect {
+        x: left,
+        y: top,
+        w: right - left,
+        h: bottom - top,
+    })
+}
+
 /// Read `_NET_WORKAREA` from the root window (first 4 CARDINALs: x, y, w, h).
 #[cfg(unix)]
 fn x11_net_workarea() -> Option<Rect> {
@@ -513,6 +558,79 @@ mod tests {
     #[test]
     fn empty_list_is_not_found() {
         assert_eq!(pick_own_window(&[], 42, "Abito"), Err(OwnWindowError::NotFound));
+    }
+
+    // ---- F010: the work area of ONE monitor, computed from INJECTED monitors ----
+
+    #[test]
+    fn without_reported_insets_the_monitor_bounds_are_the_work_area() {
+        // the platform reports no menu bar / notch / dock: the whole monitor is usable
+        let m = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        assert_eq!(monitor_work_area(m, None), Some(m));
+        // ...and so is one whose insets are all zero
+        let zero = Insets { left: 0, top: 0, right: 0, bottom: 0 };
+        assert_eq!(monitor_work_area(m, Some(zero)), Some(m));
+        // negative ORIGINS are legitimate (a monitor left of the primary)
+        let left = Rect { x: -1920, y: 0, w: 1920, h: 1080 };
+        assert_eq!(monitor_work_area(left, None), Some(left));
+    }
+
+    #[test]
+    fn a_notch_or_menu_bar_inset_shrinks_the_monitor_from_the_top() {
+        // the classic macOS case: a menu bar / notch the platform reports
+        let m = Rect { x: 0, y: 0, w: 2560, h: 1440 };
+        let menubar = Insets { left: 0, top: 38, right: 0, bottom: 0 };
+        assert_eq!(
+            monitor_work_area(m, Some(menubar)),
+            Some(Rect { x: 0, y: 38, w: 2560, h: 1440 - 38 })
+        );
+        // the same monitor placed RIGHT of the primary: insets apply in the
+        // monitor's own coordinate space, never in the desktop's
+        let right = Rect { x: 1920, y: 0, w: 2560, h: 1440 };
+        assert_eq!(
+            monitor_work_area(right, Some(menubar)),
+            Some(Rect { x: 1920, y: 38, w: 2560, h: 1440 - 38 })
+        );
+    }
+
+    #[test]
+    fn side_and_bottom_docks_shrink_the_monitor_from_their_edges() {
+        let m = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        let docks = Insets { left: 48, top: 32, right: 0, bottom: 48 };
+        assert_eq!(
+            monitor_work_area(m, Some(docks)),
+            Some(Rect { x: 48, y: 32, w: 1920 - 48, h: 1080 - 32 - 48 })
+        );
+    }
+
+    #[test]
+    fn insets_that_leave_no_usable_area_are_refused() {
+        let m = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        // the insets eat the whole monitor (or invert it): None, never a degenerate rect
+        let all = Insets { left: 960, top: 540, right: 960, bottom: 540 };
+        assert_eq!(monitor_work_area(m, Some(all)), None);
+        let exactly = Insets { left: 0, top: 0, right: 1920, bottom: 0 };
+        assert_eq!(monitor_work_area(m, Some(exactly)), None);
+        // a degenerate monitor itself is refused too
+        assert_eq!(monitor_work_area(Rect { x: 0, y: 0, w: 0, h: 1080 }, None), None);
+    }
+
+    #[test]
+    fn the_win32_rcwork_source_is_exactly_this_inset_subtraction() {
+        // the seam the production sources fill: an rcWork of (0,0,1920,1032) on a
+        // 1920x1080 monitor with a 48px bottom taskbar IS monitor_work_area(...)
+        let m = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        let taskbar = Insets { left: 0, top: 0, right: 0, bottom: 48 };
+        assert_eq!(
+            monitor_work_area(m, Some(taskbar)),
+            rect_from_bounds(0, 0, 1920, 1032)
+        );
+        // and the left-docked-taskbar rcWork from the same SDK example
+        let taskbar = Insets { left: 48, top: 0, right: 0, bottom: 0 };
+        assert_eq!(
+            monitor_work_area(m, Some(taskbar)),
+            rect_from_bounds(48, 0, 1920, 1080)
+        );
     }
 
     // ---- U3b: the win32 work area is a real OS value; its math is pure and
