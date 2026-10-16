@@ -789,7 +789,8 @@ permission or reaches another backend: choosing a role only changes what the
 NEXT turn asks for and which local model answers it.
 
 **Store:** `<app config dir>/specialists.json` = `
-{"v":1,"active":<id|null>,"specialists":[{"id","name","instructions","model"}]}`
+{"v":1,"active":<id|null>,"specialists":[{"id","name","instructions","model","space","permissions"}]}`
+(`space` and `permissions` are the #375 additions; see the section below)
 (dir 0700, file 0600, atomic temp+rename, read with `O_NOFOLLOW` + owner/mode
 tests). Only a genuinely absent file loads as a healthy empty store. Existing
 corrupt, unreadable, wrongly versioned, oversized or invalid-record data returns
@@ -858,6 +859,27 @@ and disables mutations; no reset is offered. A draft already open is retained.
 Isolated Chromium/CDP with explicit mock IPC checks these paths; it is not native
 Tauri proof. UI/native acceptance remains with the parent. Scripted `dispatchEvent`
 cannot replace trusted input. Do not bypass the gesture guard.
+
+### #375 — declarative Space name and permissions per specialist
+
+Each specialist carries two OPTIONAL fields. **Both are declarative only:**
+nothing resolves, injects into the prompt, grants, enforces or executes them,
+and no capability widens. The UI says so («Declarativo: todavía no se aplica»).
+
+- `space`: a free-text Space NAME (no registry exists), trimmed, 1..80
+  characters, every control refused. `null`/absent = none; `""` clears it.
+- `permissions`: a subset of the closed vocabulary
+  `read | write | network | execute`, stored in that canonical order, never
+  empty. Read-only (`["read"]`) is the default and the floor.
+- Absent fields behave as before. A hostile STORED value is dropped, not
+  executed: the record still loads, `space` becomes absent and any unknown,
+  non-string, non-array or empty permission set degrades to `["read"]`
+  (stored duplicates collapse).
+- IPC: `create`/`update` still accept today's exact five-key shape; `space`
+  and/or `permissions` may be added. Unknown keys, unknown or duplicate
+  permissions and hostile Space names are refused and change nothing.
+- The persisted byte bound includes the widest Space name (80×4 bytes) and the
+  widest permission array.
 
 ### Verifying #327
 
