@@ -539,11 +539,12 @@
         if (st === 'outdated') secondary = { label: 'Desconectar', command: cmd('agent_disconnect') };
         if (!hash) note = 'No hay una vista previa del cambio; volvé a abrir esta pantalla.';
         else if (!reviewable) note = 'Es un cambio grande: revisalo en el archivo.';
-        else primary = { label: st === 'outdated' ? 'Actualizar' : 'Conectar', command: connectCmd() };
+        // #436 design: the connect word is the design's own «Agregar hooks» (was «Conectar»)
+        else primary = { label: st === 'outdated' ? 'Actualizar' : 'Agregar hooks', command: connectCmd() };
       }
       if (st === 'connected') {
         secondary = { label: 'Desconectar', command: cmd('agent_disconnect') };
-        if (a.backup === true) note = 'Hay un respaldo de tu configuración anterior.';
+        if (a.backup === true) note = 'Con respaldo.'; // #436 design: the design's own subtitle
       }
       if (st === 'unavailable') note = 'No está instalado en esta computadora.';
       if (st === 'error') {

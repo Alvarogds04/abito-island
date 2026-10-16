@@ -547,7 +547,8 @@ test('agents: each state is icon + one word with the right button — «Agregar 
   // #436 D7: rows render in the design's closed six-order, so tests pick their row by id
   const row = (state, extra = {}) => S.agentsView(agentsState([{ id: 'codex', state, backup: false, detail: null, plan_hash: 'b'.repeat(64), summary: 'Adds the Abito hooks (PermissionRequest, Stop) to ~/.codex/hooks.json. A backup is made first.', reviewable: true, ...extra }])).rows.find(r => r.id === 'codex');
   const nc = row('not_connected');
-  assert.deepEqual([nc.word, nc.tone, nc.primary && nc.primary.label], ['Sin conectar', 'faint', 'Conectar']);
+  // #436 design: the connect word is «Agregar hooks» (was «Conectar»)
+  assert.deepEqual([nc.word, nc.tone, nc.primary && nc.primary.label], ['Sin conectar', 'faint', 'Agregar hooks']);
   assert.deepEqual(nc.primary.command, { action: 'agent_connect', agentId: 'codex', plan_hash: 'b'.repeat(64) });
   assert.equal(nc.secondary, null);
   const ok = row('connected');
@@ -574,7 +575,7 @@ test('agents: each state is icon + one word with the right button — «Agregar 
 
 test('agents: a backup is mentioned when there is one; the list is honest without an engine', () => {
   const ok = S.agentsView(agentsState([{ id: 'claude-code', state: 'connected', backup: true, detail: null }])).rows[0];
-  assert.match(ok.note, /respaldo/i);
+  assert.equal(ok.note, 'Con respaldo.'); // #436 design: the design's own subtitle (was a full sentence)
   assert.equal(S.agentsView(state({ connection: 'no_daemon', agents: null })).kind, 'no_engine');
   assert.equal(S.agentsView(state({ connection: 'connected', agents: null })).kind, 'loading');
   assert.equal(S.agentsView(agentsState([])).kind, 'ready');
@@ -752,7 +753,7 @@ const rowOf = (entry, _id) => S.agentsView(agentsState([entry])).rows.find(r => 
 
 test('plan: the closed summary is shown next to the button, and the click carries the hash the human saw', () => {
   const r = rowOf(plan());
-  assert.equal(r.primary.label, 'Conectar');
+  assert.equal(r.primary.label, 'Agregar hooks'); // #436 design (was «Conectar»)
   assert.deepEqual(r.primary.command, { action: 'agent_connect', agentId: 'claude-code', plan_hash: HASH });
   assert.equal(r.summary, 'Agrega los hooks de Abito (PermissionRequest, Stop) a ~/.claude/settings.json. Antes se hace un respaldo.');
   assert.match(r.aria, /Agrega los hooks/);
@@ -820,6 +821,14 @@ test('trust: after Codex connects the human is told what to do next, in the pane
 test('opencode: always «No encontrado», never a button', () => {
   const r = rowOf({ id: 'opencode', state: 'unavailable', backup: false, detail: null });
   assert.equal(r.primary, null); assert.equal(r.secondary, null); assert.equal(r.word, 'No encontrado');
+});
+
+test('wiring: the agents group follows the design: «Agentes», hooks asked only on open — never on a timer', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /sectionTitle\('Agentes'\)/, 'the design section label');
+  assert.doesNotMatch(src, /Agentes de código/);
+  assert.match(src, /action: 'hooks_preview'/, 'the read-only preview is asked with the agents list');
+  assert.doesNotMatch(src, /setInterval/, 'no polling: the ask rides the tab opening, not a timer');
 });
 
 test('wiring: the plan summary is drawn above the button and the trust hint is its own highlighted line', () => {
