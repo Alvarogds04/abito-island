@@ -451,7 +451,8 @@ fn the_real_daemon_lists_agents_with_a_plan_the_page_can_carry_back() {
     let js = format!("const S=require('{}/frontend/settings-view.js'); const st={}; const r=S.agentsView(st).rows.find(x=>x.id==='claude-code'); process.stdout.write(JSON.stringify({{label:r.primary&&r.primary.label,hash:r.primary&&r.primary.command.plan_hash,summary:r.summary}}));", env!("CARGO_MANIFEST_DIR"), v);
     let out = Command::new("node").arg("-e").arg(js).output().expect("node");
     let row: Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&out.stderr)));
-    assert_eq!(row["label"], json!("Conectar"));
+    // #436 design: the connect word is «Agregar hooks» (was «Conectar»)
+    assert_eq!(row["label"], json!("Agregar hooks"));
     assert_eq!(row["hash"], json!(hash), "the click carries the hash the human saw");
     assert!(row["summary"].as_str().unwrap().starts_with("Agrega los hooks de Abito"), "{row}");
     if let Some(o) = list.iter().find(|a| a["id"] == json!("opencode")) { assert_eq!(o["state"], json!("unavailable")); }
