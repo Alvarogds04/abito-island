@@ -1633,6 +1633,80 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
 #connections-more > section { padding: 10px 0; border-top: 1px solid var(--line); }
 #connections-more > h3 { margin: 0; }
 
+/* ---- #435: the Blobs visual customizer (page «3 Blobs»). Scoped to the Blobs tab via
+   body.dataset.screen, so every other Ajustes tab keeps its look. Type steps follow the
+   T6.1 scale (12 caption / 13 label / 14 body), controls 32 visual inside 44 hit areas
+   (the .sbtn/.sfield base already provide the invisible hit ring), gaps 8/20. Blob
+   colours come ONLY from the closed --dot-* palette: a renderer can paint nothing else. */
+#settings-body[data-screen="pills"] .pills-layout { display: grid; grid-template-columns: minmax(0, 1fr) 272px; gap: var(--space-20); align-items: start; margin-top: var(--space-8); }
+#settings-body[data-screen="pills"] .pills-main { display: flex; flex-direction: column; gap: var(--space-8); min-width: 0; }
+#settings-body[data-screen="pills"] .psection-label { font: 600 var(--fs-caption)/1.2 var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--island-muted); margin-top: var(--space-8); }
+#settings-body[data-screen="pills"] .psection-label:first-child { margin-top: 0; }
+
+/* The live blob: one three-stop gradient per closed palette colour; no colour reads neutral. */
+#settings-body[data-screen="pills"] .blob-visual { width: 40px; height: 40px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, var(--fill-hover), var(--line) 55%, var(--island-muted)); }
+#settings-body[data-screen="pills"] .blob-visual[data-color="green"] { background: radial-gradient(circle at 35% 30%, var(--dot-green-1), var(--dot-green-2) 55%, var(--dot-green-3)); }
+#settings-body[data-screen="pills"] .blob-visual[data-color="blue"] { background: radial-gradient(circle at 35% 30%, var(--dot-blue-1), var(--dot-blue-2) 55%, var(--dot-blue-3)); }
+#settings-body[data-screen="pills"] .blob-visual[data-color="mint"] { background: radial-gradient(circle at 35% 30%, var(--dot-mint-1), var(--dot-mint-2) 55%, var(--dot-mint-3)); }
+#settings-body[data-screen="pills"] .blob-visual[data-color="orange"] { background: radial-gradient(circle at 35% 30%, var(--dot-orange-1), var(--dot-orange-2) 55%, var(--dot-orange-3)); }
+#settings-body[data-screen="pills"] .blob-visual[data-color="purple"] { background: radial-gradient(circle at 35% 30%, var(--dot-purple-1), var(--dot-purple-2) 55%, var(--dot-purple-3)); }
+
+/* The PRINCIPAL card: the main pill, always on the island, with the only disclaimer chip. */
+#settings-body[data-screen="pills"] .pill-principal { display: flex; align-items: center; gap: var(--space-12); min-height: 56px; padding: var(--space-8) var(--space-16); border: 1px solid var(--line-soft); border-radius: var(--radius-2xl); background: var(--card-bg); color: var(--island-ink); font: 600 var(--fs-body)/1.2 var(--font-ui); cursor: pointer; text-align: left; }
+#settings-body[data-screen="pills"] .pill-principal:hover { border-color: var(--line); }
+#settings-body[data-screen="pills"] .pill-principal .pill-name { flex: none; }
+#settings-body[data-screen="pills"] .pill-principal .chip { font-size: var(--fs-caption); color: var(--island-muted); cursor: help; }
+#settings-body[data-screen="pills"] .pill-principal .ico { margin-left: auto; color: var(--sun); flex: none; }
+
+/* Declared tiles: live blob + name, a 2px live ring on the selection, a lifted state while dragging. */
+#settings-body[data-screen="pills"] .pills-declared-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); }
+#settings-body[data-screen="pills"] .pills-declared-head .psection-label { margin-top: 0; }
+#settings-body[data-screen="pills"] .pill-count { font: 600 var(--fs-caption)/1 var(--font-ui); color: var(--island-muted); padding: 4px 10px; border-radius: 10px; background: var(--surface); }
+#settings-body[data-screen="pills"] .pills-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-8); }
+#settings-body[data-screen="pills"] .pill-tile, #settings-body[data-screen="pills"] .pill-tile-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-8); min-height: 96px; padding: var(--space-8); border: 1px solid var(--line-soft); border-radius: 14px; background: var(--card-bg); color: var(--island-ink); font: 500 var(--fs-label)/1.2 var(--font-ui); cursor: pointer; }
+#settings-body[data-screen="pills"] .pill-tile:hover { border-color: var(--line); }
+#settings-body[data-screen="pills"] .pill-tile[aria-pressed="true"] { border-color: transparent; box-shadow: 0 0 0 2px var(--island-live); }
+#settings-body[data-screen="pills"] .pill-tile .pill-name, #settings-body[data-screen="pills"] .pill-tile-new .pill-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-body[data-screen="pills"] .pill-tile-new { border-style: dashed; color: var(--island-muted); }
+#settings-body[data-screen="pills"] .pill-plus { font: 400 20px/1 var(--font-ui); }
+#settings-body[data-screen="pills"] .pill-tile[data-dragging] { transform: translateY(-2px) scale(1.04); box-shadow: 0 6px 16px rgba(0,0,0,.35); border-color: var(--line); z-index: 1; }
+#settings-body[data-screen="pills"] .pill-tile { transition: transform 120ms cubic-bezier(.25,.9,.35,1.03), box-shadow 120ms cubic-bezier(.25,.9,.35,1.03); }
+/* #304: reduced motion is Abito's OWN html[data-motion="reduce"] state, never the
+   system media query — the settings window publishes the same override (motionOverride). */
+html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile { transition: none; }
+html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-dragging] { transform: none; }
+
+/* «Así se ve en la isla»: the island order with the island's own four-tile cap. */
+#settings-body[data-screen="pills"] .pill-strip { display: flex; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-2xl); background: var(--surface); border: 1px solid var(--line-soft); overflow: hidden; }
+#settings-body[data-screen="pills"] .pill-strip-item { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; padding: var(--space-8); border-radius: 10px; background: var(--card-bg); font: 500 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-ink); }
+#settings-body[data-screen="pills"] .pill-strip-item .blob-visual { width: 24px; height: 24px; }
+#settings-body[data-screen="pills"] .pill-strip-item .pill-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-body[data-screen="pills"] .pill-strip-item:nth-child(n+5) { display: none; }
+
+/* The editor panel: large preview, read-only name, the closed swatch row, order arrows, «Principal», delete. */
+#settings-body[data-screen="pills"] .pills-editor { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-16); border: 1px solid var(--line-soft); border-radius: var(--radius-2xl); background: var(--card-bg); }
+#settings-body[data-screen="pills"] .blob-preview { width: 104px; height: 104px; align-self: center; margin-bottom: var(--space-8); }
+#settings-body[data-screen="pills"] .pills-editor .srow-title { font-size: var(--fs-caption); color: var(--island-muted); }
+#settings-body[data-screen="pills"] .pills-editor .sfield { flex: none; width: 100%; min-width: 0; }
+#settings-body[data-screen="pills"] .swatch-row { display: flex; gap: var(--space-8); flex-wrap: wrap; }
+#settings-body[data-screen="pills"] .swatch { width: 44px; height: 44px; padding: 6px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+#settings-body[data-screen="pills"] .swatch::before { content: ""; display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--dot-green-2); }
+#settings-body[data-screen="pills"] .swatch[data-color="green"]::before { background: var(--dot-green-2); }
+#settings-body[data-screen="pills"] .swatch[data-color="blue"]::before { background: var(--dot-blue-2); }
+#settings-body[data-screen="pills"] .swatch[data-color="mint"]::before { background: var(--dot-mint-2); }
+#settings-body[data-screen="pills"] .swatch[data-color="orange"]::before { background: var(--dot-orange-2); }
+#settings-body[data-screen="pills"] .swatch[data-color="purple"]::before { background: var(--dot-purple-2); }
+#settings-body[data-screen="pills"] .swatch[aria-checked="true"]::before { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--island-live); }
+#settings-body[data-screen="pills"] .editor-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-8); }
+#settings-body[data-screen="pills"] .editor-actions .sbtn { padding: 0 12px; }
+#settings-body[data-screen="pills"] .pill-editor-question { font: 600 var(--fs-body)/1.3 var(--font-ui); overflow-wrap: anywhere; }
+#settings-body[data-screen="pills"] .pill-editor-detail { font-size: var(--fs-caption); color: var(--island-muted); }
+#settings-body[data-screen="pills"] .sbtn.danger::after { border-color: var(--red-11); }
+#settings-body[data-screen="pills"] .sbtn.danger { color: var(--red-11); }
+/* The narrow in-island column stacks the editor under the tiles. */
+#settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr); }
+#settings[data-rail="true"] #settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr) 272px; }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
