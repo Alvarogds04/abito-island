@@ -1285,6 +1285,45 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 }
 html[data-motion="reduce"] #island-countdown::before { transition: none; }
 
+/* ---- #353: GitHub service card (frontend/integrations-github.js, FAKE dataset).
+   APPEND-ONLY block, placed BEFORE the #410 compact slice (a #410 test slices style.css from
+   that marker to EOF). Theme tokens only, so light and dark resolve with zero raw colors;
+   the grid intensity rides on opacity of --go, never on a raw color. Inert until
+   <section id="integrations-github" hidden> exists (mount contract in the module header). */
+#integrations-github { display: grid; gap: 8px; }
+#integrations-github[hidden] { display: none; }
+.ig-title, .ig-sub { margin: 0; font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); }
+.ig-sub { font-size: var(--fs-label); color: var(--muted); }
+.ig-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
+.ig-ci { margin: 0; font: 400 var(--fs-label)/1.2 var(--font-ui); color: var(--muted); }
+.ig-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ig-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: var(--radius-xl);
+  border: 1px solid var(--line-faint); background: var(--fill-alt);
+}
+.ig-num { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); }
+.ig-name { flex: 1; min-width: 0; font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ig-meta { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); }
+.ig-chip { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.ig-chip--pass { color: var(--go); }
+.ig-chip--fail { color: var(--red-11); }
+.ig-chip--pending { color: var(--sun); }
+.ig-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; max-width: 320px; }
+.ig-day {
+  min-height: 44px; border-radius: var(--radius-full); padding: 0; cursor: pointer;
+  border: 1px solid var(--line-soft); background: var(--fill-hover);
+}
+.ig-day--1, .ig-day--2, .ig-day--3, .ig-day--4 { background: var(--go); }
+.ig-day--1 { opacity: .35; }
+.ig-day--2 { opacity: .55; }
+.ig-day--3 { opacity: .8; }
+.ig-day:hover { border-color: var(--island-ink); }
+.ig-day:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+.ig-day[aria-pressed="true"] { border-color: var(--island-ink); border-width: 2px; }
+.ig-detail { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; padding: 8px 12px; border-radius: var(--radius-xl); border: 1px solid var(--line); }
+.ig-detail-title { font: 700 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
