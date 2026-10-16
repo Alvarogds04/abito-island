@@ -1,15 +1,21 @@
 'use strict';
-/* #360 — pure sessions-ticker view-model: a CLOSED projection of the daemon's
-   `sessions` frame (live agent sessions with their terminal origin). No DOM
-   ownership, no IPC, no network; the only DOM it touches is the container handed
-   to render(), written with textContent only. UI copy in Spanish (rioplatense
-   voseo). Contracts: apps/desktop-daemon/docs/PROTOCOL.md "Sessions frames".
-   Loaded as a classic script (window.AbitoSessionsTicker) and by
-   test-node/sessions-ticker-view-check.cjs. */
+/* #360 — the live agent sessions ticker, in ONE file (one script tag in
+   index.html): the pure view-model (closed projection of the daemon's
+   `sessions` frame) plus, browser-only, the self-mounting poll loop.
+   Conditions from the card review:
+   - renders nothing and takes ZERO layout space when there are no sessions;
+   - theme tokens only (light and dark resolve them) — no raw colors here;
+   - textContent only (every written node is built here);
+   - poll floor 2 s (the daemon caches scans for 2 s anyway), paused while the
+     page is hidden, at most one ask in flight;
+   - Spanish copy (rioplatense voseo), placement PROVISIONAL (fixed bottom-left;
+   the human judges it visually). Loaded as a classic script (window.AbitoSessionsTicker)
+   and by test-node/sessions-ticker-view-check.cjs (pure API only, no DOM). */
 (function (root, factory) {
   const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.AbitoSessionsTicker = Object.freeze(api);
+  if (typeof module === 'object' && module.exports) { module.exports = api; return; }
+  root.AbitoSessionsTicker = Object.freeze(api);
+  mount(api);
 })(typeof self !== 'undefined' ? self : this, () => {
   const SCHEMA = 'abito-sessions/view/1';
   const MAX_ROWS = 64; // the daemon never sends more; the view re-checks anyway
@@ -106,3 +112,44 @@
 
   return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render };
 });
+
+// ---- browser-only wiring: self-mounting poll through agent_action --------------
+
+function mount(V) {
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) || null;
+  if (!invoke) return;
+
+  const POLL_MS = 2000; // the floor: never faster than the daemon's scan cache
+  const host = document.createElement('div');
+  host.setAttribute('data-abito', 'sessions-ticker');
+  host.style.cssText = 'position:fixed;left:14px;bottom:10px;z-index:40;pointer-events:none;display:none;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70vw;';
+  document.body.append(host);
+
+  // The Rust host folds the `sessions` frame into ClientState.sessions
+  // ({rows, truncated}); rebuild OUR closed frame shape for the pure view.
+  const toFrame = state => (state && Array.isArray(state.rows))
+    ? { type: 'sessions', schema: V.SCHEMA, sessions: state.rows, truncated: state.truncated === true }
+    : null;
+
+  let timer = null;
+  let inFlight = false;
+  async function ask() {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const state = await invoke('agent_action', { payload: { action: 'sessions_list' } });
+      const view = V.sessionsView(toFrame(state && state.sessions));
+      V.render(host, view || { state: 'error' });
+    } catch {
+      V.render(host, { state: 'error' }); // one honest muted line; rows return on the next good answer
+    } finally {
+      inFlight = false;
+    }
+  }
+  const tick = () => { if (!document.hidden) ask(); };
+  const start = () => { if (!timer) { timer = setInterval(tick, POLL_MS); tick(); } };
+  const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+  document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
+  start();
+}

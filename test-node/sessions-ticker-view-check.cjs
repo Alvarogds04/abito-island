@@ -1,12 +1,12 @@
 'use strict';
-/* #360 — pure checks for frontend/sessions-ticker-view.js (the live agent sessions
-   ticker view-model). No DOM, no network, no IPC. The view is a CLOSED projection
+/* #360 — pure checks for frontend/sessions-ticker.js (the live agent sessions
+   ticker: pure view-model + browser-only mount; Node exercises the pure API). No DOM, no network, no IPC. The view is a CLOSED projection
    of the daemon's `sessions` frame: kind/state labels and plain text rows in
    Spanish (rioplatense voseo), ready to render with textContent only.
    Run: node apps/desktop-tauri/test-node/sessions-ticker-view-check.cjs */
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const T = require(path.join(__dirname, '..', 'frontend', 'sessions-ticker-view.js'));
+const T = require(path.join(__dirname, '..', 'frontend', 'sessions-ticker.js'));
 
 let passed = 0; const async = [];
 function test(name, fn) {
