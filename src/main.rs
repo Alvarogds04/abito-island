@@ -1884,6 +1884,21 @@ fn main() {
                     );
                 }
             }
+            // T6.2: the own Ajustes window remembers its size. The event payload
+            // is the ONLY source and the scale factor is read right here on the
+            // main thread — never a window getter while a lock is held or off
+            // the main thread (review finding R2). The debounced persister in
+            // `settingswindow` touches only atomics and the prefs gate.
+            if window.label() == settingswindow::SETTINGS_LABEL {
+                if let tauri::WindowEvent::Resized(size) = event {
+                    settingswindow::note_resized(
+                        window.app_handle(),
+                        size.width,
+                        size.height,
+                        window.scale_factor().unwrap_or(1.0),
+                    );
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // #366 F093: the own Ajustes window closes normally — quitting is
                 // the island window's path only, never a side effect of this one.

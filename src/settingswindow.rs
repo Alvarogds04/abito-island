@@ -17,6 +17,9 @@
 use crate::AppState;
 use abito_island::bridge::{self, BridgeError};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Once;
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 /// The exact window label the sender gate admits for the settings window.
@@ -52,6 +55,65 @@ pub(crate) fn opening_size(stored: Option<(u32, u32)>, work: (u32, u32)) -> (f64
     // the WM enforces min_inner_size anyway.
     (chosen.0.min(work.0 as f64).max(MIN_INNER_SIZE.0),
      chosen.1.min(work.1 as f64).max(MIN_INNER_SIZE.1))
+}
+
+// ---- T6.2: the debounced persister of the remembered size --------------------
+
+/// How long the own window must stay still before its size is saved: not on
+/// every pixel of an interactive drag-resize, only once it settles.
+const RESIZE_QUIET_MS: u64 = 700;
+
+/// The pending size, in LOGICAL px, written ONLY by the main-thread window
+/// event (the event payload, never a window getter — R2) and read by the one
+/// persister thread, which touches nothing else of the window.
+static PENDING_W: AtomicU32 = AtomicU32::new(0);
+static PENDING_H: AtomicU32 = AtomicU32::new(0);
+/// Wall-clock ms of the last recorded resize and of the last committed save.
+static CHANGED_AT_MS: AtomicU64 = AtomicU64::new(0);
+static SAVED_AT_MS: AtomicU64 = AtomicU64::new(0);
+static PERSISTER: Once = Once::new();
+
+/// T6.2 (pure): a resize is due for saving when one happened AFTER the last
+/// save AND the window has stayed still for the whole quiet period. A failed
+/// save leaves `last_save_ms` behind `last_change_ms`, so it re-arms on its
+/// own; a clock that appears to run backwards saves nothing.
+pub(crate) fn save_due(last_change_ms: u64, last_save_ms: u64, now_ms: u64, quiet_ms: u64) -> bool {
+    last_change_ms > last_save_ms && now_ms.saturating_sub(last_change_ms) >= quiet_ms
+}
+
+/// T6.2: record a resize of the own Ajustes window. Called from the MAIN-THREAD
+/// window event with the size from the EVENT PAYLOAD and the scale factor read
+/// right here on the main thread — no window getter is ever called off-thread
+/// or while a host lock is held (review finding R2). Starts the one persister
+/// thread on the first resize.
+pub(crate) fn note_resized(app: &AppHandle, width: u32, height: u32, scale: f64) {
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    PENDING_W.store(((width as f64) / scale).round() as u32, Ordering::SeqCst);
+    PENDING_H.store(((height as f64) / scale).round() as u32, Ordering::SeqCst);
+    CHANGED_AT_MS.store(crate::now_ms() as u64, Ordering::SeqCst);
+    PERSISTER.call_once(|| spawn_persister(app.clone()));
+}
+
+fn spawn_persister(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(200));
+        if crate::QUITTING.load(Ordering::SeqCst) {
+            break;
+        }
+        let now = crate::now_ms() as u64;
+        if !save_due(CHANGED_AT_MS.load(Ordering::SeqCst), SAVED_AT_MS.load(Ordering::SeqCst), now, RESIZE_QUIET_MS) {
+            continue;
+        }
+        let w = PENDING_W.load(Ordering::SeqCst);
+        let h = PENDING_H.load(Ordering::SeqCst);
+        if crate::settingshost::save_settings_window_size(&app, w, h) {
+            SAVED_AT_MS.store(now, Ordering::SeqCst);
+        } else {
+            // back off: the change stays unsaved (last_save is behind last_change)
+            // and is retried after the quiet period, not on every tick.
+            std::thread::sleep(Duration::from_millis(RESIZE_QUIET_MS));
+        }
+    });
 }
 
 /// #366 F093: commands that act on the MAIN island window (drag, desktop verbs)
@@ -263,7 +325,7 @@ mod tests {
 
     // ---- T6.2: the opening size of the own window (pure, no window system) ---
 
-    use super::{opening_size, DEFAULT_INNER_SIZE, MIN_INNER_SIZE};
+    use super::{opening_size, save_due, DEFAULT_INNER_SIZE, MIN_INNER_SIZE};
 
     /// T6.2 (D2, design §3): the own window is 960x640 with min 720x480, both
     /// in logical px — the unit `inner_size`/`min_inner_size` take.
@@ -311,5 +373,29 @@ mod tests {
         // a remembered size that fits is still clamped if the area shrank
         // between runs in a way that leaves it inside — the boundary is exact
         assert_eq!(opening_size(Some((900, 500)), (900, 500)), (900.0, 500.0));
+    }
+
+    /// T6.2: the debounce decision (pure) — a resize is saved when one happened
+    /// AFTER the last save and the window has stayed still for the whole quiet
+    /// period; a save failure re-arms (the change stays unsaved) and a clock
+    /// that appears to run backwards saves nothing.
+    #[test]
+    fn t62_the_debounce_saves_once_the_window_stays_still() {
+        const QUIET: u64 = 700;
+        // nothing yet
+        assert!(!save_due(0, 0, 10_000, QUIET), "no resize ever recorded");
+        // quiet period not elapsed
+        assert!(!save_due(1_000, 0, 1_699, QUIET));
+        assert!(save_due(1_000, 0, 1_700, QUIET));
+        // a second resize restarts the quiet period from its own timestamp
+        assert!(!save_due(2_000, 1_000, 2_699, QUIET));
+        assert!(save_due(2_000, 1_000, 2_700, QUIET));
+        // already saved: a new resize re-arms, otherwise nothing is due
+        assert!(!save_due(1_000, 1_000, 9_999, QUIET));
+        assert!(save_due(5_000, 1_000, 5_700, QUIET));
+        // a failed save left last_save behind the change: still due
+        assert!(save_due(1_000, 500, 1_700, QUIET));
+        // a clock that runs backwards never reports due (no underflow panic)
+        assert!(!save_due(9_999, 0, 1_000, QUIET));
     }
 }

@@ -156,6 +156,23 @@ pub fn save_position(app: &AppHandle, x: i32, y: i32) -> bool {
     ).is_ok()
 }
 
+/// T6.2: commit the size the human resized the own Ajustes window to, through
+/// the SAME `prefs::transact` gate, file and atomic writer as every other
+/// preference — so a settings change after a resize can never drop this, and
+/// this write can never drop a settings change. No publication: the size is
+/// not part of the settings view the WebView reads. Failure leaves the previous
+/// size in memory (and on disk) for this launch; the debounced persister retries.
+pub fn save_settings_window_size(app: &AppHandle, w: u32, h: u32) -> bool {
+    let state = app.state::<AppState>();
+    prefs::transact(
+        &state.settings.prefs_serial,
+        &state.settings.prefs,
+        &prefs::Command::SetSettingsWindowSize(w, h),
+        |p| persist_prefs(app, p),
+        |_| {},
+    ).is_ok()
+}
+
 /// Closed preference commands: view, sound_on/off, set_sound_gain (0..=0.2),
 /// set_display_name, set/clear_avatar_color, set_main_pill, toggle_declared_pill and
 /// set_theme (system|light|dark). Pill actions take exactly action + id; selection never
