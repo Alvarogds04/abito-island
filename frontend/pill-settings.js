@@ -14,10 +14,10 @@
     };
     const count = el('p', 'snote', `${prefs.declaredPills.length}/${P.MAX_DECLARED} declaradas. La principal no ocupa un lugar.`);
     count.id = 'pill-slot-count'; host.append(count);
-    host.append(el('p', 'snote', 'Elegir una pill no conecta el servicio ni configura cuentas o hooks.'));
-    const label = el('label', 'srow-title', 'Pill principal'); label.htmlFor = 'pill-main-setting';
+    host.append(el('p', 'snote', 'Elegir un blob no conecta el servicio ni configura cuentas o hooks.'));
+    const label = el('label', 'srow-title', 'Blob principal'); label.htmlFor = 'pill-main-setting';
     const main = el('select', 'sfield'); main.id = 'pill-main-setting';
-    main.setAttribute('aria-label', 'Pill principal'); main.disabled = !!o.saving;
+    main.setAttribute('aria-label', 'Blob principal'); main.disabled = !!o.saving;
     for (const def of C.mainChoices()) {
       const option = el('option', '', def.name); option.value = def.id; main.append(option);
     }

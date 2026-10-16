@@ -86,7 +86,7 @@
     const word = offered ? 'Sin conexión' : 'No disponible';
     const detail = def.platform === 'excluded' ? 'Apple Music queda fuera de la versión 0.2.' :
       !offered ? 'Esta integración no tiene soporte en este sistema.' :
-      'Elegir esta pill no conecta el servicio. No hay una sesión activa disponible para esta vista.';
+      'Elegir este blob no conecta el servicio. No hay una sesión activa disponible para esta vista.';
     return { id, name: def.name, offered, connected: false, word, detail, icon: 'plug-off', tone: 'faint', aria: `${def.name}: ${word}. ${detail}` };
   }
   return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_DECLARED, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor };

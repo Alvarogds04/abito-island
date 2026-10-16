@@ -60,6 +60,6 @@
     const observed = version;
     invoke('prefs_action', { payload: { action: 'view' } }).then(raw => {
       if (version === observed) apply(raw); // initial read cannot overwrite a newer pushed snapshot
-    }, () => { if (live) live.textContent = 'No se pudieron leer tus pills guardadas. Se muestran los valores predeterminados sin guardar.'; });
+    }, () => { if (live) live.textContent = 'No se pudieron leer tus blobs guardados. Se muestran los valores predeterminados sin guardar.'; });
   } else if (live) live.textContent = 'Sin acceso a preferencias. Se muestran los valores predeterminados sin guardar.';
 })(typeof window !== 'undefined' ? window : this);

@@ -38,24 +38,26 @@ auth ladder, polling (health + proposals), the pinned proposal card, and the
 wired `allow`/`deny`/`choose` verbs. The WebView only ever sends the human's
 click; Rust re-validates card id, expiry and `payload_hash` before `/execute`.
 
-## Pill catalog (#345, F031/F032)
+## Blob catalog (#345, F031/F032)
 
-The [pill model](../../docs/pills.md) contains 25 stable identities, one main
+The [blob model](../../docs/pills.md) contains 25 stable identities, one main
 workspace choice and up to four declarations. Choices are local, explicitly
 **not connections**; services remain unavailable without a real producer.
 Run `node apps/desktop-tauri/test-node/pill-catalog-check.cjs` from the repo root
 for the offline model checks; `node apps/desktop-tauri/test-node/pills-check.cjs`
 executes the actual overview/settings scripts against a local fake DOM/IPC.
-Use **Ajustes → Pills** to set the main and declare/remove choices. The overview
+Use **Ajustes → Blobs** to set the main and declare/remove choices. The overview
 shows main plus declarations in catalog order and keeps its existing host
-connection, notices and decision controls. Per-pill colour overrides are
-documented in the next section (#346).
+connection, notices and decision controls. Per-blob colour overrides are
+documented in the next section (#346). The UI copy calls these choices
+**blobs** (the main one is the blob principal); the stored keys, wire fields,
+file names and test ids keep their shipped `pill` names (#415).
 
-## #346 — per-pill colours (F033 palette override)
+## #346 — per-blob colours (F033 palette override)
 
-Every visible pill may wear one of the five palette colours, chosen by the human
-in **Ajustes → Pills**. The mechanism is closed end to end and the model lives
-with the rest of the pill docs in [docs/pills.md](../../docs/pills.md).
+Every visible blob may wear one of the five palette colours, chosen by the human
+in **Ajustes → Blobs**. The mechanism is closed end to end and the model lives
+with the rest of the blob docs in [docs/pills.md](../../docs/pills.md).
 
 - **One vocabulary, no raw values.** The only accepted colours are the five names
   `green | blue | mint | orange | purple`: `COLORS` in `src/prefs.rs` and
@@ -63,7 +65,7 @@ with the rest of the pill docs in [docs/pills.md](../../docs/pills.md).
   rgb, CSS text or user string is ever stored, transported or painted; the model
   answers only an already-validated name or the empty string (`colorOf`).
 - **Typed field.** `prefs.json` gains an optional `pill_colors` map
-  (pill id → palette name). Unknown pill ids and off-set colours drop on load —
+  (blob id → palette name). Unknown blob ids and off-set colours drop on load —
   the `main_pill` reading rule mirrored — and absent or empty never writes the
   key, so untouched files keep their bytes and a hostile value can never destroy
   the stored catalogue or any other known field.
@@ -76,14 +78,14 @@ with the rest of the pill docs in [docs/pills.md](../../docs/pills.md).
 - **Projection.** The `prefs_action` view and the `prefs:state` event carry
   `pillColors` beside `avatarColors`: already-validated names only, nothing new or
   sensitive crosses the wire.
-- **UI.** Each offered row in **Ajustes → Pills** gets a closed select with the
+- **UI.** Each offered row in **Ajustes → Blobs** gets a closed select with the
   five colour names plus a selectable **Sin color**, which dispatches
   `clear_pill_color` — the escape hatch the avatar does not need, because there
-  the default is itself one of the five while a colourless pill must stay
+  the default is itself one of the five while a colourless blob must stay
   reversible. The overview paints `data-color` only from the validated name, and
   `style.css` maps the five names to the never-themed `--dot-*-2` identity tokens
-  as borders: both #380 palettes show the same colour, hover/pressed pill rules
-  stay untouched, and the pill keeps its name text and aria — colour never
+  as borders: both #380 palettes show the same colour, hover/pressed blob rules
+  stay untouched, and the blob keeps its name text and aria — colour never
   carries meaning alone.
 - **Checks.** `pill-catalog-check.cjs` and `pills-check.cjs` pin the model gates
   and the DOM/event boundary (set/clear writes, hostile values never paint);

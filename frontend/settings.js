@@ -971,7 +971,7 @@
     }
     const pills = window.AbitoPillSettings, model = window.AbitoPills;
     if (pills && model) {
-      const section = group('pills', 'Pills', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
+      const section = group('pills', 'Blobs', 'Una principal y hasta cuatro declaradas; elegir no conecta.');
       pills.render(section, prefs, { saving: pillSaving, error: pillError, putIcon,
         onCommand(payload) {
           if (pillSaving || !isOpen() || screen !== 'pills') return;
@@ -984,12 +984,12 @@
           pillSaving = true; pillError = ''; render();
           call('prefs_action', payload).then(saved => {
             pillSaving = false; prefs = saved; render();
-            say(payload.action === 'set_pill_color' ? 'Color de pill guardado.'
-              : payload.action === 'clear_pill_color' ? 'Color de pill quitado.'
-              : 'Pill guardada. Elegir no conecta el servicio.');
+            say(payload.action === 'set_pill_color' ? 'Color de blob guardado.'
+              : payload.action === 'clear_pill_color' ? 'Color de blob quitado.'
+              : 'Blob guardado. Elegir no conecta el servicio.');
           }, () => {
             pillSaving = false;
-            pillError = 'No se pudo guardar la pill; se mantuvo la elección anterior.';
+            pillError = 'No se pudo guardar el blob; se mantuvo la elección anterior.';
             render(); say(pillError);
           });
         },

@@ -22,9 +22,9 @@ test('F055 general volume uses default and inclusive boundaries without coercion
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Pills, Apariencia, General', () => {
+test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Blobs, Apariencia, General', () => {
   assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'models', 'specialists', 'pills', 'appearance', 'general']);
-  assert.deepEqual(S.TABS.map(x => x.title), ['Conexiones', 'Modelos', 'Especialistas', 'Pills', 'Apariencia', 'General']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['Conexiones', 'Modelos', 'Especialistas', 'Blobs', 'Apariencia', 'General']);
   // S8: the old ids still resolve (deep links), to the merged tab
   assert.equal(S.tabAlias('connectors'), 'accounts');
   assert.equal(S.tabAlias('accounts'), 'accounts');

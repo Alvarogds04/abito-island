@@ -245,7 +245,7 @@ test('S6 failed main save keeps previous snapshot and focus; explicit retry succ
   assert.deepEqual(b.backend.prefs,before); assert.equal(b.backend.writes,0); assert.equal(b.backend.publications,0);
   assert.equal(b.get('pill-main-setting').value,M.DEFAULT_MAIN);
   assert.equal(b.get('pill-name').textContent,'VS Code');
-  assert.equal(b.get('pill-settings-error').textContent,'No se pudo guardar la pill; se mantuvo la elección anterior.');
+  assert.equal(b.get('pill-settings-error').textContent,'No se pudo guardar el blob; se mantuvo la elección anterior.');
   assert.equal(b.doc.activeElement.id,'pill-main-setting');
   const retry=b.get('pill-main-setting'); retry.value='agent_cursor'; retry.fire('change'); await flush();
   assert.equal(b.get('pill-settings-error').textContent,'');
@@ -484,7 +484,9 @@ test('#346 overview paints dataset.color only with an already-validated palette 
   assert.equal(b.get('pill-choice-integration_n8n').dataset.color, 'mint');
   assert.equal(b.get('pill-choice-integration_vercel').dataset.color, undefined, 'a hostile stored value never paints');
   assert.equal(b.get('pill-choice-integration_github').dataset.color, undefined, 'an off-set value never paints');
-  b.emit({ pillColors: JSON.parse('{"integration_resend":"expression(alert(1))","integration_claude":"purple"}') });
+  let pushedHostile;
+  try { pushedHostile = JSON.parse('{"integration_resend":"expression(alert(1))","integration_claude":"purple"}'); } catch { pushedHostile = null; }
+  b.emit({ pillColors: pushedHostile });
   assert.equal(b.get('pill-choice-integration_resend').dataset.color, undefined, 'a hostile pushed value never paints');
   assert.equal(b.get('pill-choice-integration_claude').dataset.color, 'purple', 'the validated name repaints');
   assert.equal(b.get('pill-choices').textContent.includes('<img'), false);
