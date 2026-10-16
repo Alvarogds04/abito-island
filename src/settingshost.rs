@@ -27,7 +27,9 @@ const RESTART_WAIT: Duration = Duration::from_secs(62);
 const RESTART_POLL: Duration = Duration::from_millis(200);
 
 pub struct SettingsHost {
-    agent: Mutex<Option<AgentConn>>,
+    // #315: the tray derives its connection state from this slot's view
+    // (try_lock only — never a blocking read inside publish).
+    pub(crate) agent: Mutex<Option<AgentConn>>,
     // Retained through disk commit and masked publication; never forwarded to the daemon.
     accounts: Mutex<Option<AccountStore>>,
     prefs: Mutex<Prefs>,
@@ -238,7 +240,7 @@ pub(crate) fn parse_daemon_action(payload: &Value) -> Option<&'static str> {
 /// expires. Holds the agent slot (the same rule as `agent_action`): the state
 /// callback only emits, it never re-locks. Returns `(connection, own_child_gone)`
 /// for the restart verdict; the page only ever sees `{action, ready, connection, outcome}`.
-fn daemon_connect(
+pub(crate) fn daemon_connect(
     handle: &AppHandle,
     state: &AppState,
     root: &std::path::Path,
