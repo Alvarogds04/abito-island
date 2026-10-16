@@ -519,6 +519,15 @@ impl Prefs {
 
 fn valid_gain(n: f64) -> bool { n.is_finite() && (0.0..=0.2).contains(&n) }
 
+/// #435: the `order` payload of the reorder commands — exactly an array of strings.
+/// Membership against the live state is apply's job (parse never sees it).
+fn ordered_strings(value: Option<&Value>) -> Result<Vec<String>, CommandError> {
+    value.and_then(Value::as_array).ok_or(CommandError)?
+        .iter()
+        .map(|item| item.as_str().map(str::to_owned).ok_or(CommandError))
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     View,
@@ -546,6 +555,12 @@ pub enum Command {
     /// #415 WU2: the closed-palette colour of one created blob, or its removal
     /// (empty string clears — a colourless blob must stay reversible).
     SetBlobColor { name: String, color: String },
+    /// #435: the persisted declared order — exactly the currently declared ids,
+    /// reordered. A strict permutation is the only accepted input.
+    ReorderDeclaredPills(Vec<String>),
+    /// #435: the persisted created-blob order — exactly the stored names (exact,
+    /// case-sensitive), reordered. A strict permutation is the only accepted input.
+    ReorderBlobs(Vec<String>),
     /// #414: the WHOLE list of one provider replaces what is stored; an empty list clears it.
     SetChosenModels { provider: String, models: Vec<String> },
     /// #336 T1b-a: the island's inactivity interaction as one exact closed
@@ -583,6 +598,10 @@ pub struct CommandError;
 /// typed optional fields; unknown file keys are dropped. #415 WU2: create_blob takes
 /// exactly action + name (+ optional color, a COLORS name), delete_blob exactly
 /// action + name, set_blob_color exactly action + name + color (a COLORS name or "").
+/// #435: reorder_declared_pills takes exactly action + order (an array of strings,
+/// a strict permutation of the currently declared ids — checked at apply) and
+/// reorder_blobs takes exactly action + order (a strict permutation of the stored
+/// created-blob names, exact case — checked at apply).
 /// #389: set_monitor takes exactly action + monitor (a bounded platform monitor name),
 /// clear_monitor exactly action.
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
@@ -673,6 +692,17 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
                 return Err(CommandError);
             }
             Ok(Command::SetBlobColor { name: name.to_owned(), color: color.to_owned() })
+        }
+        // #435: the persisted order. Parse validates only the closed shape (exactly
+        // action + order, an array of strings — parse_command never sees the live
+        // state); apply is the strict permutation gate.
+        Some(action @ ("reorder_declared_pills" | "reorder_blobs")) if map.len() == 2 => {
+            let order = ordered_strings(map.get("order"))?;
+            if action == "reorder_declared_pills" {
+                Ok(Command::ReorderDeclaredPills(order))
+            } else {
+                Ok(Command::ReorderBlobs(order))
+            }
         }
         Some("set_chosen_models") if map.len() == 3 => {
             let provider = map.get("provider").and_then(Value::as_str).ok_or(CommandError)?;
@@ -840,6 +870,37 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             let Some(blob) = blobs.iter_mut().find(|b| b.name == *name) else { return Err(CommandError); };
             blob.color = (!color.is_empty()).then(|| color.clone());
             next.custom_blobs = Some(blobs);
+        }
+        // #435: the persisted order — a strict permutation of the currently stored
+        // list. Anything else (duplicates, unknowns, a different set or size) is
+        // refused without any change, exactly like every other closed command.
+        Command::ReorderDeclaredPills(order) => {
+            if !current.valid_pill_choices() { return Err(CommandError); }
+            let ids = current.declared_pills();
+            if order.len() != ids.len()
+                || !order.iter().all(|id| ids.contains(id))
+                || order.iter().collect::<std::collections::HashSet<_>>().len() != order.len()
+            {
+                return Err(CommandError);
+            }
+            next.declared_pills = Some(order.clone());
+        }
+        Command::ReorderBlobs(names) => {
+            let blobs = current.custom_blobs.clone().unwrap_or_default();
+            if names.len() != blobs.len()
+                || !names.iter().all(|name| blobs.iter().any(|b| &b.name == name))
+                || names.iter().collect::<std::collections::HashSet<_>>().len() != names.len()
+            {
+                return Err(CommandError);
+            }
+            next.custom_blobs = (!blobs.is_empty()).then_some({
+                let mut reordered = Vec::with_capacity(names.len());
+                for name in names {
+                    let Some(blob) = blobs.iter().find(|b| &b.name == name) else { return Err(CommandError); };
+                    reordered.push(blob.clone());
+                }
+                reordered
+            });
         }
         // #389: the value gate ran at parse and runs again here for direct
         // callers; clearing always succeeds and never writes the key.
