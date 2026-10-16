@@ -47,6 +47,7 @@
   const WINDOW_MODE = V.isSettingsWindow(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
     && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label);
   if (WINDOW_MODE) document.body.dataset.window = 'settings';
+  const moreGroup = $('connections-more'); // FAKE services cards; render() wipes the body, so it is re-appended per render
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
   let screen = 'accounts';
@@ -459,6 +460,7 @@
         body.append(el('p', 'snote', 'Los especialistas no están disponibles en esta compilación.'));
       }
     } else renderGeneral(); // pills / appearance / general: each section names its tab
+    if (moreGroup) { moreGroup.hidden = !V.servicesGroupVisible(screen); if (!moreGroup.hidden) body.append(moreGroup); }
     body.scrollTop = keep;
     if (focused && $(focused) && body.contains($(focused))) {
       $(focused).focus();

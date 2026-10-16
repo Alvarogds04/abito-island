@@ -1599,6 +1599,14 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
 .fin-balance, .fin-total { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fin-totals { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 
+/* ---- Ajustes -> Conexiones: group «Servicios (datos de ejemplo)» (FAKE integration cards). Appended BEFORE the
+   #410 compact block (a test slices style.css from that marker to EOF). Tokens only. */
+#connections-more { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+#connections-more[hidden] { display: none; }
+#connections-more > section[hidden] { display: none; }
+#connections-more > section { padding: 10px 0; border-top: 1px solid var(--line); }
+#connections-more > h3 { margin: 0; }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
