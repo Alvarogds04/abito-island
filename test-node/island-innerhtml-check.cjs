@@ -33,10 +33,14 @@ const HOSTS = ['notice-ring', 'connection-icon', 'bridge-icon', 'card-bridge-ico
 test('S3: the nine former innerHTML sites paint DOM nodes through putIcon (replaceChildren)', () => {
   assert.doesNotMatch(raw, /\.innerHTML|\.outerHTML/, 'the nine writes are gone'); // fails today, on purpose
   for (const host of HOSTS) {
-    const line = lines.find(l => l.includes(`$('${host}')`));
-    assert.ok(line, `#${host} is painted by island.js`);
-    assert.match(line, /putIcon\(/, `#${host} is painted with a node, never with markup`);
-    assert.doesNotMatch(line, /innerHTML|outerHTML/, `#${host} keeps no markup sink`);
+    // the host must be PAINTED with a node through putIcon somewhere; other
+    // mentions (e.g. #437 re-parents the static ring into the rebuilt band)
+    // must still keep no markup sink
+    const paint = lines.find(l => l.includes(`$('${host}')`) && /putIcon\(/.test(l));
+    assert.ok(paint, `#${host} is painted with a node, never with markup`);
+    for (const line of lines.filter(l => l.includes(`$('${host}')`))) {
+      assert.doesNotMatch(line, /innerHTML|outerHTML/, `#${host} keeps no markup sink`);
+    }
   }
   const boot = lines.find(l => l.includes("[data-icon]"));
   assert.ok(boot, 'the static [data-icon] bootstrap exists');

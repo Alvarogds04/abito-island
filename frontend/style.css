@@ -200,7 +200,8 @@ html[data-motion="reduce"] .stheme { transition: none; }
 #notice-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 #notice-pill {
   display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 0 0 10px;
-  min-height: 44px; border-radius: var(--radius-full); background: var(--surface);
+  /* #437: the design band is 40 px (D11: the design wins over the old 44). */
+  min-height: 40px; border-radius: var(--radius-full); background: var(--surface);
 }
 #notice-ring { display: inline-grid; place-items: center; color: var(--go); }
 #notice-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
@@ -208,10 +209,9 @@ html[data-motion="reduce"] .stheme { transition: none; }
    info keeps the neutral green ring (existing notices render unchanged). */
 #notices[data-tone="red"] #notice-ring, #notices[data-tone="red"] #notice-title { color: var(--red-11); }
 #notices[data-tone="sun"] #notice-ring, #notices[data-tone="sun"] #notice-title { color: var(--sun); }
-#notice-count {
-  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
-  background: var(--go); color: #000; font: 700 12px/20px var(--font-ui); text-align: center;
-}
+/* #437: the design band carries the severity as its own 1 px tone ring. */
+#notices[data-tone="red"] #notice-pill { border-color: var(--red-11); }
+#notices[data-tone="sun"] #notice-pill { border-color: var(--sun); }
 #notice-dismiss { margin-left: auto; }
 #notice-detail, #card-reason {
   margin: 0; font-size: 12px; line-height: 1.35; color: var(--island-muted); overflow-wrap: anywhere;
@@ -847,15 +847,37 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #notice-row { gap: 4px; min-width: 0; }
 #notice-row .chip { font-weight: 400; font-size: 12px; }
 #notice-info { flex: 0 0 44px; border: 0; }
-#notice-pill { gap: 0; padding: 0; border: 1px solid var(--card-line); background: var(--fill-alt); }
-#notice-open { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 8px; border: 0; border-radius: 18px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
+#notice-pill { gap: 0; padding: 0; min-height: 40px; border: 1px solid var(--card-line); background: var(--fill-alt); } /* #437: the design's 40 px band with its 1 px ring (tone variants above) */
+#notice-open { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; min-height: 40px; padding: 0 8px; border: 0; border-radius: 18px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
 #notice-open:hover:not(:disabled) { background: var(--btn-bg); }
 #notice-open:disabled { cursor: default; }
-#notice-title { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.notice-text { display: flex; flex-direction: column; justify-content: center; gap: 0; min-width: 0; }
+#notice-title { overflow: hidden; text-overflow: ellipsis; font-weight: 600; } /* #437: the design title is 13/600 */
+#notice-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); line-height: 1.25; color: var(--island-muted); }
+#notice-action { flex: 0 0 auto; min-height: 28px; padding: 0 12px; border: 0; border-radius: 9px; background: var(--btn-bg); color: var(--ink-2); font: 600 var(--fs-caption)/1.2 var(--font-ui); cursor: pointer; }
+#notice-action:hover { background: var(--fill-hover); }
+#notice-action:disabled { opacity: .4; cursor: default; }
 #notice-ring { flex: 0 0 24px; }
-#notice-count { flex: 0 0 auto; background: var(--btn-bg); color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 #notice-dismiss { flex: 0 0 44px; border: 0; color: var(--muted); }
 #notice-detail { z-index: 6; border-radius: 10px; background: var(--card-bg); }
+/* ---- #437: the notices LIST view («Avisos · N» + «Descartar todos», 32 px rows).
+   Presentation only: rows never answer, approve or navigate; the × dismisses the
+   EXACT notice through the closed verb. Tokens only, so «claro» y «oscuro» both work. */
+#notice-list { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+#notice-list[hidden] { display: none; }
+#notice-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 0 2px; }
+#notice-list-title { color: var(--island-ink); font: 600 var(--fs-label)/1.2 var(--font-ui); }
+#notice-clear { flex: 0 0 auto; min-height: 28px; padding: 0 12px; border: 0; border-radius: 9px; background: var(--btn-bg); color: var(--ink-2); font: 600 var(--fs-caption)/1.2 var(--font-ui); cursor: pointer; }
+#notice-clear:hover { background: var(--fill-hover); }
+#notice-rows { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.notice-list-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--card-line); background: var(--fill-alt); }
+.notice-list-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--go); }
+.notice-list-row[data-tone="sun"] .notice-list-dot { background: var(--sun); }
+.notice-list-row[data-tone="red"] .notice-list-dot { background: var(--red-11); }
+.notice-list-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--island-ink); font: 500 var(--fs-label)/1.2 var(--font-ui); }
+.notice-list-time { flex: 0 0 auto; color: var(--island-muted); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.notice-list-dismiss { flex: 0 0 28px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--island-muted); cursor: pointer; }
+.notice-list-dismiss:hover { background: var(--fill-hover); color: var(--island-ink); }
 /* Confirmed finished-click lane never shows/answers a covered question. */
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notices { left: 108px; right: 10px; opacity: 1; visibility: visible; transform: none; }
 #capsule[data-notice-view="notices"] #question, #capsule[data-notice-view="notices"] #overview-view { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -945,7 +967,7 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 #notice-row .chip { min-height: 28px; font-size: var(--fs-label); white-space: nowrap; margin-left: 0; }
 #bridge, #card-bridge, #hotkey { margin-left: 0; }
 #notice-info { position: absolute; top: 0; right: 4px; flex: none; } /* top 0: the 44px control fills the 44px band exactly, no phantom overflow scroll */
-#notice-pill { margin-top: auto; min-height: 44px; order: -1; margin-right: 48px; } /* #335 band: the actionable notice is the FIRST thing in the 44px band (never hidden behind a scroll), clear of the «i» column */
+#notice-pill { margin-top: auto; min-height: 40px; order: -1; margin-right: 48px; } /* #437: the actionable design band (40 px, D11) is the FIRST thing in the 44px band container, clear of the «i» column */
 #notice-title { font-size: var(--fs-body); }
 #notice-open { gap: 10px; padding: 0 10px; }
 #notice-detail { left: 8px; right: 8px; top: 52px; padding: 8px 10px; font-size: var(--fs-label); }
@@ -1327,7 +1349,6 @@ body[data-window="settings"] #models {
    Band-only (the notices lane keeps its full pane); the scroll itself still works by wheel and keys. */
 body #capsule:not([data-notice-view="notices"]) #notices { scrollbar-width: none; }
 body #capsule:not([data-notice-view="notices"]) #notice-open { padding-inline: 6px; gap: 6px; }
-body #capsule:not([data-notice-view="notices"]) #notices[data-count="1"] #notice-count { display: none; }
 
 /* ---- T6.3 #434: Ajustes → General (design ajustes-ventana-general-{dark,light}.png). Groups
    Perfil / Isla / Sonido y atajo, volume as a native range slider, segmented auto-close.

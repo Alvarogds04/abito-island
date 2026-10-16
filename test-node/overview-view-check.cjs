@@ -226,6 +226,106 @@ test('island.js paints the notice strip tone from the view (textContent only)', 
   assert.doesNotMatch(src, /noticesEl\.innerHTML/, 'the strip never writes markup');
 });
 
+// ---- #437 wiring: the design band, the grouped «N avisos» + «Ver», the list view ----
+test('#437 island.js renders the design band and the list view through the pure views', () => {
+  const src = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  // the band and the list come from the pure views (one admission source)
+  assert.match(src, /O\.noticeBandView\(/);
+  assert.match(src, /O\.noticeListView\(/);
+  // the band's one action: «Abrir» (native contract) or «Ver» (local list)
+  assert.match(src, /noticeAction\.textContent\s*=/);
+  // «Ver» toggles the list; the native-confirmed opener (#notice-open) is untouched
+  assert.match(src, /toggleNoticeList/);
+  const opener = src.slice(src.indexOf("const noticeOpen = $('notice-open')"), src.indexOf('const listenNotice'));
+  assert.match(opener, /window\.desktop\.click\(payload\)/, 'the native-confirmed navigation contract stays on #notice-open');
+  // per-row × dismisses the EXACT id; a refusal refreshes, never falls back to the first
+  assert.match(src, /dismiss\(row\.id\)/);
+  assert.match(src, /never falls back/, 'the refusal path is documented and honest');
+  // «Descartar todos» loops the argument-free verb, bounded by the queue (8)
+  assert.match(src, /notice-clear/);
+  // the list closes itself when the notices drop below two, and on Escape
+  assert.match(src, /noticeListOpen\s*=\s*false/);
+  // no badge: the design's title says «N avisos» itself
+  assert.doesNotMatch(src, /noticeCount\.textContent/, 'the old count badge is gone from the band');
+});
+
+// ---- #437: the notice BAND (design: one 40 px band; several collapse into «N avisos» + «Ver») ----
+test('notice age: un momento / N min / hoy / ayer / N d; absent clocks say nothing', () => {
+  assert.equal(O.noticeAge(NOW - 30000, NOW), 'un momento');
+  assert.equal(O.noticeAge(NOW - 120000, NOW), '2 min');
+  assert.equal(O.noticeAge(NOW - 3 * 3600000, NOW), 'hoy');
+  assert.equal(O.noticeAge(NOW - 30 * 3600000, NOW), 'ayer');
+  assert.equal(O.noticeAge(NOW - 4 * 86400000, NOW), '4 d');
+  assert.equal(O.noticeAge(NOW + 5000, NOW), 'un momento', 'a future clock never goes negative');
+  assert.equal(O.noticeAge(undefined, NOW), '');
+  assert.equal(O.noticeAge(NOW, 'junk'), '');
+  assert.equal(O.noticeAgeDetail(NOW - 120000, NOW), 'Hace 2 min');
+  assert.equal(O.noticeAgeDetail(NOW - 30000, NOW), 'Hace un momento');
+  assert.equal(O.noticeAgeDetail(NOW - 3 * 3600000, NOW), 'Hoy');
+  assert.equal(O.noticeAgeDetail(NOW - 30 * 3600000, NOW), 'Ayer');
+  assert.equal(O.noticeAgeDetail(NOW - 4 * 86400000, NOW), 'Hace 4 d');
+  assert.equal(O.noticeAgeDetail(undefined, NOW), '');
+});
+
+test('notice band, one notice: short title, «Hace …» age, «Abrir», tone and ring from the notice', () => {
+  const n = [{ id: 'a', kind: 'settled', severity: 'warning', title: 'Pi terminó su turno',
+    detail: 'No confirma que la tarea haya salido bien.', at: NOW - 120000, expiresAt: NOW + 45000 }];
+  const v = O.noticeBandView(n, NOW);
+  assert.equal(v.count, 1);
+  assert.equal(v.grouped, false);
+  assert.equal(v.title, 'Pi terminó');
+  assert.equal(v.detail, 'Hace 2 min');
+  assert.equal(v.action, 'open');
+  assert.equal(v.tone, 'sun');
+  assert.equal(v.fraction, 0.75);
+  assert.match(v.aria, /Pi terminó su turno/, 'the full honest sentence stays in the aria');
+  assert.equal(O.noticeBandView([], NOW), null);
+  assert.equal(O.noticeBandView(null, NOW), null);
+});
+
+test('notice band, several notices: ONE band «N avisos» + «Ver» with the short titles', () => {
+  const n = [
+    { id: 'a', kind: 'settled', severity: 'warning', title: 'Pi terminó su turno', at: NOW - 120000, expiresAt: NOW + 45000 },
+    { id: 'b', kind: 'settled', severity: 'info', title: 'Pi espera tu decisión', at: NOW - 60000, expiresAt: NOW + 50000 },
+    { id: 'c', kind: 'settled', severity: 'error', title: 'Atajo limitado (sin permiso)', at: NOW - 30000, expiresAt: NOW + 55000 },
+  ];
+  const v = O.noticeBandView(n, NOW);
+  assert.equal(v.count, 3);
+  assert.equal(v.grouped, true);
+  assert.equal(v.title, '3 avisos');
+  assert.equal(v.detail, 'Pi terminó · Pi espera · Atajo limitado', 'the design\'s short titles, joined with ·');
+  assert.equal(v.action, 'list');
+  assert.equal(v.tone, 'sun', 'the band wears the FIRST notice\'s severity, like the existing ring');
+  assert.match(v.aria, /3 avisos recientes/);
+});
+
+test('notice band: the 60 s window and kind admission ride the same noticeView rules', () => {
+  const engine = [{ id: 't', kind: 'toast', severity: 'info', title: 'engine toast', at: NOW, expiresAt: NOW + 60000 }];
+  assert.equal(O.noticeBandView(engine, NOW), null, 'an engine-facing toast never renders');
+  const expired = [{ id: 'x', kind: 'settled', title: 'Pi terminó su turno', at: NOW - 60000, expiresAt: NOW }];
+  const v = O.noticeBandView(expired, NOW);
+  assert.equal(v.fraction, 0, 'the ring clamps, the window is unchanged');
+});
+
+test('notice list view: 32 px rows carry id, FULL title, age and tone; count for the header', () => {
+  const n = [
+    { id: 'a', kind: 'settled', severity: 'warning', title: 'Pi terminó su turno', at: NOW - 120000, expiresAt: NOW + 45000 },
+    { id: 'b', kind: 'settled', severity: 'info', title: 'Pi espera tu decisión', at: NOW - 60000, expiresAt: NOW + 50000 },
+    { id: 'c', kind: 'transport', severity: 'error', title: 'Atajo limitado (sin permiso)', at: NOW - 30 * 3600000, expiresAt: NOW + 55000 },
+  ];
+  const v = O.noticeListView(n, NOW);
+  assert.equal(v.count, 3);
+  assert.deepEqual(v.rows.map(r => [r.id, r.title, r.time, r.tone]), [
+    ['a', 'Pi terminó su turno', '2 min', 'sun'],
+    ['b', 'Pi espera tu decisión', '1 min', ''],
+    ['c', 'Atajo limitado (sin permiso)', 'ayer', 'red'],
+  ], 'rows keep the FULL title; the row age says «un momento», never a bare «ahora»');
+  assert.equal(O.noticeListView([], NOW), null);
+  assert.equal(O.noticeListView(null, NOW), null);
+  // unadmitted kinds never reach the list either
+  assert.equal(O.noticeListView([{ id: 'e', kind: 'engine', title: 'x', at: NOW, expiresAt: NOW + 60000 }], NOW), null);
+});
+
 // ---- markup contract -----------------------------------------------------
 test('every icon-only control in index.html has an aria-label', () => {
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
@@ -333,9 +433,10 @@ test('R5: two stacked notices stay inside the fixed 44px band and never reach th
   assert.equal(px(n.height), 44, 'band = the approved one-row 44px (island y10..54)');
   assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/,
     'overflow scrolls INSIDE the band instead of growing the box');
-  // model of two stacked notices, from the real boxes: row + gap + pill
+  // model of two stacked notices, from the real boxes: row + gap + band (#437: the
+  // design's 40 px band replaces the old 44 px pill — D11, the design wins)
   const stacked = px(decls('#notice-row')['min-height']) + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
-  assert.equal(stacked, 96, 'model: chips row + gap + notice pill stack to 96px');
+  assert.equal(stacked, 92, 'model: chips row + gap + 40px design band stack to 92px');
   assert.ok(stacked > px(n.height), 'the stacked content exceeds the band, so it must scroll');
   assert.ok(px(n.top) - 10 + px(n.height) <= px(p.top), 'even stacked, the band box ends before the grid: zero touch');
   assert.equal(px(decls('#notice-info').top), 0, 'the «i» fits the band: no phantom 4px scroll');
@@ -748,11 +849,10 @@ test('#423 the notice title keeps a readable width in the 228px band (measured 1
   assert.ok(pad >= 0 && gap >= 0, 'band-scoped padding-inline and gap are declared');
   const RING = 28; // measured box of #notice-ring (svg min-content)
   const avail = 228 - 16 - px(decls('#notice-pill')['margin-right']) - 2 - px(decls('#notice-dismiss').flex.split(' ')[2]);
-  const title = avail - 2 * pad - RING - gap; // single notice: the count badge is hidden
+  const title = avail - 2 * pad - RING - gap; // #437: the design drops the count badge — the title says «N avisos» itself
   assert.ok(title >= 64, `title box ${title}px must show most of «Avisos caídos» (87px at 14px; was 15px); the full text stays in the aria name and the «i» detail`);
-  const count = decls('body #capsule:not([data-notice-view="notices"]) #notices[data-count="1"] #notice-count');
-  assert.equal(count.display, 'none', 'one notice needs no «1» badge in the band (the aria text still counts)');
-  assert.match(islandSrc, /noticesEl\.dataset\.count\s*=/, 'renderNotices publishes the notice count for the CSS');
+  assert.doesNotMatch(css, /#notice-count/, 'the design band has no count badge to hide');
+  assert.match(islandSrc, /noticesEl\.dataset\.count\s*=/, 'renderNotices still publishes the notice count for the aria/CSS');
 });
 
 console.log(`overview-view-check: ${passed} passed`);

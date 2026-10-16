@@ -155,6 +155,7 @@ function engagementFixture(openOnHover) {
       hostPoseView: () => ({ tracker: { failing: false, since: 0 }, pose: null }),
       connectionView: () => ({ word: '', detail: '', tone: '', aria: '', icon: '' }),
       bridgeView: () => null, noticeView: () => null, hotkeyView: () => null,
+      noticeBandView: () => null, noticeListView: () => null, // #437: the stub keeps the strip empty, like noticeView
       cardConnection: () => null, expiryLabel: () => '', expiryAria: () => '',
       cardView: () => ({ kind: 'inert', tone: '', icon: null, word: '', aria: '' }),
       infoLabel: a => a, hoverScale: () => 1,

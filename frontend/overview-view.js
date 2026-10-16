@@ -77,7 +77,9 @@
   }
 
   // ---- notice pill (Sileo) ---------------------------------------------------
-  const KNOWN_SHORT = { 'Pi terminó su turno': 'Pi terminó' };
+  const KNOWN_SHORT = { 'Pi terminó su turno': 'Pi terminó',
+    // #437: the design's short titles for the grouped band («3 avisos · Pi terminó · Pi espera · Atajo limitado»)
+    'Pi espera tu decisión': 'Pi espera', 'Atajo limitado (sin permiso)': 'Atajo limitado' };
   const shortTitle = title => {
     const t = String(title || '').trim();
     return KNOWN_SHORT[t] || t.split(/\s+/).slice(0, 3).join(' ');
@@ -111,6 +113,56 @@
     if (!payload || typeof payload.id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.id)) return null;
     return payload.kind === 'question' ? 'question' : payload.kind === 'finished' ? 'notices' : null;
+  }
+
+  // ---- #437: the notice BAND and the notices LIST (design §2) ----------------
+  // One notice renders as a 40 px band (short title 13/600, muted age 12, one
+  // action, ×). Several collapse into ONE band «N avisos» + «Ver», and «Ver"
+  // opens a 32 px-row list. Pure views over the same admitted set as
+  // noticeView (Rust stays the single admission source); the 60 s window and
+  // every honest sentence ride the SAME noticeView rules.
+  function noticeAge(at, now) {
+    const t = Number(at);
+    const n = Number(now);
+    if (!Number.isFinite(t) || !Number.isFinite(n)) return '';
+    const ms = Math.max(0, n - t); // a future clock never goes negative
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return 'un momento';
+    if (min < 60) return `${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return 'hoy';
+    if (h < 48) return 'ayer';
+    return `${Math.floor(h / 24)} d`;
+  }
+  // The band's muted detail: «Hace 2 min»; hoy/ayer already carry their own tense.
+  function noticeAgeDetail(at, now) {
+    const age = noticeAge(at, now);
+    if (!age) return '';
+    return /^(hoy|ayer)$/.test(age) ? age[0].toUpperCase() + age.slice(1) : `Hace ${age}`;
+  }
+  function noticeBandView(notices, now) {
+    const base = noticeView(notices, now); // null for nothing admitted
+    if (!base) return null;
+    const list = (Array.isArray(notices) ? notices : [])
+      .filter(n => n && NOTICE_KINDS.has(typeof n.kind === 'string' && n.kind ? n.kind : 'settled'));
+    const first = list[0];
+    if (list.length === 1) {
+      return { count: 1, grouped: false, title: base.text, detail: noticeAgeDetail(first.at, now),
+        action: 'open', tone: base.tone, fraction: base.fraction, aria: base.aria };
+    }
+    return { count: list.length, grouped: true, title: `${list.length} avisos`,
+      detail: list.map(x => shortTitle(x.title)).join(' · '), action: 'list',
+      tone: base.tone, fraction: base.fraction, aria: base.aria };
+  }
+  function noticeListView(notices, now) {
+    const list = (Array.isArray(notices) ? notices : [])
+      .filter(n => n && NOTICE_KINDS.has(typeof n.kind === 'string' && n.kind ? n.kind : 'settled'));
+    if (!list.length) return null;
+    return { count: list.length, rows: list.map(x => {
+      const severity = Object.prototype.hasOwnProperty.call(SEVERITY_TONE, x.severity) ? x.severity : 'info';
+      return { id: typeof x.id === 'string' ? x.id : '', title: String(x.title || ''),
+        time: noticeAge(x.at, now), tone: SEVERITY_TONE[severity] || '' };
+    }) };
   }
 
   // R6 gesture after the human's click. A SENT decision is NOT a confirmed
@@ -232,5 +284,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });
