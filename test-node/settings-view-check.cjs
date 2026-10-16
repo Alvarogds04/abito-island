@@ -977,11 +977,13 @@ test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row o
 test('#408 S9 spacing at the Settings size: wider rail, roomier panel and sections, 2-column cards, tall rail items', () => {
   const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
   const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, sel); return css.slice(i, css.indexOf('}', i)); };
-  assert.match(rule('#settings[data-rail="true"]'), /grid-template-columns:\s*200px/);
+  assert.match(rule('#settings[data-rail="true"]'), /grid-template-columns:\s*184px/, 'design §3: rail 184');
   assert.match(rule('#settings[data-rail="true"]'), /padding:\s*20px 24px/);
   assert.match(rule('#settings[data-rail="true"] .ssec'), /margin-top:\s*20px/);
   assert.match(rule('#settings[data-rail="true"] #settings-tabs'), /gap:\s*6px/);
-  assert.match(rule('#settings[data-rail="true"] .stab'), /min-height:\s*48px/);
+  // design §1/§3: rail tab 36 visual, r10 — the element keeps a 44px hit area and draws the
+  // visual tab on its ::after inset layer.
+  assert.match(rule('#settings[data-rail="true"] .stab'), /min-height:\s*44px/);
   // #410 r2: the provider cards are gone (the compact list replaced them); the rail keeps its
   // roomier sections, tabs and rows, which the assertions above and below still pin.
   assert.match(rule('#settings[data-rail="true"] .sagent'), /padding:\s*12px 0/);
@@ -1077,12 +1079,13 @@ test('#410 compact sizing: V1 tokens only, one type step down, tighter rows — 
   assert.match(rule(`${COMPACT_SCOPE} .sline`), /font-size: var\(--fs-label\)/);       // 14px -> 13px
   assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /font: 600 var\(--fs-label\)/);         // 14px -> 13px
   assert.match(rule(`${COMPACT_SCOPE} .chip`), /font-size: var\(--fs-caption\)/);      // 13px -> 12px
-  // tighter than the same selectors outside the tab (V1 / #408 rail), which the rules above keep
-  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 44px/);   // was 48px (V1)
-  assert.match(rule(`${COMPACT_SCOPE} .srow`), /gap: 6px/);           // was 10px (V1)
-  assert.match(rule(`${COMPACT_SCOPE} .srows`), /gap: 4px/);          // was 6px
-  assert.match(rule(`${COMPACT_SCOPE} .ssec`), /margin-top: 12px/);   // was 20px (rail)
-  assert.match(rule(`${COMPACT_SCOPE} .ssection`), /line-height: 16px/); // was 18px (V1)
+  // the approved design scale (DESIGN-NOTES §1/§3: row 40, row gap 8, group gap 20) replaces the
+  // denser-than-design values this block used to pin; the type step-down and the 44px floor stay.
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 40px/);   // was 44px; design row 40
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /gap: (?:8px|var\(--space-8\))/);           // was 6px; design row gap 8
+  assert.match(rule(`${COMPACT_SCOPE} .srows`), /gap: (?:8px|var\(--space-8\))/);          // was 4px; design row gap 8
+  assert.match(rule(`${COMPACT_SCOPE} .ssec`), /margin-top: 20px/);   // was 12px; design group gap 20
+  assert.match(rule(`${COMPACT_SCOPE} .ssection`), /line-height: 18px/); // was 16px
   assert.match(rule(`${COMPACT_SCOPE} .sconn`), /margin: 0/);            // the list, not a card grid
   assert.match(rule(`${COMPACT_SCOPE} .sconn-row`), /flex-wrap: wrap/);  // a live login wraps to line 2
   assert.match(rule(`${COMPACT_SCOPE} .sconn-head .srow-title`), /text-overflow: ellipsis/);
@@ -1093,11 +1096,34 @@ test('#410 compact sizing: V1 tokens only, one type step down, tighter rows — 
   // S3 click targets kept: the compact block densifies spacing/type, never the 44px floor
   assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-height: 44px/);
   assert.match(rule(`${COMPACT_SCOPE} .sbtn`), /min-width: 44px/);
-  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 44px/);
+  assert.match(rule(`${COMPACT_SCOPE} .srow`), /min-height: 40px/);
   assert.match(css.match(/#settings-filter \{([^}]*)\}/)[1], /height: 44px/, 'the Conexiones search keeps its target');
   assert.match(css.match(/\.sfield \{([^}]*)\}/)[1], /min-height: 44px/, 'fields keep their target');
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.match(src, /node\.style\.minHeight = '44px'/, 'the owned-account buttons keep their 44px anchor (#308)');
+});
+
+// ---- T6.1: the scale draws the 32px visual on an inset layer; the states must follow it ----------
+// (coordinator requirement): buttons/tabs keep a 44px hit area and draw their visible 32px pill on
+// ::after — so hover, selected, primary and the field's aria-invalid ring must be restated on the
+// VISIBLE layer, never only on the transparent hit layer, or the states would be lost.
+test('T6.1 visible-layer contract: hover, selected, primary and aria-invalid paint the ::after visual, not the hit layer', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, `${sel} exists`); return css.slice(i, css.indexOf('}', i)); };
+  // the visual layer exists, inset, with the visible radius on it (not on the 44px element)
+  assert.match(rule('.sbtn::after'), /inset:\s*6px/, 'button visual: 44px element, 32px visual');
+  assert.match(rule('.sbtn::after'), /z-index:\s*-1/, 'the visual sits behind the label');
+  // hover, primary and the selected tab paint the visible layer
+  assert.match(rule('.sbtn:hover::after'), /background:/, 'hover paints the visible pill');
+  assert.match(rule('.sbtn.primary::after'), /background:\s*var\(--go\)/, 'primary paints the visible pill');
+  assert.match(rule('.stab::after'), /inset:\s*4px/, 'tab visual: 44px element, 36px visual');
+  assert.match(rule('.stab[aria-selected="true"]::after'), /border-color:\s*var\(--go\)/, 'the selected tab paints the visible layer');
+  assert.match(rule('.stab:hover::after'), /background:/, 'tab hover paints the visible layer');
+  // fields have no ::after (inputs cannot): the aria-invalid ring is the inset box-shadow, which
+  // tracks the visible field edge, not the invisible 6px hit border
+  const invalid = rule('#settings-display-name[aria-invalid="true"]');
+  assert.match(invalid, /box-shadow:.*var\(--red-11\)/, 'aria-invalid rings the visible field');
+  assert.doesNotMatch(invalid, /border-color:/, 'the invisible hit border never paints');
 });
 
 // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------

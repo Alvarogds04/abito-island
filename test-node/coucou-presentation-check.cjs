@@ -88,10 +88,14 @@ test('V1 dot: a panel left open can never move the dot character (scoped to the 
 
 test('V1 type ramp: roles are tokens (>=12px floor) and the V1 block declares no raw px font-size', () => {
   const full = read('style.css');
-  const tokens = /:root \{ --fs-title: (\d+)px; --fs-body: (\d+)px; --fs-label: (\d+)px; --fs-caption: (\d+)px; \}/.exec(full);
-  assert(tokens, 'token declaration');
-  for (const v of tokens.slice(1).map(Number)) assert(v >= 12, `token ${v}px`);
-  assert.deepEqual(tokens.slice(1).map(Number), [16, 14, 13, 12]);
+  // T6.1 (design §1): the ramp is declared EARLY (top of file, before any rule that uses it) and
+  // comes with the spacing scale. Exact tokens and exact numbers, pinned:
+  const tokens = /:root \{ --fs-title: (\d+)px; --fs-body: (\d+)px; --fs-label: (\d+)px; --fs-caption: (\d+)px; --space-4: (\d+)px; --space-8: (\d+)px; --space-12: (\d+)px; --space-16: (\d+)px; --space-20: (\d+)px; --space-24: (\d+)px; --space-32: (\d+)px; \}/.exec(full);
+  assert(tokens, 'early token declaration: --fs-title/body/label/caption + --space-4..32, one block');
+  assert.deepEqual(tokens.slice(1, 5).map(Number), [16, 14, 13, 12], 'type ramp 12/13/14/16 only');
+  assert.deepEqual(tokens.slice(5).map(Number), [4, 8, 12, 16, 20, 24, 32], 'spacing scale 4·8·12·16·24·32 (+16)');
+  for (const v of tokens.slice(1, 5).map(Number)) assert(v >= 12, `token ${v}px`);
+  assert(full.indexOf('--fs-title') < full.indexOf('#capsule'), 'the ramp is declared before the rules that use it');
   const css = full.slice(full.indexOf('Visual correction V1 (TaskView'));
   assert.doesNotMatch(css, /font-size:\s*\d/, 'raw px font-size in the V1 block');
   assert(/var\(--fs-body\)/.test(css) && /var\(--fs-label\)/.test(css) && /var\(--fs-caption\)/.test(css));
