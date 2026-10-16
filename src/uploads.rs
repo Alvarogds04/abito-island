@@ -208,7 +208,9 @@ pub fn read_dropped(path: &Path) -> Result<(String, Vec<u8>), ChatError> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let meta = fs::metadata(path)
+    // symlink_metadata: a symlink is refused, never followed.
+    // symlink_metadata: a symlink is refused, never followed.
+    let meta = fs::symlink_metadata(path)
         .map_err(|_| invalid("No se pudo leer el archivo arrastrado."))?;
     if !meta.is_file() {
         return Err(invalid("Eso no es un archivo."));
@@ -219,6 +221,72 @@ pub fn read_dropped(path: &Path) -> Result<(String, Vec<u8>), ChatError> {
     let bytes = fs::read(path)
         .map_err(|_| invalid("No se pudo leer el archivo arrastrado."))?;
     Ok((raw, bytes))
+}
+
+/// Longest a native drop stays claimable.
+pub const DROP_TTL_MS: u64 = 60_000;
+/// Most native-dropped paths held at once.
+pub const DROP_CAP: usize = 16;
+
+/// Paths the OS reported through the native drag-drop event: short-lived,
+/// bounded and one-shot. `chat_attach` only honours a member of this set.
+#[derive(Default)]
+pub struct DropSet {
+    entries: Vec<(PathBuf, u64)>,
+}
+
+impl DropSet {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn prune(&mut self, now_ms: u64) {
+        self.entries
+            .retain(|(_, at)| now_ms.saturating_sub(*at) <= DROP_TTL_MS);
+    }
+
+    /// Remember dropped paths; the oldest are evicted beyond `DROP_CAP`.
+    pub fn record(&mut self, paths: Vec<PathBuf>, now_ms: u64) {
+        self.prune(now_ms);
+        for path in paths {
+            self.entries.retain(|(p, _)| *p != path);
+            self.entries.push((path, now_ms));
+        }
+        let excess = self.entries.len().saturating_sub(DROP_CAP);
+        if excess > 0 {
+            self.entries.drain(..excess);
+        }
+    }
+
+    /// True once if `path` was dropped and is still fresh; it is removed.
+    pub fn consume(&mut self, path: &Path, now_ms: u64) -> bool {
+        self.prune(now_ms);
+        match self.entries.iter().position(|(p, _)| p == path) {
+            Some(i) => {
+                self.entries.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// Attach a natively dropped file: refuses any path not in `set`.
+pub fn attach_dropped(
+    set: &mut DropSet,
+    dir: &Path,
+    path: &Path,
+    now_ms: u64,
+) -> Result<Attachment, ChatError> {
+    if !set.consume(path, now_ms) {
+        return Err(invalid("Ese archivo no llegó arrastrado a la ventana."));
+    }
+    let (name, bytes) = read_dropped(path)?;
+    attach(dir, &name, &bytes)
 }
 
 /// Split a raw `chat_attach_data` body into (display name, bytes): a
