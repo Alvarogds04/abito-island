@@ -1182,6 +1182,40 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 .stab:hover { background: var(--fill-hover); color: var(--island-ink); }
 .stab[aria-selected="true"] { border-color: var(--go); color: var(--go); font-weight: 700; }
 .stab:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+/* ---- #352: Integraciones — service cards (frontend/integrations-view.js, FAKE provider).
+   APPEND-ONLY block: theme tokens only (--surface/--line/--fill/--go/--sun/--red-11/--muted,
+   --radius/--fs), so light and dark resolve them with zero raw colors. The module is inert
+   until index.html carries <section id="integrations" hidden> + one script tag (mount
+   contract in the module header). textContent only; 44px click targets like Ajustes. */
+#integrations { display: grid; gap: 8px; }
+#integrations[hidden] { display: none; }
+.int-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.int-title { font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); }
+.int-count { font: 400 var(--fs-label)/1.2 var(--font-ui); color: var(--muted); }
+.int-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
+.int-service {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: var(--radius-xl);
+  border: 1px solid var(--line-faint); background: var(--fill-alt);
+}
+.int-info { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
+.int-name { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.int-state { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.int-state--connected { color: var(--go); }
+.int-state--error { color: var(--red-11); }
+.int-state--paused { color: var(--sun); }
+.int-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.int-actions button {
+  min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
+  font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
+}
+.int-actions button:hover:not(:disabled) { background: var(--fill-hover); color: var(--island-ink); }
+.int-actions button:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+.int-actions button:disabled { opacity: .45; cursor: default; }
+.int-actions .int-enable[aria-pressed="true"] { border-color: var(--go); color: var(--go); font-weight: 700; }
+.int-actions .int-open { border-color: var(--line); color: var(--island-ink); }
+
 /* the model picker lives inside Ajustes now: in flow, no overlay of its own */
 #settings #models { position: static; padding: 0; background: none; border-radius: 0; flex: 1; min-height: 0; transform: none; transition: none; opacity: 1; visibility: visible; }
 #settings #models:not([data-open="true"]) { display: none; }
