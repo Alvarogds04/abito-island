@@ -270,7 +270,7 @@ fn plain_line(s: &str, max: usize) -> bool {
 }
 
 impl ToolCall {
-    fn valid(&self) -> bool {
+    pub fn valid(&self) -> bool {
         safe_token(&self.call_id, EVENT_ID_MAX)
             && safe_token(&self.name, TOOL_NAME_MAX)
             && self.summary.as_deref().is_none_or(|s| plain_line(s, TOOL_SUMMARY_MAX))
@@ -278,7 +278,7 @@ impl ToolCall {
 }
 
 impl ApprovalDecision {
-    fn valid(&self) -> bool {
+    pub fn valid(&self) -> bool {
         safe_token(&self.request_id, EVENT_ID_MAX) && plain_line(&self.operation, APPROVAL_OPERATION_MAX)
     }
 }
