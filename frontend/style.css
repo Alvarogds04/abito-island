@@ -1638,7 +1638,7 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
    T6.1 scale (12 caption / 13 label / 14 body), controls 32 visual inside 44 hit areas
    (the .sbtn/.sfield base already provide the invisible hit ring), gaps 8/20. Blob
    colours come ONLY from the closed --dot-* palette: a renderer can paint nothing else. */
-#settings-body[data-screen="pills"] .pills-layout { display: grid; grid-template-columns: minmax(0, 1fr) 272px; gap: var(--space-20); align-items: start; margin-top: var(--space-8); }
+#settings-body[data-screen="pills"] .pills-layout { display: grid; grid-template-columns: minmax(0, 1fr) 252px; gap: var(--space-20); align-items: start; margin-top: var(--space-8); }
 #settings-body[data-screen="pills"] .pills-main { display: flex; flex-direction: column; gap: var(--space-8); min-width: 0; }
 #settings-body[data-screen="pills"] .psection-label { font: 600 var(--fs-caption)/1.2 var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--island-muted); margin-top: var(--space-8); }
 #settings-body[data-screen="pills"] .psection-label:first-child { margin-top: 0; }
@@ -1683,28 +1683,49 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #settings-body[data-screen="pills"] .pill-strip-item .pill-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #settings-body[data-screen="pills"] .pill-strip-item:nth-child(n+5) { display: none; }
 
+/* §4.1 Mode A — the «Nuevo» chooser: segmented control, search, category chips,
+   the offered list with markers, and the one-line hint. */
+#settings-body[data-screen="pills"] .segmented { display: flex; gap: 2px; min-height: 32px; padding: 2px; border-radius: 10px; background: var(--fill); }
+#settings-body[data-screen="pills"] .segmented .seg { flex: 1; min-height: 0; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--island-muted); font: 400 var(--fs-label)/1.2 var(--font-ui); cursor: pointer; }
+#settings-body[data-screen="pills"] .segmented .seg[aria-pressed="true"] { background: var(--surface); color: var(--island-ink); font-weight: 600; }
+#settings-body[data-screen="pills"] .pill-catalog-cats { display: flex; flex-wrap: wrap; gap: 4px; }
+#settings-body[data-screen="pills"] .pill-catalog-cat { min-height: 24px; padding: 0 8px; border: 0; border-radius: 12px; background: var(--fill); color: var(--island-muted); font: 400 var(--fs-caption)/1 var(--font-ui); cursor: pointer; }
+#settings-body[data-screen="pills"] .pill-catalog-cat[aria-pressed="true"] { background: var(--surface); color: var(--island-ink); font-weight: 600; }
+#settings-body[data-screen="pills"] .pill-catalog-list { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-height: 0; max-height: 300px; overflow-y: auto; scrollbar-width: none; }
+#settings-body[data-screen="pills"] .pill-catalog-list::-webkit-scrollbar { display: none; }
+#settings-body[data-screen="pills"] .pill-catalog-row { display: flex; align-items: center; gap: var(--space-8); min-height: 36px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--island-ink); font: 400 var(--fs-label)/1.2 var(--font-ui); text-align: left; }
+#settings-body[data-screen="pills"] .pill-catalog-row:hover { background: var(--fill-hover); }
+#settings-body[data-screen="pills"] .pill-catalog-row[aria-pressed="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--island-live); }
+#settings-body[data-screen="pills"] .pill-catalog-row[aria-pressed="true"] .ico { color: var(--island-live); margin-left: auto; flex: none; }
+#settings-body[data-screen="pills"] .pill-catalog-blob { width: 20px; height: 20px; }
+#settings-body[data-screen="pills"] .pill-catalog-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-body[data-screen="pills"] .pill-catalog-row .chip { min-height: 24px; font-size: var(--fs-caption); color: var(--island-muted); flex: none; }
+#settings-body[data-screen="pills"] .pill-catalog-empty { padding: 12px 8px; color: var(--island-muted); font-size: var(--fs-label); text-align: center; }
+#settings-body[data-screen="pills"] .pill-catalog-note { font-size: var(--fs-caption); color: var(--island-muted); }
+#settings-body[data-screen="pills"] .pill-catalog-search { flex: none; width: 100%; min-width: 0; }
+
 /* The editor panel: large preview, read-only name, the closed swatch row, order arrows, «Principal», delete. */
 #settings-body[data-screen="pills"] .pills-editor { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-16); border: 1px solid var(--line-soft); border-radius: var(--radius-2xl); background: var(--card-bg); }
-#settings-body[data-screen="pills"] .blob-preview { width: 104px; height: 104px; align-self: center; margin-bottom: var(--space-8); }
+#settings-body[data-screen="pills"] .blob-preview { width: 96px; height: 96px; align-self: center; margin-bottom: var(--space-8); }
+#settings-body[data-screen="pills"] .blob-preview:not([data-color]) { background: transparent; box-shadow: inset 0 0 0 2px var(--line); }
 #settings-body[data-screen="pills"] .pills-editor .srow-title { font-size: var(--fs-caption); color: var(--island-muted); }
 #settings-body[data-screen="pills"] .pills-editor .sfield { flex: none; width: 100%; min-width: 0; }
 #settings-body[data-screen="pills"] .swatch-row { display: flex; gap: var(--space-8); flex-wrap: wrap; }
-#settings-body[data-screen="pills"] .swatch { width: 44px; height: 44px; padding: 6px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+#settings-body[data-screen="pills"] .swatch { width: 36px; height: 36px; padding: 4px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 #settings-body[data-screen="pills"] .swatch::before { content: ""; display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--dot-green-2); }
 #settings-body[data-screen="pills"] .swatch[data-color="green"]::before { background: var(--dot-green-2); }
 #settings-body[data-screen="pills"] .swatch[data-color="blue"]::before { background: var(--dot-blue-2); }
 #settings-body[data-screen="pills"] .swatch[data-color="mint"]::before { background: var(--dot-mint-2); }
 #settings-body[data-screen="pills"] .swatch[data-color="orange"]::before { background: var(--dot-orange-2); }
 #settings-body[data-screen="pills"] .swatch[data-color="purple"]::before { background: var(--dot-purple-2); }
-#settings-body[data-screen="pills"] .swatch[aria-checked="true"]::before { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--island-live); }
+#settings-body[data-screen="pills"] .swatch[aria-checked="true"]::before { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--island-ink); }
 #settings-body[data-screen="pills"] .editor-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-8); }
 #settings-body[data-screen="pills"] .editor-actions .sbtn { padding: 0 12px; }
 #settings-body[data-screen="pills"] .pill-editor-question { font: 600 var(--fs-body)/1.3 var(--font-ui); overflow-wrap: anywhere; }
 #settings-body[data-screen="pills"] .pill-editor-detail { font-size: var(--fs-caption); color: var(--island-muted); }
 #settings-body[data-screen="pills"] .sbtn.danger::after { border-color: var(--red-11); }
 #settings-body[data-screen="pills"] .sbtn.danger { color: var(--red-11); }
-/* The narrow in-island column stacks the editor under the tiles. */
-#settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr); }
+/* §4.1: the own window uses the same panel at 272 wide. */
 #settings[data-rail="true"] #settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr) 272px; }
 
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:

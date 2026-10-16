@@ -16,7 +16,10 @@
   // Page-lifetime editor state, the same pattern as the settings drafts: what the
   // human selected survives the re-renders every prefs push causes. `key` is
   // `pill:<catalog id>` or `blob:<name>`; mode is 'edit' | 'create' | 'delete'.
-  const ui = { key: null, mode: 'edit', createName: '', createColor: '' };
+  // #435 §4.1: the chooser drafts — switching [Del catálogo | Propio] discards nothing
+  // typed in the other mode until «Cancelar».
+  const ui = { key: null, mode: 'edit', createName: '', createColor: '',
+    createKind: 'catalog', catalogSearch: '', catalogCat: 'all', catalogPick: '' };
   let drag = null; // an in-flight tile drag: { key, node }
   let lastArgs = null; // [host, raw, options] — internal transitions re-render with them
 
@@ -143,7 +146,9 @@
       fresh.append(el('span', 'pill-name', 'Nuevo'));
       fresh.addEventListener('click', event => {
         if (event.isTrusted !== true) return;
-        ui.key = null; ui.mode = 'create'; ui.createName = ''; ui.createColor = ''; paint();
+        ui.key = null; ui.mode = 'create'; ui.createName = ''; ui.createColor = '';
+        ui.createKind = 'catalog'; ui.catalogSearch = ''; ui.catalogCat = 'all'; ui.catalogPick = '';
+        paint();
       });
       grid.append(fresh);
     }
@@ -177,6 +182,110 @@
     // ---- editor panel -----------------------------------------------------------------------------------
     const editor = el('aside', 'pills-editor'); editor.id = 'pill-editor';
     if (ui.mode === 'create') {
+      // §4.1: the segmented control tops both modes; «Del catálogo» is the default.
+      const seg = el('div', 'segmented');
+      seg.setAttribute('role', 'group');
+      seg.setAttribute('aria-label', 'Tipo de blob');
+      const catSeg = el('button', 'seg', 'Del catálogo'); catSeg.type = 'button'; catSeg.id = 'create-kind-catalog';
+      catSeg.setAttribute('aria-pressed', ui.createKind !== 'custom' ? 'true' : 'false');
+      catSeg.addEventListener('click', event => {
+        if (event.isTrusted !== true || ui.createKind === 'catalog') return;
+        ui.createKind = 'catalog'; paint();
+      });
+      const ownSeg = el('button', 'seg', 'Propio'); ownSeg.type = 'button'; ownSeg.id = 'create-kind-custom';
+      ownSeg.setAttribute('aria-pressed', ui.createKind === 'custom' ? 'true' : 'false');
+      ownSeg.addEventListener('click', event => {
+        if (event.isTrusted !== true || ui.createKind === 'custom') return;
+        ui.createKind = 'custom'; paint();
+      });
+      seg.append(catSeg, ownSeg);
+      editor.append(seg);
+    }
+    if (ui.mode === 'create' && ui.createKind === 'catalog') {
+      // §4.1 Mode A: search, category chips, the offered list with markers, the
+      // one-line hint, and Agregar/Cancelar. Agregar is today's declaration: the
+      // existing closed toggle command, same gates, no new wire surface.
+      const search = el('input', 'sfield'); search.id = 'pill-catalog-search';
+      search.placeholder = 'Buscar…';
+      search.setAttribute('aria-label', 'Buscar en el catálogo');
+      search.value = ui.catalogSearch;
+      const chips = el('div', 'pill-catalog-cats');
+      // §4.1 fixes the chip copy: «IA» — shorter than the catalog's category name.
+      const catLabels = { workspace: 'Dónde programás', agent: 'Agentes', ai: 'IA', service: 'Servicios' };
+      for (const cat of [{ id: 'all', name: 'Todos' }, ...C.CATEGORIES]) {
+        const chip = el('button', 'pill-catalog-cat', cat.id === 'all' ? cat.name : catLabels[cat.id] || cat.name); chip.type = 'button';
+        chip.dataset.cat = cat.id;
+        chip.setAttribute('aria-pressed', ui.catalogCat === cat.id ? 'true' : 'false');
+        chip.addEventListener('click', event => {
+          if (event.isTrusted !== true || ui.catalogCat === cat.id) return;
+          ui.catalogCat = cat.id; paint();
+        });
+        chips.append(chip);
+      }
+      const list = el('div', 'pill-catalog-list'); list.id = 'pill-catalog-list';
+      const add = el('button', 'sbtn primary', 'Agregar'); add.type = 'button'; add.id = 'pill-catalog-add';
+      add.disabled = o.saving || !ui.catalogPick;
+      const cancel = el('button', 'sbtn', 'Cancelar'); cancel.type = 'button'; cancel.id = 'pill-catalog-cancel';
+      const closeChooser = () => {
+        ui.mode = 'edit'; ui.catalogPick = ''; ui.catalogSearch = ''; ui.catalogCat = 'all'; paint();
+      };
+      const rebuild = () => {
+        add.disabled = o.saving || !ui.catalogPick; // a selection enables Agregar
+        const q = ui.catalogSearch.trim().toLowerCase();
+        const defs = C.available().filter(d =>
+          (ui.catalogCat === 'all' || d.category === ui.catalogCat) &&
+          (!q || d.name.toLowerCase().includes(q)));
+        list.textContent = '';
+        if (!defs.length) { list.append(el('span', 'pill-catalog-empty', 'Sin resultados')); return; }
+        for (const d of defs) {
+          const isMain = d.id === prefs.mainPill;
+          const isDeclared = prefs.declaredPills.includes(d.id);
+          const row = el(isMain || isDeclared ? 'div' : 'button', 'pill-catalog-row');
+          row.dataset.pillId = d.id;
+          if (!isMain && !isDeclared) {
+            row.type = 'button'; row.id = `pill-catalog-row-${d.id}`;
+            row.setAttribute('aria-pressed', ui.catalogPick === d.id ? 'true' : 'false');
+            row.addEventListener('click', event => {
+              if (event.isTrusted !== true) return;
+              ui.catalogPick = d.id;
+              rebuild(); // selection ring, check icon and Agregar follow
+            });
+            if (ui.catalogPick === d.id) {
+              const ico = el('span', 'ico'); (o.putIcon || (() => {}))(ico, 'check');
+              row.append(ico);
+            }
+          }
+          row.append(blob('blob-visual pill-catalog-blob', P.colorOf(prefs, d.id)));
+          row.append(el('span', 'pill-catalog-name', d.name));
+          if (isMain) row.append(el('span', 'chip', 'Principal'));
+          else if (isDeclared) row.append(el('span', 'chip', 'Ya está'));
+          list.append(row);
+        }
+      };
+      search.addEventListener('input', event => {
+        if (event.isTrusted !== true) return;
+        ui.catalogSearch = search.value;
+        rebuild(); // the search field keeps its focus: only the list is rebuilt
+      });
+      add.addEventListener('click', event => {
+        if (event.isTrusted !== true || add.disabled) return;
+        const id = ui.catalogPick;
+        if (!P.toggle(prefs, id)) return; // the same closed gates as today's declaration
+        o.onCommand({ action: 'toggle_declared_pill', id });
+        ui.mode = 'edit'; ui.key = `pill:${id}`; // §4.1: Agregar selects the new tile
+        ui.catalogPick = ''; ui.catalogSearch = ''; ui.catalogCat = 'all';
+        paint();
+      });
+      cancel.addEventListener('click', event => {
+        if (event.isTrusted !== true) return;
+        closeChooser();
+      });
+      editor.append(search, chips, list, el('span', 'pill-catalog-note', 'Elegir no conecta la cuenta'));
+      const actions = el('div', 'editor-actions');
+      actions.append(add, cancel);
+      editor.append(actions);
+      rebuild();
+    } else if (ui.mode === 'create') {
       editor.append(blob('blob-visual blob-preview'));
       const nameLabel = el('label', 'srow-title', 'Nombre'); nameLabel.htmlFor = 'blob-create-input';
       editor.append(nameLabel);
@@ -187,7 +296,7 @@
       input.value = ui.createName;
       const create = el('button', 'sbtn primary', 'Crear'); create.type = 'button'; create.id = 'blob-create-button';
       create.disabled = o.saving;
-      const paintCreate = () => { create.disabled = o.saving || !input.value.trim(); };
+      const paintCreate = () => { create.disabled = o.saving || !input.value.trim() || !ui.createColor; };
       paintCreate();
       input.addEventListener('input', event => {
         if (event.isTrusted !== true) return;
@@ -336,7 +445,7 @@
     const row = el('div', 'swatch-row');
     row.setAttribute('role', 'radiogroup');
     row.setAttribute('aria-label', label);
-    const paint = () => {
+    const paintRow = () => {
       for (const b of row.children) {
         const on = b.dataset.color === current;
         b.setAttribute('aria-checked', on ? 'true' : 'false');

@@ -124,9 +124,12 @@ test('S1 default state: principal card with the island chip, declared tiles with
   assert.ok(byId(host, 'pill-editor-delete'), 'the delete button exists');
 });
 
-test('S2 create state: Crear stays disabled until a name exists; the closed model gates dispatch', () => {
+test('S2 create state (Propio): Crear stays disabled until a name exists; the closed model gates dispatch', () => {
   const { host, commands } = boot(THREE);
   byId(host, 'pill-tile-new').fire('click');
+  assert.equal(byId(host, 'create-kind-catalog').getAttribute('aria-pressed'), 'true', 'the chooser opens on Del catálogo (the designed default)');
+  byId(host, 'create-kind-custom').fire('click');
+  assert.equal(byId(host, 'create-kind-custom').getAttribute('aria-pressed'), 'true', 'Propio is selectable');
   const preview = byClass(host, 'blob-preview')[0];
   assert.ok(preview, 'the large preview exists');
   assert.equal(preview.dataset.color, undefined, 'a new blob has no colour yet');
@@ -139,14 +142,20 @@ test('S2 create state: Crear stays disabled until a name exists; the closed mode
   input.value = '   '; input.fire('input');
   assert.ok(byId(host, 'blob-create-button').disabled, 'a blank name never enables Crear');
   input.value = 'Notas'; input.fire('input');
-  assert.ok(!byId(host, 'blob-create-button').disabled, 'a name enables Crear');
-  create.fire('click', { isTrusted: false });
+  assert.ok(byId(host, 'blob-create-button').disabled, 'a name alone is not enough (§4.1: name + colour)');
+  byClass(host, 'swatch').find(x => x.dataset.color === 'green').fire('click');
+  // the swatch re-renders the panel: re-find the button (fresh nodes, like S5's rows)
+  const ready = byId(host, 'blob-create-button');
+  assert.ok(!ready.disabled, 'name + colour enables Crear');
+  ready.fire('click', { isTrusted: false });
   assert.deepEqual(commands, [], 'a synthetic gesture never dispatches');
-  create.fire('click');
-  assert.deepEqual(commands, [{ action: 'create_blob', name: 'Notas' }], 'the create command goes through the closed gate');
+  ready.fire('click');
+  assert.deepEqual(commands, [{ action: 'create_blob', name: 'Notas', color: 'green' }],
+    'the create command goes through the closed gate with the picked colour (§4.1)');
   assert.ok(byId(host, 'blob-create-input') === null, 'the create form is gone after creating');
   // a duplicate of an existing created blob is refused by the model (case-insensitive)
   byId(host, 'pill-tile-new').fire('click');
+  byId(host, 'create-kind-custom').fire('click');
   const again = byId(host, 'blob-create-input');
   again.value = 'notas'; again.fire('input');
   byId(host, 'blob-create-button').fire('click');
@@ -278,4 +287,74 @@ test('S8 the customizer speaks blob, never pill, and keeps no paragraphs', () =>
   assert.equal((joined.match(/Elegir un blob no conecta el servicio/g) || []).length, 1,
     'the disclaimer appears once, as the principal chip tooltip');
   assert.equal(byClass(host, 'snote').filter(n => n.textContent).length, 0, 'no standing paragraph copy');
+});
+
+test('S9 chooser (B): Del catálogo lists offered pills with markers, never pickable for main/declared; Agregar goes through the closed toggle', () => {
+  const { host, commands } = boot(THREE);
+  byId(host, 'pill-tile-new').fire('click');
+  const seg = byId(host, 'create-kind-catalog'), segCustom = byId(host, 'create-kind-custom');
+  assert.ok(seg && segCustom, 'the segmented [Del catálogo | Propio] exists');
+  assert.equal(seg.getAttribute('aria-pressed'), 'true', 'Del catálogo is the designed default');
+  const search = byId(host, 'pill-catalog-search');
+  assert.ok(search, 'the search field exists');
+  assert.equal(search.placeholder, 'Buscar…', 'the designed placeholder');
+  assert.deepEqual(byClass(host, 'pill-catalog-cat').map(x => x.textContent),
+    ['Todos', 'Dónde programás', 'Agentes', 'IA', 'Servicios'], 'the category chips');
+  assert.match(words(host), /Elegir no conecta la cuenta/, 'the catalog disclaimer');
+  const rows = () => byClass(host, 'pill-catalog-row');
+  const colourRow = rows().find(x => x.dataset.pillId === 'integration_resend');
+  assert.ok(colourRow.children.some(c => String(c.className).includes('blob-visual') && c.dataset.color === 'mint'),
+    'each row paints a live 20px blob in the item colour');
+  const mainRow = rows().find(x => x.dataset.pillId === 'integration_claude');
+  assert.ok(mainRow, 'the main pill is listed');
+  assert.match(words(mainRow), /Principal/, 'the main pill wears its marker');
+  assert.equal(mainRow.tagName, 'DIV', 'a marked row is not pickable');
+  const declaredRow = rows().find(x => x.dataset.pillId === 'integration_resend');
+  assert.match(words(declaredRow), /Ya está/, 'a declared pill wears its marker');
+  const pickable = rows().filter(x => x.tagName === 'BUTTON');
+  assert.ok(pickable.length > 0, 'undeclared offered pills are pickable');
+  assert.ok(!pickable.some(x => ['integration_claude', ...THREE.declaredPills].includes(x.dataset.pillId)),
+    'marked rows are never pickable');
+  assert.ok(byId(host, 'pill-catalog-add').disabled, 'Agregar needs a selected row');
+  const target = pickable.find(x => x.dataset.pillId === 'agent_cursor');
+  target.fire('click');
+  const chosen = byId(host, 'pill-catalog-row-agent_cursor');
+  assert.equal(chosen.getAttribute('aria-pressed'), 'true', 'the selected row is pressed');
+  assert.ok(chosen.children.some(c => String(c.className).includes('ico')), 'the selected row shows the check icon');
+  assert.equal(byId(host, 'pill-catalog-add').disabled, false, 'a selection enables Agregar');
+  byId(host, 'pill-catalog-add').fire('click', { isTrusted: false });
+  assert.deepEqual(commands, [], 'a synthetic Agregar never dispatches');
+  byId(host, 'pill-catalog-add').fire('click');
+  assert.deepEqual(commands, [{ action: 'toggle_declared_pill', id: 'agent_cursor' }],
+    'Agregar is the existing closed toggle command');
+  assert.ok(byId(host, 'blob-create-input') === null, 'the chooser is gone after adding');
+  const name = byId(host, 'pill-editor-name');
+  assert.ok(name, 'the editor is back');
+  assert.equal(name.value, 'Cursor', 'Agregar selects the new tile');
+});
+
+test('S9 chooser (B): search and category chips filter the offered list; Cancelar returns without dispatch', () => {
+  const { host, commands } = boot(THREE);
+  byId(host, 'pill-tile-new').fire('click');
+  const search = byId(host, 'pill-catalog-search');
+  search.value = 'github'; search.fire('input');
+  assert.deepEqual(byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON').map(x => x.dataset.pillId),
+    ['integration_github'], 'the search filters by name');
+  search.value = 'zzzz'; search.fire('input');
+  assert.match(words(host), /Sin resultados/, 'an empty search says so in one line');
+  search.value = 'GITHUB'; search.fire('input');
+  assert.deepEqual(byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON').map(x => x.dataset.pillId),
+    ['integration_github'], 'the filter is case-insensitive');
+  search.value = ''; search.fire('input');
+  byClass(host, 'pill-catalog-cat').find(x => x.textContent === 'Agentes').fire('click');
+  const agentRows = byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON');
+  assert.ok(agentRows.length > 0 && agentRows.every(x => C.definition(x.dataset.pillId).category === 'agent'),
+    'the category chip filters');
+  byClass(host, 'pill-catalog-cat').find(x => x.textContent === 'Todos').fire('click');
+  assert.ok(byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON').length > agentRows.length,
+    'Todos restores the whole list');
+  byId(host, 'pill-catalog-cancel').fire('click');
+  assert.ok(byId(host, 'blob-create-input') === null, 'the chooser is gone');
+  assert.ok(byId(host, 'pill-editor-name'), 'the editor is back');
+  assert.deepEqual(commands, [], 'cancel never dispatches');
 });

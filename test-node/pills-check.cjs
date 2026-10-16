@@ -225,6 +225,19 @@ test('S4 actual settings quits a declared pill through the editor confirm at cap
   assert.ok(b.get('pill-tile-new'), 'the empty slot exists again at 3/4');
   assert.deepEqual(b.get('pill-choices').children.map(x=>x.dataset.pillId), [M.DEFAULT_MAIN,'integration_resend','integration_vercel','integration_github']);
   assert.equal(b.backend.writes,1); assert.equal(b.backend.publications,1);
+  // S11: the removed catalog pill is re-added through the public chooser (option B)
+  b.click('pill-tile-new'); await flush();
+  assert.equal(b.get('create-kind-catalog').getAttribute('aria-pressed'), 'true', 'the chooser opens on Del catálogo');
+  b.get('pill-catalog-search').value = 'n8n'; b.get('pill-catalog-search').fire('input');
+  b.get('pill-catalog-row-integration_n8n').fire('click');
+  b.click('pill-catalog-add'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'toggle_declared_pill', id: 'integration_n8n' },
+    { action: 'toggle_declared_pill', id: 'integration_n8n' },
+  ], 'the re-add is the same public toggle command');
+  assert.match(b.get('pill-slot-count').textContent, /4\/4/);
+  assert.equal(b.get('pill-tile-new'), null, 'full again, no empty slot');
+  assert.equal(b.backend.writes,2); assert.equal(b.backend.publications,2);
 });
 
 test('S4 actual main change through «Principal» removes the new-main declaration only and preserves legacy values', async () => {
@@ -609,18 +622,21 @@ test('#415 Ajustes creates a blob through the closed create_blob command and rep
   const b = await blobBoot();
   assert.ok(b.get('pill-tile-new'), 'the empty slot exists at 2/4 declared');
   b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush(); // «Propio» is the custom editor (§4.1)
   const input = b.get('blob-create-input'), button = b.get('blob-create-button');
   assert.ok(input && button, 'the create form exists');
   assert.equal(input.placeholder, 'Nombre del blob');
   b.click('blob-create-button'); await flush();
   assert.deepEqual(writes(b), [], 'an empty name never dispatches');
-  input.value = 'Abito GitHub'; b.click('blob-create-button'); await flush();
+  input.value = 'Abito GitHub'; b.get('blob-create-input').fire('input');
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'green').fire('click'); await flush();
+  b.click('blob-create-button'); await flush();
   assert.deepEqual(writes(b), [], 'a duplicate name never dispatches');
   b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush();
   b.get('blob-create-input').value = 'Abito Reviewer'; b.get('blob-create-input').fire('input'); await flush();
-  // the colour swatch rides along at creation
+  // the colour swatch rides along at creation (§4.1: Crear needs name + colour)
   allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'orange').fire('click'); await flush();
-  b.get('blob-create-input').fire('input'); await flush();
   b.click('blob-create-button'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'create_blob', name: 'Abito Reviewer', color: 'orange' }]);
   assert.equal(b.backend.writes, 1);
@@ -650,6 +666,7 @@ test('#415 synthetic gestures never create or delete blobs; a failed save keeps 
   const b = await blobBoot();
   const before = clone(b.backend.prefs);
   b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush();
   b.get('blob-create-input').value = 'Abito correo';
   b.get('blob-create-button').fire('click', { isTrusted: false });
   await flush();
@@ -662,7 +679,9 @@ test('#415 synthetic gestures never create or delete blobs; a failed save keeps 
   assert.deepEqual(b.backend.prefs, before);
   b.backend.rejectNext = true;
   b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush();
   b.get('blob-create-input').value = 'Abito correo'; b.get('blob-create-input').fire('input');
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'mint').fire('click'); await flush();
   b.click('blob-create-button'); await flush();
   assert.equal(b.backend.writes, 0);
   assert.deepEqual(b.backend.prefs.blobs, [{ name: 'Abito GitHub', color: 'mint' }], 'a failed save keeps the stored list');
