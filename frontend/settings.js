@@ -187,7 +187,7 @@
   // enum, persists it and publishes `prefs:state`; theme.js paints from that saved state. So a
   // failed save leaves the previous theme on screen (no optimistic paint, no false «guardado»).
   function chooseTheme(mode) {
-    call('prefs_action', { action: 'set_theme', theme: mode }).then(p => {
+    return call('prefs_action', { action: 'set_theme', theme: mode }).then(p => {
       themeError = '';
       prefs = p;
       render();
@@ -1047,6 +1047,67 @@
       });
     }
   }
+
+  // #366 F094 — the quick panel: right-click on an Ajustes gear opens a small popover INSIDE the
+  // island with the three most-used toggles (sound, theme, auto-close). A normal click keeps the
+  // #408 behaviour untouched. Only the existing closed prefs commands are used; the saved
+  // projection is the truth, a failed save keeps the previous value and says so.
+  let quick = null;
+  function closeQuick() { if (quick) { quick.remove(); quick = null; } }
+  function quickSay(text) { say(text); }
+  function renderQuick() {
+    if (!quick) return;
+    const v = V.quickPanelView(prefs);
+    const island = V.islandInteractionView(prefs);
+    quick.textContent = '';
+    quick.append(el('h3', 'ssection', 'Ajustes rápidos'));
+    quick.append(toggleRow('quick-sound', 'Sonido', v.sound.on, () =>
+      call('prefs_action', { action: v.sound.on ? 'sound_off' : 'sound_on' }).then(
+        p => { prefs = p; renderQuick(); quickSay(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); },
+        () => quickSay('No se pudo guardar. El sonido sigue sin cambios; probá de nuevo.'))));
+    const picker = el('span', 'stheme-options');
+    picker.setAttribute('role', 'radiogroup'); picker.setAttribute('aria-label', 'Tema');
+    for (const option of v.theme) {
+      const b = el('button', 'stheme'); b.type = 'button'; b.id = `quick-theme-${option.id}`;
+      b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+      b.setAttribute('aria-label', option.aria); b.append(el('span', 'stheme-label', option.label));
+      b.addEventListener('click', e => { if (e.isTrusted === true) chooseTheme(option.id).then(renderQuick); });
+      picker.append(b);
+    }
+    quick.append(picker);
+    const form = el('form', 'sname-form'); form.noValidate = true;
+    const label = el('label', 'srow-title', 'Cerrar a los (segundos)'); label.htmlFor = 'quick-autoclose';
+    const input = el('input', 'sfield'); input.type = 'number'; input.id = 'quick-autoclose';
+    input.min = '5'; input.max = '120'; input.step = '1'; input.value = String(v.autoCloseSeconds);
+    const issue = el('p', 'snote'); issue.setAttribute('role', 'status');
+    const save = el('button', 'sbtn primary', 'Guardar cierre'); save.type = 'submit';
+    const paint = () => { const problem = V.autoCloseProblem(input.value); issue.textContent = problem; save.disabled = !!problem; };
+    input.addEventListener('input', paint);
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!e.isTrusted || V.autoCloseProblem(input.value)) return;
+      call('prefs_action', { action: 'set_island_interaction', auto_close_seconds: Number(input.value), open_on_hover: island.openOnHover }).then(
+        p => { prefs = p; renderQuick(); quickSay('Cierre automático guardado.'); },
+        () => { issue.textContent = 'No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'; });
+    });
+    form.append(label, input, issue, save); quick.append(form); paint();
+    quick.append(wordBtn('Todos los ajustes', () => { closeQuick(); open(screen); }));
+  }
+  function openQuick() {
+    if (WINDOW_MODE) return;
+    if (quick) { closeQuick(); return; }
+    quick = el('div', 'squick'); quick.id = 'settings-quick'; quick.setAttribute('role', 'dialog'); quick.setAttribute('aria-label', 'Ajustes rápidos');
+    (document.getElementById('island') || document.body).append(quick);
+    renderQuick();
+    call('prefs_action', { action: 'view' }).then(p => { prefs = p; renderQuick(); }, () => {});
+  }
+  for (const g of [...openers, $('open-settings')].filter(Boolean)) g.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (e.isTrusted === true) openQuick();
+  });
+  document.addEventListener('keydown', e => { if (quick && e.key === 'Escape') { e.stopPropagation(); closeQuick(); } }, true);
+  document.addEventListener('pointerdown', e => { if (quick && e.isTrusted === true && !quick.contains(e.target) && !e.target.closest('#open-screen-settings, #open-settings')) closeQuick(); }, true);
+  document.addEventListener('island:view', closeQuick);
   // #366 F093: inside the Rust-created settings window the SAME page opens
   // Ajustes at once — the panel IS the window (the island chrome stays hidden
   // by CSS, and the island's own phase machinery is never driven from here).

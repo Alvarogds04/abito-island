@@ -1474,3 +1474,11 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 - **Same page, window mode.** `settings.js` detects the label, sets `body[data-window="settings"]` (append-only CSS hides the island chrome) and opens Ajustes at once; closing the panel closes the window and never resizes the island.
 - **Chosen in** Ajustes → General → «Abrir Ajustes en su ventana».
 - **Not verified here:** no GUI was launched; window creation is covered only by pure tests (payload, pref decision, gate).
+
+## #366 / F094 — the quick panel inside the island
+
+- **Entry.** Right-click (`contextmenu`) on either Ajustes gear opens a small popover inside the island. A normal click keeps the #408 behaviour exactly. There is no long-press. The gesture is not discoverable by itself; the human should judge whether it needs a visible hint.
+- **Content.** Exactly three toggles: sound, theme (system/light/dark) and auto-close seconds, plus «Todos los ajustes» which opens the full panel.
+- **No new command.** It reuses the closed `prefs_action` commands (`sound_on/off`, `set_theme` through the same `chooseTheme` sender, `set_island_interaction` with the full typed pair). The saved projection is the truth; a failed save keeps the previous value and says so. Auto-close is validated by `autoCloseProblem` before any IPC.
+- **View-model.** `quickPanelView` (`settings-view.js`) reuses `themeView` and `islandInteractionView`, so the quick panel and the full panel cannot disagree. Escape, an outside click or a view change closes it. It is not built inside the settings window.
+- **Tests.** `test-node/settings-view-check.cjs` (`F094`, plus a source contract). No index.html change: the panel is built from DOM nodes.

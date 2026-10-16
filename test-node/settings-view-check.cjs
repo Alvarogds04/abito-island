@@ -1208,3 +1208,29 @@ test('#366 settings window seam contract: the closed command, the honest fallbac
   const windowModeClose = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
   assert.doesNotMatch(windowModeClose, /askSize\(false\)[^\n]*\n[^\n]*WINDOW_MODE/, 'close asks the closed command first');
 });
+
+// ---- #366 F094: the quick panel inside the island -------------------------------------------------
+
+test('F094 quickPanelView projects exactly sound, theme and auto-close from the saved prefs', () => {
+  const v = S.quickPanelView({ sound: true, theme: 'dark', autoCloseSeconds: 45 });
+  assert.equal(v.sound.on, true);
+  assert.deepEqual(v.theme.map(o => [o.id, o.selected]), [['system', false], ['light', false], ['dark', true]]);
+  assert.equal(v.autoCloseSeconds, 45);
+  const d = S.quickPanelView({});
+  assert.equal(d.sound.on, false);
+  assert.equal(d.theme.find(o => o.selected).id, 'system');
+  assert.equal(d.autoCloseSeconds, 15, 'the contract default');
+  assert.equal(S.quickPanelView(null).autoCloseSeconds, 15);
+  assert.deepEqual(Object.keys(v).sort(), ['autoCloseSeconds', 'sound', 'theme']);
+});
+
+test('#366 quick panel contract: right-click on the gear, existing closed prefs commands only, normal click untouched', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /addEventListener\('contextmenu'/);
+  assert.match(src, /V\.quickPanelView\(/);
+  assert.match(src, /chooseTheme\(option\.id\)/, 'the quick theme reuses the one closed theme sender');
+  assert.match(src, /'sound_on'/);
+  assert.match(src, /action: 'set_island_interaction'/);
+  assert.match(src, /V\.autoCloseProblem\(/);
+  assert.doesNotMatch(src, /long-?press|longpress/i, 'no long-press gesture');
+});
