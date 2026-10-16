@@ -611,6 +611,20 @@ impl NoticeStore {
             .retain(|entry| !(entry.id == id && entry.session_id == session_id));
     }
 
+    /// #437: dismiss the notice with EXACTLY this id (the notices list view's
+    /// per-row ×). An unknown id is refused with ZERO mutation — never a
+    /// first-notice fallback (coordinator decision, T6.6 #437). Answers true
+    /// only when that exact notice was removed.
+    pub fn dismiss_exact(&mut self, id: &str, now: u64) -> bool {
+        self.prune(now);
+        let Some(entry) = self.queue.iter().find(|entry| entry.id == id) else {
+            return false;
+        };
+        let session_id = entry.session_id.clone();
+        self.dismiss(id, &session_id, now);
+        true
+    }
+
     pub fn project(&self) -> &str {
         &self.project
     }
@@ -715,6 +729,34 @@ mod tests {
         let wrong_type = json!({"v":1, "type":"tests_passed", "project":project, "sessionId":"session-1", "at":NOW, "id":"event-1"});
         assert!(parse(&wrong_type, &project, Some(&identity), NOW).is_err());
         assert!(parse(&wrong_type, &project, None, NOW).is_err());
+    }
+
+    // #437: per-row dismissal in the notices list view needs an exact-id dismiss
+    // that REFUSES an unknown id with zero mutation — the list's × must never
+    // fall back to the first notice (coordinator decision, T6.6 #437).
+    #[test]
+    fn dismiss_exact_removes_only_that_notice_and_refuses_unknown_ids() {
+        let project = project();
+        let identity = identity_of(&project);
+        let decode_at = |value: &Value, now: u64| {
+            decode(value.to_string().as_bytes(), &project, Some(&identity), now)
+        };
+        let mut store = NoticeStore::new(project.clone());
+        for id in ["event-1", "event-2"] {
+            let value = json!({"v":1, "type":"settled", "project":project,
+                               "sessionId":"session-1", "at":NOW, "id":id});
+            let message = decode_at(&value, NOW).expect("valid settled");
+            assert!(store.accept(&message, NOW), "{id} admitted");
+        }
+        assert_eq!(store.snapshot(NOW).len(), 2);
+        // an unknown id is refused and changes NOTHING (never a first-notice fallback)
+        assert!(!store.dismiss_exact("event-9", NOW));
+        assert_eq!(store.snapshot(NOW).len(), 2, "an unknown id never mutates the queue");
+        // the exact id removes exactly that notice; the other one stays
+        assert!(store.dismiss_exact("event-1", NOW));
+        let left = store.snapshot(NOW);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "event-2");
     }
 
     // ported from legacy test/core.test.cjs:41
