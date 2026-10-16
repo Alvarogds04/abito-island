@@ -1285,6 +1285,35 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 }
 html[data-motion="reduce"] #island-countdown::before { transition: none; }
 
+/* ---- #357/#358/#359: Notion, n8n and Calendario service cards (frontend/integrations-{notion,n8n,calendar}.js,
+   FAKE providers). APPEND-ONLY block, placed BEFORE the #410 compact slice (a #410 test slices style.css from
+   that marker to EOF). Theme tokens only, so light and dark resolve with zero raw colors; 44px targets. */
+#integrations-notion { display: grid; gap: 8px; }
+#integrations-notion[hidden] { display: none; }
+.intn-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.intn-title { font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); }
+.intn-count, .intn-age { font: 400 var(--fs-label)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.intn-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
+.intn-empty { margin: 0; font: 400 var(--fs-label)/1.4 var(--font-ui); color: var(--muted); }
+.intn-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.intn-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  min-height: 44px; padding: 0 12px; border-radius: var(--radius-xl); text-align: left;
+  border: 1px solid var(--line-faint); background: var(--fill-alt); color: var(--island-ink);
+  font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
+}
+.intn-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.intn-row:hover, .intn-back:hover { background: var(--fill-hover); }
+.intn-row:focus-visible, .intn-back:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+.intn-card { display: grid; gap: 6px; padding: 10px 12px; border-radius: var(--radius-xl); border: 1px solid var(--line-faint); background: var(--fill-alt); }
+.intn-card-title { margin: 0; font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); overflow-wrap: anywhere; }
+.intn-card-body { margin: 0; font: 400 var(--fs-label)/1.4 var(--font-ui); color: var(--island-ink); overflow-wrap: anywhere; }
+.intn-back {
+  justify-self: start; min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
+  font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
+}
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
