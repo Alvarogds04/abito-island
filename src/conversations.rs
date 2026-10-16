@@ -57,6 +57,69 @@ struct StoredTurn {
     /// record shape is preserved byte for byte (shape pin in the tests).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<StoredAttachment>,
+    /// #418: tool-call receipts and approval decisions. Same optional-key
+    /// pattern: plain turns write NO key; old records load with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<StoredToolCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    approvals: Vec<StoredApproval>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredToolCall {
+    call_id: String,
+    name: String,
+    state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredApproval {
+    request_id: String,
+    operation: String,
+    decision: String,
+}
+fn word<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
+}
+impl StoredToolCall {
+    fn from_call(c: &crate::chat::ToolCall) -> io::Result<Self> {
+        if !c.valid() {
+            return Err(invalid());
+        }
+        Ok(Self { call_id: c.call_id.clone(), name: c.name.clone(), state: word(&c.state), summary: c.summary.clone() })
+    }
+    fn into_call(self) -> io::Result<crate::chat::ToolCall> {
+        use crate::chat::ToolState;
+        let state = match self.state.as_str() {
+            "running" => ToolState::Running,
+            "done" => ToolState::Done,
+            "failed" => ToolState::Failed,
+            _ => return Err(invalid()),
+        };
+        let call = crate::chat::ToolCall { call_id: self.call_id, name: self.name, state, summary: self.summary };
+        if call.valid() { Ok(call) } else { Err(invalid()) }
+    }
+}
+impl StoredApproval {
+    fn from_decision(a: &crate::chat::ApprovalDecision) -> io::Result<Self> {
+        if !a.valid() {
+            return Err(invalid());
+        }
+        Ok(Self { request_id: a.request_id.clone(), operation: a.operation.clone(), decision: word(&a.decision) })
+    }
+    fn into_decision(self) -> io::Result<crate::chat::ApprovalDecision> {
+        use crate::chat::Decision;
+        let decision = match self.decision.as_str() {
+            "approved" => Decision::Approved,
+            "denied" => Decision::Denied,
+            "expired" => Decision::Expired,
+            _ => return Err(invalid()),
+        };
+        let item = crate::chat::ApprovalDecision { request_id: self.request_id, operation: self.operation, decision };
+        if item.valid() { Ok(item) } else { Err(invalid()) }
+    }
 }
 /// Metadata only: the file content stays in the island's uploads directory
 /// and is re-read (re-validated) when a prompt is built.
@@ -179,6 +242,8 @@ impl StoredTurn {
                 .iter()
                 .map(StoredAttachment::from_attachment)
                 .collect::<io::Result<Vec<_>>>()?,
+            tool_calls: t.tool_calls.iter().map(StoredToolCall::from_call).collect::<io::Result<Vec<_>>>()?,
+            approvals: t.approvals.iter().map(StoredApproval::from_decision).collect::<io::Result<Vec<_>>>()?,
         })
     }
     fn into_turn(self, id: &str) -> io::Result<Turn> {
@@ -209,6 +274,8 @@ impl StoredTurn {
             .into_iter()
             .map(StoredAttachment::into_attachment)
             .collect::<io::Result<Vec<_>>>()?;
+        let tool_calls = self.tool_calls.into_iter().map(StoredToolCall::into_call).collect::<io::Result<Vec<_>>>()?;
+        let approvals = self.approvals.into_iter().map(StoredApproval::into_decision).collect::<io::Result<Vec<_>>>()?;
         Ok(Turn {
             turn_id: format!("t-{}", self.number),
             request_id: format!("{id}/r-{}", self.number),
@@ -234,6 +301,8 @@ impl StoredTurn {
             },
             trimmed_turns: self.trimmed_turns,
             attachments,
+            tool_calls,
+            approvals,
         })
     }
 }

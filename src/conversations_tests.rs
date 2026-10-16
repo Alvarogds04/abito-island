@@ -266,3 +266,63 @@ fn attachment_metadata_round_trips_and_forged_records_are_refused() {
     let page = reopened.page(&convo.id, None, PAGE_SIZE).unwrap();
     assert_eq!(page.turns.len(), 0, "the forged record is skipped, never loaded");
 }
+
+// --- #418 shape pins: tool calls and approvals use the optional-key pattern ----
+
+fn card_turn() -> Turn {
+    let mut t = turn(1, "con herramientas");
+    t.tool_calls = vec![
+        crate::chat::ToolCall { call_id: "call_1".into(), name: "read".into(), state: crate::chat::ToolState::Done, summary: None },
+        crate::chat::ToolCall { call_id: "call_2".into(), name: "bash".into(), state: crate::chat::ToolState::Failed, summary: Some("La herramienta terminó con error.".into()) },
+    ];
+    t.approvals = vec![crate::chat::ApprovalDecision { request_id: "req_1".into(), operation: "Enviar correo".into(), decision: crate::chat::Decision::Denied }];
+    t
+}
+
+#[test]
+fn plain_turns_write_no_tool_or_approval_keys_and_old_records_load() {
+    let temp = Temp::new();
+    let dir = temp.0.join("history");
+    let mut store = Store::open(&dir).unwrap();
+    let convo = store.create(None, 1).unwrap();
+    store.append(&convo.id, &turn(1, "texto viejo"), 2).unwrap();
+    let contents = std::fs::read_to_string(dir.join(format!("{}.jsonl", convo.id))).unwrap();
+    let line = contents.lines().find(|l| l.contains("\"kind\":\"turn\"")).unwrap();
+    assert!(!line.contains("tool_calls") && !line.contains("approvals"), "{line}");
+    let page = Store::open(&dir).unwrap().page(&convo.id, None, PAGE_SIZE).unwrap();
+    assert!(page.turns[0].tool_calls.is_empty() && page.turns[0].approvals.is_empty());
+}
+
+#[test]
+fn tool_calls_and_approvals_round_trip_through_history() {
+    let temp = Temp::new();
+    let dir = temp.0.join("history");
+    let mut store = Store::open(&dir).unwrap();
+    let convo = store.create(None, 1).unwrap();
+    store.append(&convo.id, &card_turn(), 2).unwrap();
+    let page = Store::open(&dir).unwrap().page(&convo.id, None, PAGE_SIZE).unwrap();
+    assert_eq!(page.turns[0].tool_calls, card_turn().tool_calls);
+    assert_eq!(page.turns[0].approvals, card_turn().approvals);
+}
+
+#[test]
+fn unsafe_cards_are_refused_on_write_and_forged_records_are_skipped_on_read() {
+    let temp = Temp::new();
+    let dir = temp.0.join("history");
+    let mut store = Store::open(&dir).unwrap();
+    let convo = store.create(None, 1).unwrap();
+    let mut bad = card_turn();
+    bad.tool_calls[0].name = "bash\nrm".into();
+    assert!(store.append(&convo.id, &bad, 2).is_err());
+    let file = dir.join(format!("{}.jsonl", convo.id));
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("\"kind\":\"turn\""), "a refused turn writes nothing");
+    store.append(&convo.id, &card_turn(), 3).unwrap();
+    let contents = std::fs::read_to_string(&file).unwrap();
+    for (from, to) in [("\"state\":\"done\"", "\"state\":\"sneaky\""), ("\"decision\":\"denied\"", "\"decision\":\"maybe\""), ("\"call_1\"", "\"bad id\"")] {
+        let forged = contents.replace(from, to);
+        assert_ne!(forged, contents, "{from}");
+        std::fs::write(&file, forged).unwrap();
+        let page = Store::open(&dir).unwrap().page(&convo.id, None, PAGE_SIZE).unwrap();
+        assert!(page.turns.is_empty(), "{from}: forged record is skipped");
+    }
+}
