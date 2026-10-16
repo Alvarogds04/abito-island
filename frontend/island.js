@@ -338,11 +338,13 @@
     // #336 L18: a spent hover engagement cancels ONLY this release — core.rs
     // release() applies the snap first and then skips the toggle on
     // cancelled, so the island keeps open; every later press is legacy.
-    const engaged = hoverEngagePress;
+    // Merged BEFORE the send: the native IPC arguments stay byte-identical
+    // (character-states-check pins that exact line and must not change).
+    cancelled = cancelled || hoverEngagePress;
     hoverEngagePress = false;
     character.dragEnd();
     document.body.classList.remove('is-dragging');
-    send('drag_release', { x: pt.x, y: pt.y, cancelled: cancelled || engaged });
+    send('drag_release', { x: pt.x, y: pt.y, cancelled });
     syncInteraction();
   };
   window.addEventListener('pointerdown', e => {
