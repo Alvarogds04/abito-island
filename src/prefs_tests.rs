@@ -1655,3 +1655,91 @@ fn t62_settings_window_size_persists_and_round_trips() {
     let default_sized = update(&Prefs::default(), &Command::SetSettingsWindowSize(960, 640), |_| true).unwrap();
     assert!(default_sized.to_text().contains("settings_window_size"));
 }
+
+// #435 T6.4: persisted order for the declared pills and the created blobs — two
+// separate closed commands, each exactly {action, order:[...]}, each a strict
+// permutation of what is currently stored. Anything else refuses with no mutation
+// and no write, like every other closed command.
+#[test]
+fn reorder_declared_pills_is_a_strict_permutation_gate() {
+    let start = Prefs::from_text(Some(
+        r#"{"v":1,"main_pill":"integration_claude","declared_pills":["integration_resend","integration_n8n","integration_vercel"]}"#,
+    ));
+    let baseline = start.clone();
+    let reorder = parse_command(&json!({"action":"reorder_declared_pills","order":["integration_vercel","integration_resend","integration_n8n"]})).unwrap();
+    let next = update(&start, &reorder, |_| true).unwrap();
+    assert_eq!(next.declared_pills(), ["integration_vercel", "integration_resend", "integration_n8n"]);
+    assert_eq!(next.main_pill(), "integration_claude", "the main pill is never part of the declared list");
+    // the new order survives a full file round trip
+    let reread = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(reread.declared_pills(), next.declared_pills(), "the persisted order reads back exactly");
+    // parse refuses a wrong closed shape before any state is touched
+    for bad in [
+        json!({"action":"reorder_declared_pills"}),
+        json!({"action":"reorder_declared_pills","order":"integration_vercel"}),
+        json!({"action":"reorder_declared_pills","order":[1]}),
+        json!({"action":"reorder_declared_pills","order":["integration_vercel","integration_resend","integration_n8n"],"x":1}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}");
+    }
+    // apply refuses anything that is not exactly a permutation of the stored ids
+    let refused = |payload: Value| {
+        match parse_command(&payload) {
+            Err(CommandError) => {}
+            Ok(command) => assert_eq!(update(&start, &command, |_| true), Err(CommandError), "{payload}"),
+        }
+    };
+    refused(json!({"action":"reorder_declared_pills","order":["integration_resend","integration_resend","integration_n8n"]}));
+    refused(json!({"action":"reorder_declared_pills","order":["integration_resend","integration_n8n"]}));
+    refused(json!({"action":"reorder_declared_pills","order":["integration_resend","integration_n8n","integration_vercel","integration_github"]}));
+    refused(json!({"action":"reorder_declared_pills","order":["integration_resend","integration_n8n","integration_music"]}));
+    refused(json!({"action":"reorder_declared_pills","order":["integration_resend","integration_n8n","integration_claude"]}));
+    refused(json!({"action":"reorder_declared_pills","order":[]}));
+    assert_eq!(start, baseline, "a refusal never moves the store");
+    // an empty declared list is its own (valid) permutation
+    let empty = Prefs::from_text(Some(r#"{"v":1,"declared_pills":[]}"#));
+    let ok = update(&empty, &parse_command(&json!({"action":"reorder_declared_pills","order":[]})).unwrap(), |_| true).unwrap();
+    assert_eq!(ok.declared_pills(), Vec::<String>::new());
+}
+
+#[test]
+fn reorder_blobs_is_a_strict_permutation_gate_by_exact_name() {
+    let start = update(&Prefs::default(),
+        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"mint"})).unwrap(), |_| true).unwrap();
+    let start = update(&start, &parse_command(&json!({"action":"create_blob","name":"Notas"})).unwrap(), |_| true).unwrap();
+    let baseline = start.clone();
+    let reorder = parse_command(&json!({"action":"reorder_blobs","order":["Notas","Abito GitHub"]})).unwrap();
+    let next = update(&start, &reorder, |_| true).unwrap();
+    let blobs = next.custom_blobs.as_ref().unwrap();
+    assert_eq!(blobs[0].name, "Notas");
+    assert_eq!(blobs[1].name, "Abito GitHub");
+    assert_eq!(blobs[1].color.as_deref(), Some("mint"), "reordering keeps each entry's own colour");
+    // the new order survives a full file round trip
+    let reread = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(reread.custom_blobs, next.custom_blobs, "created blobs read back exactly");
+    // parse refuses a wrong closed shape before any state is touched
+    for bad in [
+        json!({"action":"reorder_blobs"}),
+        json!({"action":"reorder_blobs","order":"Notas"}),
+        json!({"action":"reorder_blobs","order":[1]}),
+        json!({"action":"reorder_blobs","order":["Notas","Abito GitHub"],"x":1}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}");
+    }
+    // apply refuses anything that is not exactly a permutation of the stored names
+    let refused = |payload: Value| {
+        match parse_command(&payload) {
+            Err(CommandError) => {}
+            Ok(command) => assert_eq!(update(&start, &command, |_| true), Err(CommandError), "{payload}"),
+        }
+    };
+    refused(json!({"action":"reorder_blobs","order":["notas","Abito GitHub"]})); // names are exact
+    refused(json!({"action":"reorder_blobs","order":["Notas","Notas"]}));
+    refused(json!({"action":"reorder_blobs","order":["Notas"]}));
+    refused(json!({"action":"reorder_blobs","order":["Notas","Abito GitHub","X"]}));
+    refused(json!({"action":"reorder_blobs","order":[]}));
+    assert_eq!(start, baseline, "a refusal never moves the store");
+    // with no blobs at all, an empty order is valid and stores nothing
+    let none = update(&Prefs::default(), &parse_command(&json!({"action":"reorder_blobs","order":[]})).unwrap(), |_| true).unwrap();
+    assert_eq!(none.custom_blobs, None, "an empty order never creates the field");
+}

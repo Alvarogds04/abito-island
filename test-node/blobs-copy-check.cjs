@@ -55,15 +55,19 @@ const settings = global.window.AbitoPillSettings =
   (() => { require(path.join(frontend, 'pill-settings.js')); return global.window.AbitoPillSettings; })();
 const view = require(path.join(frontend, 'settings-view.js'));
 
-test('S1 the settings pills section reads «Blob principal» and never the word «pill»', () => {
+test('S1 the settings pills section speaks blob, never pill, with the single chip disclaimer (#435)', () => {
   assert.ok(settings.render, 'render entry point');
   const host = new Node('div');
   host.ownerDocument = doc;
   settings.render(host, {}, { saving: false, error: '' });
   const { texts, arias } = words(host);
   const joined = [...texts, ...arias].join('\n');
-  assert.match(joined, /Blob principal/, 'the main choice label is «Blob principal»');
-  assert.match(joined, /Elegir un blob no conecta/, 'the note speaks of a blob');
+  // #435: the «Blob principal» select and the standing note paragraphs are GONE
+  // (design page «3 Blobs»); the only disclaimer left is the principal chip tooltip.
+  assert.match(joined, /Siempre en la isla/, 'the principal chip is there');
+  assert.equal((joined.match(/Elegir un blob no conecta el servicio/g) || []).length, 1,
+    'the disclaimer appears once, as the principal chip tooltip');
+  assert.equal((joined.match(/pill/gi) || []).length, 0, 'no visible word says pill');
   for (const word of joined.split(/\s+/)) {
     assert.doesNotMatch(word, /pill/i, `visible word must not say pill: ${word}`);
   }

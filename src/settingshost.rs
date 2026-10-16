@@ -177,6 +177,8 @@ pub fn save_settings_window_size(app: &AppHandle, w: u32, h: u32) -> bool {
 /// set_display_name, set/clear_avatar_color, set_main_pill, toggle_declared_pill and
 /// set_theme (system|light|dark). Pill actions take exactly action + id; selection never
 /// installs or connects anything. The theme is #380's optional closed field.
+/// #435: reorder_declared_pills and reorder_blobs take exactly action + order (an
+/// array of strings) — apply enforces the strict-permutation gate.
 #[tauri::command]
 pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();

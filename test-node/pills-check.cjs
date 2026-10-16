@@ -64,7 +64,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
         }
         if (backend.rejectNext) { backend.rejectNext = false; return Promise.reject(new Error('save_failed')); }
         const before = JSON.stringify(backend.prefs);
-        const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : payload.action === 'set_pill_color' ? M.setColor(backend.prefs, payload.id, payload.color) : payload.action === 'clear_pill_color' ? M.clearColor(backend.prefs, payload.id) : payload.action === 'create_blob' ? M.createBlob(backend.prefs, payload.name, payload.color || '') : payload.action === 'delete_blob' ? M.deleteBlob(backend.prefs, payload.name) : payload.action === 'set_blob_color' ? M.setBlobColor(backend.prefs, payload.name, payload.color) : null;
+        const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : payload.action === 'set_pill_color' ? M.setColor(backend.prefs, payload.id, payload.color) : payload.action === 'clear_pill_color' ? M.clearColor(backend.prefs, payload.id) : payload.action === 'create_blob' ? M.createBlob(backend.prefs, payload.name, payload.color || '') : payload.action === 'delete_blob' ? M.deleteBlob(backend.prefs, payload.name) : payload.action === 'set_blob_color' ? M.setBlobColor(backend.prefs, payload.name, payload.color) : payload.action === 'reorder_declared_pills' ? M.reorderDeclared(backend.prefs, payload.order) : payload.action === 'reorder_blobs' ? M.reorderBlobs(backend.prefs, payload.order) : null;
         if (next) Object.assign(backend.prefs, next);
         else if (payload.action === 'sound_on') backend.prefs.sound = true;
         else if (payload.action === 'sound_off') backend.prefs.sound = false;
@@ -141,7 +141,8 @@ test('S4 prefs event reconciles new main/removal/order and focus without erasing
   b.click('pill-choice-integration_github'); b.get('pill-choice-integration_github').focus();
   b.emit({ mainPill: 'agent_cursor', declaredPills: ['ai_google', 'agent_amp'] });
   assert.equal(b.get('pill-name').textContent, 'Cursor');
-  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_cursor', 'agent_amp', 'ai_google']);
+  // #435: stored order — before this change the catalog index gave ['agent_cursor', 'agent_amp', 'ai_google'].
+  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_cursor', 'ai_google', 'agent_amp']);
   assert.equal(b.doc.activeElement.id, 'pill-choice-agent_cursor');
   assert.equal(b.get('overview-status').textContent, 'Motor caído');
   assert.equal(b.get('overview-detail').textContent, 'Conexión previa');
@@ -174,6 +175,12 @@ test('S6 initial prefs read cannot overwrite a newer pushed choice snapshot', as
 });
 
 
+const allByClass = (root, cls) => {
+  const hits = [];
+  const visit = n => { for (const c of n.children || []) { if (String(c.className || '').split(/\s+/).includes(cls)) hits.push(c); visit(c); } };
+  visit(root); return hits;
+};
+
 async function settingsBoot(options, tab = 'pills') {
   const b = boot(options); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
@@ -183,73 +190,98 @@ async function settingsBoot(options, tab = 'pills') {
 }
 const writes = b => b.calls.filter(x => x.cmd === 'prefs_action' && x.payload.action !== 'view');
 
-test('S3/S4 actual Ajustes render25 catalog rows, four main choices, defaults and platform refusals', async () => {
+test('S3/S4 actual Ajustes renders the #435 visual customizer: principal card, the four default declared tiles, the full state', async () => {
   const b = await settingsBoot();
-  assert.equal(b.get('pill-main-setting').value, M.DEFAULT_MAIN);
-  assert.deepEqual(b.get('pill-main-setting').children.map(x => x.value), ['integration_claude', 'agent_cursor', 'agent_antigravity', 'agent_codex']);
+  // #435: the text-heavy catalog list is GONE (design page «3 Blobs»); the screen is
+  // the principal card, the declared tiles and the editor. Before this change the
+  // screen rendered a «Blob principal» select and 25 catalog toggle rows.
+  assert.equal(b.get('pill-main-setting'), null, 'the old main select is gone');
+  assert.equal(b.get('pill-settings-rows'), null, 'the old 25-row catalog list is gone');
+  assert.equal(b.get('pill-principal-card').dataset.pillId, M.DEFAULT_MAIN, 'the principal card carries the main pill');
   assert.match(b.get('pill-slot-count').textContent, /4\/4/);
-  assert.equal(b.get('pill-settings-rows').querySelectorAll('button').length, 25);
-  for (const id of [M.DEFAULT_MAIN, 'agent_claude-desktop', 'integration_music', 'ai_google']) assert.equal(b.get('pill-toggle-' + id).disabled, true, id);
-  for (const id of M.DEFAULT_DECLARED) {
-    const button = b.get('pill-toggle-' + id);
-    assert.equal(button.disabled, false); assert.equal(button.getAttribute('aria-pressed'), 'true'); assert.ok(button.getAttribute('aria-label'));
+  assert.equal(b.get('pill-tile-new'), null, 'the designed full state has no empty slot');
+  const grid = b.get('pill-declared-grid');
+  const tiles = grid.children.filter(n => String(n.className).includes('pill-tile'));
+  assert.deepEqual(tiles.map(x => x.dataset.pillId), M.DEFAULT_DECLARED, 'the four default declared tiles');
+  for (const tile of tiles) {
+    assert.equal(tile.tagName, 'BUTTON');
+    assert.ok(tile.getAttribute('aria-label'), 'each tile names its blob');
+    assert.ok(tile.children.some(c => String(c.className).includes('blob-visual')), 'each tile paints a live blob');
   }
+  assert.equal(tiles[0].getAttribute('aria-pressed'), 'true', 'the editor opens on the first declared tile (the designed default)');
   assert.deepEqual(writes(b), []); assert.equal(b.backend.writes, 0);
-  const scripts=[...read('index.html').matchAll(/src="([^"]+\.js)"/g)].map(x=>x[1]);
+  const scripts=[...read('index.html').matchAll(/src="([^"]+\.js)"/g)].map(x => x[1]);
   assert.ok(scripts.indexOf('pills.js') < scripts.indexOf('pill-settings.js'));
   assert.ok(scripts.indexOf('pill-settings.js') < scripts.indexOf('settings.js'));
 });
 
-test('S4 actual settings can remove at capacity then add; fifth/main/unsupported additions never dispatch', async () => {
+test('S4 actual settings quits a declared pill through the editor confirm at capacity', async () => {
   const b = await settingsBoot(); const before = clone(b.backend.prefs);
-  for (const id of ['ai_google', M.DEFAULT_MAIN, 'agent_claude-desktop', 'integration_music']) b.click('pill-toggle-' + id);
-  await flush(); assert.deepEqual(writes(b), []); assert.deepEqual(b.backend.prefs, before);
-  assert.equal(b.backend.writes, 0); assert.equal(b.backend.publications, 0);
-  b.click('pill-toggle-integration_n8n'); await flush();
+  // nothing dispatches until the editor confirm is pressed
+  b.click('pill-tile-integration_n8n'); await flush();
+  b.click('pill-editor-delete'); await flush();
+  assert.deepEqual(writes(b), []); assert.deepEqual(b.backend.prefs, before);
+  b.click('pill-editor-confirm-delete'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'toggle_declared_pill', id: 'integration_n8n' }]);
   assert.match(b.get('pill-slot-count').textContent, /3\/4/);
-  b.click('pill-toggle-ai_google'); await flush();
+  assert.ok(b.get('pill-tile-new'), 'the empty slot exists again at 3/4');
+  assert.deepEqual(b.get('pill-choices').children.map(x=>x.dataset.pillId), [M.DEFAULT_MAIN,'integration_resend','integration_vercel','integration_github']);
+  assert.equal(b.backend.writes,1); assert.equal(b.backend.publications,1);
+  // S11: the removed catalog pill is re-added through the public chooser (option B)
+  b.click('pill-tile-new'); await flush();
+  assert.equal(b.get('create-kind-catalog').getAttribute('aria-pressed'), 'true', 'the chooser opens on Del catálogo');
+  b.get('pill-catalog-search').value = 'n8n'; b.get('pill-catalog-search').fire('input');
+  b.get('pill-catalog-row-integration_n8n').fire('click');
+  b.click('pill-catalog-add'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [
     { action: 'toggle_declared_pill', id: 'integration_n8n' },
-    { action: 'toggle_declared_pill', id: 'ai_google' },
-  ]);
-  assert.deepEqual(b.backend.prefs.declaredPills, ['integration_resend', 'integration_vercel', 'integration_github', 'ai_google']);
-  assert.deepEqual(b.get('pill-choices').children.map(x=>x.dataset.pillId), [M.DEFAULT_MAIN,'ai_google','integration_resend','integration_vercel','integration_github']);
+    { action: 'toggle_declared_pill', id: 'integration_n8n' },
+  ], 'the re-add is the same public toggle command');
+  assert.match(b.get('pill-slot-count').textContent, /4\/4/);
+  assert.equal(b.get('pill-tile-new'), null, 'full again, no empty slot');
   assert.equal(b.backend.writes,2); assert.equal(b.backend.publications,2);
 });
 
-test('S4 actual main change removes new-main declaration only and preserves legacy values', async () => {
+test('S4 actual main change through «Principal» removes the new-main declaration only and preserves legacy values', async () => {
   const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor','ai_google'] } });
   b.backend.prefs.sound=true; b.backend.prefs.gain=0.2; b.backend.prefs.displayName='Ana'; b.backend.prefs.avatarColors={abito:'purple'};
-  const main=b.get('pill-main-setting'); main.value='agent_cursor'; main.fire('change'); await flush();
-  assert.deepEqual(writes(b).map(x=>x.payload),[{action:'set_main_pill',id:'agent_cursor'}]);
+  b.click('pill-tile-agent_cursor'); await flush();
+  b.click('pill-editor-main'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload),[{action:'set_main_pill',id:'agent_cursor'}]);
   assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']); assert.equal(b.backend.prefs.mainPill,'agent_cursor');
   assert.equal(b.backend.prefs.sound,true); assert.equal(b.backend.prefs.gain,0.2);
   assert.equal(b.backend.prefs.displayName,'Ana'); assert.deepEqual(b.backend.prefs.avatarColors,{abito:'purple'});
-  assert.equal(b.get('pill-name').textContent,'Cursor'); assert.equal(b.get('pill-main-setting').value,'agent_cursor');
+  assert.equal(b.get('pill-name').textContent,'Cursor');
 });
 
-test('S6 settings rejects synthetic/unknown/main-repeat/closed-panel input without writes', async () => {
-  const b=await settingsBoot({prefs:{declaredPills:[]}});
-  const main=b.get('pill-main-setting'); main.value='agent_cursor'; main.fire('change',{isTrusted:false});
-  main.value='unknown'; main.fire('change');
-  main.value=M.DEFAULT_MAIN; main.fire('change');
-  b.click('pill-toggle-ai_google',{isTrusted:false});
-  const old=b.get('pill-toggle-ai_google');
-  b.click('settings-close'); old.fire('click'); await flush();
+test('S6 settings rejects synthetic/main-repeat/closed-panel input without writes', async () => {
+  const b=await settingsBoot({prefs:{declaredPills:['agent_cursor','ai_google']}});
+  b.click('pill-tile-agent_cursor'); await flush();
+  const main=b.get('pill-editor-main');
+  main.fire('click',{isTrusted:false}); // a synthetic promotion never dispatches
+  b.click('pill-principal-card'); await flush(); // main-repeat: the principal cannot promote itself
+  assert.equal(b.get('pill-editor-main').disabled, true);
+  b.get('pill-editor-main').fire('click'); // trusted, but disabled
+  b.click('settings-close'); main.fire('click'); await flush(); // a closed panel never dispatches
   assert.deepEqual(writes(b),[]); assert.equal(b.backend.writes,0); assert.equal(b.backend.publications,0);
   assert.equal(b.get('pill-name').textContent,'VS Code');
 });
 
 test('S6 failed main save keeps previous snapshot and focus; explicit retry succeeds', async () => {
-  const b=await settingsBoot(); const before=clone(b.backend.prefs);
+  const b=await settingsBoot({prefs:{declaredPills:['agent_cursor','ai_google']}});
+  const before=clone(b.backend.prefs);
   b.backend.rejectNext=true;
-  const main=b.get('pill-main-setting'); main.focus(); main.value='agent_cursor'; main.fire('change'); await flush();
+  b.click('pill-tile-agent_cursor'); await flush();
+  const main=b.get('pill-editor-main'); main.focus();
+  b.click('pill-editor-main'); await flush();
   assert.deepEqual(b.backend.prefs,before); assert.equal(b.backend.writes,0); assert.equal(b.backend.publications,0);
-  assert.equal(b.get('pill-main-setting').value,M.DEFAULT_MAIN);
-  assert.equal(b.get('pill-name').textContent,'VS Code');
   assert.equal(b.get('pill-settings-error').textContent,'No se pudo guardar el blob; se mantuvo la elección anterior.');
-  assert.equal(b.doc.activeElement.id,'pill-main-setting');
-  const retry=b.get('pill-main-setting'); retry.value='agent_cursor'; retry.fire('change'); await flush();
+  assert.equal(b.doc.activeElement.id,'pill-editor-main');
+  b.backend.rejectNext=true;
+  b.click('pill-editor-main'); await flush();
+  assert.deepEqual(b.backend.prefs,before, 'a retry that fails again keeps the snapshot');
+  b.backend.rejectNext=false;
+  b.click('pill-editor-main'); await flush();
   assert.equal(b.get('pill-settings-error').textContent,'');
   assert.equal(b.get('pill-name').textContent,'Cursor'); assert.equal(b.backend.writes,1);
 });
@@ -580,37 +612,35 @@ test('#346 overview paints dataset.color only with an already-validated palette 
   assert.equal(b.get('pill-choices').textContent.includes('<img'), false);
 });
 
-test('#346 Ajustes offers the closed palette plus «Sin color», writes set/clear and keeps every other preference', async () => {
+test('#346 the editor offers the closed five-colour swatch row, writes set/clear and keeps every other preference', async () => {
   const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'], pillColors: { agent_cursor: 'blue' } } });
-  const rows = () => b.get('pill-settings-rows').children.flatMap(section => section.children).filter(n => n.dataset.pillId);
-  const row = id => rows().find(n => n.dataset.pillId === id);
-  const pick = b.get('pill-color-agent_cursor');
-  assert.ok(pick, 'an offered pill row has a colour control');
-  assert.deepEqual(pick.children.map(x => x.value), ['', 'green', 'blue', 'mint', 'orange', 'purple'], 'closed set + selectable «Sin color»');
-  assert.deepEqual(pick.children.map(x => x.textContent), ['Sin color', 'Verde', 'Azul', 'Menta', 'Naranja', 'Púrpura']);
-  assert.equal(pick.value, 'blue', 'the stored colour is the selected option');
-  assert.equal(row('agent_cursor').dataset.color, 'blue', 'the row wears the validated name');
-  assert.equal(b.get('pill-color-integration_music'), null, 'a refused pill never gets a colour control');
-  assert.equal(b.get('pill-color-agent_claude-desktop'), null, 'an unsupported-on-this-host pill never gets a colour control');
+  b.click('pill-tile-agent_cursor'); await flush();
+  const row = () => b.get('pill-editor').children.flatMap(n => String(n.className).includes('swatch-row') ? [n] : (n.children || []).flatMap(x => String(x.className).includes('swatch-row') ? [x] : []))[0];
+  assert.ok(row(), 'an offered pill editor has a swatch row');
+  const swatches = () => row().children.filter(n => String(n.className).includes('swatch'));
+  assert.deepEqual(swatches().map(x => x.dataset.color), ['green', 'blue', 'mint', 'orange', 'purple'], 'the closed five-colour set');
+  assert.deepEqual(swatches().map(x => x.getAttribute('aria-label')), ['Verde', 'Azul', 'Menta', 'Naranja', 'Púrpura']);
+  assert.equal(swatches().find(x => x.dataset.color === 'blue').getAttribute('aria-checked'), 'true', 'the stored colour is the selected swatch');
+  assert.equal(b.get('pill-tile-integration_music'), null, 'a refused pill never becomes a tile');
+  assert.equal(b.get('pill-tile-agent_claude-desktop'), null, 'an unsupported-on-this-host pill never becomes a tile');
   b.backend.prefs.sound = true; b.backend.prefs.gain = 0.2; b.backend.prefs.displayName = 'Ana'; b.backend.prefs.avatarColors = { abito: 'purple' };
-  pick.value = 'mint'; pick.fire('change'); await flush();
+  swatches().find(x => x.dataset.color === 'mint').fire('click'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_pill_color', id: 'agent_cursor', color: 'mint' }]);
   assert.equal(b.backend.prefs.pillColors.agent_cursor, 'mint');
-  assert.equal(row('agent_cursor').dataset.color, 'mint', 'the row repaints from the saved projection');
+  assert.equal(b.get('pill-tile-agent_cursor').dataset.color, 'mint', 'the tile repaints from the saved projection');
   assert.equal(b.backend.prefs.sound, true); assert.equal(b.backend.prefs.gain, 0.2);
   assert.equal(b.backend.prefs.displayName, 'Ana');
   assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'purple' });
   assert.deepEqual(b.backend.prefs.declaredPills, ['agent_cursor', 'ai_google'], 'the catalogue is untouched');
-  // «Sin color» is selectable: it sends the closed clear and the row goes neutral.
-  const current = b.get('pill-color-agent_cursor');
-  current.value = ''; current.fire('change'); await flush();
+  // the reversible way back: clicking the current colour again clears it.
+  b.get('pill-tile-agent_cursor').fire('click'); await flush();
+  swatches().find(x => x.dataset.color === 'mint').fire('click'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [
     { action: 'set_pill_color', id: 'agent_cursor', color: 'mint' },
     { action: 'clear_pill_color', id: 'agent_cursor' },
   ]);
   assert.equal(b.backend.prefs.pillColors.agent_cursor, undefined, 'the projection carries no colour after clear');
-  assert.equal(row('agent_cursor').dataset.color, undefined, 'the chip is neutral after clear');
-  assert.equal(b.get('pill-color-agent_cursor').value, '', 'the control reads back neutral');
+  assert.equal(b.get('pill-tile-agent_cursor').dataset.color, undefined, 'the tile is neutral after clear');
   assert.equal(b.backend.prefs.sound, true, 'clear touches nothing else');
 });
 
@@ -671,54 +701,117 @@ test('#415 the overview shows created blobs after the catalog order, as label+co
 });
 
 async function blobBoot() {
-  const b = await settingsBoot({ prefs: { customBlobs: [{ name: 'Abito GitHub', color: 'mint' }] } });
+  // two declared pills: the «Nuevo» slot only exists below the designed 4/4 full state
+  const b = await settingsBoot({ prefs: { declaredPills: ['integration_resend', 'integration_n8n'], customBlobs: [{ name: 'Abito GitHub', color: 'mint' }] } });
   return b;
 }
 
 test('#415 Ajustes creates a blob through the closed create_blob command and repaints', async () => {
   const b = await blobBoot();
-  const input = b.get('blob-create-input'), pick = b.get('blob-create-color'), button = b.get('blob-create-button');
-  assert.ok(input && pick && button, 'the create form exists');
+  assert.ok(b.get('pill-tile-new'), 'the empty slot exists at 2/4 declared');
+  b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush(); // «Propio» is the custom editor (§4.1)
+  const input = b.get('blob-create-input'), button = b.get('blob-create-button');
+  assert.ok(input && button, 'the create form exists');
+  assert.equal(input.placeholder, 'Nombre del blob');
   b.click('blob-create-button'); await flush();
   assert.deepEqual(writes(b), [], 'an empty name never dispatches');
-  input.value = 'Abito GitHub'; b.click('blob-create-button'); await flush();
+  input.value = 'Abito GitHub'; b.get('blob-create-input').fire('input');
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'green').fire('click'); await flush();
+  b.click('blob-create-button'); await flush();
   assert.deepEqual(writes(b), [], 'a duplicate name never dispatches');
-  input.value = 'Abito Reviewer'; pick.value = 'orange'; b.click('blob-create-button'); await flush();
+  b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush();
+  b.get('blob-create-input').value = 'Abito Reviewer'; b.get('blob-create-input').fire('input'); await flush();
+  // the colour swatch rides along at creation (§4.1: Crear needs name + colour)
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'orange').fire('click'); await flush();
+  b.click('blob-create-button'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'create_blob', name: 'Abito Reviewer', color: 'orange' }]);
   assert.equal(b.backend.writes, 1);
-  const rows = b.get('blob-settings-rows').children.map(x => x.dataset.blobName).filter(Boolean);
-  assert.deepEqual(rows, ['Abito GitHub', 'Abito Reviewer'], 'creation order is the shown order');
+  const tiles = b.get('pill-declared-grid').children.filter(n => n.dataset && n.dataset.blobName);
+  assert.deepEqual(tiles.map(x => x.dataset.blobName), ['Abito GitHub', 'Abito Reviewer'], 'creation order is the shown order');
   assert.deepEqual(b.backend.prefs.blobs[1], { name: 'Abito Reviewer', color: 'orange' }, 'the fake backend applied the same closed model');
 });
 
 test('#415 Ajustes deletes a created blob, edits its closed-palette colour, and never offers the principal', async () => {
   const b = await blobBoot();
-  assert.equal(b.get('blob-delete-0')?.getAttribute('aria-label'), 'Eliminar: Abito GitHub');
-  b.get('blob-color-0').value = 'purple'; b.get('blob-color-0').fire('change'); await flush();
+  b.click('blob-tile-0'); await flush();
+  assert.equal(b.get('pill-editor-main').disabled, true, 'the main pill is a workspace choice, never a created blob');
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'purple').fire('click'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_blob_color', name: 'Abito GitHub', color: 'purple' }]);
-  b.get('blob-color-0').value = ''; b.get('blob-color-0').fire('change'); await flush();
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'purple').fire('click'); await flush();
   assert.deepEqual(writes(b).slice(-1).map(x => x.payload), [{ action: 'set_blob_color', name: 'Abito GitHub', color: '' }]);
-  b.click('blob-delete-0'); await flush();
+  b.click('pill-editor-delete'); await flush();
+  b.click('pill-editor-confirm-delete'); await flush();
   assert.deepEqual(writes(b).slice(-1).map(x => x.payload), [{ action: 'delete_blob', name: 'Abito GitHub' }]);
-  assert.deepEqual(b.get('blob-settings-rows').children.map(x => x.dataset.blobName).filter(Boolean), [], 'the list is empty after deletion');
+  assert.deepEqual(b.get('pill-declared-grid').children.filter(n => n.dataset && n.dataset.blobName), [], 'the list is empty after deletion');
   // every other preference survives beside blob writes
   assert.equal(b.backend.prefs.mainPill, M.DEFAULT_MAIN);
-  assert.deepEqual(b.backend.prefs.declaredPills, M.DEFAULT_DECLARED);
+  assert.deepEqual(b.backend.prefs.declaredPills, ['integration_resend', 'integration_n8n']);
 });
 
 test('#415 synthetic gestures never create or delete blobs; a failed save keeps the list', async () => {
   const b = await blobBoot();
   const before = clone(b.backend.prefs);
+  b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush();
   b.get('blob-create-input').value = 'Abito correo';
   b.get('blob-create-button').fire('click', { isTrusted: false });
-  b.click('blob-delete-0', { isTrusted: false });
+  await flush();
+  assert.deepEqual(writes(b), []);
+  b.click('blob-tile-0'); await flush();
+  b.click('pill-editor-delete'); await flush();
+  b.get('pill-editor-confirm-delete').fire('click', { isTrusted: false });
   await flush();
   assert.deepEqual(writes(b), []);
   assert.deepEqual(b.backend.prefs, before);
   b.backend.rejectNext = true;
-  b.get('blob-create-input').value = 'Abito correo';
+  b.click('pill-tile-new'); await flush();
+  b.click('create-kind-custom'); await flush();
+  b.get('blob-create-input').value = 'Abito correo'; b.get('blob-create-input').fire('input');
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'mint').fire('click'); await flush();
   b.click('blob-create-button'); await flush();
   assert.equal(b.backend.writes, 0);
   assert.deepEqual(b.backend.prefs.blobs, [{ name: 'Abito GitHub', color: 'mint' }], 'a failed save keeps the stored list');
   assert.match(b.get('pill-settings-error').textContent, /No se pudo crear el blob/);
+});
+
+// #435 D4: «Principal» promotes a blob AND feeds the island character colour through
+// the existing typed pref (avatarColors['abito'] via set_avatar_color) — no new wire
+// field. A colourless promotion changes nothing about the character.
+test('#435 D4: promoting a coloured tile writes set_main_pill plus set_avatar_color for the character', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'], pillColors: { agent_cursor: 'mint' } } });
+  b.click('pill-tile-agent_cursor'); await flush();
+  b.click('pill-editor-main'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'set_main_pill', id: 'agent_cursor' },
+    { action: 'set_avatar_color', identity: 'abito', color: 'mint' },
+  ]);
+  assert.equal(b.backend.prefs.mainPill, 'agent_cursor');
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'mint' }, 'the character wears the promoted blob colour');
+});
+
+test('#435 D4: promoting a colourless tile changes nothing about the character colour', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'] } });
+  b.backend.prefs.avatarColors = { abito: 'purple' }; // the harness seeds legacy values after boot
+  b.click('pill-tile-agent_cursor'); await flush();
+  b.click('pill-editor-main'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_main_pill', id: 'agent_cursor' }]);
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'purple' }, 'the kept colour is untouched');
+});
+
+test('#435 D4: recolouring the principal itself also feeds the character colour', async () => {
+  const b = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'] } });
+  b.click('pill-principal-card'); await flush();
+  allByClass(b.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'green').fire('click'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [
+    { action: 'set_pill_color', id: M.DEFAULT_MAIN, color: 'green' },
+    { action: 'set_avatar_color', identity: 'abito', color: 'green' },
+  ]);
+  assert.deepEqual(b.backend.prefs.avatarColors, { abito: 'green' });
+  // a recolour of a non-principal tile never touches the character
+  const other = await settingsBoot({ prefs: { declaredPills: ['agent_cursor', 'ai_google'] } });
+  other.click('pill-tile-ai_google'); await flush();
+  allByClass(other.get('pill-editor'), 'swatch').find(x => x.dataset.color === 'mint').fire('click'); await flush();
+  assert.deepEqual(writes(other).map(x => x.payload), [{ action: 'set_pill_color', id: 'ai_google', color: 'mint' }]);
 });

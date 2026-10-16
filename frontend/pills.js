@@ -119,9 +119,28 @@
     const blob = blobs.find(b => b.name === name);
     return blob && isColor(blob.color) ? blob.color : '';
   }
-  // Future pure ordering seam, not an invented external-session producer.
+  // #435: a closed permutation gate — exactly the currently declared ids, reordered.
+  // Anything else (duplicates, unknown ids, a different set, a wrong type) refuses
+  // without mutating, mirroring the other write gates.
+  function reorderDeclared(state, order, os = C.HOST_OS) {
+    if (!valid(state, os) || !Array.isArray(order) || order.length !== state.declaredPills.length ||
+      !order.every(id => typeof id === 'string' && state.declaredPills.includes(id)) ||
+      new Set(order).size !== order.length) return null;
+    return { mainPill: state.mainPill, declaredPills: [...order], pillColors: state.pillColors };
+  }
+  // #435: the same gate over the stored custom-blob names (exact, case-sensitive).
+  function reorderBlobs(state, order, os = C.HOST_OS) {
+    if (!valid(state, os) || !Array.isArray(order)) return null;
+    const blobs = Array.isArray(state.blobs) ? state.blobs : [];
+    if (order.length !== blobs.length || new Set(order).size !== order.length ||
+      !order.every(name => typeof name === 'string' && blobs.some(b => b.name === name))) return null;
+    return { ...keep(state), blobs: order.map(name => blobs.find(b => b.name === name)) };
+  }
+  // #435: main first, then the stored declared order — the persisted order the
+  // reorder gates write is what the island shows. Non-catalog ids keep the external
+  // seam right after the main, also in their stored (input) order.
   function order(items, mainPill) {
-    const rank = id => id === mainPill ? -2 : C.definition(id) ? C.CATALOG.findIndex(def => def.id === id) : -1;
+    const rank = id => id === mainPill ? -2 : C.definition(id) ? 0 : -1;
     return items.map((item, index) => ({ item, index })).sort((a, b) => rank(a.item.id) - rank(b.item.id) || a.index - b.index).map(x => x.item);
   }
   function visible(raw, os = C.HOST_OS) {
@@ -145,5 +164,5 @@
       'Elegir este blob no conecta el servicio. No hay una sesión activa disponible para esta vista.';
     return { id, name: def.name, offered, connected: false, word, detail, icon: 'plug-off', tone: 'faint', aria: `${def.name}: ${word}. ${detail}` };
   }
-  return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_DECLARED, MAX_BLOBS, MAX_BLOB_NAME, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor, createBlob, deleteBlob, setBlobColor, colorOfBlob };
+  return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_DECLARED, MAX_BLOBS, MAX_BLOB_NAME, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor, createBlob, deleteBlob, setBlobColor, colorOfBlob, reorderDeclared, reorderBlobs };
 });
