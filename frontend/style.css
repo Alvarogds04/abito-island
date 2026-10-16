@@ -718,7 +718,6 @@ select.sfield option { background: var(--surface); color: var(--island-ink); }
 #settings-display-name[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--red-11); } /* rings the VISIBLE field, not the hit ring */
 .sbtn.primary { color: #000; }
 .sbtn.primary::after { background: var(--go); border-color: var(--go); }
-.sbtn.primary::after { background: var(--go); border-color: var(--go); }
 .sbtn:disabled { opacity: .4; cursor: default; }
 .skbd { padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-mid); background: var(--surface); color: var(--island-ink); font: 700 12px/1.2 ui-monospace, monospace; }
 .switch {
