@@ -118,9 +118,11 @@ StartupWMClass=Abito-island
 
 // ---- receipt verification (no launch) -------------------------------------
 const DAEMON_FILES = ['package.json', 'identity.md', 'THIRD-PARTY-NOTICES.md',
-  'src/agents.cjs', 'src/auth.cjs', 'src/cli.cjs', 'src/config.cjs',
-  'src/connectors.cjs', 'src/daemon.cjs', 'src/isolation.cjs', 'src/profiles.cjs',
-  'src/protocol.cjs', 'src/runtime.cjs', 'src/sdk-helper.mjs', 'src/server.cjs'];
+  'src/agent-hooks.cjs', 'src/agents.cjs', 'src/auth.cjs', 'src/cli.cjs', 'src/config.cjs',
+  'src/connectors.cjs', 'src/connector-host.cjs', 'src/connector-host-client.cjs',
+  'src/daemon.cjs', 'src/interrupt.cjs', 'src/isolation.cjs', 'src/mcp-import.cjs', 'src/profiles.cjs',
+  'src/protocol.cjs', 'src/rotation.cjs', 'src/runtime.cjs', 'src/sdk-helper.mjs', 'src/server.cjs',
+  'src/sessions.cjs', 'src/spaces.cjs'];
 const STAGED = ['abito-island', 'abito-island-launcher', 'abito-island.png', `${IDENTIFIER}.desktop`,
   ...DAEMON_FILES.map(f => `desktop-daemon/${f}`)];
 const STAGED_DIRS = ['desktop-daemon', 'desktop-daemon/src'];
