@@ -1261,3 +1261,10 @@ test('#366 quick panel contract: right-click on the gear, existing closed prefs 
   assert.match(src, /V\.autoCloseProblem\(/);
   assert.doesNotMatch(src, /long-?press|longpress/i, 'no long-press gesture');
 });
+
+test('R16 cancel plan: binds to the flow this row started; no flow yet means a local clear, never an empty id', () => {
+  assert.deepEqual(S.cancelPlan({ providerId: 'openai', phase: 'active', sawFlow: false }), { kind: 'local' });
+  assert.deepEqual(S.cancelPlan({ providerId: 'openai', phase: 'active', sawFlow: true, flowId: '' }), { kind: 'local' });
+  assert.deepEqual(S.cancelPlan({ providerId: 'openai', phase: 'active', sawFlow: true, flowId: 'f-7' }), { kind: 'send', flowId: 'f-7' });
+  assert.deepEqual(S.cancelPlan(null), { kind: 'local' });
+});
