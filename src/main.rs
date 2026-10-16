@@ -1097,43 +1097,44 @@ async fn desktop_action(
     }
     let (action, index) = bridge::validate_payload(&payload)?;
     state.rate.lock().expect("rate lock").check(now_ms())?;
-    match action {
-        Action::Allow | Action::Deny => {
-            let approval = Arc::clone(&state.approval);
-            let hooks = state_hooks(&state)?;
-            let decision = if action == Action::Allow {
-                approval::Decision::Allow
-            } else {
-                approval::Decision::Deny
-            };
-            let handle = app.clone();
-            Ok(tauri::async_runtime::spawn_blocking(move || {
-                approval::decide(&approval, decision, &hooks);
-                let state = handle.state::<AppState>();
-                build_snapshot(&handle, &state)
-            })
+    // R2 routing: `runs_off_main_thread` is the SINGLE source of truth. The
+    // helper matches every Action variant exhaustively (no wildcard), so a
+    // new verb cannot compile without a deliberate routing choice, and this
+    // arm and the routing test can never silently diverge.
+    if runs_off_main_thread(action) {
+        let approval = Arc::clone(&state.approval);
+        let hooks = state_hooks(&state)?;
+        let decision = if action == Action::Allow {
+            approval::Decision::Allow
+        } else {
+            approval::Decision::Deny
+        };
+        let handle = app.clone();
+        Ok(tauri::async_runtime::spawn_blocking(move || {
+            approval::decide(&approval, decision, &hooks);
+            let state = handle.state::<AppState>();
+            build_snapshot(&handle, &state)
+        })
+        .await
+        .map_err(|_| BridgeError::denied("decision aborted"))?)
+    } else {
+        // R2: every verb here performs window getters/ops. An off-main
+        // getter posts to the event loop and blocks with NO timeout, so
+        // running one with a host lock held can deadlock against the
+        // main thread (which takes the same locks). Inline on the main
+        // thread, exactly like the click path above; the tokio thread
+        // only waits for the result.
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let state = handle.state::<AppState>();
+            let _ = send.send(dispatch_verb(&handle, &state, action, index));
+        })
+        .map_err(|_| BridgeError::denied("action scheduling failed"))?;
+        tauri::async_runtime::spawn_blocking(move || receive.recv())
             .await
-            .map_err(|_| BridgeError::denied("decision aborted"))?)
-        }
-        _ => {
-            // R2: every verb here performs window getters/ops. An off-main
-            // getter posts to the event loop and blocks with NO timeout, so
-            // running one with a host lock held can deadlock against the
-            // main thread (which takes the same locks). Inline on the main
-            // thread, exactly like the click path above; the tokio thread
-            // only waits for the result.
-            let (send, receive) = std::sync::mpsc::sync_channel(1);
-            let handle = app.clone();
-            app.run_on_main_thread(move || {
-                let state = handle.state::<AppState>();
-                let _ = send.send(dispatch_verb(&handle, &state, action, index));
-            })
-            .map_err(|_| BridgeError::denied("action scheduling failed"))?;
-            tauri::async_runtime::spawn_blocking(move || receive.recv())
-                .await
-                .map_err(|_| BridgeError::denied("action aborted"))?
-                .map_err(|_| BridgeError::denied("action aborted"))?
-        }
+            .map_err(|_| BridgeError::denied("action aborted"))?
+            .map_err(|_| BridgeError::denied("action aborted"))?
     }
 }
 
@@ -2152,8 +2153,26 @@ mod host_ctx_tests {
 /// touch a window. Every other verb performs window getters/ops, and an
 /// off-main getter posts to the event loop and blocks with no timeout, so
 /// taking any host lock across one can deadlock against the main thread.
+///
+/// This match is the routing's single source of truth and has NO wildcard
+/// arm: adding an `Action` variant fails the BUILD here (compile-time
+/// exhaustiveness), forcing a deliberate routing choice before this verb
+/// can ever reach `desktop_action`. Update `main_thread_routing_tests` in
+/// the same change.
 fn runs_off_main_thread(action: Action) -> bool {
-    matches!(action, Action::Allow | Action::Deny)
+    match action {
+        Action::Allow | Action::Deny => true,
+        Action::Snapshot
+        | Action::Expand
+        | Action::Close
+        | Action::Hide
+        | Action::Quit
+        | Action::Dismiss
+        | Action::Choose
+        | Action::AnimateAnyway
+        | Action::RespectSystemMotion
+        | Action::AutoClose => false,
+    }
 }
 
 #[cfg(test)]
@@ -2162,6 +2181,10 @@ mod main_thread_routing_tests {
 
     #[test]
     fn only_the_http_decision_verbs_may_run_off_the_main_thread() {
+        // Exhaustiveness guard: `runs_off_main_thread` matches every Action
+        // variant with NO wildcard arm, so adding a variant fails the build
+        // (which fails this suite) until a deliberate routing choice is made
+        // and this test's two lists are extended.
         // The decisions block on HTTP and never touch a window: the
         // spawn_blocking pool stays theirs (legacy 5 s deadline).
         for action in [Action::Allow, Action::Deny] {
