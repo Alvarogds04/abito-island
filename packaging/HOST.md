@@ -69,6 +69,18 @@ files, missing files, extra empty directories, symlinks anywhere, writable files
 and receipt key drift. Every shipped file is hashed. Directory entries themselves
 have no content hash but must match the declared layout and safe modes.
 
+The daemon source list includes `src/connector-host.cjs` and
+`src/connector-host-client.cjs`: they are required at module load even when
+`connectorHostBin` is unset. Omitting either breaks the packaged CLI before it
+can report status. `test-node/host-stage-check.cjs` runs the staged CLI's public
+`status` command with an isolated, absent island: exit 3, empty stdout, and exactly
+`abito-island-daemon: not running` on stderr (with one LF), with no island created
+and all receipt hashes unchanged. It then removes each module from its disposable
+stage in turn and proves that the CLI fails rather than falling back to the source
+checkout. This checks runtime module closure, not a release build or live connector
+functionality; the Rust connector-host binary is not bundled by this source-list
+change and must still be explicitly configured if installed later.
+
 The installer now needs Node and its sibling `lib.cjs`; the former standalone
 flat-file shell envelope intentionally becomes a recursive closed-set envelope.
 It verifies before touching installation state, checks destination ancestor chains
