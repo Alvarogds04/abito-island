@@ -736,4 +736,23 @@ test('#305b the reason the portal was dropped stays visible after the X11 fallba
   assert.equal(O.hotkeyView(v({ limited: false, portal_note: 'permission_denied' })).word, 'Atajo sin permiso', 'on a full X11 session the decline is the only thing worth saying');
 });
 
+test('#423 the notice title keeps a readable width in the 228px band (measured 15px in Chromium before the fix)', () => {
+  // Measured in Chromium (verify/notice-band-before.png): band 228, padding 8+8, classic scrollbar 15,
+  // pill margin-right 48 (clears the «i»), dismiss 44, border 2, ring 28 => «Avisos caídos» (87px of text)
+  // was squeezed into a 15px box. The contract models the same budget from the declared boxes.
+  const band = 'body #capsule:not([data-notice-view="notices"]) #notices';
+  const n = decls(band);
+  assert.equal(n['scrollbar-width'], 'none', 'the band scrolls by wheel/keys but never spends 15px on a scrollbar track');
+  const open = decls('body #capsule:not([data-notice-view="notices"]) #notice-open');
+  const pad = px(open['padding-inline']), gap = px(open.gap);
+  assert.ok(pad >= 0 && gap >= 0, 'band-scoped padding-inline and gap are declared');
+  const RING = 28; // measured box of #notice-ring (svg min-content)
+  const avail = 228 - 16 - px(decls('#notice-pill')['margin-right']) - 2 - px(decls('#notice-dismiss').flex.split(' ')[2]);
+  const title = avail - 2 * pad - RING - gap; // single notice: the count badge is hidden
+  assert.ok(title >= 64, `title box ${title}px must show most of «Avisos caídos» (87px at 14px; was 15px); the full text stays in the aria name and the «i» detail`);
+  const count = decls('body #capsule:not([data-notice-view="notices"]) #notices[data-count="1"] #notice-count');
+  assert.equal(count.display, 'none', 'one notice needs no «1» badge in the band (the aria text still counts)');
+  assert.match(islandSrc, /noticesEl\.dataset\.count\s*=/, 'renderNotices publishes the notice count for the CSS');
+});
+
 console.log(`overview-view-check: ${passed} passed`);

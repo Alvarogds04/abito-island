@@ -1303,6 +1303,13 @@ body[data-window="settings"] #models {
 
 /* #366 F094 — the quick panel popover inside the island (scoped to its own id). */
 #settings-quick { position: absolute; z-index: 6; top: 48px; right: 12px; width: 260px; max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 16px; background: var(--card-bg); color: var(--island-muted); box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+/* ---- #423: the notice title keeps a readable width in the 228px overview band. Measured in Chromium:
+   the classic scrollbar (15px), the roomy pill padding and the «1» badge left «Avisos caídos» a 15px box.
+   Band-only (the notices lane keeps its full pane); the scroll itself still works by wheel and keys. */
+body #capsule:not([data-notice-view="notices"]) #notices { scrollbar-width: none; }
+body #capsule:not([data-notice-view="notices"]) #notice-open { padding-inline: 6px; gap: 6px; }
+body #capsule:not([data-notice-view="notices"]) #notices[data-count="1"] #notice-count { display: none; }
+
 /* ---- #410 r2: the compact Conexiones LIST. One row per provider: name + status chip, the two
    connect words (API / Auth) from the view-model, and the row's own flow (code/URL) wrapped below.
    All rules live in the #410 compact block below, so the rail keeps its cascade position. */
