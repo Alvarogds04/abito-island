@@ -196,11 +196,37 @@ function engagementFixture(openOnHover) {
     enter() { byId.get('capsule').fire('pointerenter', pointer({ type: 'pointerenter' })); },
     leave() { byId.get('capsule').fire('pointerleave', pointer({ type: 'pointerleave' })); },
     press() { fire(windowListeners, 'pointerdown', pointer({ type: 'pointerdown', target: { closest: () => null } })); },
+    // a press on an element that matches the real selector list (e.g. a link): closest honours the selector
+    pressOn(tag) { fire(windowListeners, 'pointerdown', pointer({ type: 'pointerdown', ctrlKey: true,
+      target: { closest: sel => (String(sel).split(',').map(x => x.trim()).includes(tag) ? {} : null) } })); },
     release() { fire(windowListeners, 'pointerup', pointer({ type: 'pointerup' })); },
     click() { fire(documentListeners, 'click', pointer({ type: 'click' })); },
     dragReleases() { return invocations.filter(i => i.cmd === 'drag_release'); },
   };
 }
+
+test('#421 a Ctrl+click press on a link never starts a drag: no drag_press, no toggle, no collapse verb (facade spy)', () => {
+  const f = engagementFixture(false);
+  f.mutate();
+  f.seed('expanded');
+  f.pressOn('#settings a');
+  f.release();
+  assert.equal(f.invocations.filter(i => i.cmd === 'drag_press').length, 0, 'the link owns its click: no native drag press');
+  assert.equal(f.dragReleases().length, 0, 'no release to toggle the island');
+  assert.deepEqual(f.desktopCalls.filter(c => c !== 'expand'), [], 'no collapse verb after the click');
+});
+
+test('#421 narrowness: a press on a bare anchor outside #settings (and on the capsule) still sends drag_press', () => {
+  const f = engagementFixture(false);
+  f.mutate();
+  f.seed('expanded');
+  f.pressOn('a');
+  f.release();
+  assert.equal(f.invocations.filter(i => i.cmd === 'drag_press').length, 1, 'only an anchor inside #settings is exempt');
+  f.press();
+  f.release();
+  assert.equal(f.invocations.filter(i => i.cmd === 'drag_press').length, 2, 'ordinary presses keep dragging');
+});
 
 test('#336 L18 the first press after a hover-open releases as cancelled: engaged, never collapsed (facade spy)', () => {
   const f = engagementFixture(true);

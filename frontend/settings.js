@@ -715,7 +715,22 @@
     if (eventV) {
       if (eventV.message) box.append(el('p', 'sline', eventV.message));
       if (eventV.userCode) box.append(Object.assign(el('code', 'scode', eventV.userCode), { title: 'Código de verificación' }));
-      if (eventV.link) box.append(el('p', 'sline sub', eventV.link)); // shown as text: Abito opens nothing by itself
+      if (eventV.link) {
+        // #421: a real anchor, but href never carries the remote URL (the webview must not navigate away).
+        // Every gesture (click, Ctrl/Meta/Shift+click, Enter, middle click, context-menu) is cancelled and
+        // only a trusted one opens, through the validated host command. Text via textContent only.
+        const a = el('a', 'slink', eventV.link);
+        a.setAttribute('href', '#'); a.setAttribute('role', 'link'); a.title = 'Abrir el enlace';
+        const open = e => {
+          e.preventDefault(); e.stopPropagation();
+          if (e.isTrusted === true && invoke) invoke('open_chat_url', { payload: { url: eventV.link } }).catch(() => {});
+        };
+        a.addEventListener('click', open); a.addEventListener('auxclick', open);
+        a.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); });
+        box.append(a);
+      } else if (eventV.linkRejected) {
+        box.append(el('p', 'sline sub', 'No se pudo abrir el enlace desde acá.')); // never echoes the rejected URL
+      }
     }
     if (prompt) {
       box.append(el('p', 'sline', prompt.message));
