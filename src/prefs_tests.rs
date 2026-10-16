@@ -1145,11 +1145,13 @@ mod chosen_models {
             pill_colors: [("agent_amp".to_string(), "mint".to_string())].into(),
             theme: Some(Theme::Dark),
             chosen_models: Some([("anthropic".to_string(), vec!["claude-sonnet-4-5".to_string()])].into()),
+            auto_close_seconds: Some(30),
+            open_on_hover: Some(true),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
