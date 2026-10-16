@@ -1402,6 +1402,31 @@ test('#366 settings window seam contract: the closed command, the honest fallbac
   assert.doesNotMatch(windowModeClose, /askSize\(false\)[^\n]*\n[^\n]*WINDOW_MODE/, 'close asks the closed command first');
 });
 
+test('#437 D9 «Ventana»: the in-island bar opens the full window through the existing closed verbs', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  // the button is built only for the in-island bar: the settings window runs the same
+  // page in WINDOW_MODE and must not grow a button that opens the window it already is
+  assert.match(src, /id = 'settings-window-open'/);
+  assert.match(src, /insertBefore\(b, closeBtn\)/, '«Ventana» sits before the close button, as drawn');
+  const build = src.slice(src.indexOf("id = 'settings-window-open'") - 400, src.indexOf("id = 'settings-window-open'") + 200);
+  assert.match(build, /if \(WINDOW_MODE\) return/, 'no «Ventana» inside the settings window');
+  // the ONE closed window command only opens when the typed pref says so
+  // (settingswindow.rs answers open:false otherwise), so the click first saves
+  // the pref through the closed prefs command, then opens the window
+  const click = src.slice(src.indexOf("ventana.addEventListener('click'"), src.indexOf("ventana.addEventListener('click'") + 1600);
+  assert.match(click, /e\.isTrusted !== true/, 'only a trusted gesture opens the window');
+  assert.match(click, /action: 'set_settings_window', settings_window: true/, 'the pref flip rides the closed prefs command');
+  assert.match(click, /settings_window_action/, 'the ONE closed window command opens it');
+  assert.match(click, /action: 'open'/);
+  assert.match(click, /opened\.open === true/, 'the honest answer decides, never optimism');
+  assert.match(click, /close\(false\)/, 'the in-island panel yields to the window');
+  // a failed save or a failed open: the pref is reverted, the panel stays, the failure is said
+  assert.match(click, /settings_window: false/, 'the pref is reverted on failure');
+  assert.match(click, /No se pudo abrir la ventana/, 'the failure is said, never silent');
+  // the General toggle reflects the new placement (prefs is the saved truth)
+  assert.match(click, /prefs = p/);
+});
+
 // ---- #366 F094: the quick panel inside the island -------------------------------------------------
 
 test('F094 quickPanelView projects exactly sound, theme and auto-close from the saved prefs', () => {
