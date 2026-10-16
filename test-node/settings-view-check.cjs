@@ -1024,3 +1024,49 @@ test('#390 GD027 fix: outcome drives the sentence — restarted/refused/timeout,
   const all = JSON.stringify([restarted, refused, timeout]);
   assert.ok(!all.includes('portal') && !all.includes('token') && !all.includes('sk-'), 'no foreign wording');
 });
+
+// ---- #336 F003/F004: island inactivity interaction -------------------------------------------------
+test('F003 the interaction view-model reads the typed pair with 15s/hover-off defaults and no coercion', () => {
+  assert.deepEqual(S.islandInteractionView(undefined), { autoCloseSeconds: 15, openOnHover: false });
+  assert.deepEqual(S.islandInteractionView({}), { autoCloseSeconds: 15, openOnHover: false });
+  assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 45, openOnHover: true }), { autoCloseSeconds: 45, openOnHover: true });
+  assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 5, openOnHover: false }), { autoCloseSeconds: 5, openOnHover: false });
+  assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 120 }), { autoCloseSeconds: 120, openOnHover: false });
+  // hostile/foreign values read as the defaults, each field independently
+  for (const bad of [{ autoCloseSeconds: 4 }, { autoCloseSeconds: 121 }, { autoCloseSeconds: 15.5 },
+    { autoCloseSeconds: '15' }, { autoCloseSeconds: null }, { autoCloseSeconds: Infinity }, { autoCloseSeconds: NaN }]) {
+    assert.deepEqual(S.islandInteractionView(bad), { autoCloseSeconds: 15, openOnHover: false }, JSON.stringify(bad));
+  }
+  assert.deepEqual(S.islandInteractionView({ openOnHover: 'true' }), { autoCloseSeconds: 15, openOnHover: false });
+  assert.deepEqual(S.islandInteractionView({ openOnHover: 1 }), { autoCloseSeconds: 15, openOnHover: false });
+  assert.deepEqual(S.islandInteractionView({ autoCloseSeconds: 45, openOnHover: 'yes' }),
+    { autoCloseSeconds: 45, openOnHover: false }, 'the fields fall back independently');
+});
+
+test('F003 the delay field accepts only canonical integers 5..120 and says so honestly otherwise', () => {
+  for (const value of ['5', '45', '120', '15', 5, 15, 120, ' 15 ']) assert.equal(S.autoCloseProblem(value), '', JSON.stringify(value));
+  const message = 'Ingresá un entero entre 5 y 120 segundos.';
+  for (const value of ['', ' ', '4', '121', '0', '-5', '15.5', '1e2', '+5', 'junk', 'Infinity', 'NaN', null, undefined, 15.5, {}, true]) {
+    assert.equal(S.autoCloseProblem(value), message, JSON.stringify(value));
+  }
+});
+
+test('#336 settings UI source contract: the closed pair payload, validation before save, honest failure and the hover toggle', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  // the ONE closed command, always carrying the full typed pair
+  assert.match(src, /action: 'set_island_interaction', auto_close_seconds:/);
+  assert.match(src, /open_on_hover:/);
+  assert.doesNotMatch(src, /set_island_interaction[^\n]*auto_close_seconds:\s*autoCloseSeconds(?!,)/);
+  // validation gate: the view-model validator drives input, submit and the disabled save
+  assert.match(src, /V\.autoCloseProblem\(/);
+  assert.match(src, /settings-autoclose-error/);
+  // honest invalid values: the issue text is shown and the save stays disabled
+  assert.match(src, /aria-invalid[^\n]*auto|autoCloseIssue|problem \? 'true'/);
+  // honest save failure: the value did not change
+  assert.match(src, /No se pudo guardar\. La interacción sigue sin cambios/);
+  // hover toggle through the same closed pair, with an honest failure too
+  assert.match(src, /sw-island-hover/);
+  assert.match(src, /say\('No se pudo guardar\. La interacción sigue sin cambios/);
+  // the new section never writes raw pixels
+  assert.doesNotMatch(src, /auto[Cc]lose[^\n]*\d+px/);
+});

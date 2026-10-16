@@ -538,13 +538,35 @@
       ? '' : 'Ingresá un volumen entre 0 y 0,2.';
   }
 
+  // #336 F003/F004 — the typed interaction pair as the panel shows it: the
+  // effective values behind the projection, each field falling back to the
+  // public contract's default (15 seconds / hover off) on its own, never
+  // coercing a foreign value.
+  function islandInteractionView(input) {
+    const i = input || {};
+    const seconds = i.autoCloseSeconds;
+    return {
+      autoCloseSeconds: Number.isInteger(seconds) && seconds >= 5 && seconds <= 120 ? seconds : 15,
+      openOnHover: i.openOnHover === true,
+    };
+  }
+
+  // Canonical integer text only ('15', 15, ' 15 '): no floats, no exponents,
+  // no signed forms, no coercion — the inclusive 5..120 range of the wire.
+  function autoCloseProblem(text) {
+    const raw = String(text).trim();
+    const n = Number(raw);
+    return /^\d+$/.test(raw) && Number.isSafeInteger(n) && n >= 5 && n <= 120
+      ? '' : 'Ingresá un entero entre 5 y 120 segundos.';
+  }
+
   function displayNameProblem(text) {
     if (Array.from(text).length > 80) return 'Usá hasta 80 caracteres.';
     if (/[\u0000-\u001f\u007f-\u009f]/.test(text)) return 'El nombre contiene caracteres de control.';
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerCards, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     daemonRestartView, daemonRestartOutcome,
     THEME_MODES, THEME_LABELS, themeView };
