@@ -583,16 +583,77 @@ fn apply_plan(app: &AppHandle, state: &AppState, plan: TogglePlan) {
 
 // --- M1b snapshots/events ---------------------------------------------------
 
+/// Window facts the host context needs, read without ever blocking on the
+/// event loop: `is_visible()` called off the main thread posts to the event
+/// loop and waits with NO timeout (tauri-runtime-wry 2.12.1), so any thread
+/// that holds a host lock while calling it can deadlock against the main
+/// thread (R2). The cached source is the only one the lock-holding paths
+/// read; the cache is refreshed on the main thread after every show/hide.
+pub(crate) trait WindowFacts: Send + Sync {
+    fn is_visible(&self) -> bool;
+}
+
+/// The live getter. Inline (non-blocking) on the main thread; BLOCKING on
+/// any other thread. Only ever consulted on the main thread, never while a
+/// lock is held (see `sync_host_visible`).
+struct LiveWindowFacts<'a>(&'a WebviewWindow);
+
+impl WindowFacts for LiveWindowFacts<'_> {
+    fn is_visible(&self) -> bool {
+        self.0.is_visible().unwrap_or(true)
+    }
+}
+
+/// Cached main-window visibility. `true` matches the getter's own fallback
+/// (`unwrap_or(true)`): an unreadable window never blocks the lane.
+static HOST_VISIBLE: AtomicBool = AtomicBool::new(true);
+
+/// The cached source: the only `WindowFacts` a lock holder may read.
+struct CachedWindowFacts;
+
+impl WindowFacts for CachedWindowFacts {
+    fn is_visible(&self) -> bool {
+        HOST_VISIBLE.load(Ordering::SeqCst)
+    }
+}
+
+/// Main-thread only: read the live getter once and refresh the cache. Every
+/// show/hide of the main window goes through here so the cached fact can
+/// never drift from the real window state.
+fn sync_host_visible(win: &WebviewWindow) {
+    // Main thread only: the live getter is inline here, never blocking.
+    HOST_VISIBLE.store(LiveWindowFacts(win).is_visible(), Ordering::SeqCst);
+}
+
+/// Pure core of `host_ctx`: the window facts arrive through the seam so a
+/// test can prove a lock holder never touches the blocking getter.
+fn host_ctx_from(
+    now_ms: i64,
+    expanded: bool,
+    facts: &dyn WindowFacts,
+    quitting: bool,
+) -> approval::HostCtx {
+    approval::HostCtx {
+        now_ms,
+        expanded,
+        visible: facts.is_visible(),
+        quitting,
+    }
+}
+
 /// Host facts the approval lane needs (`approval::HostCtx`). Lock order:
 /// this reads ONLY the phase guard and never the approval mutex, so it is
-/// safe to call from the lane while it holds its own lock.
-fn host_ctx(app: &AppHandle, state: &AppState) -> approval::HostCtx {
-    approval::HostCtx {
-        now_ms: now_ms() as i64,
-        expanded: *state.phase.lock().expect("phase lock") == IslandState::Expanded,
-        visible: main_window(app).is_visible().unwrap_or(true),
-        quitting: QUITTING.load(Ordering::SeqCst),
-    }
+/// safe to call from the lane while it holds its own lock. R2: `visible`
+/// comes from the main-thread-maintained cache — the lane thread must NEVER
+/// call a window getter, which would block on the event loop with no
+/// timeout while the approval mutex is held (AB-BA against the main thread).
+fn host_ctx(_app: &AppHandle, state: &AppState) -> approval::HostCtx {
+    host_ctx_from(
+        now_ms() as i64,
+        *state.phase.lock().expect("phase lock") == IslandState::Expanded,
+        &CachedWindowFacts,
+        QUITTING.load(Ordering::SeqCst),
+    )
 }
 
 /// Current snapshot in Electron's exact shape. `anchor` is reported only
@@ -709,6 +770,7 @@ pub(crate) fn restore(app: &AppHandle) {
             let win = main_window(app);
             let _ = win.unminimize();
             let _ = win.show();
+            sync_host_visible(&win);
             publish(app, &state);
             return;
         }
@@ -747,6 +809,7 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
     // Q1: show, never focus — the island must not take the keyboard from
     // the app the human is working in (legacy `restore()` focused it).
     let _ = win.show();
+    sync_host_visible(&win);
     publish(app, state);
 }
 
@@ -756,6 +819,9 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
 fn open_chat_and_type(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _ = dispatch_verb(app, &state, Action::Expand, None);
+    // R2: keep the cached visibility honest at the call site too — the expand
+    // verb above may have revealed the island from Hidden.
+    sync_host_visible(&main_window(app));
     chathost::switch_view(app, &state, true);
     let win = main_window(app);
     let _ = win.set_focus();
@@ -1031,25 +1097,44 @@ async fn desktop_action(
     }
     let (action, index) = bridge::validate_payload(&payload)?;
     state.rate.lock().expect("rate lock").check(now_ms())?;
-    match action {
-        Action::Allow | Action::Deny => {
-            let approval = Arc::clone(&state.approval);
-            let hooks = state_hooks(&state)?;
-            let decision = if action == Action::Allow {
-                approval::Decision::Allow
-            } else {
-                approval::Decision::Deny
-            };
-            let handle = app.clone();
-            Ok(tauri::async_runtime::spawn_blocking(move || {
-                approval::decide(&approval, decision, &hooks);
-                let state = handle.state::<AppState>();
-                build_snapshot(&handle, &state)
-            })
+    // R2 routing: `runs_off_main_thread` is the SINGLE source of truth. The
+    // helper matches every Action variant exhaustively (no wildcard), so a
+    // new verb cannot compile without a deliberate routing choice, and this
+    // arm and the routing test can never silently diverge.
+    if runs_off_main_thread(action) {
+        let approval = Arc::clone(&state.approval);
+        let hooks = state_hooks(&state)?;
+        let decision = if action == Action::Allow {
+            approval::Decision::Allow
+        } else {
+            approval::Decision::Deny
+        };
+        let handle = app.clone();
+        Ok(tauri::async_runtime::spawn_blocking(move || {
+            approval::decide(&approval, decision, &hooks);
+            let state = handle.state::<AppState>();
+            build_snapshot(&handle, &state)
+        })
+        .await
+        .map_err(|_| BridgeError::denied("decision aborted"))?)
+    } else {
+        // R2: every verb here performs window getters/ops. An off-main
+        // getter posts to the event loop and blocks with NO timeout, so
+        // running one with a host lock held can deadlock against the
+        // main thread (which takes the same locks). Inline on the main
+        // thread, exactly like the click path above; the tokio thread
+        // only waits for the result.
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let state = handle.state::<AppState>();
+            let _ = send.send(dispatch_verb(&handle, &state, action, index));
+        })
+        .map_err(|_| BridgeError::denied("action scheduling failed"))?;
+        tauri::async_runtime::spawn_blocking(move || receive.recv())
             .await
-            .map_err(|_| BridgeError::denied("decision aborted"))?)
-        }
-        _ => dispatch_verb(&app, &state, action, index),
+            .map_err(|_| BridgeError::denied("action aborted"))?
+            .map_err(|_| BridgeError::denied("action aborted"))?
     }
 }
 
@@ -1151,6 +1236,7 @@ fn dispatch_click(app: &AppHandle, state: &AppState, click: bridge::Click) -> Re
     }
     let _ = win.unminimize();
     let _ = win.show(); // no set_focus: focus handback is not an acceptance gate
+    sync_host_visible(&win);
     chathost::publish_chat(app);
     publish(app, state);
     // Successful, guarded open only; the renderer selects the matched lane.
@@ -1368,6 +1454,7 @@ fn dispatch_action(
                             // Show in place; the chat view is NOT switched.
                             let _ = win.unminimize();
                             let _ = win.show();
+                            sync_host_visible(&win);
                             push_phase(app, "overview", edge);
                             chathost::publish_chat(app);
                         }
@@ -1379,6 +1466,7 @@ fn dispatch_action(
                             apply_plan(app, state, plan);
                             let _ = win.unminimize();
                             let _ = win.show();
+                            sync_host_visible(&win);
                         }
                     }
                     #[cfg(unix)]
@@ -1417,7 +1505,9 @@ fn dispatch_action(
             };
             if hidden {
                 approval::bump_epoch(&state.approval); // main.cjs 467
-                let _ = main_window(app).hide();
+                let win = main_window(app);
+                let _ = win.hide();
+                sync_host_visible(&win);
                 publish(app, state);
             }
             Ok(build_snapshot(app, state))
@@ -1602,7 +1692,8 @@ pub(crate) fn probe_requested() -> bool {
 /// The three callbacks the approval lane needs from the host (`main.cjs`
 /// publish / Date / console equivalents). `ctx` must NEVER take the
 /// approval lock — the lane calls it while holding its own (it only reads
-/// the phase guard and window state).
+/// the phase guard and the cached window facts; never a window getter,
+/// which would block on the event loop with no timeout — R2).
 fn build_hooks(app: AppHandle) -> approval::SharedHooks {
     Arc::new(approval::Hooks {
         ctx: {
@@ -1829,6 +1920,9 @@ fn main() {
             if let Err(e) = win.set_always_on_top(true) {
                 eprintln!("set_always_on_top(true) failed: {e}");
             }
+            // R2: seed the cached visibility the off-main host context reads
+            // (main thread here, so the live getter is inline and safe).
+            sync_host_visible(&win);
             let state = app.state::<AppState>();
             *state.work_area.lock().expect("work area lock") = wa.rect;
             // #264: the dock edge follows the RESTORED origin, so an island that
@@ -1958,5 +2052,173 @@ mod auto_close_tests {
             err.message.strip_prefix("Denied: ").map(str::to_string),
             Some("La isla tiene una interacción pendiente.".to_string())
         );
+    }
+}
+
+/// R2 (lock-across-getter deadlock): the host context the lane reads while
+/// holding the approval mutex must never touch a blocking window getter,
+/// and the visible fact it returns must track every show/hide of the main
+/// window. See `WindowFacts` / `HOST_VISIBLE`.
+#[cfg(test)]
+mod host_ctx_tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    /// A fake host whose getter blocks until the test releases it: exactly
+    /// what the real `is_visible()` does when called off the main thread
+    /// (posts to the event loop, waits with NO timeout).
+    struct BlockingFacts {
+        called: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl WindowFacts for BlockingFacts {
+        fn is_visible(&self) -> bool {
+            self.called.send(()).expect("test channel");
+            self.release
+                .lock()
+                .expect("test channel")
+                .recv()
+                .expect("test channel");
+            true
+        }
+    }
+
+    /// A lock holder reading the host context through the CACHED source
+    /// finishes while still holding its lock and never invokes the getter.
+    /// The first half proves the fake getter really blocks (the test can
+    /// detect the hazard); the second half proves the cache does not.
+    #[test]
+    fn a_lock_holder_reading_the_host_context_never_calls_the_blocking_getter() {
+        // 1. Hazard check: the same read through a blocking source hangs
+        //    until released — this test CAN detect the deadlock.
+        let (called_tx, called_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let blocking = BlockingFacts {
+            called: called_tx,
+            release: Mutex::new(release_rx),
+        };
+        let worker = std::thread::spawn(move || {
+            host_ctx_from(0, false, &blocking, false)
+        });
+        assert!(
+            called_rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "the blocking fake must actually be called: otherwise this test detects nothing"
+        );
+        release_tx.send(()).expect("test channel");
+        let ctx = worker.join().expect("hazard worker thread");
+        assert!(ctx.visible);
+
+        // 2. Production source: a lock holder reads the cache and completes
+        //    without ever calling the blocking getter.
+        let (called_tx, called_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let uncalled = BlockingFacts {
+            called: called_tx,
+            release: Mutex::new(release_rx),
+        };
+        HOST_VISIBLE.store(true, Ordering::SeqCst);
+        let lock = Arc::new(Mutex::new(()));
+        let worker_lock = Arc::clone(&lock);
+        let cache = CachedWindowFacts;
+        let worker = std::thread::spawn(move || {
+            let guard = worker_lock.lock().expect("test lock");
+            let ctx = host_ctx_from(0, false, &cache, false);
+            // Report completion WITHOUT releasing the lock: the holder must
+            // never wait on the event loop for this read to finish.
+            done_tx.send(ctx.visible).expect("test channel");
+            drop(guard);
+            drop(uncalled);
+            drop(release_tx);
+        });
+        let visible = done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the cached host context must never block on the window getter");
+        assert!(visible);
+        assert!(
+            called_rx.try_recv().is_err(),
+            "a lock holder must never call the blocking getter"
+        );
+        worker.join().expect("cached worker thread");
+    }
+
+    /// The cached visible fact tracks every show/hide: it starts `true` (the
+    /// getter's own `unwrap_or(true)` fallback) and `sync_host_visible` is
+    /// the only production writer (main thread, after each window op).
+    #[test]
+    fn the_cached_visible_fact_defaults_true_and_tracks_updates() {
+        HOST_VISIBLE.store(true, Ordering::SeqCst);
+        assert!(HOST_VISIBLE.load(Ordering::SeqCst));
+        HOST_VISIBLE.store(false, Ordering::SeqCst);
+        assert!(!HOST_VISIBLE.load(Ordering::SeqCst));
+        HOST_VISIBLE.store(true, Ordering::SeqCst);
+        assert!(HOST_VISIBLE.load(Ordering::SeqCst));
+    }
+}
+
+/// R2 (lock-across-getter deadlock): only the approval decisions may run on
+/// the tokio thread — they block on HTTP (legacy 5 s deadline) and never
+/// touch a window. Every other verb performs window getters/ops, and an
+/// off-main getter posts to the event loop and blocks with no timeout, so
+/// taking any host lock across one can deadlock against the main thread.
+///
+/// This match is the routing's single source of truth and has NO wildcard
+/// arm: adding an `Action` variant fails the BUILD here (compile-time
+/// exhaustiveness), forcing a deliberate routing choice before this verb
+/// can ever reach `desktop_action`. Update `main_thread_routing_tests` in
+/// the same change.
+fn runs_off_main_thread(action: Action) -> bool {
+    match action {
+        Action::Allow | Action::Deny => true,
+        Action::Snapshot
+        | Action::Expand
+        | Action::Close
+        | Action::Hide
+        | Action::Quit
+        | Action::Dismiss
+        | Action::Choose
+        | Action::AnimateAnyway
+        | Action::RespectSystemMotion
+        | Action::AutoClose => false,
+    }
+}
+
+#[cfg(test)]
+mod main_thread_routing_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_http_decision_verbs_may_run_off_the_main_thread() {
+        // Exhaustiveness guard: `runs_off_main_thread` matches every Action
+        // variant with NO wildcard arm, so adding a variant fails the build
+        // (which fails this suite) until a deliberate routing choice is made
+        // and this test's two lists are extended.
+        // The decisions block on HTTP and never touch a window: the
+        // spawn_blocking pool stays theirs (legacy 5 s deadline).
+        for action in [Action::Allow, Action::Deny] {
+            assert!(
+                runs_off_main_thread(action),
+                "{action:?} must keep running off the main thread"
+            );
+        }
+        // Every other verb performs window getters/ops: inline on the main
+        // thread only, never across a lock off it (R2 deadlock).
+        for action in [
+            Action::Snapshot,
+            Action::Expand,
+            Action::Close,
+            Action::Hide,
+            Action::Quit,
+            Action::Dismiss,
+            Action::Choose,
+            Action::AnimateAnyway,
+            Action::RespectSystemMotion,
+            Action::AutoClose,
+        ] {
+            assert!(
+                !runs_off_main_thread(action),
+                "{action:?} must run inline on the main thread"
+            );
+        }
     }
 }
