@@ -20,6 +20,8 @@
 (() => {
   const V = window.AbitoChatView;
   const M = window.AbitoChatMarkdown;
+  // #371: the transcript's tool receipts and approval cards (text nodes only).
+  const Cards = window.AbitoChatCards;
   const $ = id => document.getElementById(id);
   const capsule = $('capsule');
   const chat = $('chat');
@@ -213,7 +215,10 @@
     li.className = row.kind;
     li.textContent = '';
     li.removeAttribute('aria-label'); delete li.dataset.tone;
-    if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
+    delete li.dataset.state; delete li.dataset.decision; // #371: a patched row never keeps the previous card's state
+    if ((row.kind === 'tool' || row.kind === 'approval') && Cards) {
+      Cards.render(li, row, iconNode);
+    } else if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
       li.setAttribute('aria-label', row.text);
       const i = document.createElement('span');
       i.className = 'ico';

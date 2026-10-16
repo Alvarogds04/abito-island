@@ -168,6 +168,85 @@
     return { keep, patch, append: b.slice(i), remove: Math.max(0, a.length - b.length) };
   }
 
+  // ---- #371 (OD002/OD024/GD031): tool-call receipts and approval cards ------
+  // Field-driven: these rows exist ONLY when the turn carries `tool_calls` /
+  // `approvals`. Today no producer emits them (the local-model lane is text
+  // only), so a plain turn renders byte-identically; this contract is what the
+  // future agent lane fills: `tool_calls: [{call_id, name, state:
+  // 'running'|'done'|'failed', summary?}]`, `approvals: [{request_id,
+  // operation, decision: 'approved'|'denied'|'expired'}]`. Everything renders
+  // as ONE bounded plain-text line per card: control characters collapse to
+  // spaces, the scalar count is capped (never splitting a surrogate pair), and
+  // a receipt that cannot name its call never renders. An unmodelled state or
+  // decision is announced as unknown, never guessed.
+  const CARD_NAME_MAX = 80;
+  const CARD_SUMMARY_MAX = 240;
+  const TOOL_STATES = Object.freeze({
+    running: { word: 'En curso', icon: 'clock' },
+    done: { word: 'Listo', icon: 'check' },
+    failed: { word: 'Falló', icon: 'triangle' },
+  });
+  const TOOL_UNKNOWN = { word: 'Desconocido', icon: 'info' };
+  // The decision words reuse the #338 card vocabulary (Permitir/Denegar; the
+  // honest expiry of a proposal that can no longer be decided).
+  const APPROVAL_DECISIONS = Object.freeze({
+    approved: { word: 'Permitida', icon: 'check' },
+    denied: { word: 'Denegada', icon: 'cross' },
+    expired: { word: 'Vencida', icon: 'clock-off' },
+  });
+  const APPROVAL_UNKNOWN = { word: 'Desconocida', icon: 'info' };
+
+  // One bounded plain-text line: control characters become one space, runs of
+  // spaces collapse, and the length is bounded in Unicode scalars.
+  function cleanLine(value, max) {
+    if (typeof value !== 'string') return '';
+    const plain = value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+    const chars = Array.from(plain);
+    return chars.length <= max ? plain : chars.slice(0, max).join('') + '…';
+  }
+
+  function toolRows(turn) {
+    const list = Array.isArray(turn.tool_calls) ? turn.tool_calls : [];
+    const rows = [];
+    for (const call of list) {
+      const name = cleanLine(call && call.name, CARD_NAME_MAX);
+      if (!name) continue; // a receipt that cannot name its call never renders
+      const modelled = !!(call && TOOL_STATES[call.state]);
+      const state = modelled ? TOOL_STATES[call.state] : TOOL_UNKNOWN;
+      const summary = cleanLine(call && call.summary, CARD_SUMMARY_MAX);
+      rows.push({
+        kind: 'tool',
+        name,
+        state: modelled ? call.state : 'unknown',
+        summary: summary || undefined,
+        short: state.word,
+        icon: state.icon,
+        text: summary ? `Herramienta ${name}: ${state.word}. ${summary}` : `Herramienta ${name}: ${state.word}.`,
+      });
+    }
+    return rows;
+  }
+
+  function approvalRows(turn) {
+    const list = Array.isArray(turn.approvals) ? turn.approvals : [];
+    const rows = [];
+    for (const item of list) {
+      const operation = cleanLine(item && item.operation, CARD_NAME_MAX);
+      if (!operation) continue; // a card without its operation is not a card
+      const modelled = !!(item && APPROVAL_DECISIONS[item.decision]);
+      const decision = modelled ? APPROVAL_DECISIONS[item.decision] : APPROVAL_UNKNOWN;
+      rows.push({
+        kind: 'approval',
+        operation,
+        decision: modelled ? item.decision : 'unknown',
+        short: decision.word,
+        icon: decision.icon,
+        text: `Aprobación ${operation}: ${decision.word}.`,
+      });
+    }
+    return rows;
+  }
+
   function turnRows(turn) {
     const rows = [{ kind: 'user', text: turn.user_text }];
     // #343: what the turn carried, named — the files live in the island's
@@ -179,6 +258,8 @@
         text: `Archivos adjuntos: ${names}`,
       });
     }
+    rows.push(...toolRows(turn));
+    rows.push(...approvalRows(turn));
     if (turn.trimmed_turns > 0) {
       rows.push({
         kind: 'note', short: 'Recortado', icon: 'info',
@@ -417,5 +498,5 @@
     return `${oneDecimal(n / (1024 * 1024))} MB`;
   }
 
-  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });
