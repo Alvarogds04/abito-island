@@ -41,6 +41,12 @@
   const agent = payload => call('agent_action', payload);
 
   const openers = [$('open-screen-settings')].filter(Boolean); // the chat header gear: the ONE entry (#408)
+  // #366 F093: the SAME page runs inside the Rust-created settings window. There the panel
+  // fills the window (body[data-window="settings"] CSS) and the island's size is not this
+  // page's business. The label is the exact one the sender gate admits (narrow approval).
+  const WINDOW_MODE = V.isSettingsWindow(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
+    && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  if (WINDOW_MODE) document.body.dataset.window = 'settings';
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
   let screen = 'accounts';
@@ -271,13 +277,24 @@
     if (agentState === null) connectTimer = setTimeout(() => { if (agentState === null) { agentState = { connection: 'no_daemon' }; if (isOpen()) render(); } }, V.CONNECT_WAIT_MS);
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
     for (const b of openers) b.setAttribute('aria-expanded', 'true');
-    askSize(true);
+    if (!WINDOW_MODE) askSize(true); // #366: the own window never resizes the island
     syncRail();
     refreshAll();
     showScreen(id || screen);
     $('settings-close').focus();
   }
   function close(byKeyboard) {
+    // #366 F093: in the own window the panel close IS the window close: the ONE closed
+    // command asks Rust (the island's size and focus are never this window's business).
+    if (WINDOW_MODE) {
+      call('settings_window_action', { action: 'close' }).catch(() => {});
+      panel.inert = true; delete panel.dataset.open;
+      document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null }));
+      if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
+      discardAccountForm();
+      drafts.reset();
+      return;
+    }
     if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
@@ -292,14 +309,27 @@
   }
   const isOpen = () => panel.dataset.open === 'true';
 
+  // #366 F093: the typed pref chooses. ONE closed command asks Rust for the own window;
+  // an answer that says the window was not used (the pref chose in-island) and ANY failure
+  // both fall back to the in-island panel — the #408 default is never a dead gear.
+  function openWindowOrInIsland() {
+    const id = screen;
+    call('settings_window_action', { action: 'open' }).then(windowOpen => {
+      if (windowOpen && windowOpen.open === true) return; // the own window is up (Rust created it)
+      open(id); // the typed pref chose in-island
+    }).catch(() => open(screen)); // any failure falls back to in-island Settings too
+  }
   // the chat-header gear toggles Ajustes; the gear of the overview opens the chat view first
   for (const b of openers) b.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
-    if (isOpen()) close(e.detail === 0); else open(screen);
+    if (isOpen()) close(e.detail === 0);
+    else if (V.settingsWindowView(prefs).on) openWindowOrInIsland();
+    else open(screen);
   });
   const gear = $('open-settings');
   if (gear) gear.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
+    if (V.settingsWindowView(prefs).on) { openWindowOrInIsland(); return; } // #366: no island detour needed
     pendingOpen = screen;
     call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; });
   });
@@ -341,6 +371,9 @@
     call('hotkey_action', { action: 'view' }).then(h => { hotkey = h; render(); }, () => {});
     if (window.desktop) window.desktop.snapshot().then(s => { motionOverride = s.motionOverride !== false; render(); }, () => {});
   }
+  // #366 F093: the gear consults the placement pref even before the panel was ever
+  // opened, so the typed choice survives a page reload: one honest view fetch at startup.
+  if (!WINDOW_MODE) call('prefs_action', { action: 'view' }).then(p => { prefs = p; }, () => {});
   function applyAgent(next) {
     if (next && typeof next === 'object') {
       if (Object.hasOwn(next, 'ownedAccounts')) ownedAccounts = next.ownedAccounts === null ? null : { accounts: V.ownedAccounts(next.ownedAccounts) };
@@ -778,6 +811,17 @@
     const g = V.generalView({ sound: prefs.sound, gain: prefs.gain, motionOverride, hotkey });
     // each section belongs to one tab (#408); a section of another tab is built detached and never attached
     const group = (tab, title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); if (tab === screen) body.append(sec); return sec; };
+    // #366 F093: where Ajustes opens — inside the island (default, #408) or in its own
+    // window. The typed pref is the only chooser; a failed save keeps the previous
+    // placement and says so.
+    const placement = group('general', 'Ventana', 'Dónde se abre Ajustes. La ventana es aparte; la isla sigue siendo lo de siempre.');
+    const placementOn = V.settingsWindowView(prefs).on;
+    placement.append(toggleRow('sw-settings-window', 'Abrir Ajustes en su ventana', placementOn, () => {
+      call('prefs_action', { action: 'set_settings_window', settings_window: !placementOn }).then(p => {
+        prefs = p; render();
+        say(!placementOn ? 'Ajustes se abre en su ventana.' : 'Ajustes se abre dentro de la isla.');
+      }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
+    }));
     if (g.hotkey) {
       const sec = group('general', 'Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
       const h = g.hotkey;
@@ -1003,4 +1047,8 @@
       });
     }
   }
+  // #366 F093: inside the Rust-created settings window the SAME page opens
+  // Ajustes at once — the panel IS the window (the island chrome stays hidden
+  // by CSS, and the island's own phase machinery is never driven from here).
+  if (WINDOW_MODE) open('accounts');
 })();

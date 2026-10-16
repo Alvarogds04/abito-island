@@ -1465,3 +1465,12 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
   panel remains the default and the fallback for any window failure.
 - **Tests:** `src/prefs_tests.rs` (`f093_*` — exact command shape, persistence and round-trip,
   untouched-file bytes, hostile values dropped) and `src/settingshost.rs` (`f093` projection test).
+
+## #366 / F093 — Ajustes in its own window (opt-in)
+
+- **One closed command.** `settings_window_action` accepts exactly `{"action":"open"|"close"}` (no URL, label or size). Gate order: sender (`bridge::sender_ok`) → shared rate limiter → payload → effect.
+- **The typed pref chooses.** `open` creates or focuses the window only when `settings_window` is stored `true`; otherwise it answers `{"open":false}` and the page opens the in-island panel (#408, the default). Any command failure also falls back to the in-island panel.
+- **Rust creates the window.** Label `settings`, the SAME page (`index.html`), decorated, resizable, not always-on-top. `bridge::sender_ok` and the navigation lock admit exactly the labels `main` and `settings` (exact, case-sensitive); the URL allowlist is unchanged. Closing it never quits the app.
+- **Same page, window mode.** `settings.js` detects the label, sets `body[data-window="settings"]` (append-only CSS hides the island chrome) and opens Ajustes at once; closing the panel closes the window and never resizes the island.
+- **Chosen in** Ajustes → General → «Abrir Ajustes en su ventana».
+- **Not verified here:** no GUI was launched; window creation is covered only by pure tests (payload, pref decision, gate).

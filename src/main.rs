@@ -34,6 +34,7 @@ mod hotkeyhost;
 mod tray;
 mod trayhost;
 mod settingshost;
+mod settingswindow;
 mod specialists;
 mod specialistshost;
 mod modelshost;
@@ -798,7 +799,11 @@ fn spawn_publish_ticker(app: AppHandle) {
 fn navigation_lock() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("navigation-lock")
         .on_navigation(|webview, url| {
-            let allowed = webview.label() == "main" && bridge::page_url_allowed(url.as_str());
+            // #366 F093: the Rust-created settings window loads the SAME page,
+            // under the same closed URL allowlist — the label set here matches
+            // the one the sender gate admits, never the page's choice.
+            let allowed = (webview.label() == "main" || webview.label() == settingswindow::SETTINGS_LABEL)
+                && bridge::page_url_allowed(url.as_str());
             if !allowed {
                 eprintln!("navigation blocked from {}: {url}", webview.label());
             }
@@ -1707,6 +1712,7 @@ fn main() {
             settingshost::prefs_action,
             settingshost::settings_view,
             settingshost::daemon_action,
+            settingswindow::settings_window_action,
             specialistshost::specialists_action,
             nativedialoghost::native_dialog_action,
             record_facade_evidence,
@@ -1737,6 +1743,11 @@ fn main() {
                 }
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // #366 F093: the own Ajustes window closes normally — quitting is
+                // the island window's path only, never a side effect of this one.
+                if window.label() == settingswindow::SETTINGS_LABEL {
+                    return;
+                }
                 if QUITTING.load(Ordering::SeqCst) {
                     return; // the exit path is already closing windows
                 }

@@ -260,7 +260,9 @@ pub fn route_click(click: &Click, question: &Value, notices: &Value, now: u64) -
 /// host. The label and URL are read from the live webview by the command, so
 /// a stray webview (or a webview that somehow navigated away) is rejected.
 pub fn sender_ok(label: &str, url: &str) -> Result<(), BridgeError> {
-    if label != "main" {
+    // #366 F093: the Rust-created settings window shares the SAME gate under
+    // its own exact label; the URL allowlist below is untouched.
+    if label != "main" && label != "settings" {
         return Err(BridgeError::denied("wrong window label"));
     }
     if !page_url_allowed(url) {
@@ -490,6 +492,32 @@ mod tests {
         ] {
             assert!(sender_ok("main", url).is_ok(), "{url}");
         }
+    }
+
+    /// #366 F093: the settings window (created by Rust only, same page) shares
+    /// the SAME sender gate under its own exact label. Only the exact lowercase
+    /// "settings" is admitted; look-alikes stay refused, and the URL allowlist
+    /// is untouched (a foreign URL on the settings label is still an origin
+    /// denial, with the same message as before).
+    #[test]
+    fn f093_the_settings_label_shares_the_same_gate_exact_only() {
+        for url in ["tauri://localhost", "tauri://localhost/", "tauri://localhost/index.html"] {
+            assert!(sender_ok("settings", url).is_ok(), "{url}");
+        }
+        // look-alikes and every other label stay refused
+        for label in ["Settings", "SETTINGS", "settings2", "main2", "main ", " main", "", "settings-window"] {
+            assert!(sender_ok(label, "tauri://localhost/index.html").is_err(), "{label:?} must be refused");
+        }
+        // the URL allowlist is untouched: a foreign URL on the settings label is an origin denial
+        for url in ["https://evil.example/", "tauri://localhost/other.html", "", "tauri://localhost/index.html?x=1"] {
+            let err = sender_ok("settings", url).expect_err(url);
+            assert_eq!(err.code, "denied", "{url}");
+            assert!(err.message.contains("origin"), "{url}: {err}");
+        }
+        // the original behaviour for "main" is byte-identical
+        assert!(sender_ok("main", "tauri://localhost/index.html").is_ok());
+        let err = sender_ok("main", "tauri://localhost/other.html").expect_err("main foreign url");
+        assert_eq!(err.code, "denied");
     }
 
     #[test]

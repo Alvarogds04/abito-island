@@ -1164,3 +1164,47 @@ test('#336 settings UI source contract: the closed pair payload, validation befo
   // the new section never writes raw pixels
   assert.doesNotMatch(src, /auto[Cc]lose[^\n]*\d+px/);
 });
+
+// ---- #366 F093: the opt-in settings window ----------------------------------------------------------
+
+test('F093 isSettingsWindow admits only the exact lowercase settings label', () => {
+  assert.equal(S.isSettingsWindow('settings'), true);
+  assert.equal(S.isSettingsWindow('main'), false);
+  assert.equal(S.isSettingsWindow('Settings'), false, 'exact match only');
+  assert.equal(S.isSettingsWindow('settings2'), false);
+  assert.equal(S.isSettingsWindow(''), false);
+  assert.equal(S.isSettingsWindow(null), false);
+  assert.equal(S.isSettingsWindow(undefined), false);
+  assert.equal(S.isSettingsWindow(42), false);
+});
+
+test('F093 the settings window view models the General toggle from the projection only', () => {
+  // absent projection = the in-island default; only an explicit true opts in
+  assert.deepEqual(S.settingsWindowView({}), { on: false });
+  assert.deepEqual(S.settingsWindowView({ settingsWindow: false }), { on: false });
+  assert.deepEqual(S.settingsWindowView({ settingsWindow: true }), { on: true });
+  assert.deepEqual(S.settingsWindowView(null), { on: false });
+  assert.deepEqual(S.settingsWindowView('junk'), { on: false });
+});
+
+test('#366 settings window seam contract: the closed command, the honest fallback and the window-mode page', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  // the ONE closed command carries exactly its two closed actions
+  assert.match(src, /settings_window_action/);
+  assert.match(src, /action: 'open'/);
+  assert.match(src, /action: 'close'/);
+  // the typed pref chooses: an answer that says the window was not used falls back to in-island
+  assert.match(src, /windowOpen\.open === true/);
+  assert.match(src, /open\(screen\)/);
+  // any failure falls back to in-island Settings too
+  assert.match(src, /\.catch\(\(\) => open\(screen\)\)/);
+  // the settings window runs the same page in window mode: body flag for the CSS,
+  // the island size call is skipped, closing asks the closed command
+  assert.match(src, /dataset\.window = 'settings'/);
+  assert.match(src, /WINDOW_MODE/);
+  // the Ajustes → General toggle stores the typed choice through the closed prefs command
+  assert.match(src, /set_settings_window/);
+  // a settings-window close never resizes the island (no askSize there)
+  const windowModeClose = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
+  assert.doesNotMatch(windowModeClose, /askSize\(false\)[^\n]*\n[^\n]*WINDOW_MODE/, 'close asks the closed command first');
+});

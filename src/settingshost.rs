@@ -102,6 +102,13 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()
 }
 
+/// #366 F093: the effective Ajustes placement, read by the settings window host
+/// (the field is private to this module; the projection and this accessor are
+/// the only readers outside `prefs.rs`).
+pub fn settings_window_on(host: &SettingsHost) -> bool {
+    host.prefs.lock().expect("prefs lock").settings_window_on()
+}
+
 /// #264 (GD049): the position the human last dragged the island to, read for the
 /// FIRST geometry decision of a launch (before the window is placed) and for the
 /// post-load pin. Read-only; the WebView never receives it.
