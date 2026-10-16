@@ -1351,3 +1351,20 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
   fallback, round-trip in temp dirs, corrupt replacement, missing dir
   creation). Cargo.lock is untouched (the `tray-icon` tauri feature adds no
   packages).
+## #368 / F099 — closed, gated focus of terminal / agent session / editor
+
+- **One command, closed enum:** `focus_host` accepts exactly `{"target": "terminal" | "session" | "editor"}`. The payload never carries a command, a path or a window id, so a caller can only ask for a class of window the closed allowlists already accept (`src/focushost.rs`: `TERMINAL_CLASSES`, `EDITOR_CLASSES`, boundary-exact match — `codesign` never matches `code`).
+- **Gate order mirrors `open_chat_url`:** sender → payload validation → rate limiter → effect. A rejected call returns a public Spanish reason, spends no rate budget and reaches no effect.
+- **`session` semantics:** an agent-session window is a terminal-class window whose title carries the standalone agent tokens `pi` / `herdr` (token match: `pip install` is NOT a session window). A plain `terminal` ask accepts any terminal-class window; `editor` wins even when the title mentions the agent.
+- **Resolution is wmctrl/xdotool-FREE:** `_NET_CLIENT_LIST_STACKING` + `WM_CLASS` + `_NET_WM_NAME` over the existing x11rb dependency; the TOPMOST match is focused with the EWMH `_NET_ACTIVE_WINDOW` client message (`set_input_focus` fallback). No process is spawned with a caller-influenced argument. On GNOME/Wayland this sees XWayland windows only; a native-Wayland window that is not found is an honest per-target Spanish reason ("No encontré una ventana de terminal/sesión de agente/editor abierta."), never a guess; a connect or activation failure is the platform reason.
+- **Non-Linux** is an honest stub (the same Spanish platform reason); nothing is attempted.
+- **Tests:** `src/focushost_tests.rs` — closed enum, payload shapes, gate order and budget, classification table, topmost pick, and the honest no-match / failed-activation decisions.
+
+## #368 / F100 — closed, gated launch of Claude Desktop
+
+- **One command, no parameters:** `launch_claude` accepts exactly `null` or `{}` — every other payload shape is a public Spanish reason («Este comando no acepta parámetros.»), spends no rate budget and reaches no effect.
+- **Closed desktop-entry probe:** the command never receives an app name, a path or a command. The probe looks ONLY for the closed entry list (`src/focushost.rs`: `CLAUDE_DESKTOP_ENTRIES` — `claude.desktop`, `claude-code.desktop`, `Claude.desktop`, in that order) inside the closed XDG application directories (`$XDG_DATA_HOME/applications` or `~/.local/share/applications`, then `~/.local/share/applications`, `/usr/local/share/applications`, `/usr/share/applications`). An unrelated file like `evil.desktop` is invisible; the first directory with a hit wins; absent everywhere → «Claude Desktop no está instalado en esta máquina.»
+- **Launch:** the probe-resolved path is handed to `gio launch` (no shell, no caller-influenced argument, stdio detached). A failed spawn or non-success exit → «No pude abrir Claude Desktop.», never a false success.
+- **Gate order mirrors `focus_host`:** sender → payload validation → rate limiter → effect.
+- **Non-Linux** is an honest stub («Esta plataforma no permite abrir Claude Desktop.»); nothing is attempted.
+- **Tests:** `src/focushost_tests.rs` — closed payload shapes, gate order and budget, the not-installed / failed-launch decisions, and the closed deterministic probe (entry order, directory order, unrelated files invisible).

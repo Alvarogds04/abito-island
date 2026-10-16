@@ -27,6 +27,7 @@ pub mod chatlane;
 pub mod conversations;
 pub mod core;
 pub mod desktop;
+pub mod focushost;
 pub mod daemonhost;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakebridge;
