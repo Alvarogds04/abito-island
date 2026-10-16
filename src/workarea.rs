@@ -24,6 +24,43 @@ fn valid(r: Rect) -> bool {
     r.w > 0 && r.h > 0
 }
 
+/// A monitor as the #389 placement seam sees it: the platform's stable name
+/// key (see [`monitor_key`]) and its geometry in physical px.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonitorChoice {
+    pub key: String,
+    pub rect: Rect,
+}
+
+/// #389: the stable key of one monitor — the NAME the platform itself reports
+/// (the X11 output name such as `eDP-1` / `HDMI-A-1`, the Windows device name
+/// such as `\\.\DISPLAY1`). It survives reboots and reconnects, and it is
+/// built from nothing but what the island saw: no inference, no user input.
+/// A monitor the platform does not name cannot be chosen at all.
+pub fn monitor_key(name: Option<&str>) -> Option<String> {
+    let name = name?.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// #389: the geometry placement and edge snapping work in. The human's chosen
+/// monitor when it is present and connected (exact key match, valid geometry);
+/// the island's CURRENT monitor otherwise — no choice, an unknown key, a
+/// disconnected monitor, nothing enumerable, or a degenerate geometry. The
+/// fallback is exactly the value `workarea::current()` produced, so an absent
+/// preference is provably today's behaviour. The chosen monitor's bounds are
+/// its work area: per-monitor decorative insets are only observable for the
+/// monitor the window lives on (`monitor_work_area(rect, None)` IS the monitor
+/// bounds), and the pure `reclamp`/`snap`/`restore` decisions below then see
+/// one honest `Rect`, whatever monitor it came from.
+pub fn chosen_area(chosen: Option<&str>, current: Rect, monitors: &[MonitorChoice]) -> Rect {
+    let Some(key) = chosen else { return current };
+    monitors
+        .iter()
+        .find(|m| m.key == key && valid(m.rect))
+        .map(|m| m.rect)
+        .unwrap_or(current)
+}
+
 /// F010 — the decorative frame a platform reports around one monitor's usable
 /// area: a macOS-style notch / menu bar at the top, a dock along a side or the
 /// bottom. Absent means the platform reports none (`None` insets), NOT that
@@ -518,6 +555,72 @@ mod tests {
 
     fn cand(id: u32, pid: Option<u32>, title: &str) -> Candidate {
         Candidate { id, pid, title: Some(title.to_string()) }
+    }
+
+    // --- #389: the monitor the human chose — placement and snapping area -----
+
+    fn mon(key: &str, x: i32, y: i32, w: i32, h: i32) -> MonitorChoice {
+        MonitorChoice { key: key.to_string(), rect: Rect { x, y, w, h } }
+    }
+
+    #[test]
+    fn a_monitor_key_is_the_platform_name_the_island_itself_saw() {
+        // the X11 output name / Windows device name is the stable identifier
+        assert_eq!(monitor_key(Some("eDP-1")), Some("eDP-1".to_string()));
+        assert_eq!(monitor_key(Some("HDMI-A-1")), Some("HDMI-A-1".to_string()));
+        assert_eq!(monitor_key(Some(r"\\.\DISPLAY1")), Some(r"\\.\DISPLAY1".to_string()));
+        // surrounding whitespace is the platform's sloppiness, not part of the key
+        assert_eq!(monitor_key(Some("  DP-1 ")), Some("DP-1".to_string()));
+        // a monitor the platform does not name cannot be chosen at all
+        assert_eq!(monitor_key(None), None);
+        assert_eq!(monitor_key(Some("")), None);
+        assert_eq!(monitor_key(Some("   ")), None);
+    }
+
+    #[test]
+    fn without_a_choice_the_area_is_today_s_current_monitor_exactly() {
+        let current = Rect { x: 0, y: 27, w: 1920, h: 1053 };
+        let monitors = [mon("eDP-1", 0, 0, 1920, 1080), mon("DP-1", 1920, 0, 2560, 1440)];
+        // no pref, no monitors to compare against: provably the same value
+        // `workarea::current()` produced (the equivalence the fallback promises)
+        assert_eq!(chosen_area(None, current, &monitors), current);
+        assert_eq!(chosen_area(None, current, &[]), current);
+        assert_eq!(chosen_area(None, current, &monitors), chosen_area(None, current, &[]));
+    }
+
+    #[test]
+    fn the_chosen_monitor_s_bounds_are_the_area_when_present() {
+        let current = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        let chosen = Rect { x: 1920, y: 0, w: 2560, h: 1440 };
+        let monitors = [mon("eDP-1", 0, 0, 1920, 1080), mon("DP-1", 1920, 0, 2560, 1440)];
+        assert_eq!(chosen_area(Some("DP-1"), current, &monitors), chosen);
+        // a monitor to the LEFT with negative coordinates is picked verbatim
+        let left = [mon("DP-1", -1920, -200, 1920, 1080), mon("eDP-1", 0, 0, 1920, 1080)];
+        assert_eq!(chosen_area(Some("DP-1"), current, &left), Rect { x: -1920, y: -200, w: 1920, h: 1080 });
+    }
+
+    #[test]
+    fn an_unknown_or_disconnected_key_falls_back_to_the_current_monitor() {
+        let current = Rect { x: 0, y: 27, w: 1920, h: 1053 };
+        let monitors = [mon("eDP-1", 0, 0, 1920, 1080)];
+        // never heard of it
+        assert_eq!(chosen_area(Some("HDMI-A-1"), current, &monitors), current);
+        // was connected at choice time, is gone now
+        assert_eq!(chosen_area(Some("DP-1"), current, &monitors), current);
+        // no monitors enumerable at all
+        assert_eq!(chosen_area(Some("eDP-1"), current, &[]), current);
+        // a degenerate geometry is refused like everywhere else: fallback
+        let broken = [mon("eDP-1", 0, 0, 0, 1080)];
+        assert_eq!(chosen_area(Some("eDP-1"), current, &broken), current);
+    }
+
+    #[test]
+    fn a_duplicated_name_resolves_to_the_first_offered_monitor() {
+        // two ports can report the same name; the enumeration order decides,
+        // deterministically: first match wins, never a guess between them
+        let dup = [mon("DP-1", 0, 0, 1920, 1080), mon("DP-1", 1920, 0, 2560, 1440)];
+        let area = chosen_area(Some("DP-1"), Rect { x: 960, y: 0, w: 100, h: 100 }, &dup);
+        assert_eq!(area, Rect { x: 0, y: 0, w: 1920, h: 1080 });
     }
 
     #[test]

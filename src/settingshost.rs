@@ -93,7 +93,8 @@ fn view_prefs(p: &Prefs) -> Value {
         "theme": p.theme().as_str(),
         "chosenModels": p.chosen_models,
         "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
-        "customBlobs": p.custom_blobs_view()})
+        "customBlobs": p.custom_blobs_view(),
+        "monitor": p.monitor})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -109,6 +110,16 @@ pub fn saved_position(app: &AppHandle) -> Option<(i32, i32)> {
     // the guard must drop before `state`: a tail expression would hold the borrow
     let position = state.settings.prefs.lock().expect("prefs lock").position;
     position
+}
+
+/// #389 (GD012): the monitor the human chose for the island, read for the FIRST
+/// geometry decision of a launch and on every work-area poll. Read-only: the
+/// WebView only sees it through the projection. `None` = the default behaviour
+/// (the island's current monitor).
+pub fn chosen_monitor(app: &AppHandle) -> Option<String> {
+    let state = app.state::<AppState>();
+    let monitor = state.settings.prefs.lock().expect("prefs lock").monitor.clone();
+    monitor
 }
 
 /// #264: commit the origin a drag release decided, through the SAME `prefs::transact`
@@ -443,6 +454,25 @@ mod settings_view_tests {
         let cmd = parse_command(&json!({"action":"set_chosen_models","provider":"openai","models":["gpt-5.2"]})).unwrap();
         let next = update(&prefs, &cmd, |_| true).unwrap();
         assert_eq!(view_prefs(&next)["chosenModels"], json!({"anthropic":["claude-sonnet-4-5"],"openai":["gpt-5.2"]}));
+    }
+
+    /// #389: the chosen panel monitor reaches the WebView only as the validated
+    /// typed pref; no choice projects as null, like every optional field.
+    #[test]
+    fn f389_the_webview_projection_carries_the_chosen_monitor() {
+        use abito_island::prefs::{parse_command, update, Prefs};
+        let prefs = Prefs::from_text(Some(r#"{"v":1,"monitor":"DP-1"}"#));
+        assert_eq!(view_prefs(&prefs)["monitor"], json!("DP-1"));
+        assert_eq!(view_prefs(&Prefs::default())["monitor"], json!(null), "no choice is null, like the other optional fields");
+        let cmd = parse_command(&json!({"action":"set_monitor","monitor":"eDP-1"})).unwrap();
+        assert_eq!(view_prefs(&update(&prefs, &cmd, |_| true).unwrap())["monitor"], json!("eDP-1"));
+        let cleared = parse_command(&json!({"action":"clear_monitor"})).unwrap();
+        assert_eq!(view_prefs(&update(&prefs, &cleared, |_| true).unwrap())["monitor"], json!(null), "the default projects null");
+        // the established projection shapes are untouched by the new field
+        let view = view_prefs(&prefs);
+        assert_eq!(view["theme"], json!("system"));
+        assert_eq!(view["sound"], json!(false));
+        assert_eq!(view["chosenModels"], json!(null));
     }
 
     /// #346 F033: `pillColors` is the same projection shape as `avatarColors` — already

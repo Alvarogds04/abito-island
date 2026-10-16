@@ -536,6 +536,26 @@ notch/menu-bar inset source exists today — GNOME publishes the panel-subtracte
 on, so placement there is the usable work area unchanged. Single-monitor behavior
 is untouched.
 
+**Chosen monitor (#389 GD012).** Ajustes → Panel may pin the island to ONE monitor:
+`prefs.json` v1 gains the optional `monitor` key — the platform's stable monitor name
+(the X11 output name such as `eDP-1` / `HDMI-A-1`, the Windows device name such as
+`\\.\DISPLAY1`), bounded, trimmed, no control characters, never a prototype key. The
+key is built from nothing but the monitor names the island itself enumerated; no
+inference, no user typing. Absent (and never written by an untouched file) = today's
+behaviour, provably: `workarea::chosen_area(None, current, …)` returns exactly the
+`workarea::current()` value. Placement (first pin, restore), edge snapping and the
+work-area watcher resolve their area through `workarea::chosen_area` — exact key match
+with valid geometry wins; an unknown key, a disconnected monitor, nothing enumerable
+or a degenerate geometry falls back to the island's CURRENT monitor. A stored key the
+island cannot see right now is NOT dropped on load: the fallback happens at placement,
+so a redocked laptop restores the choice. The chosen monitor's bounds are its work area
+(`monitor_work_area(rect, None)`); per-monitor decorative insets remain observable only
+for the monitor the window lives on. IPC: `set_monitor` (exactly action + monitor) and
+`clear_monitor` (exactly action) behind the same closed schema, rate limit, gate and
+atomic writer as every preference; a refused shape leaves state and bytes identical.
+Projection: `prefs_action` and `prefs:state` carry `monitor` (string or null); the
+Settings UI itself is a later card.
+
 **Same island, a vertical column (#309).** A short click on the compact island still
 opens the approved **640×160 overview** (M1 contract, untouched). Its most
 prominent control, **Conversar** (≥44 px, also `Enter` in the overview),

@@ -1148,11 +1148,12 @@ mod chosen_models {
             auto_close_seconds: Some(30),
             open_on_hover: Some(true),
             custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("mint".into()) }]),
+            monitor: Some("DP-1".into()),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
@@ -1417,4 +1418,91 @@ fn hostile_stored_blobs_are_dropped_on_load() {
         let valid_count = p.custom_blobs.as_ref().map(|b| b.len()).unwrap_or(0);
         assert!(valid_count <= 1, "{text} must not panic");
     }
+}
+
+// ---- #389 (GD012): the chosen panel monitor — a typed optional pref --------
+
+#[test]
+fn set_monitor_round_trips_and_clear_monitor_returns_to_the_default() {
+    let command = parse_command(&json!({"action":"set_monitor","monitor":"DP-1"})).unwrap();
+    let next = update(&Prefs::default(), &command, |_| true).unwrap();
+    assert_eq!(next.monitor.as_deref(), Some("DP-1"));
+    // the stored key round-trips through the same v1 file as every other pref
+    let re = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(re.monitor.as_deref(), Some("DP-1"));
+    assert_eq!(re.to_text(), next.to_text(), "stable bytes across a reload");
+    // every platform shape the island itself can report is storable
+    for name in ["eDP-1", "HDMI-A-1", r"\\.\DISPLAY1"] {
+        let p = Prefs::from_text(Some(&json!({"v":1,"monitor":name}).to_string()));
+        assert_eq!(p.monitor.as_deref(), Some(name), "{name} survives a reload");
+    }
+    // clearing is the way back to the default behaviour (absence), and absence
+    // is never written: an untouched file keeps exactly the bytes it had
+    let cleared = update(&next, &parse_command(&json!({"action":"clear_monitor"})).unwrap(), |_| true).unwrap();
+    assert_eq!(cleared.monitor, None);
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1,"sound":true}"#)).monitor, None);
+    assert!(!Prefs::default().to_text().contains("monitor"), "no key is written for the default");
+}
+
+#[test]
+fn set_monitor_is_an_exact_closed_command() {
+    assert_eq!(
+        parse_command(&json!({"action":"set_monitor","monitor":"eDP-1"})),
+        Ok(Command::SetMonitor("eDP-1".to_string()))
+    );
+    assert_eq!(parse_command(&json!({"action":"clear_monitor"})), Ok(Command::ClearMonitor));
+    for bad in [
+        json!({"action":"set_monitor"}),
+        json!({"action":"set_monitor","monitor":"eDP-1","x":1}),
+        json!({"action":"set_monitor","monitor":42}),
+        json!({"action":"set_monitor","monitor":null}),
+        json!({"action":"set_monitor","Monitor":"eDP-1"}),
+        json!({"action":"clear_monitor","monitor":"eDP-1"}),
+        json!({"action":"clear_monitor","x":1}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad} must be refused: exact keys only");
+    }
+}
+
+#[test]
+fn set_monitor_refusals_leave_the_store_byte_identical() {
+    for bad in [
+        "", "   ", "\u{7}", "eDP-1\n", "__proto__", "prototype", "constructor",
+        // 65 scalars: one past the bound
+        "A:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ] {
+        assert!(parse_command(&json!({"action":"set_monitor","monitor":bad})).is_err(), "{bad:?} must be refused");
+        // the apply boundary refuses hostile shapes for direct callers too
+        assert!(update(&Prefs::default(), &Command::SetMonitor(bad.to_string()), |_| panic!("no write")).is_err());
+    }
+    // a refused command changes nothing: state and bytes stay what they were
+    let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"monitor":"DP-1"}"#));
+    let mut writes = 0;
+    for command in [
+        Command::SetMonitor(String::new()),
+        Command::SetMonitor("__proto__".into()),
+        Command::SetMonitor("A:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()),
+    ] {
+        assert!(update(&current, &command, |_| { writes += 1; true }).is_err());
+    }
+    assert_eq!(writes, 0, "a refused command never reaches disk");
+    assert_eq!(Prefs::from_text(Some(&current.to_text())), current);
+}
+
+#[test]
+fn a_disconnected_monitor_s_key_survives_the_reload() {
+    // the fallback to the island's current monitor happens at PLACEMENT, never
+    // by dropping the stored choice: a laptop redocked restores the choice
+    let p = Prefs::from_text(Some(r#"{"v":1,"monitor":"DP-1"}"#));
+    assert_eq!(p.monitor.as_deref(), Some("DP-1"));
+    // only a hostile shape is dropped on load, like every other typed field
+    for bad in [r#"{"v":1,"monitor":42}"#, r#"{"v":1,"monitor":""}"#, r#"{"v":1,"monitor":"bad\n"}"#,
+                r#"{"v":1,"monitor":null}"#, r#"{"v":1,"monitor":true}"#] {
+        let p = Prefs::from_text(Some(bad));
+        assert_eq!(p.monitor, None, "{bad} reads as no choice");
+        assert!(!p.to_text().contains("monitor"), "{bad} leaves no key behind");
+    }
+    // a well-shaped key the island never saw still parses: the placement
+    // fallback owns "unknown", not the store
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1,"monitor":"SOMEDAY-MONITOR"}"#)).monitor.as_deref(), Some("SOMEDAY-MONITOR"));
 }
