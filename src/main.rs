@@ -40,6 +40,7 @@ mod modelshost;
 #[cfg(unix)]
 mod nativeaudit;
 mod nativewindow;
+mod nativedialoghost;
 #[cfg(any(debug_assertions, feature = "probe"))]
 mod probe;
 mod platform;
@@ -1563,6 +1564,7 @@ fn main() {
             settingshost::settings_view,
             settingshost::daemon_action,
             specialistshost::specialists_action,
+            nativedialoghost::native_dialog_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence
