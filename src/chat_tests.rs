@@ -536,3 +536,94 @@ fn safe_errors_name_what_to_do() {
     assert!(ChatError::attachment_unavailable().safe_message.contains("ya no está disponible"));
     assert!(ChatError::vision_unsupported().safe_message.contains("no puede leer imágenes"));
 }
+
+// --- #418: tool calls and approval decisions as turn events -------------------
+
+fn running_turn(c: &mut Conversation) -> String {
+    let a = c.submit("hola", "req-0000000001", &profile()).unwrap();
+    c.apply(&a.turn_id, 1, Event::Thinking).unwrap();
+    a.turn_id
+}
+
+fn call(id: &str, name: &str, state: ToolState, summary: Option<&str>) -> Event {
+    Event::ToolCall(ToolCall {
+        call_id: id.into(),
+        name: name.into(),
+        state,
+        summary: summary.map(str::to_string),
+    })
+}
+
+#[test]
+fn a_plain_turn_view_has_no_tool_or_approval_keys() {
+    let mut c = convo();
+    let t = running_turn(&mut c);
+    c.apply(&t, 2, Event::Delta("ok".into())).unwrap();
+    let v = c.view();
+    let turn = v["turns"][0].as_object().unwrap();
+    assert!(!turn.contains_key("tool_calls"));
+    assert!(!turn.contains_key("approvals"));
+}
+
+#[test]
+fn a_tool_call_event_surfaces_in_the_view_and_upserts_by_call_id() {
+    let mut c = convo();
+    let t = running_turn(&mut c);
+    c.apply(&t, 2, call("call_1", "read", ToolState::Running, None)).unwrap();
+    assert_eq!(c.view()["turns"][0]["tool_calls"], json!([{"call_id": "call_1", "name": "read", "state": "running"}]));
+    c.apply(&t, 3, call("call_1", "read", ToolState::Failed, Some("La herramienta terminó con error."))).unwrap();
+    let calls = c.view()["turns"][0]["tool_calls"].clone();
+    assert_eq!(calls, json!([{"call_id": "call_1", "name": "read", "state": "failed", "summary": "La herramienta terminó con error."}]));
+    // a finished call never goes back to running
+    assert_eq!(c.apply(&t, 4, call("call_1", "read", ToolState::Running, None)), Err(Reject::InvalidTransition));
+}
+
+#[test]
+fn unsafe_tool_events_are_rejected_and_change_nothing() {
+    let mut c = convo();
+    let t = running_turn(&mut c);
+    let before = c.view();
+    for bad in [
+        call("bad id!", "read", ToolState::Running, None),
+        call("", "read", ToolState::Running, None),
+        call("call_1", "bash\nrm -rf /", ToolState::Running, None),
+        call("call_1", &"n".repeat(65), ToolState::Running, None),
+        call("call_1", "read", ToolState::Running, Some("line\nbreak")),
+        call("call_1", "read", ToolState::Running, Some(&"s".repeat(241))),
+    ] {
+        assert_eq!(c.apply(&t, 2, bad), Err(Reject::Invalid));
+    }
+    assert_eq!(c.view(), before, "rejected events leave the turn and seq unchanged");
+    assert!(c.apply(&t, 2, Event::Delta("x".into())).is_ok(), "seq 2 is still free");
+}
+
+#[test]
+fn tool_calls_per_turn_are_bounded() {
+    let mut c = convo();
+    let t = running_turn(&mut c);
+    for i in 0..MAX_TOOL_CALLS {
+        c.apply(&t, 2 + i as u64, call(&format!("c{i}"), "read", ToolState::Done, None)).unwrap();
+    }
+    assert_eq!(c.apply(&t, 2 + MAX_TOOL_CALLS as u64, call("extra", "read", ToolState::Done, None)), Err(Reject::Invalid));
+}
+
+#[test]
+fn approval_decisions_surface_once_per_request() {
+    let mut c = convo();
+    let t = running_turn(&mut c);
+    let ev = |id: &str, d| Event::Approval(ApprovalDecision { request_id: id.into(), operation: "Enviar correo".into(), decision: d });
+    c.apply(&t, 2, ev("req_1", Decision::Approved)).unwrap();
+    assert_eq!(c.view()["turns"][0]["approvals"], json!([{"request_id": "req_1", "operation": "Enviar correo", "decision": "approved"}]));
+    assert_eq!(c.apply(&t, 3, ev("req_1", Decision::Denied)), Err(Reject::InvalidTransition));
+    let bad = Event::Approval(ApprovalDecision { request_id: "req_2".into(), operation: "a\u{0}b".into(), decision: Decision::Expired });
+    assert_eq!(c.apply(&t, 3, bad), Err(Reject::Invalid));
+    assert_eq!(c.view()["turns"][0]["approvals"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn tool_events_after_a_terminal_turn_are_refused() {
+    let mut c = convo();
+    let t = running_turn(&mut c);
+    c.apply(&t, 2, Event::Complete(FinishReason::Stop)).unwrap();
+    assert_eq!(c.apply(&t, 3, call("c1", "read", ToolState::Done, None)), Err(Reject::AfterTerminal));
+}

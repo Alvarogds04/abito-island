@@ -216,6 +216,73 @@ pub fn valid_attachment_id(id: &str) -> bool {
         && id[2..].bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
+/// #418 — bounds of the #371 transcript cards (the page caps the same scalars).
+pub const MAX_TOOL_CALLS: usize = 64;
+pub const MAX_APPROVALS: usize = 32;
+pub const TOOL_NAME_MAX: usize = 64;
+pub const TOOL_SUMMARY_MAX: usize = 240;
+pub const APPROVAL_OPERATION_MAX: usize = 80;
+const EVENT_ID_MAX: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolState {
+    Running,
+    Done,
+    Failed,
+}
+
+/// One tool call as the turn shows it: an id, a bounded name, a state and an
+/// optional one-line summary. Never arguments, results, paths or env.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolCall {
+    pub call_id: String,
+    pub name: String,
+    pub state: ToolState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Approved,
+    Denied,
+    Expired,
+}
+
+/// The decision taken on one #338 proposal card, recorded on the turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ApprovalDecision {
+    pub request_id: String,
+    pub operation: String,
+    pub decision: Decision,
+}
+
+fn safe_token(s: &str, max: usize) -> bool {
+    (1..=max).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+}
+
+/// One plain line: no control characters, non-blank, ≤ `max` scalars.
+fn plain_line(s: &str, max: usize) -> bool {
+    !s.trim().is_empty() && s.chars().count() <= max && !s.chars().any(char::is_control)
+}
+
+impl ToolCall {
+    fn valid(&self) -> bool {
+        safe_token(&self.call_id, EVENT_ID_MAX)
+            && safe_token(&self.name, TOOL_NAME_MAX)
+            && self.summary.as_deref().is_none_or(|s| plain_line(s, TOOL_SUMMARY_MAX))
+    }
+}
+
+impl ApprovalDecision {
+    fn valid(&self) -> bool {
+        safe_token(&self.request_id, EVENT_ID_MAX) && plain_line(&self.operation, APPROVAL_OPERATION_MAX)
+    }
+}
+
 /// `chat.accepted`: queued work, not completion and not approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Accepted {
@@ -234,6 +301,10 @@ pub enum Event {
     Thinking,
     Delta(String),
     WaitingApproval,
+    /// #418: a tool call started or finished (upsert by `call_id`).
+    ToolCall(ToolCall),
+    /// #418: the decision taken on a #338 proposal during this turn.
+    Approval(ApprovalDecision),
     Complete(FinishReason),
     Error(ChatError),
 }
@@ -253,6 +324,8 @@ pub enum Reject {
     Gap,
     AfterTerminal,
     InvalidTransition,
+    /// #418: an unsafe or over-bound tool/approval payload.
+    Invalid,
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +344,10 @@ pub struct Turn {
     pub trimmed_turns: usize,
     /// #343: files attached to THIS turn (metadata; content on disk).
     pub attachments: Vec<Attachment>,
+    /// #418: tool-call receipts (empty for plain turns; never serialized then).
+    pub tool_calls: Vec<ToolCall>,
+    /// #418: approval decisions taken during the turn.
+    pub approvals: Vec<ApprovalDecision>,
 }
 
 impl Turn {
@@ -457,6 +534,8 @@ impl Conversation {
             profile: profile.clone(),
             trimmed_turns: 0,
             attachments,
+            tool_calls: Vec::new(),
+            approvals: Vec::new(),
         };
         let accepted = Self::accepted(&turn, false);
         self.turns.push_back(turn);
@@ -523,6 +602,30 @@ impl Conversation {
                 }
                 _ => return Err(Reject::InvalidTransition),
             },
+            Event::ToolCall(call) => {
+                if !call.valid() {
+                    return Err(Reject::Invalid);
+                }
+                match turn.tool_calls.iter().position(|c| c.call_id == call.call_id) {
+                    Some(i) => {
+                        if turn.tool_calls[i].state != ToolState::Running {
+                            return Err(Reject::InvalidTransition);
+                        }
+                        turn.tool_calls[i] = call;
+                    }
+                    None if turn.tool_calls.len() >= MAX_TOOL_CALLS => return Err(Reject::Invalid),
+                    None => turn.tool_calls.push(call),
+                }
+            }
+            Event::Approval(item) => {
+                if !item.valid() || turn.approvals.len() >= MAX_APPROVALS {
+                    return Err(Reject::Invalid);
+                }
+                if turn.approvals.iter().any(|a| a.request_id == item.request_id) {
+                    return Err(Reject::InvalidTransition);
+                }
+                turn.approvals.push(item);
+            }
             Event::Complete(reason) => {
                 turn.state = if reason == FinishReason::Cancelled {
                     TurnState::Cancelled
@@ -650,7 +753,7 @@ impl Conversation {
             .turns
             .iter()
             .map(|t| {
-                json!({
+                let mut v = json!({
                     "turn_id": t.turn_id,
                     "request_id": t.request_id,
                     "state": t.state,
@@ -663,7 +766,15 @@ impl Conversation {
                     "profile_id": t.profile.profile_id,
                     "profile_revision": t.profile.revision,
                     "attachments": t.attachments,
-                })
+                });
+                // #418: optional keys — a plain turn's projection is unchanged.
+                if !t.tool_calls.is_empty() {
+                    v["tool_calls"] = json!(t.tool_calls);
+                }
+                if !t.approvals.is_empty() {
+                    v["approvals"] = json!(t.approvals);
+                }
+                v
             })
             .collect();
         json!({

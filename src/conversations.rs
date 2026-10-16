@@ -234,6 +234,8 @@ impl StoredTurn {
             },
             trimmed_turns: self.trimmed_turns,
             attachments,
+            tool_calls: Vec::new(),
+            approvals: Vec::new(),
         })
     }
 }
