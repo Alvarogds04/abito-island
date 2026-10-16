@@ -91,7 +91,8 @@ fn view_prefs(p: &Prefs) -> Value {
         "mainPill": p.main_pill(), "declaredPills": p.declared_pills(),
         "pillColors": p.pill_colors,
         "theme": p.theme().as_str(),
-        "chosenModels": p.chosen_models})
+        "chosenModels": p.chosen_models,
+        "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover()})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -476,5 +477,29 @@ mod settings_view_tests {
         ] {
             assert_eq!(parse_daemon_action(&bad), None, "{bad}");
         }
+    }
+
+    /// #336 T1b-a (L15): the projection carries the EFFECTIVE interaction
+    /// values — the defaults (15 seconds / hover off) without any stored key,
+    /// saved values when present, and the defaults again when a hostile file
+    /// value was dropped at load. The established fields keep their shapes.
+    #[test]
+    fn f003_the_webview_projection_carries_the_effective_interaction_values() {
+        use abito_island::prefs::Prefs;
+        let defaults = view_prefs(&Prefs::default());
+        assert_eq!(defaults["autoCloseSeconds"], json!(15));
+        assert_eq!(defaults["openOnHover"], json!(false));
+        let saved = Prefs::from_text(Some(r#"{"v":1,"auto_close_seconds":45,"open_on_hover":true}"#));
+        let view = view_prefs(&saved);
+        assert_eq!(view["autoCloseSeconds"], json!(45));
+        assert_eq!(view["openOnHover"], json!(true));
+        let hostile = Prefs::from_text(Some(r#"{"v":1,"auto_close_seconds":999,"open_on_hover":"yes"}"#));
+        let view = view_prefs(&hostile);
+        assert_eq!(view["autoCloseSeconds"], json!(15), "dropped values read as defaults");
+        assert_eq!(view["openOnHover"], json!(false), "dropped values read as defaults");
+        // the established projection shapes are untouched
+        assert_eq!(view["pillColors"], json!({}));
+        assert_eq!(view["theme"], json!("system"));
+        assert_eq!(view["sound"], json!(false));
     }
 }

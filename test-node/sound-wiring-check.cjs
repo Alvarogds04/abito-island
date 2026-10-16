@@ -96,6 +96,8 @@ function hostDtoFixture(host) {
       'p.main_pill()': JSON.parse(main[1]),
       'p.declared_pills()': JSON.parse(declared[1]),
       'p.theme().as_str()': 'system',
+      'p.auto_close_seconds()': 15,
+      'p.open_on_hover()': false,
     };
     const expression = host.slice(at, end).replace(/\bp\.[a-z_]+(?:\(\))?(?:\.[a-z_]+\(\))*/g, token => {
       if (!Object.hasOwn(values, token)) throw new Error('Unmapped Host DTO expression: ' + token);
@@ -112,7 +114,8 @@ test('Host DTO fixture extracts complete legacy and multiline typed projections 
   const dto = hostDtoFixture(host);
   assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
     pillColors: {}, chosenModels: null,
-    mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system' });
+    mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system',
+    autoCloseSeconds: 15, openOnHover: false });
   const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
   assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });
   const quoted = 'complete ) with "quoted" text';

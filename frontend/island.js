@@ -324,6 +324,8 @@
 
   // ---- pointer tracking (webview reports; Rust decides) ------------------
   let pressed = false;
+  // #336 L18: one press may carry a spent hover engagement (see release).
+  let hoverEngagePress = false;
   let lastPoint = { x: 0, y: 0 };
   const send = (cmd, args) => {
     if (!invoke) return;
@@ -333,9 +335,17 @@
   const release = (pt, cancelled) => {
     if (!pressed) return;
     pressed = false;
+    // #336 L18: a spent hover engagement cancels ONLY this release — core.rs
+    // release() applies the snap first and then skips the toggle on
+    // cancelled, so the island keeps open; every later press is legacy.
+    // Merged BEFORE the send: the native IPC arguments stay byte-identical
+    // (character-states-check pins that exact line and must not change).
+    cancelled = cancelled || hoverEngagePress;
+    hoverEngagePress = false;
     character.dragEnd();
     document.body.classList.remove('is-dragging');
     send('drag_release', { x: pt.x, y: pt.y, cancelled });
+    syncInteraction();
   };
   window.addEventListener('pointerdown', e => {
     if (e.button !== 0 || !e.isPrimary) return;
@@ -345,7 +355,12 @@
     // the chat — drag never attaches to text or composer controls.
     if (e.target && e.target.closest && e.target.closest('button, textarea, input, #chat-log, #chat-composer')) return;
     pressed = true;
+    // #336 L18: capture the engagement at PRESS time (the native release
+    // happens before any click event): the module's hoverOnly state says
+    // whether this is the first press after a hover-open.
+    hoverEngagePress = !!(interaction && interaction.snapshot().hoverOnly);
     character.dragStart(e.screenX);
+    syncInteraction();
     lastPoint = { x: e.clientX, y: e.clientY };
     document.body.classList.add('is-dragging');
     try { if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId); }
@@ -376,6 +391,81 @@
   window.addEventListener('pointercancel', e => release({ x: e.clientX, y: e.clientY }, true));
   // Focus loss mid-drag (e.g. alt-tab): reconcile without toggling.
   window.addEventListener('blur', () => release(lastPoint, true));
+
+  // ---- #336 F003/F004: the inactivity interaction feed (T1b-b) -------------
+  // One controller from the T1a module (policy/scheduler only): the module
+  // owns eligibility, the monotonic deadline and the ONE hosted timer; this
+  // file feeds live facts/events and calls back ONLY through the existing
+  // facade verbs — `expand` for hover-open, the new atomic `autoClose` for
+  // the close. The facts are advisory input, never permission: Rust rechecks
+  // protected state atomically inside the verb. The countdown VISUAL is not
+  // wired here (no approved surface owns its markup/style yet), so
+  // onCountdown stays silent — the close itself does not depend on it.
+  let composingIME = false;
+  const interaction = window.AbitoIslandInteraction
+    ? window.AbitoIslandInteraction.createController({
+        now: () => performance.now(),
+        schedule: (fn, ms) => setTimeout(fn, ms),
+        cancel: id => clearTimeout(id),
+        open: () => (window.desktop ? window.desktop.expand() : Promise.reject(new Error('host unavailable'))),
+        autoClose: () => (window.desktop ? window.desktop.autoClose() : Promise.reject(new Error('host unavailable'))),
+        onCountdown: () => { /* the countdown visual needs an approved surface (element + style); the close does not */ },
+      })
+    : null;
+  const TEXT_FIELD = 'input, textarea, [contenteditable="true"]';
+  function interactionFacts() {
+    const snap = current;
+    const active = document.activeElement;
+    const editing = !!(active && active.matches && active.matches(TEXT_FIELD));
+    const field = $('chat-input');
+    const permission = $('permission');
+    const models = $('models');
+    return {
+      state: snap ? snap.state : 'unknown',
+      view: capsule.dataset.view || 'unknown',
+      settled: capsule.dataset.phase === 'expanded' || capsule.dataset.phase === 'compact',
+      nativeReady: snap !== null && snap !== undefined,
+      question: capsule.dataset.question === 'pending',
+      approval: !!(permission && !permission.hidden),
+      request: !!(snap && snap.request),
+      decision: !!cardFlight,
+      card: !!(snap && validCard(snap.card) && snap.card.state === 'pending'),
+      dragging: pressed,
+      editing: editing,
+      composing: composingIME || editing,
+      draft: !!(field && field.value),
+      settings: capsule.dataset.settings === 'open',
+      models: !!(models && models.dataset.open === 'true'),
+    };
+  }
+  function syncInteraction() {
+    if (interaction) interaction.update(interactionFacts());
+  }
+  function applyInteractionPrefs(p) {
+    if (!interaction || !p) return;
+    // An absent/foreign pair (a host without #336) keeps the module defaults.
+    if (Number.isInteger(p.autoCloseSeconds) && typeof p.openOnHover === 'boolean') {
+      try { interaction.setPreferences({ autoCloseSeconds: p.autoCloseSeconds, openOnHover: p.openOnHover }); }
+      catch { /* an invalid pair never reaches the module */ }
+    }
+  }
+  if (interaction) {
+    // Native phase/view + the panel/question/card flags are DOM truth already;
+    // the module consumes them through one entry point, never a frame loop.
+    new MutationObserver(syncInteraction).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view', 'data-settings', 'data-question', 'data-card'] });
+    document.addEventListener('focusin', syncInteraction);
+    document.addEventListener('focusout', syncInteraction);
+    document.addEventListener('input', syncInteraction);
+    document.addEventListener('compositionstart', () => { composingIME = true; syncInteraction(); });
+    document.addEventListener('compositionend', () => { composingIME = false; syncInteraction(); });
+    // Trusted-mouse filtering is the module's own public contract (enter/leave/
+    // engage reject anything synthetic); these listeners only forward events.
+    capsule.addEventListener('pointerenter', e => { interaction.enter(e); });
+    capsule.addEventListener('pointerleave', e => { interaction.leave(e); });
+    document.addEventListener('click', e => { interaction.engage(e); });
+    document.addEventListener('keydown', e => { interaction.engage(e); });
+    window.addEventListener('pagehide', () => { interaction.stop(); });
+  }
 
   // ---- notices (M2): DISPLAY text only ---------------------------------
   // Sileo-style local notice in the island, own code, total silence: the
@@ -539,8 +629,8 @@
     $('card-conn-word').textContent = shown.word;
   }
   if (window.desktop) {
-    try { window.desktop.onState(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); }); } catch { /* facade optional */ }
-    try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); soundCue('firstSnapshotRendered'); }, () => {}); } catch { /* facade optional */ }
+    try { window.desktop.onState(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); syncInteraction(); }); } catch { /* facade optional */ }
+    try { window.desktop.snapshot().then(snapshot => { current = snapshot; refreshHost(snapshot); renderNotices(snapshot); renderCard(); soundCue('firstSnapshotRendered'); syncInteraction(); }, () => {}); } catch { /* facade optional */ }
   }
   // #305: the global shortcut status (READ only: changing it is the settings panel's job, #308).
   function paintHotkey(view) {
@@ -594,16 +684,16 @@
     else island.dataset.dotColor = view.color;
   }
   if (invoke) {
-    invoke('prefs_action', { payload: { action: 'view' } }).then(paintDotColor, () => {});
+    invoke('prefs_action', { payload: { action: 'view' } }).then(p => { paintDotColor(p); applyInteractionPrefs(p); }, () => {});
     const listenPrefs = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
-    if (listenPrefs) listenPrefs('prefs:state', event => paintDotColor(event && event.payload)).catch(() => {});
+    if (listenPrefs) listenPrefs('prefs:state', event => { paintDotColor(event && event.payload); applyInteractionPrefs(event && event.payload); }).catch(() => {});
   }
   if (noticeDismiss) {
     noticeDismiss.addEventListener('click', event => {
       event.preventDefault();
       // Wired with M2: clears the first notice; a dismissal is never a
       // decision and never reaches Pi as approval.
-      try { window.desktop && window.desktop.dismiss().then(renderNotices, () => {}); } catch { /* facade optional */ }
+      try { if (window.desktop) { window.desktop.dismiss().then(renderNotices, () => {}); } } catch { /* facade optional */ }
     });
   }
 

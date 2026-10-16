@@ -39,6 +39,10 @@
       // setMotionOverride(bool). Each answers with the fresh snapshot.
       animateAnyway: () => action('animateAnyway'),
       respectSystemMotion: () => action('respectSystemMotion'),
+      // #336: the island's inactivity close. Argument-free like `close`; the
+      // atomic protected-state admission lives entirely on the Rust side and
+      // the legacy explicit `close()` contract is untouched.
+      autoClose: () => action('autoClose'),
       onState(callback) {
         if (typeof callback !== 'function') throw new TypeError('Callback required');
         if (!listen) return () => {};

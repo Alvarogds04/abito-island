@@ -66,6 +66,10 @@
   let gainDraft = null;
   let gainSaving = false;
   let gainError = '';
+  // #336 F003: same draft/saving/error pattern as the volume field.
+  let autoDraft = null;
+  let autoSaving = false;
+  let autoError = '';
   let nameDraft = null; // null follows saved prefs; edited text survives state pushes
   let nameSaving = false;
   let nameError = '';
@@ -861,6 +865,53 @@
       });
     });
     gainForm.append(gainLabel, gainInput, gainHint, gainIssue, gainSave); sound.append(gainForm); paintGain();
+    // #336 F003/F004: la isla se cierra sola tras la inactividad configurada y se abre al
+    // pasar el mouse. The closed command always carries the FULL typed pair (exact keys,
+    // integer 5..120 validated by the view-model BEFORE any rate or persistence).
+    const island = V.islandInteractionView(prefs);
+    const interaction = group('general', 'Isla', 'Se cierra sola después de un rato sin actividad y se abre al pasar el mouse sobre ella.');
+    const autoForm = el('form', 'sname-form'); autoForm.noValidate = true;
+    const autoLabel = el('label', 'srow-title', 'Cerrar a los'); autoLabel.htmlFor = 'settings-autoclose';
+    const autoInput = el('input', 'sfield'); autoInput.type = 'number'; autoInput.id = 'settings-autoclose';
+    autoInput.min = '5'; autoInput.max = '120'; autoInput.step = '1';
+    autoInput.value = autoDraft === null ? String(island.autoCloseSeconds) : autoDraft;
+    autoInput.setAttribute('aria-describedby', 'settings-autoclose-help settings-autoclose-error');
+    const autoHint = el('p', 'snote', 'Segundos enteros, de 5 a 120. El valor inicial es 15.'); autoHint.id = 'settings-autoclose-help';
+    const autoIssue = el('p', 'snote'); autoIssue.id = 'settings-autoclose-error'; autoIssue.setAttribute('role', 'status');
+    const autoSave = el('button', 'sbtn primary', autoSaving ? 'Guardando…' : 'Guardar cierre'); autoSave.type = 'submit';
+    const paintAuto = () => {
+      const problem = V.autoCloseProblem(autoInput.value);
+      autoIssue.textContent = autoError || problem;
+      autoInput.setAttribute('aria-invalid', problem ? 'true' : 'false');
+      autoSave.disabled = autoSaving || !!problem;
+    };
+    autoInput.addEventListener('input', e => {
+      if (!e.isTrusted) return;
+      autoDraft = autoInput.value; autoError = ''; paintAuto();
+    });
+    autoForm.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!e.isTrusted || autoSaving || V.autoCloseProblem(autoInput.value)) return;
+      const typed = autoInput.value;
+      autoDraft = typed; autoError = ''; autoSaving = true; paintAuto(); autoSave.textContent = 'Guardando…';
+      call('prefs_action', { action: 'set_island_interaction', auto_close_seconds: Number(typed), open_on_hover: island.openOnHover }).then(p => {
+        autoSaving = false; prefs = p;
+        if (autoDraft === typed) autoDraft = null;
+        render(); say('Cierre automático guardado.');
+        const field = $('settings-autoclose'); if (field) field.focus();
+      }, () => {
+        autoSaving = false; autoError = 'No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.';
+        render();
+        const field = $('settings-autoclose'); if (field) field.focus();
+      });
+    });
+    autoForm.append(autoLabel, autoInput, autoHint, autoIssue, autoSave); interaction.append(autoForm); paintAuto();
+    interaction.append(toggleRow('sw-island-hover', 'Abrir al pasar el mouse', island.openOnHover, () => {
+      const payload = { action: 'set_island_interaction', auto_close_seconds: island.autoCloseSeconds, open_on_hover: !island.openOnHover };
+      call('prefs_action', payload).then(
+        p => { prefs = p; render(); say(island.openOnHover ? 'La isla ya no se abre al pasar el mouse.' : 'La isla se abre al pasar el mouse.'); },
+        () => say('No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'));
+    }));
     const motion = group('appearance', 'Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
     motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
       if (!window.desktop) return;

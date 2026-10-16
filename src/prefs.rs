@@ -131,6 +131,12 @@ pub struct Prefs {
     /// #414: per provider, the model ids the human chose in Ajustes → Modelos. `None`
     /// means nothing was chosen, and nothing is written for it.
     pub chosen_models: Option<BTreeMap<String, Vec<String>>>,
+    /// #336 T1b-a: the configured inactivity delay in seconds (5..=120). `None` means
+    /// the default 15 and is never written, so an untouched file keeps its bytes.
+    pub auto_close_seconds: Option<u16>,
+    /// #336 T1b-a: whether a trusted mouse entry may open the settled compact island.
+    /// `None` means the default (off) and is never written.
+    pub open_on_hover: Option<bool>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -286,6 +292,15 @@ impl Prefs {
     /// The effective mode: an absent or unreadable field is `system`.
     pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
 
+    /// #336: the effective delay — an absent or out-of-range stored value reads
+    /// as the public contract's default of 15 seconds.
+    pub fn auto_close_seconds(&self) -> u16 {
+        self.auto_close_seconds.filter(|s| (5..=120).contains(s)).unwrap_or(15)
+    }
+
+    /// #336: the effective hover policy — absent means off.
+    pub fn open_on_hover(&self) -> bool { self.open_on_hover.unwrap_or(false) }
+
     pub fn from_text(text: Option<&str>) -> Prefs {
         let v = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
         let Some(v) = v else { return Prefs::default() };
@@ -306,6 +321,9 @@ impl Prefs {
             pill_colors: pill_colors_from(v.get("pill_colors")),
             theme: v.get(THEME).and_then(Value::as_str).and_then(Theme::parse),
             chosen_models: Some(chosen_models_from(v.get(CHOSEN_MODELS))),
+            auto_close_seconds: v.get("auto_close_seconds").and_then(Value::as_u64)
+                .and_then(|s| u16::try_from(s).ok()).filter(|s| (5..=120).contains(s)),
+            open_on_hover: v.get("open_on_hover").and_then(Value::as_bool),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -340,6 +358,12 @@ impl Prefs {
                 v[CHOSEN_MODELS] = json!(map);
             }
         }
+        if let Some(seconds) = self.auto_close_seconds.filter(|s| (5..=120).contains(s)) {
+            v["auto_close_seconds"] = json!(seconds);
+        }
+        if let Some(hover) = self.open_on_hover {
+            v["open_on_hover"] = json!(hover);
+        }
         v.to_string()
     }
 }
@@ -367,6 +391,9 @@ pub enum Command {
     SetTheme(Theme),
     /// #414: the WHOLE list of one provider replaces what is stored; an empty list clears it.
     SetChosenModels { provider: String, models: Vec<String> },
+    /// #336 T1b-a: the island's inactivity interaction as one exact closed
+    /// shape — integer `auto_close_seconds` 5..=120 and `open_on_hover`.
+    SetIslandInteraction { auto_close_seconds: u16, open_on_hover: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -461,6 +488,17 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             }
             Ok(Command::SetChosenModels { provider: provider.to_string(), models: clean })
         }
+        // #336 T1b-a: exactly action + auto_close_seconds + open_on_hover.
+        // `as_u64` already refuses floats, strings, null and negatives; the
+        // inclusive 5..=120 range matches the public scheduler contract.
+        Some("set_island_interaction") if map.len() == 3 => {
+            let seconds = map.get("auto_close_seconds").and_then(Value::as_u64).ok_or(CommandError)?;
+            if !(5..=120).contains(&seconds) {
+                return Err(CommandError);
+            }
+            let hover = map.get("open_on_hover").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(Command::SetIslandInteraction { auto_close_seconds: seconds as u16, open_on_hover: hover })
+        }
         _ => Err(CommandError),
     }
 }
@@ -546,6 +584,14 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::ClearPillColor(id) => {
             if !pill_offered(id) { return Err(CommandError); }
             next.pill_colors.remove(id);
+        }
+        // #336 T1b-a: both fields commit together under the same gate; the
+        // range/type checks already ran at parse and run again here for
+        // direct callers, exactly like every other typed command.
+        Command::SetIslandInteraction { auto_close_seconds, open_on_hover } => {
+            if !(5..=120).contains(auto_close_seconds) { return Err(CommandError); }
+            next.auto_close_seconds = Some(*auto_close_seconds);
+            next.open_on_hover = Some(*open_on_hover);
         }
     }
     Ok(next)

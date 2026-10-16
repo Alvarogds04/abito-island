@@ -18,9 +18,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The exact actions `preload.cjs` can ever name (ACTIONS in core.cjs).
+/// The exact actions `preload.cjs` can ever name (ACTIONS in core.cjs), plus
+/// the additive `autoClose` verb (#336).
 /// `onState` is a facade-only subscription verb and never an IPC action.
-pub const ACTIONS: [&str; 11] = [
+pub const ACTIONS: [&str; 12] = [
     "snapshot",
     "expand",
     "close",
@@ -32,6 +33,7 @@ pub const ACTIONS: [&str; 11] = [
     "choose",
     "animateAnyway",
     "respectSystemMotion",
+    "autoClose",
 ];
 
 /// Hard cap for one action payload in bytes, mirroring core.cjs
@@ -59,6 +61,10 @@ pub enum Action {
     Choose,
     AnimateAnyway,
     RespectSystemMotion,
+    /// #336 T1b: the island's inactivity close. Argument-free like `close`,
+    /// but admitted by its own atomic protected-state check (never the legacy
+    /// explicit-close denial path).
+    AutoClose,
 }
 
 impl Action {
@@ -75,6 +81,7 @@ impl Action {
             "choose" => Some(Action::Choose),
             "animateAnyway" => Some(Action::AnimateAnyway),
             "respectSystemMotion" => Some(Action::RespectSystemMotion),
+            "autoClose" => Some(Action::AutoClose),
             _ => None,
         }
     }
@@ -92,6 +99,7 @@ impl Action {
             Action::Choose => "choose",
             Action::AnimateAnyway => "animateAnyway",
             Action::RespectSystemMotion => "respectSystemMotion",
+            Action::AutoClose => "autoClose",
         }
     }
 }
@@ -448,6 +456,27 @@ mod tests {
         assert!(reason.contains("large"), "got: {reason}");
         // exactly at the cap is still structural validation
         assert!(validate_payload(&action("snapshot")).is_ok());
+    }
+
+    // --- #336 T1b-a: the additive autoClose verb ---------------------------
+
+    /// #336 L15: `autoClose` joins the closed action set as an argument-free
+    /// verb. Validation is identical to every other no-argument verb: a
+    /// stowaway key is still a malformed frame. The atomic admission that
+    /// decides it (protected state + core) lives in the command dispatch,
+    /// not here.
+    #[test]
+    fn autoclose_is_an_argument_free_member_of_the_closed_action_set() {
+        assert_eq!(ACTIONS.len(), 12);
+        assert!(ACTIONS.contains(&"autoClose"));
+        let (got, index) =
+            validate_payload(&json!({ "action": "autoClose" })).expect("autoClose validates");
+        assert_eq!(got.name(), "autoClose");
+        assert_eq!(index, None, "autoClose never carries an argument");
+        assert_eq!(Action::from_name("autoClose").map(|a| a.name()), Some("autoClose"));
+        // no smuggled payload: {action:'autoClose', force:true} is a denial
+        let reason = deny_reason(&json!({ "action": "autoClose", "force": true }));
+        assert!(reason.contains("key"), "got: {reason}");
     }
 
     // --- sender / origin (ported from validateIPC + security.cjs) ---------

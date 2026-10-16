@@ -31,6 +31,10 @@
   <script defer src="character-minibots.js"></script>
   <script defer src="sound-engine.js"></script>
   <script defer src="sound-wiring.js"></script>
+  <!-- #336 F003/F004: policy/scheduler for the inactivity interaction — loads
+       BEFORE island.js (defer keeps document order) and creates no listener,
+       timer or host call by itself. -->
+  <script defer src="island-interaction.js"></script>
   <script defer src="island.js"></script>
   <!-- U1: pure chat view helpers + the chat surface (same island). -->
   <script defer src="chat-markdown.js"></script>

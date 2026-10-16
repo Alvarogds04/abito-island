@@ -1154,3 +1154,114 @@ mod chosen_models {
         }
     }
 }
+
+/// #336 T1b-a (L15): `set_island_interaction` is an exact three-key closed
+/// command — integer `auto_close_seconds` 5..=120 inclusive and boolean
+/// `open_on_hover`, no coercion, no extra or camelCase keys. This is the
+/// invalid-schema-before-rate/disk/publish boundary: `prefs_action` parses
+/// before it takes the rate limiter.
+#[test]
+fn set_island_interaction_is_an_exact_closed_three_key_command() {
+    let exact = json!({"action":"set_island_interaction","auto_close_seconds":15,"open_on_hover":false});
+    assert!(parse_command(&exact).is_ok(), "the exact closed shape parses");
+    for seconds in [json!(5), json!(120), json!(15)] {
+        assert!(parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":seconds,"open_on_hover":true})).is_ok(), "{seconds}");
+    }
+    for seconds in [json!(4), json!(121), json!(0), json!(-5), json!(15.5), json!("15"), json!(null), json!(true)] {
+        assert!(parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":seconds,"open_on_hover":false})).is_err(), "{seconds} must be refused");
+    }
+    for hover in [json!("true"), json!(1), json!(null), json!(1.0)] {
+        assert!(parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":15,"open_on_hover":hover})).is_err(), "{hover} must be refused");
+    }
+    for bad in [
+        json!({"action":"set_island_interaction"}),
+        json!({"action":"set_island_interaction","auto_close_seconds":15}),
+        json!({"action":"set_island_interaction","open_on_hover":false}),
+        json!({"action":"set_island_interaction","auto_close_seconds":15,"open_on_hover":false,"x":1}),
+        json!({"action":"set_island_interaction","autoCloseSeconds":15,"openOnHover":false}),
+        json!({"action":"set_island_interaction","seconds":15,"hover":false}),
+        json!({"action":"set_island_interaction","auto_close_seconds":15,"open_on_hover":false,"auto_close_seconds2":10}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad} must be refused: exact keys only");
+    }
+    // the legacy closed commands keep their exact behaviour
+    assert_eq!(parse_command(&json!({"action":"view"})), Ok(Command::View));
+    assert_eq!(parse_command(&json!({"action":"set_theme","theme":"dark"})), Ok(Command::SetTheme(Theme::Dark)));
+}
+
+/// #336 T1b-a (L15): the typed pair persists through the same v1 file, gate
+/// and atomic writer as every other preference — a changed pair must reach
+/// disk before it installs, and the bytes must round-trip.
+#[test]
+fn set_island_interaction_persists_both_fields_and_round_trips() {
+    let command = parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":45,"open_on_hover":true})).unwrap();
+    let mut persisted = false;
+    let next = update(&Prefs::default(), &command, |_| { persisted = true; true }).unwrap();
+    assert!(persisted, "a changed typed pair must reach disk");
+    let value = serde_json::from_str::<Value>(&next.to_text()).expect("to_text is JSON");
+    assert_eq!(value["auto_close_seconds"], json!(45));
+    assert_eq!(value["open_on_hover"], json!(true));
+    let reread = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(reread, next, "the stored pair reads back exactly");
+    assert_eq!(reread.to_text(), next.to_text(), "stable bytes across a reload");
+    // a failed save never installs the new pair
+    let refused = update(&Prefs::default(), &command, |_| false);
+    assert!(refused.is_err(), "a failed save must be reported");
+}
+
+/// #336 T1b-a (L15): every one of the 8 known fields survives this writer,
+/// the new pair is added, and unknown JSON keys are still dropped.
+#[test]
+fn set_island_interaction_keeps_every_known_field_and_drops_unknown_json() {
+    let current = Prefs::from_text(Some(
+        r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Alvaro","avatar_colors":{"abito":"mint"},"main_pill":"agent_cursor","declared_pills":["integration_n8n"],"pill_colors":{"agent_amp":"purple"},"theme":"dark","stowaway":true}"#,
+    ));
+    assert!(current.sound, "fixture sanity");
+    let command = parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":5,"open_on_hover":false})).unwrap();
+    let next = update(&current, &command, |_| true).unwrap();
+    let value = serde_json::from_str::<Value>(&next.to_text()).expect("to_text is JSON");
+    assert_eq!(value["sound"], json!(true));
+    assert_eq!(value["gain"], json!(0.2));
+    assert_eq!(value["display_name"], json!("Alvaro"));
+    assert_eq!(value["avatar_colors"]["abito"], json!("mint"));
+    assert_eq!(value["main_pill"], json!("agent_cursor"));
+    assert_eq!(value["declared_pills"], json!(["integration_n8n"]));
+    assert_eq!(value["pill_colors"]["agent_amp"], json!("purple"));
+    assert_eq!(value["theme"], json!("dark"));
+    assert_eq!(value["auto_close_seconds"], json!(5), "the new pair must be stored");
+    assert_eq!(value["open_on_hover"], json!(false), "the new pair must be stored");
+    assert!(value.get("stowaway").is_none(), "unknown JSON keys are dropped");
+}
+
+/// #336 T1b-a: the effective values behind the projection — an absent or
+/// hostile pair reads as the public contract's 15 seconds / hover off, and an
+/// untouched file never grows the keys.
+#[test]
+fn island_interaction_defaults_are_15_seconds_and_hover_off() {
+    assert_eq!(Prefs::default().auto_close_seconds(), 15);
+    assert!(!Prefs::default().open_on_hover());
+    let valid = Prefs::from_text(Some(r#"{"v":1,"auto_close_seconds":5,"open_on_hover":true}"#));
+    assert_eq!(valid.auto_close_seconds(), 5);
+    assert!(valid.open_on_hover());
+    let boundary = Prefs::from_text(Some(r#"{"v":1,"auto_close_seconds":120}"#));
+    assert_eq!(boundary.auto_close_seconds(), 120);
+    for text in [
+        r#"{"v":1,"auto_close_seconds":4}"#, r#"{"v":1,"auto_close_seconds":121}"#,
+        r#"{"v":1,"auto_close_seconds":"15"}"#, r#"{"v":1,"auto_close_seconds":15.5}"#,
+        r#"{"v":1,"auto_close_seconds":-5}"#, r#"{"v":1,"auto_close_seconds":null}"#,
+        r#"{"v":1,"open_on_hover":"true"}"#, r#"{"v":1,"open_on_hover":1}"#,
+    ] {
+        let p = Prefs::from_text(Some(text));
+        assert_eq!(p.auto_close_seconds(), 15, "{text} falls back to the default");
+        assert!(!p.open_on_hover(), "{text} falls back to the default");
+        assert!(!p.to_text().contains("auto_close_seconds"), "{text} leaves no key behind");
+        assert!(!p.to_text().contains("open_on_hover"), "{text} leaves no key behind");
+    }
+    let untouched = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#));
+    let encoded = untouched.to_text();
+    // same precedent as the theme test: the serializer orders keys, so this
+    // asserts the bytes it ACTUALLY emits plus content equality on input order
+    assert_eq!(encoded, r#"{"sound":true,"v":1}"#, "an untouched file keeps its bytes");
+    assert_eq!(serde_json::from_str::<Value>(&encoded).unwrap(), json!({"v":1,"sound":true}),
+        "no key gained regardless of input order");
+}
