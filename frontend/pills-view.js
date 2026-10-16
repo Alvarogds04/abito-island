@@ -19,7 +19,10 @@
   function paint() {
     const focused = doc.activeElement && host.contains(doc.activeElement) ? doc.activeElement.id : null;
     selected = P.selection(prefs, selected);
-    const view = P.detail(selected);
+    // #415 WU2: a created blob is chosen like any pill — a label entry, never a connection.
+    const blob = prefs.blobs.find(b => b.name === selected);
+    const view = blob ? { name: blob.name, word: 'Sin conexión',
+      aria: `${blob.name}: Sin conexión. Elegir no conecta el servicio.` } : P.detail(selected);
     name.textContent = view.name; state.textContent = view.word;
     detail.textContent = 'Elegir no conecta el servicio.';
     detail.setAttribute('aria-label', view.aria);
@@ -42,6 +45,28 @@
         if (event.isTrusted !== true || !onScreen()) return;
         selected = def.id; paint();
         if (live) live.textContent = P.detail(selected).aria;
+      });
+      host.append(button);
+    }
+    // #415 WU2: created blobs render after the catalog order, in creation order —
+    // label + colour buttons only (no agent behaviour, nothing connects).
+    for (const blob of prefs.blobs) {
+      const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
+      button.dataset.blobName = blob.name;
+      const color = P.colorOfBlob(prefs, blob.name);
+      if (color) button.dataset.color = color;
+      button.setAttribute('aria-pressed', selected === blob.name ? 'true' : 'false');
+      button.setAttribute('aria-label', `${blob.name}: sin conexión`);
+      const glyph = parser.parseFromString(I.svg('plug-off'), 'image/svg+xml').documentElement;
+      if (glyph && glyph.nodeName === 'svg') {
+        const holder = doc.createElement('span'); holder.className = 'ico';
+        holder.append(doc.importNode(glyph, true)); button.append(holder);
+      }
+      const label = doc.createElement('span'); label.textContent = blob.name; button.append(label);
+      button.addEventListener('click', event => {
+        if (event.isTrusted !== true || !onScreen()) return;
+        selected = blob.name; paint();
+        if (live) live.textContent = `${blob.name}: sin conexión. Elegir no conecta el servicio.`;
       });
       host.append(button);
     }

@@ -11,6 +11,15 @@
   const DEFAULT_MAIN = 'integration_claude';
   const MAX_DECLARED = 4;
   const DEFAULT_DECLARED = Object.freeze(['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github']);
+  // #415 WU2: created blobs — label + optional palette colour entries, at most eight,
+  // in creation order. Same validation philosophy as src/prefs.rs valid_blob_name:
+  // bounded plain text, trimmed, no controls, never the principal's name.
+  const MAX_BLOBS = 8;
+  const MAX_BLOB_NAME = 40;
+  const CONTROL = /[\u0000-\u001f\u007f]/;
+  const validBlobName = name => typeof name === 'string' && name.length > 0 && [...name].length <= MAX_BLOB_NAME &&
+    name.trim() === name && !CONTROL.test(name) && name.toLowerCase() !== 'abito';
+  const isBlobColor = color => color === '' || isColor(color);
   const isMain = (id, os) => C.mainChoices(os).some(def => def.id === id);
   // #346 F033: the ONLY colour vocabulary — avatar-colors.js PALETTE, the same five names
   // src/prefs.rs COLORS holds. A missing palette fails closed: nothing is ever painted.
@@ -31,7 +40,19 @@
     for (const id of Object.keys(rawColors)) {
       if (C.definition(id) && isColor(rawColors[id])) pillColors[id] = rawColors[id];
     }
-    return { mainPill, declaredPills, pillColors };
+    // #415 WU2: created blobs. The Rust wire key is `customBlobs`; an already
+    // normalized snapshot (blobs) re-reads the same way. Only valid, deduplicated
+    // (case-insensitive, first wins) entries within the cap survive; a hostile
+    // entry — non-object, bad name, off-set colour — drops like every hostile input.
+    const rawBlobs = Array.isArray(input.customBlobs) ? input.customBlobs : Array.isArray(input.blobs) ? input.blobs : [];
+    const blobs = [];
+    for (const entry of rawBlobs) {
+      const name = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry.name : null;
+      if (validBlobName(name) && blobs.length < MAX_BLOBS && !blobs.some(b => b.name.toLowerCase() === name.toLowerCase())) {
+        blobs.push({ name, color: typeof entry.color === 'string' && isColor(entry.color) ? entry.color : '' });
+      }
+    }
+    return { mainPill, declaredPills, pillColors, blobs };
   }
   function valid(state, os = C.HOST_OS) {
     return !!state && isMain(state.mainPill, os) && Array.isArray(state.declaredPills) &&
@@ -69,6 +90,35 @@
     delete colors[id];
     return { mainPill: state.mainPill, declaredPills: state.declaredPills, pillColors: colors };
   }
+  // #415 WU2: the created-blob write gates — same shape as the pill gates: a NEW
+  // state out or null, and nothing is ever mutated in place. The principal «Abito»
+  // is refused by validBlobName, so the main blob can neither be created nor deleted.
+  const keep = state => ({ mainPill: state.mainPill, declaredPills: state.declaredPills, pillColors: state.pillColors });
+  function createBlob(state, name, color, os = C.HOST_OS) {
+    if (!valid(state, os) || !validBlobName(name) || !isBlobColor(color)) return null;
+    const blobs = Array.isArray(state.blobs) ? state.blobs : [];
+    if (blobs.length >= MAX_BLOBS || blobs.some(b => b.name.toLowerCase() === name.toLowerCase())) return null;
+    return { ...keep(state), blobs: [...blobs, { name, color: color || '' }] };
+  }
+  function deleteBlob(state, name, os = C.HOST_OS) {
+    if (!valid(state, os) || !validBlobName(name)) return null;
+    const blobs = Array.isArray(state.blobs) ? state.blobs : [];
+    if (!blobs.some(b => b.name === name)) return null;
+    return { ...keep(state), blobs: blobs.filter(b => b.name !== name) };
+  }
+  function setBlobColor(state, name, color, os = C.HOST_OS) {
+    if (!valid(state, os) || !validBlobName(name) || !isBlobColor(color)) return null;
+    const blobs = Array.isArray(state.blobs) ? state.blobs : [];
+    if (!blobs.some(b => b.name === name)) return null;
+    return { ...keep(state), blobs: blobs.map(b => b.name === name ? { name: b.name, color: color || '' } : b) };
+  }
+  // The validated colour of one created blob, or '' — a renderer can only paint
+  // what normalize kept.
+  function colorOfBlob(state, name) {
+    const blobs = state && Array.isArray(state.blobs) ? state.blobs : [];
+    const blob = blobs.find(b => b.name === name);
+    return blob && isColor(blob.color) ? blob.color : '';
+  }
   // Future pure ordering seam, not an invented external-session producer.
   function order(items, mainPill) {
     const rank = id => id === mainPill ? -2 : C.definition(id) ? C.CATALOG.findIndex(def => def.id === id) : -1;
@@ -78,7 +128,13 @@
     const state = normalize(raw, os);
     return order([state.mainPill, ...state.declaredPills].map(C.definition), state.mainPill);
   }
-  const selection = (raw, id, os = C.HOST_OS) => visible(raw, os).some(def => def.id === id) ? id : normalize(raw, os).mainPill;
+  // #415 WU2: a created blob's name is a valid selection too — it is chosen in the
+  // overview like any catalog pill (still without connecting anything).
+  const selection = (raw, id, os = C.HOST_OS) => {
+    const state = normalize(raw, os);
+    if (state.blobs.some(b => b.name === id)) return id;
+    return visible(raw, os).some(def => def.id === id) ? id : state.mainPill;
+  };
   function detail(id, os = C.HOST_OS) {
     const def = C.definition(id);
     if (!def) return null;
@@ -89,5 +145,5 @@
       'Elegir este blob no conecta el servicio. No hay una sesión activa disponible para esta vista.';
     return { id, name: def.name, offered, connected: false, word, detail, icon: 'plug-off', tone: 'faint', aria: `${def.name}: ${word}. ${detail}` };
   }
-  return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_DECLARED, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor };
+  return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_DECLARED, MAX_BLOBS, MAX_BLOB_NAME, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor, createBlob, deleteBlob, setBlobColor, colorOfBlob };
 });

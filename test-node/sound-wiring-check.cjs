@@ -98,6 +98,8 @@ function hostDtoFixture(host) {
       'p.theme().as_str()': 'system',
       'p.auto_close_seconds()': 15,
       'p.open_on_hover()': false,
+      // #415: created blobs project as null when none exist
+      'p.custom_blobs_view()': null,
     };
     const expression = host.slice(at, end).replace(/\bp\.[a-z_]+(?:\(\))?(?:\.[a-z_]+\(\))*/g, token => {
       if (!Object.hasOwn(values, token)) throw new Error('Unmapped Host DTO expression: ' + token);
@@ -115,7 +117,7 @@ test('Host DTO fixture extracts complete legacy and multiline typed projections 
   assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
     pillColors: {}, chosenModels: null,
     mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system',
-    autoCloseSeconds: 15, openOnHover: false });
+    autoCloseSeconds: 15, openOnHover: false, customBlobs: null });
   const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
   assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });
   const quoted = 'complete ) with "quoted" text';

@@ -52,8 +52,8 @@ test('S6 only23 Linux declarations; Apple Music excluded and desktop unsupported
 
 test('S4 default main and four default declarations; explicit empty list stays empty', () => {
   const m = M();
-  assert.deepEqual(m.normalize({}), { mainPill: ids[0], declaredPills: defaults, pillColors: {} });
-  assert.deepEqual(m.normalize({ declaredPills: [] }), { mainPill: ids[0], declaredPills: [], pillColors: {} });
+  assert.deepEqual(m.normalize({}), { mainPill: ids[0], declaredPills: defaults, pillColors: {}, blobs: [] });
+  assert.deepEqual(m.normalize({ declaredPills: [] }), { mainPill: ids[0], declaredPills: [], pillColors: {}, blobs: [] });
   assert.equal(m.MAX_DECLARED, 4);
   const a = m.normalize({}); a.declaredPills.pop();
   assert.deepEqual(m.normalize({}).declaredPills, defaults, 'defaults are never mutable shared state');
@@ -67,7 +67,7 @@ test('S6 damaged saved input keeps first4 valid distinct choices, excluding main
     'ai_google', 'agent_amp', 'integration_notion', 'integration_spotify'] };
   const before = JSON.stringify(raw);
   assert.deepEqual(m.normalize(raw), { mainPill: ids[0],
-    declaredPills: ['agent_gemini', 'ai_google', 'agent_amp', 'integration_notion'], pillColors: {} });
+    declaredPills: ['agent_gemini', 'ai_google', 'agent_amp', 'integration_notion'], pillColors: {}, blobs: [] });
   assert.equal(JSON.stringify(raw), before, 'load normalization does not mutate input');
   assert.deepEqual(m.normalize({ mainPill: 'agent_codex', declaredPills: defaults }).declaredPills, defaults);
 });

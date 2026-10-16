@@ -71,8 +71,8 @@ test('S1 the settings pills section reads «Blob principal» and never the word 
 
 test('S2 the settings model keeps the shipped wire names and the tab id', () => {
   const normalized = model.normalize({});
-  assert.deepEqual(Object.keys(normalized), ['mainPill', 'declaredPills', 'pillColors'],
-    'the wire shape of the pills pref is unchanged');
+  assert.deepEqual(Object.keys(normalized), ['mainPill', 'declaredPills', 'pillColors', 'blobs'],
+    'the shipped wire keys are unchanged; #415 adds only the created-blob list');
   assert.equal(model.DEFAULT_MAIN, 'integration_claude');
   assert.equal(model.MAX_DECLARED, 4);
   assert.equal(view.TABS.find(x => x.id === 'pills').id, 'pills', 'the tab id is a shipped contract');

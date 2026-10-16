@@ -95,6 +95,46 @@ with the rest of the blob docs in [docs/pills.md](../../docs/pills.md).
   `apps/desktop-tauri`) pins catalogue survival, arity and field isolation. Only
   a human on a real preview can prove legibility of each colour on both palettes.
 
+## #415 — the human reads «blobs»; creatable blobs (WU1/WU2)
+
+Every visible word the UI speaks is **blob** (Ajustes tab «Blobs», «Blob
+principal», notes, toasts, overview aria): WU1 renamed the copy only — the
+stored keys (`main_pill`, `declared_pills`, `pill_colors`), wire fields, closed
+actions, file names and test ids keep their shipped `pill` names, pinned by
+`blobs-copy-check.cjs`.
+
+WU2 lets the human create additional named blobs (e.g. «Abito GitHub»,
+«Abito Reviewer», «Abito correo») in **Ajustes → Blobs → Tus blobs**. A created
+blob is a label + optional #346 palette colour entry, in creation order — no new
+agent behaviour, choosing never connects anything. The principal «Abito» is the
+main blob: it can never be created or deleted.
+
+- **Typed field.** `prefs.json` gains an optional `custom_blobs` list of
+  `{name, color?}` — absent from a file nobody created a blob in, so untouched
+  files keep their bytes. Names are bounded plain text (≤40 scalars, trimmed,
+  no controls, never «Abito», unique case-insensitively, at most eight blobs);
+  colours are `COLORS` names only; hostile stored entries drop on load like
+  every hostile input.
+- **Three closed commands.** `create_blob` (action + name + optional colour),
+  `delete_blob` (action + name) and `set_blob_color` (action + name + colour or
+  `""` to clear). The model gates mirror them pure (`createBlob`, `deleteBlob`,
+  `setBlobColor` in `frontend/pills.js`): a refused write returns null and
+  mutates nothing.
+- **Projection.** `prefs_action` and `prefs:state` carry `customBlobs`
+  (validated names + palette names or null); the overview renders them after
+  the catalog order as label+colour buttons.
+- **Relation to #327 specialists.** Specialists are CHAT roles (name +
+  instructions + model, own `specialists.json` store and command set); blobs
+  are overview/settings entries in `prefs.json`. No shared storage, no shared
+  commands — only the same validation philosophy (bounded plain name, reserved
+  principal identity refused).
+- **Checks.** `pills-check.cjs` drives the real scripts: model gates (the three
+  human examples accepted, duplicates/principal/cap refused without change),
+  overview render, Ajustes create/delete/colour dispatch through the closed
+  commands, synthetic-gesture refusals and failed-save recovery;
+  `cargo test --lib prefs::` + `settingshost::settings_view_tests::f415_` pin
+  round trips, byte preservation, hostile drops and the projection.
+
 ## Run
 
 ```sh

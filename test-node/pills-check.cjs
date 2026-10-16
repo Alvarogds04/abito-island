@@ -64,7 +64,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null } 
         }
         if (backend.rejectNext) { backend.rejectNext = false; return Promise.reject(new Error('save_failed')); }
         const before = JSON.stringify(backend.prefs);
-        const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : payload.action === 'set_pill_color' ? M.setColor(backend.prefs, payload.id, payload.color) : payload.action === 'clear_pill_color' ? M.clearColor(backend.prefs, payload.id) : null;
+        const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : payload.action === 'set_pill_color' ? M.setColor(backend.prefs, payload.id, payload.color) : payload.action === 'clear_pill_color' ? M.clearColor(backend.prefs, payload.id) : payload.action === 'create_blob' ? M.createBlob(backend.prefs, payload.name, payload.color || '') : payload.action === 'delete_blob' ? M.deleteBlob(backend.prefs, payload.name) : payload.action === 'set_blob_color' ? M.setBlobColor(backend.prefs, payload.name, payload.color) : null;
         if (next) Object.assign(backend.prefs, next);
         else if (payload.action === 'sound_on') backend.prefs.sound = true;
         else if (payload.action === 'sound_off') backend.prefs.sound = false;
@@ -524,4 +524,113 @@ test('#346 Ajustes offers the closed palette plus «Sin color», writes set/clea
   assert.equal(row('agent_cursor').dataset.color, undefined, 'the chip is neutral after clear');
   assert.equal(b.get('pill-color-agent_cursor').value, '', 'the control reads back neutral');
   assert.equal(b.backend.prefs.sound, true, 'clear touches nothing else');
+});
+
+// ---- #415 WU2: created blobs (label + colour + order entries, prefs-persisted) ----
+
+test('#415 the blob model creates the human examples and refuses bad names, duplicates, the principal and the ninth blob', () => {
+  assert.deepEqual(M.normalize({}).blobs, [], 'a file without blobs reads as none');
+  let state = M.normalize({});
+  for (const [name, color] of [['Abito GitHub', 'green'], ['Abito Reviewer', ''], ['Abito correo', '']]) {
+    const next = M.createBlob(state, name, color);
+    assert.ok(next, `${name} must be accepted`);
+    state = M.normalize(next);
+  }
+  assert.deepEqual(state.blobs, [
+    { name: 'Abito GitHub', color: 'green' }, { name: 'Abito Reviewer', color: '' }, { name: 'Abito correo', color: '' },
+  ]);
+  const before = clone(state);
+  for (const [name, color] of [
+    ['abito github', ''], [' Abito correo ', ''], ['Abito', ''], ['ABITO', ''], // duplicates + the principal
+    ['', ''], ['Abito\u{0007}', ''], ['A'.repeat(41), ''], ['Abito GitHub', ''],
+    ['Nuevo', 'teal'], ['Nuevo', 42],
+  ]) assert.equal(M.createBlob(state, name, color), null, `«${name}» must be refused`);
+  assert.deepEqual(state, before, 'a refusal mutates nothing');
+  let grown = state;
+  for (let i = grown.blobs.length; i < 8; i++) grown = M.normalize(M.createBlob(grown, `B${i}`, ''));
+  assert.equal(grown.blobs.length, 8);
+  assert.equal(M.createBlob(grown, 'B9', ''), null, 'the ninth blob is refused');
+  assert.equal(grown.blobs.length, 8);
+  // deletion removes exactly the named entry; unknown names are refused
+  const removed = M.deleteBlob(grown, 'B3');
+  assert.ok(removed);
+  assert.equal(removed.blobs.some(x => x.name === 'B3'), false);
+  assert.equal(removed.blobs.length, 7);
+  assert.equal(M.deleteBlob(grown, 'Nunca existió'), null);
+  assert.equal(M.deleteBlob(grown, 'b3'), null, 'matching is exact, not case-folded');
+  assert.deepEqual(grown.blobs.length, 8);
+  // the created colour stays inside the closed palette on read
+  assert.equal(M.colorOfBlob(grown, 'Abito GitHub'), 'green');
+  assert.equal(M.colorOfBlob(grown, 'Abito Reviewer'), '');
+});
+
+test('#415 the overview shows created blobs after the catalog order, as label+colour buttons without connection', async () => {
+  const b = boot({ prefs: { customBlobs: [{ name: 'Abito GitHub', color: 'mint' }, { name: 'Abito Reviewer' }] } });
+  await flush();
+  const buttons = b.get('pill-choices').children;
+  assert.deepEqual(buttons.map(x => x.dataset.pillId).filter(Boolean), [M.DEFAULT_MAIN, ...M.DEFAULT_DECLARED], 'catalog order unchanged, blobs carry no pillId');
+  assert.deepEqual(buttons.map(x => x.dataset.blobName), [undefined, undefined, undefined, undefined, undefined, 'Abito GitHub', 'Abito Reviewer']);
+  assert.equal(buttons[5].dataset.color, 'mint');
+  assert.equal(buttons[6].dataset.color, undefined);
+  assert.match(buttons[5].getAttribute('aria-label'), /Abito GitHub/);
+  assert.equal(buttons[5].textContent.includes('Abito GitHub'), true);
+  b.emit({ customBlobs: [{ name: 'Abito correo' }] });
+  await flush();
+  const after = b.get('pill-choices').children;
+  assert.equal(after.length, 6, 'the push replaces the whole list');
+  assert.deepEqual(after.map(x => x.dataset.blobName), [undefined, undefined, undefined, undefined, undefined, 'Abito correo']);
+  assert.deepEqual(after.map(x => x.dataset.pillId).filter(Boolean), [M.DEFAULT_MAIN, ...M.DEFAULT_DECLARED]);
+});
+
+async function blobBoot() {
+  const b = await settingsBoot({ prefs: { customBlobs: [{ name: 'Abito GitHub', color: 'mint' }] } });
+  return b;
+}
+
+test('#415 Ajustes creates a blob through the closed create_blob command and repaints', async () => {
+  const b = await blobBoot();
+  const input = b.get('blob-create-input'), pick = b.get('blob-create-color'), button = b.get('blob-create-button');
+  assert.ok(input && pick && button, 'the create form exists');
+  b.click('blob-create-button'); await flush();
+  assert.deepEqual(writes(b), [], 'an empty name never dispatches');
+  input.value = 'Abito GitHub'; b.click('blob-create-button'); await flush();
+  assert.deepEqual(writes(b), [], 'a duplicate name never dispatches');
+  input.value = 'Abito Reviewer'; pick.value = 'orange'; b.click('blob-create-button'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'create_blob', name: 'Abito Reviewer', color: 'orange' }]);
+  assert.equal(b.backend.writes, 1);
+  const rows = b.get('blob-settings-rows').children.map(x => x.dataset.blobName).filter(Boolean);
+  assert.deepEqual(rows, ['Abito GitHub', 'Abito Reviewer'], 'creation order is the shown order');
+  assert.deepEqual(b.backend.prefs.blobs[1], { name: 'Abito Reviewer', color: 'orange' }, 'the fake backend applied the same closed model');
+});
+
+test('#415 Ajustes deletes a created blob, edits its closed-palette colour, and never offers the principal', async () => {
+  const b = await blobBoot();
+  assert.equal(b.get('blob-delete-0')?.getAttribute('aria-label'), 'Eliminar: Abito GitHub');
+  b.get('blob-color-0').value = 'purple'; b.get('blob-color-0').fire('change'); await flush();
+  assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_blob_color', name: 'Abito GitHub', color: 'purple' }]);
+  b.get('blob-color-0').value = ''; b.get('blob-color-0').fire('change'); await flush();
+  assert.deepEqual(writes(b).slice(-1).map(x => x.payload), [{ action: 'set_blob_color', name: 'Abito GitHub', color: '' }]);
+  b.click('blob-delete-0'); await flush();
+  assert.deepEqual(writes(b).slice(-1).map(x => x.payload), [{ action: 'delete_blob', name: 'Abito GitHub' }]);
+  assert.deepEqual(b.get('blob-settings-rows').children.map(x => x.dataset.blobName).filter(Boolean), [], 'the list is empty after deletion');
+  // every other preference survives beside blob writes
+  assert.equal(b.backend.prefs.mainPill, M.DEFAULT_MAIN);
+  assert.deepEqual(b.backend.prefs.declaredPills, M.DEFAULT_DECLARED);
+});
+
+test('#415 synthetic gestures never create or delete blobs; a failed save keeps the list', async () => {
+  const b = await blobBoot();
+  const before = clone(b.backend.prefs);
+  b.get('blob-create-input').value = 'Abito correo';
+  b.get('blob-create-button').fire('click', { isTrusted: false });
+  b.click('blob-delete-0', { isTrusted: false });
+  await flush();
+  assert.deepEqual(writes(b), []);
+  assert.deepEqual(b.backend.prefs, before);
+  b.backend.rejectNext = true;
+  b.get('blob-create-input').value = 'Abito correo';
+  b.click('blob-create-button'); await flush();
+  assert.equal(b.backend.writes, 0);
+  assert.deepEqual(b.backend.prefs.blobs, [{ name: 'Abito GitHub', color: 'mint' }], 'a failed save keeps the stored list');
+  assert.match(b.get('pill-settings-error').textContent, /No se pudo crear el blob/);
 });

@@ -1147,11 +1147,12 @@ mod chosen_models {
             chosen_models: Some([("anthropic".to_string(), vec!["claude-sonnet-4-5".to_string()])].into()),
             auto_close_seconds: Some(30),
             open_on_hover: Some(true),
+            custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("mint".into()) }]),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
@@ -1266,4 +1267,154 @@ fn island_interaction_defaults_are_15_seconds_and_hover_off() {
     assert_eq!(encoded, r#"{"sound":true,"v":1}"#, "an untouched file keeps its bytes");
     assert_eq!(serde_json::from_str::<Value>(&encoded).unwrap(), json!({"v":1,"sound":true}),
         "no key gained regardless of input order");
+}
+
+/// #415 WU2: created blobs are a typed optional pref — `custom_blobs`, a list of
+/// label + optional palette colour entries. Absent from a file nobody created a
+/// blob in, so an untouched `prefs.json` keeps exactly the bytes it had.
+#[test]
+fn blobs_default_to_absent_and_an_untouched_file_keeps_its_bytes() {
+    assert_eq!(Prefs::default().custom_blobs, None);
+    for bad in [None, Some(""), Some("not json"), Some("{}"), Some(r#"{"v":2}"#)] {
+        assert_eq!(Prefs::from_text(bad).custom_blobs, None, "{bad:?} reads as no blobs");
+    }
+    let untouched = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#));
+    assert_eq!(untouched.custom_blobs, None);
+    assert_eq!(untouched.to_text(), r#"{"sound":true,"v":1}"#, "an untouched file keeps its bytes");
+}
+
+/// #415 WU2: the human's own examples create, persist and reload. «Abito GitHub»,
+/// «Abito Reviewer» and «Abito correo» must all be accepted; the colour is the
+/// closed #346 palette or nothing.
+#[test]
+fn create_blob_accepts_the_human_examples_and_round_trips() {
+    let current = Prefs::default();
+    let github = parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"green"})).unwrap();
+    let step1 = update(&current, &github, |_| true).unwrap();
+    let reviewer = parse_command(&json!({"action":"create_blob","name":"Abito Reviewer"})).unwrap();
+    let step2 = update(&step1, &reviewer, |_| true).unwrap();
+    let correo = parse_command(&json!({"action":"create_blob","name":"Abito correo"})).unwrap();
+    let step3 = update(&step2, &correo, |_| true).unwrap();
+    let blobs = step3.custom_blobs.as_ref().unwrap();
+    assert_eq!(blobs.len(), 3);
+    assert_eq!(blobs[0].name, "Abito GitHub");
+    assert_eq!(blobs[0].color.as_deref(), Some("green"));
+    assert_eq!(blobs[1].name, "Abito Reviewer");
+    assert_eq!(blobs[1].color, None, "no colour is a valid created blob");
+    assert_eq!(blobs[2].name, "Abito correo");
+    // the entries survive a full file round trip
+    let reread = Prefs::from_text(Some(&step3.to_text()));
+    assert_eq!(reread, step3, "created blobs read back exactly");
+    assert_eq!(reread.to_text(), step3.to_text(), "stable bytes across a reload");
+    // every other known field survives beside the new one
+    let value: Value = serde_json::from_str(&step3.to_text()).unwrap();
+    assert_eq!(value["sound"], json!(false));
+    assert_eq!(value["custom_blobs"][0], json!({"name":"Abito GitHub","color":"green"}));
+    assert_eq!(value["custom_blobs"][1], json!({"name":"Abito Reviewer"}));
+}
+
+/// #415 WU2: every refusal leaves the data and the counters unchanged —
+/// duplicates (case-insensitive), the reserved principal name, overlong or
+/// control-bearing names, an off-set colour and a wrong arity are CommandError.
+#[test]
+fn create_blob_refusals_leave_the_store_byte_identical() {
+    let start = update(&Prefs::default(),
+        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"mint"})).unwrap(), |_| true).unwrap();
+    let baseline = start.clone();
+    // a refusal may come from the parse gate (untrimmed/oversized names) or from
+    // apply (duplicates, the principal, the cap); either way nothing may change.
+    let refused = |payload: Value| {
+        match parse_command(&payload) {
+            Err(CommandError) => {}
+            Ok(command) => assert_eq!(update(&start, &command, |_| true), Err(CommandError), "{payload}"),
+        }
+    };
+    refused(json!({"action":"create_blob","name":"abito github"})); // duplicate, case-insensitive
+    refused(json!({"action":"create_blob","name":"  Abito GitHub  "})); // untrimmed names never parse
+    refused(json!({"action":"create_blob","name":"Abito"})); // the main blob is not creatable
+    refused(json!({"action":"create_blob","name":"ABITO"}));
+    refused(json!({"action":"create_blob","name":""}));
+    refused(json!({"action":"create_blob","name":"   "}));
+    refused(json!({"action":"create_blob","name":"Abito\u{0007}"})); // control character
+    refused(json!({"action":"create_blob","name":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})); // 41 chars
+    refused(json!({"action":"create_blob","name":"Abito GitHub"})); // exact duplicate
+    refused(json!({"action":"create_blob","name":"Abito correo","color":"teal"})); // off-set colour
+    refused(json!({"action":"create_blob","name":"Abito correo","color":42}));
+    refused(json!({"action":"create_blob","name":42}));
+    refused(json!({"action":"create_blob","color":"green"}));
+    refused(json!({"action":"create_blob","name":"Abito correo","color":"green","x":1}));
+    refused(json!({"action":"create_blob"}));
+    assert_eq!(start, baseline, "a refusal never moves the store");
+    // the ninth blob is refused too: the pref must never outgrow its panel
+    let mut grown = start;
+    for name in ["B1", "B2", "B3", "B4", "B5", "B6", "B7"] {
+        grown = update(&grown, &parse_command(&json!({"action":"create_blob","name":name})).unwrap(), |_| true).unwrap();
+    }
+    assert_eq!(grown.custom_blobs.as_ref().unwrap().len(), 8, "cap is eight");
+    assert_eq!(update(&grown, &parse_command(&json!({"action":"create_blob","name":"B9"})).unwrap(), |_| true), Err(CommandError));
+    assert_eq!(grown.custom_blobs.as_ref().unwrap().len(), 8, "the cap refusal adds nothing");
+}
+
+/// #415 WU2: deleting removes exactly the named entry; the main blob «Abito» can
+/// never exist as a stored record, so it can never be deleted.
+#[test]
+fn delete_blob_removes_only_the_named_entry() {
+    let start = update(&Prefs::default(),
+        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"mint"})).unwrap(), |_| true).unwrap();
+    let start = update(&start,
+        &parse_command(&json!({"action":"create_blob","name":"Abito correo"})).unwrap(), |_| true).unwrap();
+    let after = update(&start, &parse_command(&json!({"action":"delete_blob","name":"Abito GitHub"})).unwrap(), |_| true).unwrap();
+    let blobs = after.custom_blobs.as_ref().unwrap();
+    assert_eq!(blobs.len(), 1);
+    assert_eq!(blobs[0].name, "Abito correo");
+    let reread = Prefs::from_text(Some(&after.to_text()));
+    assert_eq!(reread, after, "the deletion round trips");
+    // unknown names are refused and change nothing
+    let baseline = after.clone();
+    for bad in [
+        json!({"action":"delete_blob","name":"Nunca existió"}),
+        json!({"action":"delete_blob","name":"abito correo"}), // case-sensitive match: refused
+        json!({"action":"delete_blob","name":"abito"}),
+        json!({"action":"delete_blob"}),
+        json!({"action":"delete_blob","name":42}),
+        json!({"action":"delete_blob","name":"Abito correo","x":1}),
+    ] {
+        match parse_command(&bad) {
+            Err(CommandError) => {}
+            Ok(command) => assert_eq!(update(&after, &command, |_| true), Err(CommandError), "{bad}"),
+        }
+    }
+    assert_eq!(after, baseline);
+    // deleting the last entry leaves no key behind
+    let empty = update(&after, &parse_command(&json!({"action":"delete_blob","name":"Abito correo"})).unwrap(), |_| true).unwrap();
+    assert_eq!(empty.custom_blobs, None);
+    assert!(!empty.to_text().contains("custom_blobs"), "an emptied list writes no key");
+}
+
+/// #415 WU2: a hostile stored `custom_blobs` drops its bad entries on load — a
+/// non-object entry, a non-string name, a control name, an off-set colour — and
+/// a list whose every entry was dropped reads as absent (no key written).
+#[test]
+fn hostile_stored_blobs_are_dropped_on_load() {
+    let p = Prefs::from_text(Some(
+        "{\"v\":1,\"custom_blobs\":[{\"name\":\"Abito GitHub\",\"color\":\"green\"},{\"name\":42},{\"name\":\"bad\\u0007\"},{\"name\":\"Ok\",\"color\":\"teal\"},\"junk\",{\"name\":\"Solo\"}]}",
+    ));
+    let blobs = p.custom_blobs.as_ref().unwrap();
+    assert_eq!(blobs.len(), 3, "only the valid entries survive: the off-set colour drops, not the entry (the pill_colors reading rule)");
+    assert_eq!(blobs[0].name, "Abito GitHub");
+    assert_eq!(blobs[0].color.as_deref(), Some("green"));
+    assert_eq!(blobs[1].name, "Ok");
+    assert_eq!(blobs[1].color, None, "an off-set colour reads as no colour");
+    assert_eq!(blobs[2].name, "Solo");
+    let all_bad = Prefs::from_text(Some(r#"{"v":1,"custom_blobs":[{"name":1},"junk"]}"#));
+    assert_eq!(all_bad.custom_blobs, None, "nothing valid reads as absent");
+    assert!(!all_bad.to_text().contains("custom_blobs"), "no key is written back");
+    for text in [
+        r#"{"v":1,"custom_blobs":42}"#, r#"{"v":1,"custom_blobs":"x"}"#,
+        r#"{"v":1,"custom_blobs":null}"#, r#"{"v":1,"custom_blobs":[{"name":"A"}],"sound":true}"#,
+    ] {
+        let p = Prefs::from_text(Some(text));
+        let valid_count = p.custom_blobs.as_ref().map(|b| b.len()).unwrap_or(0);
+        assert!(valid_count <= 1, "{text} must not panic");
+    }
 }

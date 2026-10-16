@@ -18,6 +18,54 @@ pub const MAIN_PILLS: [&str; 4] = ["integration_claude", "agent_cursor", "agent_
 pub const DEFAULT_MAIN_PILL: &str = "integration_claude";
 pub const MAX_DECLARED_PILLS: usize = 4;
 pub const DEFAULT_DECLARED_PILLS: [&str; 4] = ["integration_resend", "integration_n8n", "integration_vercel", "integration_github"];
+
+/// #415 WU2: created blobs — label + optional palette colour entries the human
+/// creates by hand (e.g. «Abito GitHub», «Abito Reviewer», «Abito correo»). A created
+/// blob carries NO agent behaviour: it is a named, colourable, ordered entry only.
+pub const MAX_CUSTOM_BLOBS: usize = 8;
+pub const MAX_BLOB_NAME_CHARS: usize = 40;
+const CUSTOM_BLOBS: &str = "custom_blobs";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomBlob {
+    pub name: String,
+    /// One of `COLORS`, or none (a colourless blob must stay reversible).
+    pub color: Option<String>,
+}
+
+/// The closed blob-name shape: bounded plain text like every other human name —
+/// trimmed, no controls, at most `MAX_BLOB_NAME_CHARS` scalars — and never the
+/// principal's name: «Abito» itself is the main blob and cannot be created (so it
+/// can never be deleted either).
+fn valid_blob_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= MAX_BLOB_NAME_CHARS
+        && name.trim() == name
+        && !name.chars().any(char::is_control)
+        && !name.eq_ignore_ascii_case("abito")
+}
+
+fn valid_blob_color(color: &Option<String>) -> bool {
+    color.as_deref().is_none_or(|c| COLORS.contains(&c))
+}
+
+/// The stored blob entries that survive validation, deduplicated case-insensitively
+/// (first wins) and capped. Everything else is dropped; nothing here can panic.
+fn custom_blobs_from(value: Option<&Value>) -> Vec<CustomBlob> {
+    let mut out: Vec<CustomBlob> = Vec::new();
+    let Some(list) = value.and_then(Value::as_array) else { return out };
+    for entry in list {
+        let Some(map) = entry.as_object() else { continue };
+        let (Some(name), color) = (map.get("name").and_then(Value::as_str), map.get("color").and_then(Value::as_str)) else { continue };
+        if !valid_blob_name(name) || out.len() >= MAX_CUSTOM_BLOBS
+            || out.iter().any(|b| b.name.eq_ignore_ascii_case(name)) {
+            continue;
+        }
+        let color = color.filter(|c| COLORS.contains(c)).map(str::to_owned);
+        out.push(CustomBlob { name: name.to_owned(), color });
+    }
+    out
+}
 pub const PILL_IDS: [&str; 25] = [
     "integration_claude", "agent_cursor", "agent_antigravity", "agent_codex",
     "agent_gemini", "agent_copilot", "agent_muse", "agent_opencode", "agent_amp",
@@ -137,6 +185,10 @@ pub struct Prefs {
     /// #336 T1b-a: whether a trusted mouse entry may open the settled compact island.
     /// `None` means the default (off) and is never written.
     pub open_on_hover: Option<bool>,
+    /// #415 WU2: the blobs the human created by hand (label + optional palette colour),
+    /// in creation order. `None` means none, and nothing is written for it, so an
+    /// untouched file keeps its bytes.
+    pub custom_blobs: Option<Vec<CustomBlob>>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -289,6 +341,14 @@ impl Prefs {
         self.main_pill.as_deref().is_none_or(|id| MAIN_PILLS.contains(&id)) &&
             self.declared_pills.as_ref().is_none_or(|ids| *ids == self.declared_pills())
     }
+    /// #415 WU2: the WebView projection of the created blobs (validated names and
+    /// palette names only); nothing created is null, like every optional field.
+    pub fn custom_blobs_view(&self) -> Value {
+        match &self.custom_blobs {
+            Some(blobs) => Value::Array(blobs.iter().map(|b| json!({"name": b.name, "color": b.color})).collect()),
+            None => Value::Null,
+        }
+    }
     /// The effective mode: an absent or unreadable field is `system`.
     pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
 
@@ -324,6 +384,10 @@ impl Prefs {
             auto_close_seconds: v.get("auto_close_seconds").and_then(Value::as_u64)
                 .and_then(|s| u16::try_from(s).ok()).filter(|s| (5..=120).contains(s)),
             open_on_hover: v.get("open_on_hover").and_then(Value::as_bool),
+            custom_blobs: {
+                let blobs = custom_blobs_from(v.get(CUSTOM_BLOBS));
+                (!blobs.is_empty()).then_some(blobs)
+            },
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -364,6 +428,14 @@ impl Prefs {
         if let Some(hover) = self.open_on_hover {
             v["open_on_hover"] = json!(hover);
         }
+        if let Some(blobs) = &self.custom_blobs {
+            if !blobs.is_empty() {
+                v[CUSTOM_BLOBS] = json!(blobs.iter().map(|b| match &b.color {
+                    Some(color) => json!({"name": b.name, "color": color}),
+                    None => json!({"name": b.name}),
+                }).collect::<Vec<_>>());
+            }
+        }
         v.to_string()
     }
 }
@@ -389,6 +461,14 @@ pub enum Command {
     SetPillColor { id: String, color: String },
     ClearPillColor(String),
     SetTheme(Theme),
+    /// #415 WU2: a created blob — label + optional palette colour, appended in
+    /// creation order. The principal «Abito» is never creatable.
+    CreateBlob { name: String, color: Option<String> },
+    /// #415 WU2: removes exactly the named created blob; an unknown name is refused.
+    DeleteBlob { name: String },
+    /// #415 WU2: the closed-palette colour of one created blob, or its removal
+    /// (empty string clears — a colourless blob must stay reversible).
+    SetBlobColor { name: String, color: String },
     /// #414: the WHOLE list of one provider replaces what is stored; an empty list clears it.
     SetChosenModels { provider: String, models: Vec<String> },
     /// #336 T1b-a: the island's inactivity interaction as one exact closed
@@ -409,7 +489,9 @@ pub struct CommandError;
 /// apply checks main exclusion/capacity under the transaction gate. All writers
 /// apply checks main exclusion/capacity under the transaction gate. set_theme takes exactly
 /// action + theme with one of the three closed modes. All writers retain the other known
-/// typed optional fields; unknown file keys are dropped.
+/// typed optional fields; unknown file keys are dropped. #415 WU2: create_blob takes
+/// exactly action + name (+ optional color, a COLORS name), delete_blob exactly
+/// action + name, set_blob_color exactly action + name + color (a COLORS name or "").
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let map = payload.as_object().ok_or(CommandError)?;
     match map.get("action").and_then(Value::as_str) {
@@ -469,6 +551,35 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
         Some("set_theme") if map.len() == 2 => {
             let theme = map.get("theme").and_then(Value::as_str).ok_or(CommandError)?;
             Ok(Command::SetTheme(Theme::parse(theme).ok_or(CommandError)?))
+        }
+        // #415 WU2: created blobs. The colour key is optional but must be a real
+        // palette name when present; the name gate runs at parse AND at apply.
+        Some("create_blob") if map.len() == 2 || map.len() == 3 => {
+            let name = map.get("name").and_then(Value::as_str).ok_or(CommandError)?;
+            if !valid_blob_name(name) {
+                return Err(CommandError);
+            }
+            let color = if map.len() == 3 {
+                let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
+                if !COLORS.contains(&color) { return Err(CommandError); }
+                Some(color.to_owned())
+            } else { None };
+            Ok(Command::CreateBlob { name: name.to_owned(), color })
+        }
+        Some("delete_blob") if map.len() == 2 => {
+            let name = map.get("name").and_then(Value::as_str).ok_or(CommandError)?;
+            if !valid_blob_name(name) {
+                return Err(CommandError);
+            }
+            Ok(Command::DeleteBlob { name: name.to_owned() })
+        }
+        Some("set_blob_color") if map.len() == 3 => {
+            let name = map.get("name").and_then(Value::as_str).ok_or(CommandError)?;
+            let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
+            if !valid_blob_name(name) || !(color.is_empty() || COLORS.contains(&color)) {
+                return Err(CommandError);
+            }
+            Ok(Command::SetBlobColor { name: name.to_owned(), color: color.to_owned() })
         }
         Some("set_chosen_models") if map.len() == 3 => {
             let provider = map.get("provider").and_then(Value::as_str).ok_or(CommandError)?;
@@ -592,6 +703,35 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             if !(5..=120).contains(auto_close_seconds) { return Err(CommandError); }
             next.auto_close_seconds = Some(*auto_close_seconds);
             next.open_on_hover = Some(*open_on_hover);
+        }
+        // #415 WU2: created blobs. The name/colour gates ran at parse and run again
+        // here for direct callers; a duplicate (case-insensitive), the principal's
+        // name, a ninth blob and an unknown delete are refused without any change.
+        Command::CreateBlob { name, color } => {
+            if !valid_blob_name(name) || !valid_blob_color(color) { return Err(CommandError); }
+            let mut blobs = current.custom_blobs.clone().unwrap_or_default();
+            if blobs.len() >= MAX_CUSTOM_BLOBS || blobs.iter().any(|b| b.name.eq_ignore_ascii_case(name)) {
+                return Err(CommandError);
+            }
+            blobs.push(CustomBlob { name: name.clone(), color: color.clone() });
+            next.custom_blobs = Some(blobs);
+        }
+        Command::DeleteBlob { name } => {
+            if !valid_blob_name(name) { return Err(CommandError); }
+            let mut blobs = current.custom_blobs.clone().unwrap_or_default();
+            let before = blobs.len();
+            blobs.retain(|b| b.name != *name);
+            if blobs.len() == before { return Err(CommandError); }
+            next.custom_blobs = (!blobs.is_empty()).then_some(blobs);
+        }
+        Command::SetBlobColor { name, color } => {
+            if !valid_blob_name(name) || !(color.is_empty() || COLORS.contains(&color.as_str())) {
+                return Err(CommandError);
+            }
+            let mut blobs = current.custom_blobs.clone().unwrap_or_default();
+            let Some(blob) = blobs.iter_mut().find(|b| b.name == *name) else { return Err(CommandError); };
+            blob.color = (!color.is_empty()).then(|| color.clone());
+            next.custom_blobs = Some(blobs);
         }
     }
     Ok(next)
