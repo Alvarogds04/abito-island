@@ -49,7 +49,8 @@ impl SpecialistsHost {
     fn view(&self) -> Value {
         let store = self.snapshot();
         let items: Vec<Value> = store.items.iter().map(|s| {
-            json!({"id": s.id, "name": s.name, "instructions": s.instructions, "model": s.model})
+            json!({"id": s.id, "name": s.name, "instructions": s.instructions, "model": s.model,
+                "space": s.space, "permissions": s.permissions.iter().map(|p| p.as_str()).collect::<Vec<_>>()})
         }).collect();
         json!({"v": 1, "active": store.active, "specialists": items,
             "persisted": self.persisted.load(Ordering::SeqCst),
@@ -73,13 +74,13 @@ impl SpecialistsHost {
         let current = self.snapshot();
         let next = match command {
             Command::View => unreachable!("view handled before mutation guard"),
-            Command::Create { id, name, instructions, model } => {
+            Command::Create { id, name, instructions, model, space, permissions } => {
                 check_model(registry, &model)?;
-                specialists::create(&current, Specialist { id, name, instructions, model })
+                specialists::create(&current, Specialist { id, name, instructions, model, space, permissions })
             }
-            Command::Update { id, name, instructions, model } => {
+            Command::Update { id, name, instructions, model, space, permissions } => {
                 check_model(registry, &model)?;
-                specialists::update(&current, &id, &name, &instructions, model)
+                specialists::update(&current, &id, &name, &instructions, model, space, permissions)
             }
             Command::Delete { id } => specialists::remove(&current, &id),
             Command::Select { id } => {

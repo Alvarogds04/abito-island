@@ -1,7 +1,7 @@
 use super::*;
 
 fn create_command(n: usize) -> Command {
-    Command::Create { id: format!("esp-{n:016x}"), name: format!("Role {n}"), instructions: "Read carefully.\nCite sources.".into(), model: None }
+    Command::Create { id: format!("esp-{n:016x}"), name: format!("Role {n}"), instructions: "Read carefully.\nCite sources.".into(), model: None, space: Some(format!("Space {n}")), permissions: specialists::READ_ONLY.to_vec() }
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn failed_startup_blocks_every_mutation_without_events_or_disk_writes() {
         assert_eq!(view, json!({"v":1,"active":null,"specialists":[],"persisted":false,"load_error":true}));
         let before = host.snapshot();
         let commands = [create_command(1),
-            Command::Update { id:"esp-0000000000000001".into(), name:"new".into(), instructions:"new".into(), model:None },
+            Command::Update { id:"esp-0000000000000001".into(), name:"new".into(), instructions:"new".into(), model:None, space:None, permissions:specialists::READ_ONLY.to_vec() },
             Command::Delete { id:"esp-0000000000000001".into() },
             Command::Select { id:Some("esp-0000000000000001".into()) },
             Command::Select { id:None }];
@@ -74,7 +74,8 @@ fn host_restart_preserves_the_maximum_serialized_store() {
     let mut events = 0;
     for n in 0..specialists::MAX_SPECIALISTS {
         let command = specialists::parse_command(&json!({"action":"create", "id":format!("e{n:031x}"),
-            "name":"🦀".repeat(40), "instructions":"🦀".repeat(2000), "model":MODEL_ID})).unwrap();
+            "name":"🦀".repeat(40), "instructions":"🦀".repeat(2000), "model":MODEL_ID,
+            "space":"🦀".repeat(specialists::MAX_SPACE_CHARS), "permissions":["read","write","network","execute"]})).unwrap();
         host.execute(Some(&dir), &registry, command, |_| events += 1).unwrap();
     }
     host.execute(Some(&dir), &registry, Command::Select { id:Some(format!("e{:031x}",23)) }, |_| events += 1).unwrap();

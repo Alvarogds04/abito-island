@@ -1,4 +1,8 @@
 //! #327 — manual specialized sub-Abitos: the pure store behind them.
+//! #375 — each dot additionally carries a bounded plain-text default Space name and a closed,
+//! DECLARATIVE-ONLY permission set (read-only by default). Neither field is executed, injected or
+//! enforced anywhere: absent new fields are today's behaviour byte-identically, and hostile stored
+//! values are dropped, never executed.
 //!
 //! A specialist is a role the HUMAN creates and chooses by hand: a display name, the instructions
 //! that specialise it, and optionally which verified local model it uses. Nothing here delegates,
@@ -27,6 +31,7 @@ pub const FILE: &str = "specialists.json";
 pub const MAX_SPECIALISTS: usize = 24;
 pub const MAX_NAME_CHARS: usize = 40;
 pub const MAX_INSTRUCTIONS_CHARS: usize = 2000;
+pub const MAX_SPACE_CHARS: usize = 80;
 pub const ID_MAX_LEN: usize = 32;
 /// A closed payload is far smaller than this; the cap only stops a hostile one before it parses.
 const MAX_PAYLOAD_BYTES: usize = 16 * 1024;
@@ -35,11 +40,15 @@ const MAX_PAYLOAD_BYTES: usize = 16 * 1024;
 /// LF/TAB) use two bytes. Other controls, which would need six-byte escapes, are rejected.
 /// IDs are ASCII (32), model IDs ASCII (64, models::valid_profile_id); string quotes and JSON
 /// punctuation come from the empty templates. Include every inter-record comma and active ID.
-const RECORD_JSON_BYTES: usize = r#"{"id":"","name":"","instructions":"","model":""}"#.len();
+/// #375: the template carries the empty Space string and the empty permission array; the budget
+/// adds the widest Space name (4×80) and the widest closed permission array (36 bytes).
+const RECORD_JSON_BYTES: usize = r#"{"id":"","name":"","instructions":"","model":"","space":"","permissions":[]}"#.len();
+const PERMISSIONS_ARRAY_MAX: usize = r#"["read","write","network","execute"]"#.len();
 const STORE_JSON_BYTES: usize = r#"{"v":1,"active":"","specialists":[]}"#.len();
 pub(crate) const MAX_FILE_BYTES: usize = STORE_JSON_BYTES + ID_MAX_LEN
     + MAX_SPECIALISTS * (RECORD_JSON_BYTES + ID_MAX_LEN + 64
-        + 4 * (MAX_NAME_CHARS + MAX_INSTRUCTIONS_CHARS))
+        + 4 * (MAX_NAME_CHARS + MAX_INSTRUCTIONS_CHARS + MAX_SPACE_CHARS)
+        + PERMISSIONS_ARRAY_MAX - 2)
     + (MAX_SPECIALISTS - 1);
 
 /// The identities a specialist may never take: the principal of the island, the engine CLIs the
@@ -55,12 +64,58 @@ const FORBIDDEN_IDS: [&str; 8] = [
     "constructor",
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission {
+    Read,
+    Write,
+    Network,
+    Execute,
+}
+
+impl Permission {
+    /// The closed vocabulary, in the canonical storage order.
+    pub const ALL: [Permission; 4] = [Self::Read, Self::Write, Self::Network, Self::Execute];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Network => "network",
+            Self::Execute => "execute",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            "network" => Some(Self::Network),
+            "execute" => Some(Self::Execute),
+            _ => None,
+        }
+    }
+}
+
+/// #375 — read-only is the default AND the floor: an absent, empty or hostile stored set degrades
+/// to exactly this. DECLARATIVE ONLY: nothing here grants, executes, injects or enforces anything.
+pub const READ_ONLY: [Permission; 1] = [Permission::Read];
+
+/// The canonical storage order is `ALL`'s order, whatever the input order was.
+pub fn canonical_permissions(list: &[Permission]) -> Vec<Permission> {
+    Permission::ALL.iter().filter(|p| list.contains(p)).copied().collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Specialist {
     pub id: String,
     pub name: String,
     pub instructions: String,
     pub model: Option<String>,
+    /// #375 — the dot's default Space NAME: bounded plain text, declarative only. There is no
+    /// Space registry to reference and nothing resolves or applies it today.
+    pub space: Option<String>,
+    /// #375 — a closed, DECLARATIVE-ONLY permission subset; never empty (read-only is the floor).
+    pub permissions: Vec<Permission>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -122,6 +177,8 @@ impl Store {
                     "name": s.name,
                     "instructions": s.instructions,
                     "model": s.model,
+                    "space": s.space,
+                    "permissions": s.permissions.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
                 })
             })
             .collect();
@@ -148,11 +205,43 @@ fn record(raw: &Value) -> Option<Specialist> {
     if model.as_deref().is_some_and(|m| !valid_profile_id(m)) {
         return None;
     }
+    // #375 — the new fields are OPTIONAL: absent (or absent in an old record) is today's
+    // behaviour. A hostile STORED value is dropped, never executed: the record survives, the
+    // Space value becomes absent and the permission set degrades to the read-only default.
+    // Unlike the mutations, stored duplicates collapse instead of refusing: a read never loses
+    // a role that was valid when it was written.
+    let space = match map.get("space") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if valid_space(s) => Some(s.trim().to_string()),
+        _ => None,
+    };
+    let permissions = match map.get("permissions") {
+        None | Some(Value::Null) => READ_ONLY.to_vec(),
+        Some(Value::Array(items)) => {
+            let mut out = Vec::new();
+            for item in items {
+                match item.as_str().and_then(Permission::parse) {
+                    Some(p) if !out.contains(&p) => out.push(p),
+                    Some(_) => {}
+                    // One unrecognized or non-string element drops the WHOLE set to read-only:
+                    // a hostile value can never smuggle in a partially parsed grant.
+                    None => {
+                        out.clear();
+                        break;
+                    }
+                }
+            }
+            if out.is_empty() { READ_ONLY.to_vec() } else { canonical_permissions(&out) }
+        }
+        _ => READ_ONLY.to_vec(),
+    };
     Some(Specialist {
         id: id.to_string(),
         name: name.trim().to_string(),
         instructions: instructions.trim().to_string(),
         model,
+        space,
+        permissions,
     })
 }
 
@@ -199,6 +288,23 @@ pub fn valid_instructions(text: &str) -> bool {
     !trimmed.is_empty() && trimmed.chars().count() <= MAX_INSTRUCTIONS_CHARS
 }
 
+/// #375 — a Space NAME is bounded plain text like the display name: every control in C0/C1 and
+/// DEL is refused in the raw text, the trimmed value must be 1..80 characters. It is declarative
+/// only: nothing resolves, applies or executes it.
+pub fn valid_space(text: &str) -> bool {
+    if has_control(text, false) {
+        return false;
+    }
+    let trimmed = text.trim();
+    !trimmed.is_empty() && trimmed.chars().count() <= MAX_SPACE_CHARS
+}
+
+/// #375 — a permission set is never empty (read-only is the floor), always canonical, and a
+/// mutation only ever accepts the closed vocabulary.
+fn valid_permissions(permissions: &[Permission]) -> bool {
+    !permissions.is_empty() && canonical_permissions(permissions) == permissions
+}
+
 fn valid_model(model: &Option<String>) -> bool {
     model.as_deref().is_none_or(valid_profile_id)
 }
@@ -213,12 +319,16 @@ pub enum Command {
         name: String,
         instructions: String,
         model: Option<String>,
+        space: Option<String>,
+        permissions: Vec<Permission>,
     },
     Update {
         id: String,
         name: String,
         instructions: String,
         model: Option<String>,
+        space: Option<String>,
+        permissions: Vec<Permission>,
     },
     Delete {
         id: String,
@@ -232,8 +342,11 @@ pub enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandError;
 
-/// Exactly `view` / `create` / `update` / `delete` / `select`, with no extra keys. The id and model
-/// SHAPES are checked here as well as in the mutations, so a malformed request never reaches them.
+/// Exactly `view` / `create` / `update` / `delete` / `select`. #375: create/update carry the new
+/// fields OPTIONALLY, so today's exact five-key shape is accepted unchanged (absent = no Space and
+/// the read-only default); six- and seven-key shapes add `space` and/or `permissions`. The id,
+/// model and new-field SHAPES are checked here as well as in the mutations, so a malformed request
+/// never reaches them.
 pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     if serde_json::to_vec(payload).map_or(true, |b| b.len() > MAX_PAYLOAD_BYTES) {
         return Err(CommandError);
@@ -242,13 +355,15 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let action = map.get("action").and_then(Value::as_str).ok_or(CommandError)?;
     match (action, map.len()) {
         ("view", 1) => Ok(Command::View),
-        ("create", 5) => {
-            let (id, name, instructions, model) = draft_fields(map)?;
-            Ok(Command::Create { id, name, instructions, model })
+        ("create", n) if n == 5 || n == 6 || n == 7 => {
+            if !known_draft_keys(map) { return Err(CommandError); }
+            let (id, name, instructions, model, space, permissions) = draft_fields(map)?;
+            Ok(Command::Create { id, name, instructions, model, space, permissions })
         }
-        ("update", 5) => {
-            let (id, name, instructions, model) = draft_fields(map)?;
-            Ok(Command::Update { id, name, instructions, model })
+        ("update", n) if n == 5 || n == 6 || n == 7 => {
+            if !known_draft_keys(map) { return Err(CommandError); }
+            let (id, name, instructions, model, space, permissions) = draft_fields(map)?;
+            Ok(Command::Update { id, name, instructions, model, space, permissions })
         }
         ("delete", 2) => {
             let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
@@ -266,9 +381,45 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     }
 }
 
-fn draft_fields(
-    map: &serde_json::Map<String, Value>,
-) -> Result<(String, String, String, Option<String>), CommandError> {
+/// #375 — the OPTIONAL new fields: absent/null = no Space and the read-only default; an empty
+/// Space string clears the name; anything hostile (controls, overlong, wrong type, a permission
+/// outside the closed vocabulary, a duplicate) is refused, never silently kept.
+fn draft_space(map: &serde_json::Map<String, Value>) -> Result<Option<String>, CommandError> {
+    match map.get("space") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(Value::String(s)) if valid_space(s) => Ok(Some(s.trim().to_string())),
+        Some(_) => Err(CommandError),
+    }
+}
+
+fn draft_permissions(map: &serde_json::Map<String, Value>) -> Result<Vec<Permission>, CommandError> {
+    match map.get("permissions") {
+        None | Some(Value::Null) => Ok(READ_ONLY.to_vec()),
+        Some(Value::Array(items)) => {
+            let mut out = Vec::new();
+            for item in items {
+                let p = item.as_str().and_then(Permission::parse).ok_or(CommandError)?;
+                if out.contains(&p) {
+                    return Err(CommandError);
+                }
+                out.push(p);
+            }
+            Ok(if out.is_empty() { READ_ONLY.to_vec() } else { canonical_permissions(&out) })
+        }
+        Some(_) => Err(CommandError),
+    }
+}
+
+type Draft = (String, String, String, Option<String>, Option<String>, Vec<Permission>);
+
+/// The optional #375 fields widen the accepted SHAPE, never the vocabulary: any key outside the
+/// known set is refused, so `extra:1` can never ride in as a sixth field.
+fn known_draft_keys(map: &serde_json::Map<String, Value>) -> bool {
+    map.keys().all(|k| matches!(k.as_str(), "action" | "id" | "name" | "instructions" | "model" | "space" | "permissions"))
+}
+
+fn draft_fields(map: &serde_json::Map<String, Value>) -> Result<Draft, CommandError> {
     let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
     if !valid_id(id) {
         return Err(CommandError);
@@ -281,9 +432,9 @@ fn draft_fields(
     let model = match map.get("model") {
         Some(Value::Null) => None,
         Some(Value::String(m)) if valid_profile_id(m) => Some(m.clone()),
-        _ => return Err(CommandError),
+        _ => Err(CommandError)?,
     };
-    Ok((id.to_string(), name.to_string(), instructions.to_string(), model))
+    Ok((id.to_string(), name.to_string(), instructions.to_string(), model, draft_space(map)?, draft_permissions(map)?))
 }
 
 // --- mutations: pure, fail closed, never partially applied ---------------------------------------
@@ -293,7 +444,12 @@ pub fn create(store: &Store, s: Specialist) -> Result<Store, CommandError> {
     if !valid_id(&s.id) || store.find(&s.id).is_some() {
         return Err(CommandError);
     }
-    if !valid_name(&s.name) || !valid_instructions(&s.instructions) || !valid_model(&s.model) {
+    if !valid_name(&s.name)
+        || !valid_instructions(&s.instructions)
+        || !valid_model(&s.model)
+        || s.space.as_deref().is_some_and(|space| !valid_space(space))
+        || !valid_permissions(&s.permissions)
+    {
         return Err(CommandError);
     }
     if store.items.len() >= MAX_SPECIALISTS {
@@ -305,23 +461,32 @@ pub fn create(store: &Store, s: Specialist) -> Result<Store, CommandError> {
         name: s.name.trim().to_string(),
         instructions: s.instructions.trim().to_string(),
         model: s.model,
+        space: s.space,
+        permissions: s.permissions,
     });
     Ok(next)
 }
 
-/// The id is the identity: a rename (or a new specialty, or a new model) never moves it, and the
-/// role in use stays in use.
+/// The id is the identity: a rename (or a new specialty, model, Space or permission set) never
+/// moves it, and the role in use stays in use.
 pub fn update(
     store: &Store,
     id: &str,
     name: &str,
     instructions: &str,
     model: Option<String>,
+    space: Option<String>,
+    permissions: Vec<Permission>,
 ) -> Result<Store, CommandError> {
     if !valid_id(id) || store.find(id).is_none() {
         return Err(CommandError);
     }
-    if !valid_name(name) || !valid_instructions(instructions) || !valid_model(&model) {
+    if !valid_name(name)
+        || !valid_instructions(instructions)
+        || !valid_model(&model)
+        || space.as_deref().is_some_and(|s| !valid_space(s))
+        || !valid_permissions(&permissions)
+    {
         return Err(CommandError);
     }
     let mut next = store.clone();
@@ -329,6 +494,8 @@ pub fn update(
         s.name = name.trim().to_string();
         s.instructions = instructions.trim().to_string();
         s.model = model;
+        s.space = space;
+        s.permissions = permissions;
     }
     Ok(next)
 }

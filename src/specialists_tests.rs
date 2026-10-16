@@ -1,6 +1,8 @@
 //! #327 — the pure contracts of the specialists store. Written before the implementation
 //! (RED → GREEN): identity, bounds, fail-closed parsing, the closed command set, «invalid input
 //! never mutates», the effective system prompt and the private persistence.
+//! #375 — each specialist dot additionally carries a bounded plain-text default Space name and a
+//! closed, DECLARATIVE-ONLY permission set (read-only by default). Nothing executes them.
 use super::*;
 use serde_json::json;
 use std::path::PathBuf;
@@ -11,6 +13,8 @@ fn spec(id: &str) -> Specialist {
         name: "Investigador".to_string(),
         instructions: "Buscá fuentes y citá.".to_string(),
         model: Some("local-abito-gpt".to_string()),
+        space: Some("Investigación".to_string()),
+        permissions: vec![Permission::Read],
     }
 }
 
@@ -22,6 +26,8 @@ fn store() -> Store {
         name: "Editor".to_string(),
         instructions: "Corregí sin cambiar el sentido.".to_string(),
         model: None,
+        space: None,
+        permissions: READ_ONLY.to_vec(),
     });
     s
 }
@@ -75,6 +81,66 @@ fn name_and_instructions_are_bounded_and_refuse_dangerous_controls() {
     }
 }
 
+#[test]
+fn space_is_bounded_plain_text_with_no_controls_and_permissions_are_a_closed_read_only_default() {
+    assert_eq!(READ_ONLY, [Permission::Read], "read-only is the default permission set");
+    assert!(valid_space("Investigación"));
+    assert!(valid_space(&"x".repeat(MAX_SPACE_CHARS)));
+    assert!(!valid_space(&"x".repeat(MAX_SPACE_CHARS + 1)), "the Space name is bounded plain text");
+    for bad in ["", "   ", "x\u{0}", "x\u{7}", "x\u{1b}", "x\u{7f}", "x\u{9f}", "x\n", "x\t", "x\r"] {
+        assert!(!valid_space(bad), "{bad:?} must not be a valid Space name");
+    }
+    // The closed vocabulary: exactly four permissions, nothing else ever parses.
+    assert_eq!(Permission::ALL.len(), 4);
+    assert_eq!(Permission::parse("read"), Some(Permission::Read));
+    assert_eq!(Permission::parse("write"), Some(Permission::Write));
+    assert_eq!(Permission::parse("network"), Some(Permission::Network));
+    assert_eq!(Permission::parse("execute"), Some(Permission::Execute));
+    for bad in ["", "READ", "Read", "admin", "root", "shell", "files", "exec", "net", "*"] {
+        assert_eq!(Permission::parse(bad), None, "{bad:?} is not in the closed permission set");
+    }
+    // Canonical storage order is the declared ALL order, whatever the input order was.
+    assert_eq!(canonical_permissions(&[Permission::Execute, Permission::Read, Permission::Network]),
+        vec![Permission::Read, Permission::Network, Permission::Execute]);
+}
+
+#[test]
+fn hostile_stored_space_and_permissions_are_dropped_and_records_still_load_read_only() {
+    // A record whose NEW fields are hostile survives: the value is dropped, never executed.
+    let hostile_space = json!({"v":1,"active":null,"specialists":[
+        {"id":"esp-0011223344556677","name":"Válido","instructions":"ok","model":null,"space":"x\u{0}y"},
+        {"id":"esp-8899aabbccddeeff","name":"Largo","instructions":"ok","model":null,"space":"x".repeat(MAX_SPACE_CHARS + 1)},
+        {"id":"esp-ffeeddccbbaa9988","name":"Tipo","instructions":"ok","model":null,"space":7},
+        {"id":"esp-f0f0f0f0f0f0f0f0","name":"Vacío","instructions":"ok","model":null,"space":"   "}
+    ]}).to_string();
+    let s = Store::from_text(Some(&hostile_space));
+    assert_eq!(s.items.len(), 4, "a hostile NEW field never invalidates the whole record");
+    for item in &s.items {
+        assert_eq!(item.space, None, "a hostile stored Space value is dropped, never executed");
+    }
+    // A hostile permission set falls back to read-only; absent stays the read-only default.
+    let hostile_permissions = json!({"v":1,"active":null,"specialists":[
+        {"id":"esp-0011223344556677","name":"Uno","instructions":"ok","model":null,"permissions":["read","root"]},
+        {"id":"esp-8899aabbccddeeff","name":"Dos","instructions":"ok","model":null,"permissions":[7]},
+        {"id":"esp-ffeeddccbbaa9988","name":"Tres","instructions":"ok","model":null,"permissions":"read"},
+        {"id":"esp-f0f0f0f0f0f0f0f0","name":"Cuatro","instructions":"ok","model":null,"permissions":[]},
+        {"id":"esp-abababababababab","name":"Cinco","instructions":"ok","model":null}
+    ]}).to_string();
+    let s = Store::from_text(Some(&hostile_permissions));
+    assert_eq!(s.items.len(), 5);
+    for item in &s.items {
+        assert_eq!(item.permissions, READ_ONLY.to_vec(), "every hostile, empty or absent set degrades to read-only");
+    }
+    // Tolerant reads keep every recognised value and deduplicate stored duplicates.
+    let rich = json!({"v":1,"active":null,"specialists":[
+        {"id":"esp-0011223344556677","name":"Rico","instructions":"ok","model":null,
+         "space":"  Mi espacio  ","permissions":["execute","network","execute"]}
+    ]}).to_string();
+    let s = Store::from_text(Some(&rich));
+    assert_eq!(s.items[0].space.as_deref(), Some("Mi espacio"), "the stored Space name is trimmed");
+    assert_eq!(s.items[0].permissions, vec![Permission::Network, Permission::Execute], "stored duplicates collapse, canonical order wins");
+}
+
 // ---- store ------------------------------------------------------------------------------------
 
 #[test]
@@ -109,7 +175,7 @@ fn bad_records_and_unknown_active_ids_are_dropped_without_taking_the_store_down(
 #[test]
 fn the_store_is_capped_and_a_valid_active_role_is_kept() {
     let items: Vec<Specialist> = (0..MAX_SPECIALISTS + 5)
-        .map(|n| Specialist { id: format!("esp-{n:016x}"), name: format!("Rol {n}"), instructions: "ok".into(), model: None })
+        .map(|n| Specialist { id: format!("esp-{n:016x}"), name: format!("Rol {n}"), instructions: "ok".into(), model: None, space: None, permissions: READ_ONLY.to_vec() })
         .collect();
     let text = json!({"v":1,"active":"esp-0000000000000001","specialists": items.iter().map(|s| json!({
         "id": s.id, "name": s.name, "instructions": s.instructions, "model": s.model })).collect::<Vec<_>>() }).to_string();
@@ -122,14 +188,43 @@ fn the_store_is_capped_and_a_valid_active_role_is_kept() {
 fn the_command_set_is_closed_and_exact() {
     assert_eq!(parse_command(&json!({"action":"view"})), Ok(Command::View));
     let create = json!({"action":"create","id":"esp-0011223344556677","name":"Investigador","instructions":"Buscá","model":"local-abito-gpt"});
-    assert_eq!(parse_command(&create), Ok(Command::Create {
-        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(), model: Some("local-abito-gpt".into()) }));
     let null_model = json!({"action":"create","id":"esp-0011223344556677","name":"Investigador","instructions":"Buscá","model":null});
-    assert_eq!(parse_command(&null_model), Ok(Command::Create {
-        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(), model: None }));
     assert_eq!(parse_command(&json!({"action":"select","id":null})), Ok(Command::Select { id: None }));
     assert_eq!(parse_command(&json!({"action":"select","id":"esp-0011223344556677"})), Ok(Command::Select { id: Some("esp-0011223344556677".into()) }));
     assert_eq!(parse_command(&json!({"action":"delete","id":"esp-0011223344556677"})), Ok(Command::Delete { id: "esp-0011223344556677".into() }));
+    // #375: the new fields are OPTIONAL. Today's exact five-key shape is accepted unchanged and
+    // means no Space and the read-only default; six- and seven-key shapes carry them.
+    assert_eq!(parse_command(&create), Ok(Command::Create {
+        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(),
+        model: Some("local-abito-gpt".into()), space: None, permissions: READ_ONLY.to_vec() }));
+    assert_eq!(parse_command(&null_model), Ok(Command::Create {
+        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(),
+        model: None, space: None, permissions: READ_ONLY.to_vec() }));
+    let with_space = json!({"action":"create","id":"esp-0011223344556677","name":"Investigador","instructions":"Buscá","model":null,"space":"Investigación"});
+    assert_eq!(parse_command(&with_space), Ok(Command::Create {
+        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(),
+        model: None, space: Some("Investigación".into()), permissions: READ_ONLY.to_vec() }));
+    let with_all = json!({"action":"update","id":"esp-0011223344556677","name":"Investigador","instructions":"Buscá","model":null,"space":null,"permissions":["network","read","execute"]});
+    assert_eq!(parse_command(&with_all), Ok(Command::Update {
+        id: "esp-0011223344556677".into(), name: "Investigador".into(), instructions: "Buscá".into(),
+        model: None, space: None, permissions: vec![Permission::Read, Permission::Network, Permission::Execute] }));
+    let cleared_space = json!({"action":"update","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"space":""});
+    assert_eq!(parse_command(&cleared_space), Ok(Command::Update {
+        id: "esp-0011223344556677".into(), name: "n".into(), instructions: "i".into(),
+        model: None, space: None, permissions: READ_ONLY.to_vec() }), "an empty Space string clears the name");
+    for bad in [
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"space":"x\u{0}"}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"space":"x\n"}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"space":"x".repeat(MAX_SPACE_CHARS + 1)}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"space":7}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"permissions":["read","root"]}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"permissions":[7]}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"permissions":"read"}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"permissions":["read","read"]}),
+        json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i","model":null,"permissions":["read"],"space":"x","extra":1}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad} must be refused");
+    }
     for bad in [
         json!(null), json!([]), json!("view"), json!({}), json!({"action":1}), json!({"action":"view","x":1}),
         json!({"action":"create","id":"esp-0011223344556677","name":"n","instructions":"i"}),
@@ -172,6 +267,12 @@ fn create_needs_a_fresh_valid_id_and_never_activates_by_itself() {
     let mut invented = spec("esp-ffeeddccbbaa9988");
     invented.model = Some("NUBE-gpt".into());
     assert_eq!(create(&before, invented), Err(CommandError), "an unverified model id is refused");
+    let mut spaced = spec("esp-ffeeddccbbaa9988");
+    spaced.space = Some("x\u{0}".into());
+    assert_eq!(create(&before, spaced), Err(CommandError), "a hostile Space name is refused, never stored");
+    let mut permless = spec("esp-ffeeddccbbaa9988");
+    permless.permissions = Vec::new();
+    assert_eq!(create(&before, permless), Err(CommandError), "an empty permission set is not a set; read-only is the floor");
     assert_eq!(before, store());
 }
 
@@ -179,7 +280,7 @@ fn create_needs_a_fresh_valid_id_and_never_activates_by_itself() {
 fn create_refuses_a_full_store() {
     let mut s = Store::default();
     for n in 0..MAX_SPECIALISTS {
-        s.items.push(Specialist { id: format!("esp-{n:016x}"), name: format!("Rol {n}"), instructions: "ok".into(), model: None });
+        s.items.push(Specialist { id: format!("esp-{n:016x}"), name: format!("Rol {n}"), instructions: "ok".into(), model: None, space: None, permissions: READ_ONLY.to_vec() });
     }
     assert_eq!(create(&s, spec("esp-ffeeddccbbaa9988")), Err(CommandError));
     assert_eq!(s.items.len(), MAX_SPECIALISTS);
@@ -189,18 +290,23 @@ fn create_refuses_a_full_store() {
 fn update_keeps_the_id_and_the_active_role() {
     let mut before = store();
     before.active = Some("esp-0011223344556677".to_string());
-    let after = update(&before, "esp-0011223344556677", "Investigador serio", "Buscá y citá.\nSin adornos.", Some("local-abito-gpt".to_string())).unwrap();
+    let after = update(&before, "esp-0011223344556677", "Investigador serio", "Buscá y citá.\nSin adornos.", Some("local-abito-gpt".to_string()), Some("Investigación".to_string()), vec![Permission::Read, Permission::Network]).unwrap();
     assert_eq!(after.find("esp-0011223344556677").unwrap().id, "esp-0011223344556677", "renaming never moves the id");
     assert_eq!(after.find("esp-0011223344556677").unwrap().name, "Investigador serio");
+    assert_eq!(after.find("esp-0011223344556677").unwrap().space.as_deref(), Some("Investigación"));
+    assert_eq!(after.find("esp-0011223344556677").unwrap().permissions, vec![Permission::Read, Permission::Network]);
     assert_eq!(after.active, before.active);
     assert_eq!(after.items.len(), 2);
-    for (id, name, instructions, model) in [
-        ("esp-ffffffffffffffff", "n", "i", None),
-        ("esp-0011223344556677", "  ", "i", None),
-        ("esp-0011223344556677", "n", "", None),
-        ("esp-0011223344556677", "n", "i", Some("NUBE".to_string())),
+    for (id, name, instructions, model, space, permissions) in [
+        ("esp-ffffffffffffffff", "n", "i", None, None, READ_ONLY.to_vec()),
+        ("esp-0011223344556677", "  ", "i", None, None, READ_ONLY.to_vec()),
+        ("esp-0011223344556677", "n", "", None, None, READ_ONLY.to_vec()),
+        ("esp-0011223344556677", "n", "i", Some("NUBE".to_string()), None, READ_ONLY.to_vec()),
+        ("esp-0011223344556677", "n", "i", None, Some("x\u{0}".to_string()), READ_ONLY.to_vec()),
+        ("esp-0011223344556677", "n", "i", None, None, Vec::new()),
+        ("esp-0011223344556677", "n", "i", None, None, vec![Permission::Read, Permission::Read]),
     ] {
-        assert_eq!(update(&before, id, name, instructions, model), Err(CommandError), "{id}/{name}");
+        assert_eq!(update(&before, id, name, instructions, model, space, permissions), Err(CommandError), "{id}/{name}");
         assert_eq!(before, store_with_active(), "a refused update changes nothing");
     }
 }
@@ -252,16 +358,17 @@ fn full_unicode_capacity_survives_restart_with_every_field_and_active_role() {
     for n in 0..MAX_SPECIALISTS {
         let payload = json!({"action":"create", "id":format!("e{n:031x}"),
             "name":"🦀".repeat(MAX_NAME_CHARS),
-            "instructions":"🦀".repeat(MAX_INSTRUCTIONS_CHARS), "model":"m".repeat(64)});
-        let Command::Create { id, name, instructions, model } = parse_command(&payload).unwrap() else { panic!() };
-        expected = create(&expected, Specialist { id, name, instructions, model }).unwrap();
+            "instructions":"🦀".repeat(MAX_INSTRUCTIONS_CHARS), "model":"m".repeat(64),
+            "space":"🦀".repeat(MAX_SPACE_CHARS), "permissions":["read","write","network","execute"]});
+        let Command::Create { id, name, instructions, model, space, permissions } = parse_command(&payload).unwrap() else { panic!() };
+        expected = create(&expected, Specialist { id, name, instructions, model, space, permissions }).unwrap();
     }
     expected = select(&expected, Some(&expected.items[23].id)).unwrap();
-    assert_eq!(expected.to_text().len(), MAX_FILE_BYTES, "maximum UTF-8 fields and IDs saturate the derived bound");
+    assert_eq!(expected.to_text().len(), MAX_FILE_BYTES, "maximum UTF-8 fields, IDs, Space names and permission sets saturate the derived bound");
     write_file(&dir, &expected).unwrap();
     let restored = read_file(&dir).unwrap();
     eprintln!("accepted={} saved_bytes={} restored={}", expected.items.len(), std::fs::metadata(dir.join(FILE)).unwrap().len(), restored.items.len());
-    assert_eq!(restored, expected, "all IDs, text, models and active must survive restart");
+    assert_eq!(restored, expected, "all IDs, text, models, Space names, permissions and active must survive restart");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -275,6 +382,8 @@ fn json_escaped_fields_roundtrip_and_one_byte_above_the_file_bound_is_refused() 
             id: format!("e{n:031x}"), name: "\"\\".repeat(20),
             instructions: format!("{}\"", "\"\\\n\t".repeat(500)).chars().skip(1).collect(),
             model: Some("m".repeat(64)),
+            space: Some("\"\\".repeat(MAX_SPACE_CHARS / 2)),
+            permissions: Permission::ALL.to_vec(),
         }).unwrap();
     }
     expected = select(&expected, Some(&expected.items[0].id)).unwrap();
