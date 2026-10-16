@@ -105,14 +105,17 @@ test('S4 main workspace-only; changing main removes new-main declaration only', 
   assert.equal(m.toggle({ mainPill: ids[0], declaredPills: ['agent_amp', 'agent_amp'] }, 'agent_amp'), null);
 });
 
-test('S4 order is main then external seam then catalog; rendering uses real selections only', () => {
+test('S4 order is main then external seam then the STORED declared order (#435); rendering uses real selections only', () => {
   const m = M();
   const tasks = [{ id: 'ai_google' }, { id: 'external2' }, { id: 'agent_cursor' },
     { id: 'external1' }, { id: ids[0] }, { id: 'ai_google' }];
-  assert.deepEqual(m.order(tasks, ids[0]).map(x => x.id), [ids[0], 'external2', 'external1', 'agent_cursor', 'ai_google', 'ai_google']);
+  // #435: the stored (input) order of the catalog items is honoured — before this change
+  // the catalog index sorted them ([main, external2, external1, agent_cursor, ai_google, ai_google]).
+  assert.deepEqual(m.order(tasks, ids[0]).map(x => x.id), [ids[0], 'external2', 'external1', 'ai_google', 'agent_cursor', 'ai_google']);
   assert.deepEqual(tasks.map(x => x.id), ['ai_google', 'external2', 'agent_cursor', 'external1', ids[0], 'ai_google']);
   const state = { mainPill: ids[0], declaredPills: ['integration_notion', 'agent_amp', 'ai_google'] };
-  assert.deepEqual(m.visible(state).map(x => x.id), [ids[0], 'agent_amp', 'ai_google', 'integration_notion']);
+  // #435: stored order — before this change the catalog index gave [main, agent_amp, ai_google, integration_notion].
+  assert.deepEqual(m.visible(state).map(x => x.id), [ids[0], 'integration_notion', 'agent_amp', 'ai_google']);
   assert.equal(m.selection(state, 'removed'), ids[0]);
   assert.equal(m.selection(state, 'ai_google'), 'ai_google');
 });
@@ -136,7 +139,11 @@ test('S6 offline detail never claims provider credentials/URL imply connection',
 test('#346 normalize keeps only catalog ids carrying palette names; empty means no colour', () => {
   const m = M();
   assert.deepEqual(m.normalize({}).pillColors, {});
-  const raw = JSON.parse('{"pillColors":{"agent_amp":"mint","agent_cursor":"#ff0000","agent_muse":"MINT","integration_claude":"expression(alert(1))","ai_google":7,"unknown_pill":"blue","__proto__":"purple","constructor":"red"}}');
+  // Valid literal fixtures parsed as JSON on purpose: `__proto__`/`constructor` must be
+  // OWN properties (an object literal would make `__proto__` set the prototype instead).
+  const raw = (() => { try {
+    return JSON.parse('{"pillColors":{"agent_amp":"mint","agent_cursor":"#ff0000","agent_muse":"MINT","integration_claude":"expression(alert(1))","ai_google":7,"unknown_pill":"blue","__proto__":"purple","constructor":"red"}}');
+  } catch (cause) { throw new Error('fixture must be valid JSON', { cause }); } })();
   assert.deepEqual(m.normalize(raw).pillColors, { agent_amp: 'mint' });
   for (const bad of [null, [], 7, 'green', true]) assert.deepEqual(m.normalize({ pillColors: bad }).pillColors, {});
   const before = JSON.stringify(raw);
@@ -152,8 +159,10 @@ test('#346 colorOf answers only an already-validated palette name, never raw inp
   assert.equal(m.colorOf(state, 'unknown_pill'), '');
   assert.equal(m.colorOf(m.normalize({}), 'agent_amp'), '');
   assert.equal(m.colorOf(null, 'agent_amp'), '');
+  const hostileColor = (() => { try { return JSON.parse('{"agent_amp":"<img src=x>"}'); }
+    catch (cause) { throw new Error('fixture must be valid JSON', { cause }); } })();
   assert.equal(m.colorOf({ mainPill: ids[0], declaredPills: [],
-    pillColors: JSON.parse('{"agent_amp":"<img src=x>"}') }, 'agent_amp'), '');
+    pillColors: hostileColor }, 'agent_amp'), '');
 });
 
 test('#346 setColor/clearColor gate on offered catalog ids and the closed palette; state is never mutated', () => {
@@ -173,4 +182,33 @@ test('#346 setColor/clearColor gate on offered catalog ids and the closed palett
   for (const id of ['integration_music', 'unknown_pill', '__proto__', 7, null])
     assert.equal(m.clearColor(state, id), null, String(id));
   assert.deepEqual(state.pillColors, {}, 'the inputs were never mutated');
+});
+
+// #435 T6.4 — persisted declared/blob order: a closed permutation gate plus an order()
+// that honours the STORED declared order (main first) instead of the catalog index.
+test('#435 reorderDeclared/reorderBlobs are closed permutation gates; order() honours the stored declared order', () => {
+  const m = M();
+  const state = m.normalize({ declaredPills: ['integration_notion', 'agent_amp', 'ai_google'] });
+  // main first, then the STORED order — not the catalog index
+  assert.deepEqual(m.visible(state).map(x => x.id), [ids[0], 'integration_notion', 'agent_amp', 'ai_google']);
+  // a valid permutation reorders and keeps the rest of the state
+  assert.deepEqual(m.reorderDeclared(state, ['agent_amp', 'ai_google', 'integration_notion']),
+    { mainPill: ids[0], declaredPills: ['agent_amp', 'ai_google', 'integration_notion'], pillColors: {} });
+  // an empty list is its own (valid) permutation
+  const empty = m.normalize({ declaredPills: [] });
+  assert.deepEqual(m.reorderDeclared(empty, []), { mainPill: ids[0], declaredPills: [], pillColors: {} });
+  // refusals: not exactly a permutation of the currently declared ids
+  for (const order of [['agent_amp', 'agent_amp', 'ai_google'], ['agent_amp', 'ai_google'],
+    ['agent_amp', 'ai_google', 'integration_notion', 'integration_resend'],
+    ['agent_amp', 'ai_google', 'unknown'], ['agent_amp', 'ai_google', 7],
+    ['agent_amp', 'ai_google', null], 'agent_amp', 7, null, [], undefined])
+    assert.equal(m.reorderDeclared(state, order), null, JSON.stringify(order));
+  assert.deepEqual(state.declaredPills, ['integration_notion', 'agent_amp', 'ai_google'], 'the input was never mutated');
+  // custom blobs: the same gate over the stored names (exact, case-sensitive)
+  const blobs = m.normalize({ customBlobs: [{ name: 'Dev', color: 'green' }, { name: 'Notas' }] });
+  assert.deepEqual(m.reorderBlobs(blobs, ['Notas', 'Dev']).blobs.map(b => b.name), ['Notas', 'Dev']);
+  assert.equal(m.reorderBlobs(blobs, ['Notas', 'Dev']).blobs[1].color, 'green', 'the entries are the same, only reordered');
+  for (const order of [['dev', 'Notas'], ['Notas', 'Dev', 'Dev'], ['Notas'], ['Notas', 7], null, 'Notas', []])
+    assert.equal(m.reorderBlobs(blobs, order), null, JSON.stringify(order));
+  assert.deepEqual(blobs.blobs.map(b => b.name), ['Dev', 'Notas'], 'the input was never mutated');
 });

@@ -139,7 +139,8 @@ test('S4 prefs event reconciles new main/removal/order and focus without erasing
   b.click('pill-choice-integration_github'); b.get('pill-choice-integration_github').focus();
   b.emit({ mainPill: 'agent_cursor', declaredPills: ['ai_google', 'agent_amp'] });
   assert.equal(b.get('pill-name').textContent, 'Cursor');
-  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_cursor', 'agent_amp', 'ai_google']);
+  // #435: stored order — before this change the catalog index gave ['agent_cursor', 'agent_amp', 'ai_google'].
+  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_cursor', 'ai_google', 'agent_amp']);
   assert.equal(b.doc.activeElement.id, 'pill-choice-agent_cursor');
   assert.equal(b.get('overview-status').textContent, 'Motor caído');
   assert.equal(b.get('overview-detail').textContent, 'Conexión previa');
@@ -211,7 +212,8 @@ test('S4 actual settings can remove at capacity then add; fifth/main/unsupported
     { action: 'toggle_declared_pill', id: 'ai_google' },
   ]);
   assert.deepEqual(b.backend.prefs.declaredPills, ['integration_resend', 'integration_vercel', 'integration_github', 'ai_google']);
-  assert.deepEqual(b.get('pill-choices').children.map(x=>x.dataset.pillId), [M.DEFAULT_MAIN,'ai_google','integration_resend','integration_vercel','integration_github']);
+  // #435: stored order — before this change the catalog index gave [main, 'ai_google', 'integration_resend', 'integration_vercel', 'integration_github'].
+  assert.deepEqual(b.get('pill-choices').children.map(x=>x.dataset.pillId), [M.DEFAULT_MAIN,'integration_resend','integration_vercel','integration_github','ai_google']);
   assert.equal(b.backend.writes,2); assert.equal(b.backend.publications,2);
 });
 
