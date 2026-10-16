@@ -405,3 +405,69 @@ fn a_connection_that_drops_forgets_the_models() {
     assert_eq!(serde_json::to_value(&st).unwrap()["models"].as_array().unwrap().len(), 1);
     assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["models"], json!(null));
 }
+
+#[test]
+fn the_sessions_list_command_is_closed_and_exact() {
+    assert!(matches!(parse_ui_command(&json!({"action":"sessions_list"})), Ok(UiCommand::Wire(w)) if w == "{\"type\":\"sessions_list\"}\n"));
+    for bad in [
+        json!({"action":"sessions_list","cwd":"/etc"}),
+        json!({"action":"sessions_list","x":1}),
+        json!({"action":"sessions"}),
+        json!({"action":1}),
+        json!("sessions_list"),
+    ] {
+        assert!(parse_ui_command(&bad).is_err(), "{bad} is not a valid sessions_list command");
+    }
+}
+
+#[test]
+fn a_sessions_frame_is_folded_into_a_bounded_closed_view() {
+    let mut st = ClientState::connected();
+    assert_eq!(serde_json::to_value(&st).unwrap()["sessions"], json!(null), "unknown until the engine says so");
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":false,"sessions":[
+        {"id":"s-0123abcd","kind":"pi","cwd":"mi-proyecto","state":"sleeping","origin":"herdr","cmdline":"SECRETMARK"},
+        {"id":"s-ffffffff","kind":"claude-code","cwd":null,"state":"running","origin":null}]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["sessions"]["rows"][0], json!({"id":"s-0123abcd","kind":"pi","cwd":"mi-proyecto","state":"sleeping","origin":"herdr"}),
+        "the closed projection: nothing else the frame carried (no cmdline, no paths)");
+    assert_eq!(v["sessions"]["rows"][1]["cwd"], json!(null), "an absent cwd reads as null, the row stays");
+    assert_eq!(v["sessions"]["rows"][1]["origin"], json!(null));
+    assert_eq!(v["sessions"]["truncated"], json!(false), "the frame's own truncation flag travels");
+}
+
+#[test]
+fn hostile_session_rows_are_dropped_or_clamped() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":true,"sessions":[
+        {"id":"s-0123abcd","kind":"pi","cwd":"ok","state":"sleeping","origin":"tmux"},
+        {"id":"not-an-id","kind":"pi","cwd":"x","state":"sleeping","origin":null},
+        {"id":"s-11111111","kind":"bash","cwd":"x","state":"sleeping","origin":null},
+        {"id":"s-22222222","kind":"pi","cwd":"x","state":"dancing","origin":null},
+        {"id":"s-33333333","kind":"pi","cwd":"a/b","state":"sleeping","origin":null},
+        {"id":"s-44444444","kind":"pi","cwd":"x","state":"sleeping","origin":"a\u{0}b"},
+        42]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    let list = v["sessions"]["rows"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "only the well-formed row survives");
+    assert_eq!(list[0]["id"], json!("s-0123abcd"));
+    // bounded: the daemon's own 64-row cap is the client's too
+    let many: Vec<Value> = (0..70).map(|i| json!({"id":format!("s-{i:08x}"),"kind":"pi","cwd":"p","state":"sleeping","origin":null})).collect();
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":true,"sessions":many})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["sessions"]["rows"].as_array().unwrap().len(), 64);
+    assert_eq!(v["sessions"]["truncated"], json!(true), "the frame's truncation flag travels with the cap");
+    // a malformed frame changes nothing
+    st.apply(&json!({"type":"sessions","schema":"other","sessions":[],"truncated":false})).unwrap();
+    st.apply(&json!({"type":"sessions","sessions":"nope"})).unwrap();
+    st.apply(&json!({"type":"sessions"})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["sessions"]["rows"].as_array().unwrap().len(), 64);
+}
+
+#[test]
+fn a_connection_that_drops_forgets_the_sessions() {
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":false,"sessions":[
+        {"id":"s-0123abcd","kind":"pi","cwd":"p","state":"sleeping","origin":null}]})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["sessions"]["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["sessions"], json!(null));
+}

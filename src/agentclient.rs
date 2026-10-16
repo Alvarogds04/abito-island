@@ -28,6 +28,8 @@ mod tests;
 mod provider_accounts_tests;
 
 pub const PROTOCOL: &str = "island-agent/1";
+/// #360: the live agent sessions frame schema (the client folds only this one).
+pub const SESSIONS_SCHEMA: &str = "abito-sessions/view/1";
 pub const MAX_SESSION_BYTES: usize = 4096;
 pub const MAX_FRAME_BYTES: usize = 256 * 1024;
 pub const MAX_REPLY_CHARS: usize = 4096;
@@ -214,6 +216,13 @@ pub fn parse_ui_command(payload: &Value) -> Result<UiCommand, CommandError> {
             exact(1)?;
             wire(&[("type", "models_list")])
         }
+        // #360: the live agent sessions ticker. Read-only metadata only: the engine answers
+        // with a `sessions` frame, folded into a bounded closed view below; no command line,
+        // no path, no pid ever travels.
+        "sessions_list" => {
+            exact(1)?;
+            wire(&[("type", "sessions_list")])
+        }
         "agent_connect" => {
             // The plan the human SAW travels back with the click; the engine previews again and refuses to apply
             // a different one. Optional (absent = the engine applies a fresh preview), and exactly 64 lowercase hex.
@@ -326,6 +335,9 @@ pub struct ClientState {
     /// #414: the engine's `models` frame (the connected providers' catalogue), folded to a
     /// bounded closed view (null until the engine answers a `models_list` ask).
     models: Value,
+    /// #360: the engine's `sessions` frame (live agent sessions), folded to a bounded
+    /// closed view (null until the engine answers a `sessions_list` ask).
+    sessions: Value,
 }
 
 /// A plan hash from the engine: exactly 64 lowercase hex characters.
@@ -362,6 +374,7 @@ impl ClientState {
             last_error: json!({"code": null, "n": 0}),
             agents: Value::Null,
             models: Value::Null,
+            sessions: Value::Null,
         }
     }
     pub fn connected() -> ClientState {
@@ -507,6 +520,42 @@ impl ClientState {
                         "contextWindow": m.get("contextWindow").and_then(Value::as_i64).unwrap_or(0),
                     }))
                 }).collect());
+            }
+            "sessions" => {
+                // #360: the live agent sessions' closed projection. A foreign schema, a malformed
+                // frame or a row off-vocabulary changes nothing; rows are rebuilt field by field
+                // and the 64-row cap is the client's too. Nothing but the five closed fields and
+                // the frame's own truncation flag ever reaches the page: no command line, no path,
+                // no pid.
+                if frame.get("schema").and_then(Value::as_str) != Some(SESSIONS_SCHEMA) { return Ok(()); }
+                let Some(truncated) = frame.get("truncated").and_then(Value::as_bool) else { return Ok(()) };
+                let Some(list) = frame.get("sessions").and_then(Value::as_array) else { return Ok(()) };
+                let kinds = ["pi", "claude-code", "codex", "opencode", "gemini"];
+                let states = ["running", "sleeping", "stopped", "zombie", "unknown"];
+                // derived anonymous id: s- + exactly 8 lowercase hex (never a raw pid)
+                let derived_id = |s: &str| s.len() == 10 && s.starts_with("s-") && s[2..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+                // A cell is None when the field is absent or null (honest unknown) and the ROW is
+                // dropped when a present cell is invalid: never sanitized into a lie.
+                let cell = |r: &Value, key: &str, max: usize| -> Option<Option<String>> {
+                    match r.get(key) {
+                        None | Some(Value::Null) => Some(None),
+                        Some(v) => match v.as_str() {
+                            Some(s) if !s.is_empty() && s.chars().count() <= max && !s.contains('/') && !s.chars().any(|c| c.is_control()) => Some(Some(s.to_string())),
+                            _ => None,
+                        },
+                    }
+                };
+                let rows: Vec<Value> = list.iter().take(64).filter_map(|r| {
+                    let (Some(id), Some(kind), Some(state), Some(cwd), Some(origin)) = (
+                        r.get("id").and_then(Value::as_str).filter(|s| derived_id(s)),
+                        r.get("kind").and_then(Value::as_str).filter(|k| kinds.contains(k)),
+                        r.get("state").and_then(Value::as_str).filter(|s| states.contains(s)),
+                        cell(r, "cwd", 64),
+                        cell(r, "origin", 32),
+                    ) else { return None };
+                    Some(json!({"id": id, "kind": kind, "cwd": cwd, "state": state, "origin": origin}))
+                }).collect();
+                self.sessions = json!({"rows": rows, "truncated": truncated});
             }
             "error" => {
                 // the daemon's closed code set (anything else reads as plain `failed`), never free text
