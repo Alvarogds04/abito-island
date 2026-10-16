@@ -1324,6 +1324,32 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
 .ig-detail { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; padding: 8px 12px; border-radius: var(--radius-xl); border: 1px solid var(--line); }
 .ig-detail-title { font: 700 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); }
 
+/* ---- #354: Deployments service card (frontend/integrations-deployments.js, FAKE dataset).
+   Same append-only region as #353, still BEFORE the #410 compact slice. Tokens only; inert
+   until <section id="integrations-deployments" hidden> exists. */
+#integrations-deployments { display: grid; gap: 8px; }
+#integrations-deployments[hidden] { display: none; }
+.id-title { margin: 0; font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); }
+.id-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
+.id-status { margin: 0; font: 400 var(--fs-label)/1.3 var(--font-ui); color: var(--muted); }
+.id-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.id-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; width: 100%; min-height: 44px;
+  padding: 8px 12px; border-radius: var(--radius-xl); text-align: left; cursor: pointer;
+  border: 1px solid var(--line-faint); background: var(--fill-alt); color: var(--island-ink);
+}
+.id-row:hover { background: var(--fill-hover); }
+.id-row:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+.id-row[aria-pressed="true"] { border-color: var(--go); }
+.id-name { flex: 1; min-width: 0; font: 600 var(--fs-label)/1.2 var(--font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.id-meta { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); }
+.id-chip { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.id-chip--ready { color: var(--go); }
+.id-chip--error { color: var(--red-11); }
+.id-chip--building, .id-chip--queued { color: var(--sun); }
+.id-detail { display: grid; gap: 4px; padding: 8px 12px; border-radius: var(--radius-xl); border: 1px solid var(--line); }
+.id-detail-title { font: 700 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
