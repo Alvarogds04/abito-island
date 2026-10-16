@@ -4,11 +4,6 @@
    cubic-bezier(.45,0,.2,1), Abito's own reduced-motion state snaps instantly. Fonts use
    the system stack on purpose: the legacy woff2 files are not copied. */
 
-/* T6.1 type + space scale (design §1), declared BEFORE every rule that uses them (the V1 block
-   used to declare the ramp late, ~line 917). One variable per role; spacing base 4/8.
-   Light and dark safe: values are theme-independent; themes only recolour. */
-:root { --fs-title: 16px; --fs-body: 14px; --fs-label: 13px; --fs-caption: 12px; --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-20: 20px; --space-24: 24px; --space-32: 32px; }
-
 :root {
   --island: #000;
   --island-ink: #fff;
@@ -53,6 +48,10 @@
      timing is taken. The R6 contract (160ms delay, 400ms spring, 160ms exit) rules. */
   --view-shift: 16px;
 }
+/* T6.1 type + space scale (design §1), right after the first :root and still BEFORE every rule
+   that uses them (the V1 block used to declare the ramp late, ~line 917). One variable per role;
+   spacing base 4/8. Light and dark safe: values are theme-independent; themes only recolour. */
+:root { --fs-title: 16px; --fs-body: 14px; --fs-label: 13px; --fs-caption: 12px; --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-20: 20px; --space-24: 24px; --space-32: 32px; }
 #capsule[data-edge="top"] { --view-dir: -1; }
 #capsule[data-edge="bottom"] { --view-dir: 1; }
 
