@@ -70,6 +70,38 @@ pub const CHAT_MIN_H: i32 = 240;
 /// Logical px of air left between the far end of the window and the work-area edge it grows toward.
 pub const CHAT_FAR_GAP: i32 = 40;
 
+/// The island's views (F009). Every native window size the island ever takes is
+/// one entry of the [`view_sizes`] table — no view size is decided anywhere else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    /// The resting round dot (#302).
+    Compact,
+    /// The expanded overview island (640x160 r22 contract).
+    Overview,
+    /// The vertical chat column (#309).
+    Chat,
+    /// The chat column grown to the Ajustes working size (#408).
+    Settings,
+}
+
+/// F009 — the ONE table of logical sizes per view: `(window, visible)` in logical
+/// px for a work area of `area_w_phys` x `area_h_phys` physical px at `scale`.
+/// `window` is the native window size; `visible` is the view the page animates to
+/// inside it (for compact they coincide: the dot fills its 78x78 window). The arms
+/// delegate to the per-view functions, so the frozen contracts (#302/#309/#408)
+/// keep owning their own numbers — the table only routes them.
+pub fn view_sizes(view: View, area_w_phys: i32, area_h_phys: i32, scale: f64) -> ((i32, i32), (i32, i32)) {
+    match view {
+        View::Compact => (LOGICAL_COMPACT, LOGICAL_COMPACT),
+        View::Overview => (LOGICAL_OVERVIEW, OVERVIEW_VISIBLE),
+        View::Chat => (chat_window(area_h_phys, scale), chat_visible(area_h_phys, scale)),
+        View::Settings => (
+            settings_window(area_w_phys, area_h_phys, scale),
+            settings_visible(area_w_phys, area_h_phys, scale),
+        ),
+    }
+}
+
 /// Window margins around any visible view (the overview's 672x176 around its 640x160).
 const WINDOW_MARGIN: (i32, i32) = (
     LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0,
@@ -688,6 +720,56 @@ mod tests {
         let left = Rect { x: a.x, y: a.y, w: 672, h: 176 };
         let chat = anchor_toggle(Edge::Top, left, size, a);
         assert!(chat.x >= a.x && chat.right() <= a.right());
+    }
+
+    // --- #337 F009: ONE table of logical sizes per view -------------------------
+
+    #[test]
+    fn the_view_table_agrees_with_the_per_view_functions() {
+        // compact and overview are the frozen contract sizes
+        assert_eq!(view_sizes(View::Compact, 1920, 1048, 1.0), (LOGICAL_COMPACT, LOGICAL_COMPACT));
+        assert_eq!(view_sizes(View::Overview, 1920, 1048, 1.0), (LOGICAL_OVERVIEW, OVERVIEW_VISIBLE));
+        // chat and settings derive from the work area exactly like their own functions
+        assert_eq!(
+            view_sizes(View::Chat, 1920, 1048, 1.0),
+            (chat_window(1048, 1.0), chat_visible(1048, 1.0))
+        );
+        assert_eq!(
+            view_sizes(View::Settings, 1920, 1048, 1.0),
+            (settings_window(1920, 1048, 1.0), settings_visible(1920, 1048, 1.0))
+        );
+    }
+
+    #[test]
+    fn the_view_table_derived_views_follow_the_work_area_and_scale() {
+        // the chat column shrinks with a shorter area through the table too
+        for h in [1048, 768, 600, 400] {
+            let (window, visible) = view_sizes(View::Chat, 1920, h, 1.0);
+            assert_eq!(window, chat_window(h, 1.0), "chat h={h}");
+            assert_eq!(visible.1, chat_visible(h, 1.0).1, "chat h={h}");
+            assert!(window.1 >= visible.1, "the window holds the visible view");
+        }
+        // settings shrinks its width with a narrower area through the table too
+        for w in [1920, 1366, 800, 700] {
+            let (window, visible) = view_sizes(View::Settings, w, 1048, 1.0);
+            assert_eq!(window, settings_window(w, 1048, 1.0), "settings w={w}");
+            assert_eq!(visible.0, settings_visible(w, 1048, 1.0).0, "settings w={w}");
+        }
+        // logical contract sizes: the physical window is `scaled_size` of the table's
+        // logical output, whatever the scale factor
+        for scale in [1.0, 1.25, 2.0] {
+            let (window, _) = view_sizes(View::Compact, 1920, 1048, scale);
+            assert_eq!(scaled_size(window, scale), scaled_size(LOGICAL_COMPACT, scale));
+            let (window, _) = view_sizes(View::Overview, 1920, 1048, scale);
+            assert_eq!(scaled_size(window, scale), scaled_size(LOGICAL_OVERVIEW, scale));
+            let (window, _) = view_sizes(View::Chat, 1920, 1048, scale);
+            assert_eq!(scaled_size(window, scale), scaled_size(chat_window(1048, scale), scale));
+        }
+        // a broken scale never poisons the table either
+        for bad in [0.0, f64::NAN] {
+            let (window, _) = view_sizes(View::Chat, 1920, 1048, bad);
+            assert_eq!(window, chat_window(1048, 1.0));
+        }
     }
 
     // --- FIX-A (spec lane 4aa7c63): watcher re-clamp must keep the width ----
