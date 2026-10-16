@@ -194,8 +194,9 @@ pub struct Prefs {
     /// #414: per provider, the model ids the human chose in Ajustes → Modelos. `None`
     /// means nothing was chosen, and nothing is written for it.
     pub chosen_models: Option<BTreeMap<String, Vec<String>>>,
-    /// #336 T1b-a: the configured inactivity delay in seconds (5..=120). `None` means
-    /// the default 15 and is never written, so an untouched file keeps its bytes.
+    /// #336 T1b-a: the configured inactivity delay in seconds: 0 is «Nunca»
+    /// (#438) and the rest is 5..=120. `None` means the default 15 and is never
+    /// written, so an untouched file keeps its bytes.
     pub auto_close_seconds: Option<u16>,
     /// #336 T1b-a: whether a trusted mouse entry may open the settled compact island.
     /// `None` means the default (off) and is never written.
@@ -414,9 +415,10 @@ impl Prefs {
     pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
 
     /// #336: the effective delay — an absent or out-of-range stored value reads
-    /// as the public contract's default of 15 seconds.
+    /// as the public contract's default of 15 seconds. #438: 0 is «Nunca» — a
+    /// real accepted value, never clamped.
     pub fn auto_close_seconds(&self) -> u16 {
-        self.auto_close_seconds.filter(|s| (5..=120).contains(s)).unwrap_or(15)
+        self.auto_close_seconds.filter(|s| *s == 0 || (5..=120).contains(s)).unwrap_or(15)
     }
 
     /// #336: the effective hover policy — absent means off.
@@ -446,7 +448,7 @@ impl Prefs {
             theme: v.get(THEME).and_then(Value::as_str).and_then(Theme::parse),
             chosen_models: Some(chosen_models_from(v.get(CHOSEN_MODELS))),
             auto_close_seconds: v.get("auto_close_seconds").and_then(Value::as_u64)
-                .and_then(|s| u16::try_from(s).ok()).filter(|s| (5..=120).contains(s)),
+                .and_then(|s| u16::try_from(s).ok()).filter(|s| *s == 0 || (5..=120).contains(s)),
             open_on_hover: v.get("open_on_hover").and_then(Value::as_bool),
             custom_blobs: {
                 let blobs = custom_blobs_from(v.get(CUSTOM_BLOBS));
@@ -490,7 +492,7 @@ impl Prefs {
                 v[CHOSEN_MODELS] = json!(map);
             }
         }
-        if let Some(seconds) = self.auto_close_seconds.filter(|s| (5..=120).contains(s)) {
+        if let Some(seconds) = self.auto_close_seconds.filter(|s| *s == 0 || (5..=120).contains(s)) {
             v["auto_close_seconds"] = json!(seconds);
         }
         if let Some(hover) = self.open_on_hover {
@@ -549,7 +551,8 @@ pub enum Command {
     /// #414: the WHOLE list of one provider replaces what is stored; an empty list clears it.
     SetChosenModels { provider: String, models: Vec<String> },
     /// #336 T1b-a: the island's inactivity interaction as one exact closed
-    /// shape — integer `auto_close_seconds` 5..=120 and `open_on_hover`.
+    /// shape — integer `auto_close_seconds` 0 («Nunca», #438) or 5..=120 and
+    /// `open_on_hover`.
     SetIslandInteraction { auto_close_seconds: u16, open_on_hover: bool },
     /// #389: the platform monitor name the island is pinned to (Ajustes → Panel).
     /// A choice is only ever one of the keys the island itself saw and offered;
@@ -694,10 +697,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
         }
         // #336 T1b-a: exactly action + auto_close_seconds + open_on_hover.
         // `as_u64` already refuses floats, strings, null and negatives; the
-        // inclusive 5..=120 range matches the public scheduler contract.
+        // accepted set is {0} («Nunca», #438) ∪ 5..=120, matching the public
+        // scheduler contract.
         Some("set_island_interaction") if map.len() == 3 => {
             let seconds = map.get("auto_close_seconds").and_then(Value::as_u64).ok_or(CommandError)?;
-            if !(5..=120).contains(&seconds) {
+            if !(seconds == 0 || (5..=120).contains(&seconds)) {
                 return Err(CommandError);
             }
             let hover = map.get("open_on_hover").and_then(Value::as_bool).ok_or(CommandError)?;
@@ -806,9 +810,10 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         }
         // #336 T1b-a: both fields commit together under the same gate; the
         // range/type checks already ran at parse and run again here for
-        // direct callers, exactly like every other typed command.
+        // direct callers, exactly like every other typed command. #438:
+        // accepted values are {0} («Nunca») ∪ 5..=120.
         Command::SetIslandInteraction { auto_close_seconds, open_on_hover } => {
-            if !(5..=120).contains(auto_close_seconds) { return Err(CommandError); }
+            if !(*auto_close_seconds == 0 || (5..=120).contains(auto_close_seconds)) { return Err(CommandError); }
             next.auto_close_seconds = Some(*auto_close_seconds);
             next.open_on_hover = Some(*open_on_hover);
         }
