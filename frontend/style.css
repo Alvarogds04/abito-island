@@ -440,7 +440,7 @@ html[data-motion="full"] #chat-state[data-kind="busy"] .ico svg, html[data-motio
 #chat-model-picker .picker-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #chat-model-picker .picker-state { margin-left: auto; color: var(--island-muted); font-size: 11px; flex: none; }
 html[data-motion="reduce"] #chat-model-btn, html[data-motion="reduce"] #chat-model-btn .model-caret { transition: none; }
-#chat-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 6px; }
+#chat-composer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 6px; }
 #chat-input {
   flex: 1;
   min-height: 44px;

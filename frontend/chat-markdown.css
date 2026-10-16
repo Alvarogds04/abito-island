@@ -27,8 +27,11 @@
    draft row and the paperclip after the send button, without touching any
    existing rule. */
 #chat-attachments {
-  order: 9;
+  order: 11; /* after the clip (10): draft, send and clip stay on line one */
   flex-basis: 100%;
+  min-width: 0;
+  max-height: 84px; /* a few chip rows, then scroll: never push the composer out of the window */
+  overflow-y: auto;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -46,9 +49,10 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
   font: 12px/1.4 system-ui, sans-serif;
 }
-.composer-attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachment-size { color: var(--island-muted, rgba(255, 255, 255, .6)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .composer-attachment-remove {
+  position: relative;
   display: grid;
   place-items: center;
   width: 22px;
@@ -61,6 +65,7 @@
   color: inherit;
   cursor: pointer;
 }
+.composer-attachment-remove::after { content: ''; position: absolute; inset: -11px; } /* 44px touch target */
 .composer-attachment-remove svg { width: 13px; height: 13px; }
 .composer-attachment-remove:hover { background: rgba(255, 255, 255, .1); }
 #chat-attach { order: 10; }
