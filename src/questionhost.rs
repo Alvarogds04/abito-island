@@ -144,6 +144,7 @@ pub async fn question_action(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<Value, BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     let command =

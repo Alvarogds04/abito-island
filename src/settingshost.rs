@@ -94,12 +94,20 @@ fn view_prefs(p: &Prefs) -> Value {
         "chosenModels": p.chosen_models,
         "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
         "customBlobs": p.custom_blobs_view(),
-        "monitor": p.monitor})
+        "monitor": p.monitor,
+        "settingsWindow": p.settings_window_on()})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
 pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()
+}
+
+/// #366 F093: the effective Ajustes placement, read by the settings window host
+/// (the field is private to this module; the projection and this accessor are
+/// the only readers outside `prefs.rs`).
+pub fn settings_window_on(host: &SettingsHost) -> bool {
+    host.prefs.lock().expect("prefs lock").settings_window_on()
 }
 
 /// #264 (GD049): the position the human last dragged the island to, read for the
@@ -226,6 +234,7 @@ pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<
 /// rectangle on close; the page never sends a number. Same sender gate and rate limiter as the others.
 #[tauri::command]
 pub async fn settings_view(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
@@ -473,6 +482,23 @@ mod settings_view_tests {
         assert_eq!(view["theme"], json!("system"));
         assert_eq!(view["sound"], json!(false));
         assert_eq!(view["chosenModels"], json!(null));
+    }
+
+    /// #366 F093: the projection carries the Ajustes placement choice — the
+    /// in-island default (false) when no key is stored, the choice when present,
+    /// and the default again when a hostile stored value was dropped at load.
+    #[test]
+    fn f093_the_webview_projection_carries_the_settings_window_choice() {
+        use abito_island::prefs::Prefs;
+        let defaults = view_prefs(&Prefs::default());
+        assert_eq!(defaults["settingsWindow"], json!(false), "absent reads as the in-island default");
+        let saved = Prefs::from_text(Some(r#"{"v":1,"settings_window":true}"#));
+        assert_eq!(view_prefs(&saved)["settingsWindow"], json!(true));
+        let hostile = Prefs::from_text(Some(r#"{"v":1,"settings_window":"yes"}"#));
+        assert_eq!(view_prefs(&hostile)["settingsWindow"], json!(false), "a dropped value reads as the default");
+        // the established projection shapes are untouched
+        assert_eq!(defaults["autoCloseSeconds"], json!(15));
+        assert_eq!(defaults["theme"], json!("system"));
     }
 
     /// #346 F033: `pillColors` is the same projection shape as `avatarColors` — already

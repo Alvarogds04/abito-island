@@ -19,6 +19,11 @@
      never answers and never replays boot history.
    No sounds, no Coucou assets. */
 (() => {
+  // #366 F093: the settings window runs this same page; the island's pointer, hover,
+  // timer and host-verb machinery must never run there (the label is Rust's, exact).
+  const __label = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
+    && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+  if (__label === 'settings') return;
   const $ = id => document.getElementById(id);
   const capsule = $('capsule');
   const island = $('island');

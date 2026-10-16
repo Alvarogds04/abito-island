@@ -201,6 +201,10 @@ pub struct Prefs {
     /// `None` means the default placement (the island's current monitor) and is never
     /// written, so an untouched file keeps its bytes.
     pub monitor: Option<String>,
+    /// #366 F093: whether Ajustes opens in its own window instead of inside the island.
+    /// `None` means the default (in-island, #408) and is never written, so an untouched
+    /// file keeps its bytes.
+    pub settings_window: Option<bool>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -385,6 +389,9 @@ impl Prefs {
     /// #336: the effective hover policy — absent means off.
     pub fn open_on_hover(&self) -> bool { self.open_on_hover.unwrap_or(false) }
 
+    /// #366 F093: the effective Ajustes placement — absent means in-island (#408).
+    pub fn settings_window_on(&self) -> bool { self.settings_window.unwrap_or(false) }
+
     pub fn from_text(text: Option<&str>) -> Prefs {
         let v = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
         let Some(v) = v else { return Prefs::default() };
@@ -414,6 +421,7 @@ impl Prefs {
             },
             monitor: v.get(MONITOR).and_then(Value::as_str)
                 .filter(|key| valid_monitor_key(key)).map(str::to_owned),
+            settings_window: v.get("settings_window").and_then(Value::as_bool),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -465,6 +473,9 @@ impl Prefs {
         if let Some(monitor) = &self.monitor {
             v[MONITOR] = json!(monitor);
         }
+        if let Some(on) = self.settings_window {
+            v["settings_window"] = json!(on);
+        }
         v.to_string()
     }
 }
@@ -509,6 +520,9 @@ pub enum Command {
     SetMonitor(String),
     /// #389: back to the default behaviour — the island's current monitor.
     ClearMonitor,
+    /// #366 F093: whether Ajustes opens in its own window (opt-in). `false`
+    /// stores the default (in-island) as no key at all.
+    SetSettingsWindow(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -656,6 +670,12 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             Ok(Command::SetMonitor(monitor.to_owned()))
         }
         Some("clear_monitor") if map.len() == 1 => Ok(Command::ClearMonitor),
+        // #366 F093: exactly action + settings_window (a bool). No coercion: a
+        // number, string or null is refused and changes nothing.
+        Some("set_settings_window") if map.len() == 2 => {
+            let on = map.get("settings_window").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(Command::SetSettingsWindow(on))
+        }
         _ => Err(CommandError),
     }
 }
@@ -786,6 +806,9 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             next.monitor = Some(monitor.clone());
         }
         Command::ClearMonitor => next.monitor = None,
+        // #366 F093: `false` is the default, so it stores no key at all (an
+        // untouched file keeps its bytes) — the same rule as every optional field.
+        Command::SetSettingsWindow(on) => next.settings_window = on.then_some(true),
     }
     Ok(next)
 }

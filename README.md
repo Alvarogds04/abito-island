@@ -1470,3 +1470,35 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 - **Gate order mirrors `focus_host`:** sender → payload validation → rate limiter → effect.
 - **Non-Linux** is an honest stub («Esta plataforma no permite abrir Claude Desktop.»); nothing is attempted.
 - **Tests:** `src/focushost_tests.rs` — closed payload shapes, gate order and budget, the not-installed / failed-launch decisions, and the closed deterministic probe (entry order, directory order, unrelated files invisible).
+
+## #366 / F093 — the typed Ajustes placement pref
+
+- **One optional v1 field.** `prefs.json` gains an optional `settings_window` bool (absent = the
+  in-island default of #408; a non-bool stored value is dropped on load, so a hostile or damaged
+  file reads as the default). `false` stores no key at all: an untouched file keeps its bytes.
+- **One closed command.** `prefs_action {action:"set_settings_window", settings_window:<bool>}` —
+  exactly two keys, no coercion (a number, string or null is refused and changes nothing). It
+  persists through the shared `prefs::transact` gate and atomic writer like every other pref.
+- **Projection.** The `prefs_action` view and the `prefs:state` event carry `settingsWindow`
+  (effective bool: the default `false` when nothing is stored).
+- **Where it is chosen.** Ajustes → General (added with the window itself, #366 T2); the in-island
+  panel remains the default and the fallback for any window failure.
+- **Tests:** `src/prefs_tests.rs` (`f093_*` — exact command shape, persistence and round-trip,
+  untouched-file bytes, hostile values dropped) and `src/settingshost.rs` (`f093` projection test).
+
+## #366 / F093 — Ajustes in its own window (opt-in)
+
+- **One closed command.** `settings_window_action` accepts exactly `{"action":"open"|"close"}` (no URL, label or size). Gate order: sender (`bridge::sender_ok`) → shared rate limiter → payload → effect.
+- **The typed pref chooses.** `open` creates or focuses the window only when `settings_window` is stored `true`; otherwise it answers `{"open":false}` and the page opens the in-island panel (#408, the default). Any command failure also falls back to the in-island panel.
+- **Rust creates the window.** Label `settings`, the SAME page (`index.html`), decorated, resizable, not always-on-top. `bridge::sender_ok` and the navigation lock admit exactly the labels `main` and `settings` (exact, case-sensitive); the URL allowlist is unchanged. Closing it never quits the app.
+- **Same page, window mode.** `settings.js` detects the label, sets `body[data-window="settings"]` (append-only CSS hides the island chrome) and opens Ajustes at once; closing the panel closes the window and never resizes the island.
+- **Chosen in** Ajustes → General → «Abrir Ajustes en su ventana».
+- **Not verified here:** no GUI was launched; window creation is covered only by pure tests (payload, pref decision, gate).
+
+## #366 / F094 — the quick panel inside the island
+
+- **Entry.** Right-click (`contextmenu`) on either Ajustes gear opens a small popover inside the island. A normal click keeps the #408 behaviour exactly. There is no long-press. The gesture is not discoverable by itself; the human should judge whether it needs a visible hint.
+- **Content.** Exactly three toggles: sound, theme (system/light/dark) and auto-close seconds, plus «Todos los ajustes» which opens the full panel.
+- **No new command.** It reuses the closed `prefs_action` commands (`sound_on/off`, `set_theme` through the same `chooseTheme` sender, `set_island_interaction` with the full typed pair). The saved projection is the truth; a failed save keeps the previous value and says so. Auto-close is validated by `autoCloseProblem` before any IPC.
+- **View-model.** `quickPanelView` (`settings-view.js`) reuses `themeView` and `islandInteractionView`, so the quick panel and the full panel cannot disagree. Escape, an outside click or a view change closes it. It is not built inside the settings window.
+- **Tests.** `test-node/settings-view-check.cjs` (`F094`, plus a source contract). No index.html change: the panel is built from DOM nodes.

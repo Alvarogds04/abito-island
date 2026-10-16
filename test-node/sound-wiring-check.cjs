@@ -98,6 +98,7 @@ function hostDtoFixture(host) {
       'p.theme().as_str()': 'system',
       'p.auto_close_seconds()': 15,
       'p.open_on_hover()': false,
+      'p.settings_window_on()': false,
       // #415: created blobs project as null when none exist
       'p.custom_blobs_view()': null,
       // #389: the chosen panel monitor projects as null when no choice exists
@@ -119,7 +120,7 @@ test('Host DTO fixture extracts complete legacy and multiline typed projections 
   assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
     pillColors: {}, chosenModels: null,
     mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system',
-    autoCloseSeconds: 15, openOnHover: false, customBlobs: null, monitor: null });
+    autoCloseSeconds: 15, openOnHover: false, settingsWindow: false, customBlobs: null, monitor: null });
   const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
   assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });
   const quoted = 'complete ) with "quoted" text';

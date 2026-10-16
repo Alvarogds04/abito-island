@@ -595,6 +595,33 @@
       ? '' : 'Ingresá un volumen entre 0 y 0,2.';
   }
 
+  // #366 F093 — the page runs in window mode only inside the exact Rust-created
+  // settings window (label "settings", the SAME page). Any other label — including
+  // the island's own "main" and every look-alike — is island mode.
+  function isSettingsWindow(label) {
+    return label === 'settings';
+  }
+
+  // #366 F093 — the Ajustes → General toggle reads the effective placement from
+  // the projection only: absent or false is the in-island default (#408), an
+  // explicit true opts into the own window. Never coerces a foreign value.
+  // #366 F094 — the quick panel: exactly the three most-used toggles, read from the
+  // saved projection only (sound, theme mode, auto-close seconds), reusing the full
+  // panel's own view-models so the two can never disagree.
+  function quickPanelView(prefs) {
+    const p = prefs && typeof prefs === 'object' ? prefs : {};
+    return {
+      sound: { on: p.sound === true },
+      theme: themeView(p).options.map(o => ({ id: o.id, label: o.label, selected: o.selected === true, aria: o.aria })),
+      autoCloseSeconds: islandInteractionView(p).autoCloseSeconds,
+    };
+  }
+
+  function settingsWindowView(prefs) {
+    const map = prefs && typeof prefs === 'object' ? prefs : {};
+    return { on: map.settingsWindow === true };
+  }
+
   // #336 F003/F004 — the typed interaction pair as the panel shows it: the
   // effective values behind the projection, each field falling back to the
   // public contract's default (15 seconds / hover off) on its own, never
@@ -623,7 +650,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, TABS, tabById, tabAlias, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,

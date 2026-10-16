@@ -1149,6 +1149,7 @@ mod chosen_models {
             open_on_hover: Some(true),
             custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("mint".into()) }]),
             monitor: Some("DP-1".into()),
+            settings_window: None,
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
@@ -1505,4 +1506,78 @@ fn a_disconnected_monitor_s_key_survives_the_reload() {
     // a well-shaped key the island never saw still parses: the placement
     // fallback owns "unknown", not the store
     assert_eq!(Prefs::from_text(Some(r#"{"v":1,"monitor":"SOMEDAY-MONITOR"}"#)).monitor.as_deref(), Some("SOMEDAY-MONITOR"));
+}
+
+// ---- #366 F093: the opt-in settings window pref ------------------------------------------------
+
+/// #366 F093: `set_settings_window` is an exact closed two-key command; anything
+/// else (missing key, extra keys, wrong type) is refused and changes nothing.
+#[test]
+fn f093_set_settings_window_is_an_exact_closed_two_key_command() {
+    assert_eq!(parse_command(&json!({"action":"set_settings_window","settings_window":true})),
+        Ok(Command::SetSettingsWindow(true)));
+    assert_eq!(parse_command(&json!({"action":"set_settings_window","settings_window":false})),
+        Ok(Command::SetSettingsWindow(false)));
+    for bad in [
+        json!({"action":"set_settings_window"}),
+        json!({"action":"set_settings_window","settings_window":"true"}),
+        json!({"action":"set_settings_window","settings_window":1}),
+        json!({"action":"set_settings_window","settings_window":null}),
+        json!({"action":"set_settings_window","settings_window":true,"x":1}),
+        json!({"action":"set_settings_window","window":true}),
+        json!({"action":"set_settings_window","SettingsWindow":true}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad} must be refused: exact keys only");
+    }
+    // the legacy closed commands keep their exact behaviour
+    assert_eq!(parse_command(&json!({"action":"view"})), Ok(Command::View));
+    assert_eq!(parse_command(&json!({"action":"set_theme","theme":"dark"})), Ok(Command::SetTheme(Theme::Dark)));
+}
+
+/// #366 F093: the choice persists through the same v1 file, gate and atomic
+/// writer as every other preference; a failed save never installs it.
+#[test]
+fn f093_set_settings_window_persists_and_round_trips() {
+    let command = parse_command(&json!({"action":"set_settings_window","settings_window":true})).unwrap();
+    let mut persisted = false;
+    let next = update(&Prefs::default(), &command, |_| { persisted = true; true }).unwrap();
+    assert!(persisted, "a changed choice must reach disk");
+    let value = serde_json::from_str::<Value>(&next.to_text()).expect("to_text is JSON");
+    assert_eq!(value["settings_window"], json!(true));
+    let reread = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(reread, next, "the stored choice reads back exactly");
+    assert_eq!(reread.to_text(), next.to_text(), "stable bytes across a reload");
+    let refused = update(&Prefs::default(), &command, |_| false);
+    assert!(refused.is_err(), "a failed save must be reported");
+    // back to false: the key is dropped again (an untouched file keeps its bytes)
+    let off = update(&next, &parse_command(&json!({"action":"set_settings_window","settings_window":false})).unwrap(), |_| true).unwrap();
+    assert_eq!(off.settings_window, None);
+    assert!(!off.to_text().contains("settings_window"), "the default writes no key");
+    assert_eq!(update(&next, &parse_command(&json!({"action":"set_settings_window","settings_window":true})).unwrap(), |_| true).unwrap(), next, "an idempotent write changes nothing");
+}
+
+/// #366 F093: the default is in-island Ajustes (absent key = false), every known
+/// field survives this writer, and a hostile stored value is dropped on load.
+#[test]
+fn f093_default_is_in_island_and_hostile_stored_values_are_dropped() {
+    let p = Prefs::default();
+    assert_eq!(p.settings_window, None, "absent means the in-island default");
+    assert!(!p.settings_window_on(), "the effective value is false");
+    assert!(!Prefs::from_text(Some(r#"{"v":1}"#)).settings_window_on());
+    assert!(!Prefs::from_text(Some(r#"{"v":1,"settings_window":"yes"}"#)).settings_window_on(), "a non-bool reads as the default");
+    assert!(Prefs::from_text(Some(r#"{"v":1,"settings_window":true}"#)).settings_window_on());
+    // the writer keeps every known field and drops unknown JSON
+    let current = Prefs::from_text(Some(
+        r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Alvaro","theme":"dark","auto_close_seconds":30,"open_on_hover":true,"stowaway":true}"#,
+    ));
+    let next = update(&current, &parse_command(&json!({"action":"set_settings_window","settings_window":true})).unwrap(), |_| true).unwrap();
+    let value = serde_json::from_str::<Value>(&next.to_text()).expect("to_text is JSON");
+    assert_eq!(value["sound"], json!(true));
+    assert_eq!(value["gain"], json!(0.2));
+    assert_eq!(value["display_name"], json!("Alvaro"));
+    assert_eq!(value["theme"], json!("dark"));
+    assert_eq!(value["auto_close_seconds"], json!(30));
+    assert_eq!(value["open_on_hover"], json!(true));
+    assert_eq!(value["settings_window"], json!(true));
+    assert!(value.get("stowaway").is_none(), "unknown keys are dropped");
 }

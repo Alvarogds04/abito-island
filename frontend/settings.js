@@ -41,6 +41,12 @@
   const agent = payload => call('agent_action', payload);
 
   const openers = [$('open-screen-settings')].filter(Boolean); // the chat header gear: the ONE entry (#408)
+  // #366 F093: the SAME page runs inside the Rust-created settings window. There the panel
+  // fills the window (body[data-window="settings"] CSS) and the island's size is not this
+  // page's business. The label is the exact one the sender gate admits (narrow approval).
+  const WINDOW_MODE = V.isSettingsWindow(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
+    && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  if (WINDOW_MODE) document.body.dataset.window = 'settings';
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
   let screen = 'accounts';
@@ -181,7 +187,7 @@
   // enum, persists it and publishes `prefs:state`; theme.js paints from that saved state. So a
   // failed save leaves the previous theme on screen (no optimistic paint, no false «guardado»).
   function chooseTheme(mode) {
-    call('prefs_action', { action: 'set_theme', theme: mode }).then(p => {
+    return call('prefs_action', { action: 'set_theme', theme: mode }).then(p => {
       themeError = '';
       prefs = p;
       render();
@@ -271,13 +277,24 @@
     if (agentState === null) connectTimer = setTimeout(() => { if (agentState === null) { agentState = { connection: 'no_daemon' }; if (isOpen()) render(); } }, V.CONNECT_WAIT_MS);
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
     for (const b of openers) b.setAttribute('aria-expanded', 'true');
-    askSize(true);
+    if (!WINDOW_MODE) askSize(true); // #366: the own window never resizes the island
     syncRail();
     refreshAll();
     showScreen(id || screen);
     $('settings-close').focus();
   }
   function close(byKeyboard) {
+    // #366 F093: in the own window the panel close IS the window close: the ONE closed
+    // command asks Rust (the island's size and focus are never this window's business).
+    if (WINDOW_MODE) {
+      call('settings_window_action', { action: 'close' }).catch(() => {});
+      panel.inert = true; delete panel.dataset.open;
+      document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null }));
+      if (agentsAsk) { clearTimeout(agentsAsk.timer); agentsAsk = null; }
+      discardAccountForm();
+      drafts.reset();
+      return;
+    }
     if (isOpen()) askSize(false);
     panel.inert = true; delete panel.dataset.open; delete capsule.dataset.settings;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: null })); // closes the model picker with it
@@ -292,14 +309,27 @@
   }
   const isOpen = () => panel.dataset.open === 'true';
 
+  // #366 F093: the typed pref chooses. ONE closed command asks Rust for the own window;
+  // an answer that says the window was not used (the pref chose in-island) and ANY failure
+  // both fall back to the in-island panel — the #408 default is never a dead gear.
+  function openWindowOrInIsland() {
+    const id = screen;
+    call('settings_window_action', { action: 'open' }).then(windowOpen => {
+      if (windowOpen && windowOpen.open === true) return; // the own window is up (Rust created it)
+      open(id); // the typed pref chose in-island
+    }).catch(() => open(screen)); // any failure falls back to in-island Settings too
+  }
   // the chat-header gear toggles Ajustes; the gear of the overview opens the chat view first
   for (const b of openers) b.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
-    if (isOpen()) close(e.detail === 0); else open(screen);
+    if (isOpen()) close(e.detail === 0);
+    else if (V.settingsWindowView(prefs).on) openWindowOrInIsland();
+    else open(screen);
   });
   const gear = $('open-settings');
   if (gear) gear.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
+    if (V.settingsWindowView(prefs).on) { openWindowOrInIsland(); return; } // #366: no island detour needed
     pendingOpen = screen;
     call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; });
   });
@@ -341,6 +371,9 @@
     call('hotkey_action', { action: 'view' }).then(h => { hotkey = h; render(); }, () => {});
     if (window.desktop) window.desktop.snapshot().then(s => { motionOverride = s.motionOverride !== false; render(); }, () => {});
   }
+  // #366 F093: the gear consults the placement pref even before the panel was ever
+  // opened, so the typed choice survives a page reload: one honest view fetch at startup.
+  if (!WINDOW_MODE) call('prefs_action', { action: 'view' }).then(p => { prefs = p; }, () => {});
   function applyAgent(next) {
     if (next && typeof next === 'object') {
       if (Object.hasOwn(next, 'ownedAccounts')) ownedAccounts = next.ownedAccounts === null ? null : { accounts: V.ownedAccounts(next.ownedAccounts) };
@@ -778,6 +811,17 @@
     const g = V.generalView({ sound: prefs.sound, gain: prefs.gain, motionOverride, hotkey });
     // each section belongs to one tab (#408); a section of another tab is built detached and never attached
     const group = (tab, title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); if (tab === screen) body.append(sec); return sec; };
+    // #366 F093: where Ajustes opens — inside the island (default, #408) or in its own
+    // window. The typed pref is the only chooser; a failed save keeps the previous
+    // placement and says so.
+    const placement = group('general', 'Ventana', 'Dónde se abre Ajustes. La ventana es aparte; la isla sigue siendo lo de siempre.');
+    const placementOn = V.settingsWindowView(prefs).on;
+    placement.append(toggleRow('sw-settings-window', 'Abrir Ajustes en su ventana', placementOn, () => {
+      call('prefs_action', { action: 'set_settings_window', settings_window: !placementOn }).then(p => {
+        prefs = p; render();
+        say(!placementOn ? 'Ajustes se abre en su ventana.' : 'Ajustes se abre dentro de la isla.');
+      }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
+    }));
     if (g.hotkey) {
       const sec = group('general', 'Atajo de teclado', 'Abre y oculta la isla desde cualquier app.');
       const h = g.hotkey;
@@ -1003,4 +1047,69 @@
       });
     }
   }
+
+  // #366 F094 — the quick panel: right-click on an Ajustes gear opens a small popover INSIDE the
+  // island with the three most-used toggles (sound, theme, auto-close). A normal click keeps the
+  // #408 behaviour untouched. Only the existing closed prefs commands are used; the saved
+  // projection is the truth, a failed save keeps the previous value and says so.
+  let quick = null;
+  function closeQuick() { if (quick) { quick.remove(); quick = null; } }
+  function quickSay(text) { say(text); }
+  function renderQuick() {
+    if (!quick) return;
+    const v = V.quickPanelView(prefs);
+    const island = V.islandInteractionView(prefs);
+    quick.textContent = '';
+    quick.append(el('h3', 'ssection', 'Ajustes rápidos'));
+    quick.append(toggleRow('quick-sound', 'Sonido', v.sound.on, () =>
+      call('prefs_action', { action: v.sound.on ? 'sound_off' : 'sound_on' }).then(
+        p => { prefs = p; renderQuick(); quickSay(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); },
+        () => quickSay('No se pudo guardar. El sonido sigue sin cambios; probá de nuevo.'))));
+    const picker = el('span', 'stheme-options');
+    picker.setAttribute('role', 'radiogroup'); picker.setAttribute('aria-label', 'Tema');
+    for (const option of v.theme) {
+      const b = el('button', 'stheme'); b.type = 'button'; b.id = `quick-theme-${option.id}`;
+      b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+      b.setAttribute('aria-label', option.aria); b.append(el('span', 'stheme-label', option.label));
+      b.addEventListener('click', e => { if (e.isTrusted === true) chooseTheme(option.id).then(renderQuick); });
+      picker.append(b);
+    }
+    quick.append(picker);
+    const form = el('form', 'sname-form'); form.noValidate = true;
+    const label = el('label', 'srow-title', 'Cerrar a los (segundos)'); label.htmlFor = 'quick-autoclose';
+    const input = el('input', 'sfield'); input.type = 'number'; input.id = 'quick-autoclose';
+    input.min = '5'; input.max = '120'; input.step = '1'; input.value = String(v.autoCloseSeconds);
+    const issue = el('p', 'snote'); issue.setAttribute('role', 'status');
+    const save = el('button', 'sbtn primary', 'Guardar cierre'); save.type = 'submit';
+    const paint = () => { const problem = V.autoCloseProblem(input.value); issue.textContent = problem; save.disabled = !!problem; };
+    input.addEventListener('input', paint);
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!e.isTrusted || V.autoCloseProblem(input.value)) return;
+      call('prefs_action', { action: 'set_island_interaction', auto_close_seconds: Number(input.value), open_on_hover: island.openOnHover }).then(
+        p => { prefs = p; renderQuick(); quickSay('Cierre automático guardado.'); },
+        () => { issue.textContent = 'No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'; });
+    });
+    form.append(label, input, issue, save); quick.append(form); paint();
+    quick.append(wordBtn('Todos los ajustes', () => { closeQuick(); open(screen); }));
+  }
+  function openQuick() {
+    if (WINDOW_MODE) return;
+    if (quick) { closeQuick(); return; }
+    quick = el('div', 'squick'); quick.id = 'settings-quick'; quick.setAttribute('role', 'dialog'); quick.setAttribute('aria-label', 'Ajustes rápidos');
+    (document.getElementById('island') || document.body).append(quick);
+    renderQuick();
+    call('prefs_action', { action: 'view' }).then(p => { prefs = p; renderQuick(); }, () => {});
+  }
+  for (const g of [...openers, $('open-settings')].filter(Boolean)) g.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (e.isTrusted === true) openQuick();
+  });
+  document.addEventListener('keydown', e => { if (quick && e.key === 'Escape') { e.stopPropagation(); closeQuick(); } }, true);
+  document.addEventListener('pointerdown', e => { if (quick && e.isTrusted === true && !quick.contains(e.target) && !e.target.closest('#open-screen-settings, #open-settings')) closeQuick(); }, true);
+  document.addEventListener('island:view', closeQuick);
+  // #366 F093: inside the Rust-created settings window the SAME page opens
+  // Ajustes at once — the panel IS the window (the island chrome stays hidden
+  // by CSS, and the island's own phase machinery is never driven from here).
+  if (WINDOW_MODE) open('accounts');
 })();

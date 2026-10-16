@@ -246,6 +246,7 @@ pub async fn chat_action(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<Value, BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     let command = chat::parse_command(&payload).map_err(chat_error)?;
@@ -347,6 +348,7 @@ pub async fn chat_attach(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<Value, BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
@@ -374,6 +376,7 @@ pub async fn chat_attach_data(
     state: State<'_, AppState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<Value, BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;

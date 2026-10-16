@@ -1274,6 +1274,35 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings #models { position: static; padding: 0; background: none; border-radius: 0; flex: 1; min-height: 0; transform: none; transition: none; opacity: 1; visibility: visible; }
 #settings #models:not([data-open="true"]) { display: none; }
 
+/* #366 F093 — Ajustes in its own window: the SAME page runs there, but only
+   Ajustes is the window. The Rust-created window (label "settings") sets
+   body[data-window="settings"] from settings.js; every rule here is scoped to
+   that flag, so the island (the default #408 placement) is byte-identical. */
+body[data-window="settings"] { cursor: default; background: var(--card-bg); }
+body[data-window="settings"] #island-header,
+body[data-window="settings"] #clay,
+body[data-window="settings"] #compact-flag,
+body[data-window="settings"] #chat,
+body[data-window="settings"] #overview-view,
+body[data-window="settings"] #notices,
+body[data-window="settings"] #permission,
+body[data-window="settings"] #question { display: none !important; }
+/* the island shape becomes the window: no centring, no compact size, no radius */
+body[data-window="settings"] #island {
+  position: absolute; inset: 0; left: 0; transform: none !important;
+  width: 100% !important; height: 100% !important; border-radius: 0;
+  will-change: auto;
+}
+/* the panel and its own model-picker fill the window (the #408 island offsets
+   — top 58/72/84px, left/right 10–12px — are island-size business) */
+body[data-window="settings"] #settings,
+body[data-window="settings"] #models {
+  position: absolute; inset: 0; top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 0; opacity: 1; visibility: visible; transform: none;
+}
+
+/* #366 F094 — the quick panel popover inside the island (scoped to its own id). */
+#settings-quick { position: absolute; z-index: 6; top: 48px; right: 12px; width: 260px; max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 16px; background: var(--card-bg); color: var(--island-muted); box-shadow: 0 6px 24px rgba(0,0,0,.35); }
 /* ---- #410 r2: the compact Conexiones LIST. One row per provider: name + status chip, the two
    connect words (API / Auth) from the view-model, and the row's own flow (code/URL) wrapped below.
    All rules live in the #410 compact block below, so the rail keeps its cascade position. */
@@ -1603,3 +1632,4 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
 #settings-body[data-screen="accounts"] .sconn-row .srow-actions { justify-content: flex-end; }
 #settings-body[data-screen="accounts"] .sconn-row .sflow { border: 0; padding: 4px 0 0; width: 100%; }
 #settings-body[data-screen="accounts"] .sconn-row .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+

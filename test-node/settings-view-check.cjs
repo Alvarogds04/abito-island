@@ -1164,3 +1164,73 @@ test('#336 settings UI source contract: the closed pair payload, validation befo
   // the new section never writes raw pixels
   assert.doesNotMatch(src, /auto[Cc]lose[^\n]*\d+px/);
 });
+
+// ---- #366 F093: the opt-in settings window ----------------------------------------------------------
+
+test('F093 isSettingsWindow admits only the exact lowercase settings label', () => {
+  assert.equal(S.isSettingsWindow('settings'), true);
+  assert.equal(S.isSettingsWindow('main'), false);
+  assert.equal(S.isSettingsWindow('Settings'), false, 'exact match only');
+  assert.equal(S.isSettingsWindow('settings2'), false);
+  assert.equal(S.isSettingsWindow(''), false);
+  assert.equal(S.isSettingsWindow(null), false);
+  assert.equal(S.isSettingsWindow(undefined), false);
+  assert.equal(S.isSettingsWindow(42), false);
+});
+
+test('F093 the settings window view models the General toggle from the projection only', () => {
+  // absent projection = the in-island default; only an explicit true opts in
+  assert.deepEqual(S.settingsWindowView({}), { on: false });
+  assert.deepEqual(S.settingsWindowView({ settingsWindow: false }), { on: false });
+  assert.deepEqual(S.settingsWindowView({ settingsWindow: true }), { on: true });
+  assert.deepEqual(S.settingsWindowView(null), { on: false });
+  assert.deepEqual(S.settingsWindowView('junk'), { on: false });
+});
+
+test('#366 settings window seam contract: the closed command, the honest fallback and the window-mode page', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  // the ONE closed command carries exactly its two closed actions
+  assert.match(src, /settings_window_action/);
+  assert.match(src, /action: 'open'/);
+  assert.match(src, /action: 'close'/);
+  // the typed pref chooses: an answer that says the window was not used falls back to in-island
+  assert.match(src, /windowOpen\.open === true/);
+  assert.match(src, /open\(screen\)/);
+  // any failure falls back to in-island Settings too
+  assert.match(src, /\.catch\(\(\) => open\(screen\)\)/);
+  // the settings window runs the same page in window mode: body flag for the CSS,
+  // the island size call is skipped, closing asks the closed command
+  assert.match(src, /dataset\.window = 'settings'/);
+  assert.match(src, /WINDOW_MODE/);
+  // the Ajustes → General toggle stores the typed choice through the closed prefs command
+  assert.match(src, /set_settings_window/);
+  // a settings-window close never resizes the island (no askSize there)
+  const windowModeClose = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
+  assert.doesNotMatch(windowModeClose, /askSize\(false\)[^\n]*\n[^\n]*WINDOW_MODE/, 'close asks the closed command first');
+});
+
+// ---- #366 F094: the quick panel inside the island -------------------------------------------------
+
+test('F094 quickPanelView projects exactly sound, theme and auto-close from the saved prefs', () => {
+  const v = S.quickPanelView({ sound: true, theme: 'dark', autoCloseSeconds: 45 });
+  assert.equal(v.sound.on, true);
+  assert.deepEqual(v.theme.map(o => [o.id, o.selected]), [['system', false], ['light', false], ['dark', true]]);
+  assert.equal(v.autoCloseSeconds, 45);
+  const d = S.quickPanelView({});
+  assert.equal(d.sound.on, false);
+  assert.equal(d.theme.find(o => o.selected).id, 'system');
+  assert.equal(d.autoCloseSeconds, 15, 'the contract default');
+  assert.equal(S.quickPanelView(null).autoCloseSeconds, 15);
+  assert.deepEqual(Object.keys(v).sort(), ['autoCloseSeconds', 'sound', 'theme']);
+});
+
+test('#366 quick panel contract: right-click on the gear, existing closed prefs commands only, normal click untouched', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /addEventListener\('contextmenu'/);
+  assert.match(src, /V\.quickPanelView\(/);
+  assert.match(src, /chooseTheme\(option\.id\)/, 'the quick theme reuses the one closed theme sender');
+  assert.match(src, /'sound_on'/);
+  assert.match(src, /action: 'set_island_interaction'/);
+  assert.match(src, /V\.autoCloseProblem\(/);
+  assert.doesNotMatch(src, /long-?press|longpress/i, 'no long-press gesture');
+});
