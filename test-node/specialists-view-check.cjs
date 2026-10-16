@@ -10,10 +10,11 @@
    Run: node apps/desktop-tauri/test-node/specialists-view-check.cjs (also under cargo test). */
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const fs = require('node:fs');
 const frontend = path.join(__dirname, '..', 'frontend');
 const S = require(path.join(frontend, 'specialists-view.js'));
 let passed = 0;
-const test = (name, fn) => { fn(); passed += 1; };
+const test = (_name, fn) => { fn(); passed += 1; };
 
 // ---- identity: opaque, stable, format-compatible with avatar-colors (#384) -------------------------
 test('an id is opaque lowercase ASCII, never derived from the visible name, and compatible with the avatar contract', () => {
@@ -352,6 +353,17 @@ test('keyboard target supports arrows, wrapping, Home and End without synthetic 
   }
   assert.equal(S.roleKeyIndex('x', 0, 3), -1);
   assert.equal(S.roleKeyIndex('Home', 0, 0), -1);
+});
+
+// ---- #436 T6.5 (D8/D11): the section copy follows the design. Source-level wiring only:
+// specialists.js has no DOM harness (no jsdom in this suite); stated as structural proof.
+test('wiring: the section shows ONE declarativo chip and drops the repeated declarativo wording', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'specialists.js'), 'utf8');
+  assert.equal((src.match(/Declarativo: todavía no se aplica/g) || []).length, 1, 'exactly one chip, in the section header');
+  assert.doesNotMatch(src, /declarativos, todavía no se aplican/);
+  assert.doesNotMatch(src, /opcional y declarativo/);
+  assert.doesNotMatch(src, /Permisos \(declarativos\)/);
+  assert.match(src, /specialists-declarativo/, 'the chip carries the stable id the checks can find');
 });
 
 console.log(`specialists-view-check: ${passed} passed`);
