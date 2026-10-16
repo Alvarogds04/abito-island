@@ -465,8 +465,33 @@ fn store_requested(
 fn refresh_work_area(app: &AppHandle, state: &AppState) -> Rect {
     let win = main_window(app);
     let wa = workarea::current(&win);
-    *state.work_area.lock().expect("work area lock") = wa.rect;
-    wa.rect
+    let rect = placement_area(&win, wa.rect, settingshost::chosen_monitor(app).as_deref());
+    *state.work_area.lock().expect("work area lock") = rect;
+    rect
+}
+
+/// #389 (GD012): the geometry placement and edge snapping work in — the monitor
+/// chosen in Ajustes when it is connected, else the island's current monitor
+/// (the behaviour before #389). Resolution goes through the pure
+/// `workarea::chosen_area` over the monitors the island itself enumerated; the
+/// chosen monitor's bounds are its work area there. `base` is the
+/// `workarea::current()` value the caller already holds, so the no-choice path
+/// is provably today's behaviour and queries the platform once.
+fn placement_area(win: &WebviewWindow, base: Rect, chosen: Option<&str>) -> Rect {
+    let Some(key) = chosen else { return base };
+    let monitors = win
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| {
+            let pos = m.position();
+            let size = m.size();
+            let rect = Rect { x: pos.x, y: pos.y, w: size.width as i32, h: size.height as i32 };
+            workarea::monitor_key(m.name().map(|n| n.as_str()))
+                .map(|key| workarea::MonitorChoice { key, rect })
+        })
+        .collect::<Vec<_>>();
+    workarea::chosen_area(Some(key), base, &monitors)
 }
 
 /// Enqueue the guarded transaction, not a native resize previously authorized
@@ -751,12 +776,15 @@ fn spawn_workarea_watcher(app: AppHandle) {
         let state = app.state::<AppState>();
         let win = main_window(&app);
         let wa = workarea::current(&win);
+        // #389: with a chosen monitor the island re-clamps into THAT monitor's
+        // area, not the one it currently sits on; the fallback is unchanged.
+        let area = placement_area(&win, wa.rect, settingshost::chosen_monitor(&app).as_deref());
         {
             let mut stored = state.work_area.lock().expect("work area lock");
-            if wa.rect == *stored {
+            if area == *stored {
                 continue;
             }
-            *stored = wa.rect;
+            *stored = area;
         }
         if state.core.lock().expect("core lock").press_active() {
             continue;
@@ -764,7 +792,7 @@ fn spawn_workarea_watcher(app: AppHandle) {
         let io = TauriIo(&win);
         let (x, y) = io.outer_position();
         let (w, h) = io.size();
-        if let Some(safe) = geometry::reclamp_on_workarea_change(Rect { x, y, w, h }, wa.rect) {
+        if let Some(safe) = geometry::reclamp_on_workarea_change(Rect { x, y, w, h }, area) {
             io.set_size(safe.w, safe.h);
             io.set_outer_position(safe.x, safe.y);
             store_requested(
@@ -1505,7 +1533,10 @@ fn record_frontend_evidence(
             let scale = win.scale_factor().unwrap_or(1.0);
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
             let wa = workarea::current(&win);
-            let rect = geometry::restore_position(settingshost::saved_position(&app), wa.rect, w, h);
+            // #389: the first placement of a launch honours the chosen monitor
+            // when it is connected; the fallback path is byte-for-byte today's.
+            let area = placement_area(&win, wa.rect, settingshost::chosen_monitor(&app).as_deref());
+            let rect = geometry::restore_position(settingshost::saved_position(&app), area, w, h);
             let io = TauriIo(&win);
             if win
                 .inner_size()
@@ -1514,14 +1545,14 @@ fn record_frontend_evidence(
                 == (w, h)
             {
                 io.set_outer_position(rect.x, rect.y); // size fine: only pin position
-                *state.work_area.lock().expect("work area lock") = wa.rect;
+                *state.work_area.lock().expect("work area lock") = area;
                 store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
                 return;
             }
             io.set_size(w, h);
             platform::audit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
             io.set_outer_position(rect.x, rect.y);
-            *state.work_area.lock().expect("work area lock") = wa.rect;
+            *state.work_area.lock().expect("work area lock") = area;
             store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
             std::thread::sleep(Duration::from_millis(200));
             platform::audit::sample(&app, "pin-settled", attempt, Some((w, h)));
