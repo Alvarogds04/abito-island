@@ -32,6 +32,10 @@ const source = fs.readFileSync(path.join(__dirname, '../frontend/desktop.js'), '
   ]));
   assert(!calls.some(c => ['allow','deny','answer','decline'].includes(c.args.payload.action)));
   assert(Object.isFrozen(window.desktop));
+  // #336 U5: the additive autoClose verb rides the SAME single desktop_action
+  // gate — one argument-free payload, nothing else (L17: one pinned assertion).
+  await window.desktop.autoClose();
+  assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify({command:'desktop_action',args:{payload:{action:'autoClose'}}}));
   // Structural native-adapter readback complements (does not replace) Cargo's
   // public parser/planner tests. No native app or shared transport is started.
   const main = fs.readFileSync(path.join(__dirname, '../src/main.rs'), 'utf8');
