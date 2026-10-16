@@ -3,6 +3,9 @@
 //! DECLARATIVE-ONLY permission set (read-only by default). Neither field is executed, injected or
 //! enforced anywhere: absent new fields are today's behaviour byte-identically, and hostile stored
 //! values are dropped, never executed.
+//! #376 — each dot may additionally carry a closed list of extra Space NAMES (multi-Space access),
+//! also DECLARATIVE-ONLY: bounded plain text like the default Space, capped count, no enforcement
+//! here. Absent or empty is today's behaviour.
 //!
 //! A specialist is a role the HUMAN creates and chooses by hand: a display name, the instructions
 //! that specialise it, and optionally which verified local model it uses. Nothing here delegates,
@@ -32,6 +35,9 @@ pub const MAX_SPECIALISTS: usize = 24;
 pub const MAX_NAME_CHARS: usize = 40;
 pub const MAX_INSTRUCTIONS_CHARS: usize = 2000;
 pub const MAX_SPACE_CHARS: usize = 80;
+/// #376 — the closed cap on a dot's extra Space NAMES. There is no registry to resolve against:
+/// the bound only keeps the declarative list and the file size finite.
+pub const MAX_SPACES: usize = 8;
 pub const ID_MAX_LEN: usize = 32;
 /// A closed payload is far smaller than this; the cap only stops a hostile one before it parses.
 const MAX_PAYLOAD_BYTES: usize = 16 * 1024;
@@ -42,13 +48,17 @@ const MAX_PAYLOAD_BYTES: usize = 16 * 1024;
 /// punctuation come from the empty templates. Include every inter-record comma and active ID.
 /// #375: the template carries the empty Space string and the empty permission array; the budget
 /// adds the widest Space name (4×80) and the widest closed permission array (36 bytes).
-const RECORD_JSON_BYTES: usize = r#"{"id":"","name":"","instructions":"","model":"","space":"","permissions":[]}"#.len();
+/// #376: it also carries the empty extra-Space list; the budget adds the widest closed list
+/// (8 names of 4×80 bytes each, quotes, commas and brackets counted) beyond that `[]`.
+const RECORD_JSON_BYTES: usize = r#"{"id":"","name":"","instructions":"","model":"","space":"","spaces":[],"permissions":[]}"#.len();
 const PERMISSIONS_ARRAY_MAX: usize = r#"["read","write","network","execute"]"#.len();
+const SPACES_ARRAY_EXTRA: usize = 2 + MAX_SPACES * (4 * MAX_SPACE_CHARS + 2) + (MAX_SPACES - 1) - 2;
 const STORE_JSON_BYTES: usize = r#"{"v":1,"active":"","specialists":[]}"#.len();
 pub(crate) const MAX_FILE_BYTES: usize = STORE_JSON_BYTES + ID_MAX_LEN
     + MAX_SPECIALISTS * (RECORD_JSON_BYTES + ID_MAX_LEN + 64
         + 4 * (MAX_NAME_CHARS + MAX_INSTRUCTIONS_CHARS + MAX_SPACE_CHARS)
-        + PERMISSIONS_ARRAY_MAX - 2)
+        + PERMISSIONS_ARRAY_MAX - 2
+        + SPACES_ARRAY_EXTRA)
     + (MAX_SPECIALISTS - 1);
 
 /// The identities a specialist may never take: the principal of the island, the engine CLIs the
@@ -114,6 +124,10 @@ pub struct Specialist {
     /// #375 — the dot's default Space NAME: bounded plain text, declarative only. There is no
     /// Space registry to reference and nothing resolves or applies it today.
     pub space: Option<String>,
+    /// #376 — the dot's extra Space NAMES (multi-Space access), beyond the default one: bounded
+    /// plain text, deduplicated, capped, DECLARATIVE ONLY. Nothing resolves, grants or enforces
+    /// them here; an absent or empty list is today's behaviour.
+    pub spaces: Vec<String>,
     /// #375 — a closed, DECLARATIVE-ONLY permission subset; never empty (read-only is the floor).
     pub permissions: Vec<Permission>,
 }
@@ -178,6 +192,7 @@ impl Store {
                     "instructions": s.instructions,
                     "model": s.model,
                     "space": s.space,
+                    "spaces": s.spaces,
                     "permissions": s.permissions.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
                 })
             })
@@ -235,12 +250,41 @@ fn record(raw: &Value) -> Option<Specialist> {
         }
         _ => READ_ONLY.to_vec(),
     };
+    let spaces = match map.get("spaces") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => {
+            let mut out = Vec::new();
+            for item in items {
+                // One unrecognized or hostile element drops the WHOLE stored list, exactly like
+                // the permission set: a hostile value can never smuggle in a partial grant.
+                match item.as_str().filter(|s| valid_space(s)) {
+                    Some(s) => {
+                        let name = s.trim().to_string();
+                        if !out.contains(&name) {
+                            out.push(name);
+                        }
+                    }
+                    None => {
+                        out.clear();
+                        break;
+                    }
+                }
+                // An over-cap STORED list is truncated, never fatal (a read never loses a role).
+                if out.len() == MAX_SPACES {
+                    break;
+                }
+            }
+            out
+        }
+        _ => Vec::new(),
+    };
     Some(Specialist {
         id: id.to_string(),
         name: name.trim().to_string(),
         instructions: instructions.trim().to_string(),
         model,
         space,
+        spaces,
         permissions,
     })
 }
@@ -305,6 +349,24 @@ fn valid_permissions(permissions: &[Permission]) -> bool {
     !permissions.is_empty() && canonical_permissions(permissions) == permissions
 }
 
+/// #376 — an extra-Space list is bounded plain text throughout: every name passes `valid_space`,
+/// the list carries no duplicates (first occurrence wins) and never exceeds MAX_SPACES. An EMPTY
+/// list is valid: no extra Spaces, the default Space only (today's behaviour).
+fn valid_spaces(spaces: &[String]) -> bool {
+    spaces.len() <= MAX_SPACES && spaces.iter().all(|s| valid_space(s)) && canonical_spaces(spaces) == spaces
+}
+
+/// First-occurrence dedup, preserving input order: names carry no canonical order of their own.
+fn canonical_spaces(spaces: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in spaces {
+        if !out.contains(s) {
+            out.push(s.clone());
+        }
+    }
+    out
+}
+
 fn valid_model(model: &Option<String>) -> bool {
     model.as_deref().is_none_or(valid_profile_id)
 }
@@ -320,6 +382,7 @@ pub enum Command {
         instructions: String,
         model: Option<String>,
         space: Option<String>,
+        spaces: Vec<String>,
         permissions: Vec<Permission>,
     },
     Update {
@@ -328,6 +391,7 @@ pub enum Command {
         instructions: String,
         model: Option<String>,
         space: Option<String>,
+        spaces: Vec<String>,
         permissions: Vec<Permission>,
     },
     Delete {
@@ -355,15 +419,15 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let action = map.get("action").and_then(Value::as_str).ok_or(CommandError)?;
     match (action, map.len()) {
         ("view", 1) => Ok(Command::View),
-        ("create", n) if n == 5 || n == 6 || n == 7 => {
+        ("create", n) if (5..=8).contains(&n) => {
             if !known_draft_keys(map) { return Err(CommandError); }
-            let (id, name, instructions, model, space, permissions) = draft_fields(map)?;
-            Ok(Command::Create { id, name, instructions, model, space, permissions })
+            let (id, name, instructions, model, space, spaces, permissions) = draft_fields(map)?;
+            Ok(Command::Create { id, name, instructions, model, space, spaces, permissions })
         }
-        ("update", n) if n == 5 || n == 6 || n == 7 => {
+        ("update", n) if (5..=8).contains(&n) => {
             if !known_draft_keys(map) { return Err(CommandError); }
-            let (id, name, instructions, model, space, permissions) = draft_fields(map)?;
-            Ok(Command::Update { id, name, instructions, model, space, permissions })
+            let (id, name, instructions, model, space, spaces, permissions) = draft_fields(map)?;
+            Ok(Command::Update { id, name, instructions, model, space, spaces, permissions })
         }
         ("delete", 2) => {
             let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
@@ -393,6 +457,31 @@ fn draft_space(map: &serde_json::Map<String, Value>) -> Result<Option<String>, C
     }
 }
 
+fn draft_spaces(map: &serde_json::Map<String, Value>) -> Result<Vec<String>, CommandError> {
+    match map.get("spaces") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => {
+            if items.len() > MAX_SPACES {
+                return Err(CommandError);
+            }
+            let mut out = Vec::new();
+            for item in items {
+                let s = item.as_str().ok_or(CommandError)?;
+                if !valid_space(s) {
+                    return Err(CommandError);
+                }
+                let name = s.trim().to_string();
+                if out.contains(&name) {
+                    return Err(CommandError);
+                }
+                out.push(name);
+            }
+            Ok(out)
+        }
+        Some(_) => Err(CommandError),
+    }
+}
+
 fn draft_permissions(map: &serde_json::Map<String, Value>) -> Result<Vec<Permission>, CommandError> {
     match map.get("permissions") {
         None | Some(Value::Null) => Ok(READ_ONLY.to_vec()),
@@ -411,12 +500,12 @@ fn draft_permissions(map: &serde_json::Map<String, Value>) -> Result<Vec<Permiss
     }
 }
 
-type Draft = (String, String, String, Option<String>, Option<String>, Vec<Permission>);
+type Draft = (String, String, String, Option<String>, Option<String>, Vec<String>, Vec<Permission>);
 
 /// The optional #375 fields widen the accepted SHAPE, never the vocabulary: any key outside the
 /// known set is refused, so `extra:1` can never ride in as a sixth field.
 fn known_draft_keys(map: &serde_json::Map<String, Value>) -> bool {
-    map.keys().all(|k| matches!(k.as_str(), "action" | "id" | "name" | "instructions" | "model" | "space" | "permissions"))
+    map.keys().all(|k| matches!(k.as_str(), "action" | "id" | "name" | "instructions" | "model" | "space" | "spaces" | "permissions"))
 }
 
 fn draft_fields(map: &serde_json::Map<String, Value>) -> Result<Draft, CommandError> {
@@ -434,7 +523,7 @@ fn draft_fields(map: &serde_json::Map<String, Value>) -> Result<Draft, CommandEr
         Some(Value::String(m)) if valid_profile_id(m) => Some(m.clone()),
         _ => Err(CommandError)?,
     };
-    Ok((id.to_string(), name.to_string(), instructions.to_string(), model, draft_space(map)?, draft_permissions(map)?))
+    Ok((id.to_string(), name.to_string(), instructions.to_string(), model, draft_space(map)?, draft_spaces(map)?, draft_permissions(map)?))
 }
 
 // --- mutations: pure, fail closed, never partially applied ---------------------------------------
@@ -448,6 +537,7 @@ pub fn create(store: &Store, s: Specialist) -> Result<Store, CommandError> {
         || !valid_instructions(&s.instructions)
         || !valid_model(&s.model)
         || s.space.as_deref().is_some_and(|space| !valid_space(space))
+        || !valid_spaces(&s.spaces)
         || !valid_permissions(&s.permissions)
     {
         return Err(CommandError);
@@ -462,6 +552,7 @@ pub fn create(store: &Store, s: Specialist) -> Result<Store, CommandError> {
         instructions: s.instructions.trim().to_string(),
         model: s.model,
         space: s.space,
+        spaces: s.spaces,
         permissions: s.permissions,
     });
     Ok(next)
@@ -476,6 +567,7 @@ pub fn update(
     instructions: &str,
     model: Option<String>,
     space: Option<String>,
+    spaces: Vec<String>,
     permissions: Vec<Permission>,
 ) -> Result<Store, CommandError> {
     if !valid_id(id) || store.find(id).is_none() {
@@ -485,6 +577,7 @@ pub fn update(
         || !valid_instructions(instructions)
         || !valid_model(&model)
         || space.as_deref().is_some_and(|s| !valid_space(s))
+        || !valid_spaces(&spaces)
         || !valid_permissions(&permissions)
     {
         return Err(CommandError);
@@ -495,6 +588,7 @@ pub fn update(
         s.instructions = instructions.trim().to_string();
         s.model = model;
         s.space = space;
+        s.spaces = spaces;
         s.permissions = permissions;
     }
     Ok(next)
