@@ -118,6 +118,13 @@ const MAX_PROVIDERS: usize = 32;
 const MONITOR: &str = "monitor";
 pub const MAX_MONITOR_KEY: usize = 64;
 
+/// T6.2: the remembered own-window size bounds (logical px). The min matches the
+/// window's own `min_inner_size`; the max is beyond any plausible desktop window
+/// a human would choose, so a larger value is corrupt data, never a choice.
+pub const SETTINGS_WINDOW_SIZE_MIN: (u32, u32) = (720, 480);
+pub const SETTINGS_WINDOW_SIZE_MAX: (u32, u32) = (3840, 2400);
+const SETTINGS_WINDOW_SIZE: &str = "settings_window_size";
+
 /// #380: the closed theme mode. `System` is the DEFAULT and is also what an absent
 /// `theme` field means, so a file nobody changed never grows the key.
 pub const THEMES: [&str; 3] = ["system", "light", "dark"];
@@ -201,10 +208,16 @@ pub struct Prefs {
     /// `None` means the default placement (the island's current monitor) and is never
     /// written, so an untouched file keeps its bytes.
     pub monitor: Option<String>,
-    /// #366 F093: whether Ajustes opens in its own window instead of inside the island.
-    /// `None` means the default (in-island, #408) and is never written, so an untouched
-    /// file keeps its bytes.
-    pub settings_window: Option<bool>,
+/// #366 F093: whether Ajustes opens in its own window instead of inside the island.
+/// `None` means the default (in-island, #408) and is never written, so an untouched
+/// file keeps its bytes.
+pub settings_window: Option<bool>,
+    /// T6.2: the remembered inner size of the own Ajustes window, in LOGICAL px
+    /// (as `inner_size`/`min_inner_size` take them). Absent from a file nobody
+    /// resized the window in, so an untouched `prefs.json` keeps its bytes; a
+    /// stored size outside the bounds below is hostile data, dropped on load —
+    /// fitting the CURRENT screen is the opening path's job (`settingswindow::opening_size`).
+    pub settings_window_size: Option<(u32, u32)>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -303,6 +316,26 @@ fn valid_monitor_key(key: &str) -> bool {
 /// must never panic the island.
 fn valid_position(x: i32, y: i32) -> bool {
     x.unsigned_abs() <= POSITION_LIMIT && y.unsigned_abs() <= POSITION_LIMIT
+}
+
+/// T6.2: the remembered window size is bounded on BOTH axes; everything else is
+/// corrupt data and reads as no remembered size.
+fn valid_settings_window_size(w: u32, h: u32) -> bool {
+    (SETTINGS_WINDOW_SIZE_MIN.0..=SETTINGS_WINDOW_SIZE_MAX.0).contains(&w)
+        && (SETTINGS_WINDOW_SIZE_MIN.1..=SETTINGS_WINDOW_SIZE_MAX.1).contains(&h)
+}
+
+/// The stored size, accepted only as a complete, bounded `{"w":..,"h":..}` pair —
+/// a closed shape, like the IPC schema and #264's position, so a padded, truncated
+/// or wrongly typed object reads as *no remembered size* (the 960x640 default).
+fn settings_window_size_from(value: Option<&Value>) -> Option<(u32, u32)> {
+    let map = value?.as_object()?;
+    if map.len() != 2 {
+        return None;
+    }
+    let w = u32::try_from(map.get("w")?.as_u64()?).ok()?;
+    let h = u32::try_from(map.get("h")?.as_u64()?).ok()?;
+    valid_settings_window_size(w, h).then_some((w, h))
 }
 
 /// The stored position, accepted only as a complete, bounded `{"x":..,"y":..}` pair —
@@ -422,6 +455,7 @@ impl Prefs {
             monitor: v.get(MONITOR).and_then(Value::as_str)
                 .filter(|key| valid_monitor_key(key)).map(str::to_owned),
             settings_window: v.get("settings_window").and_then(Value::as_bool),
+            settings_window_size: settings_window_size_from(v.get(SETTINGS_WINDOW_SIZE)),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -476,6 +510,9 @@ impl Prefs {
         if let Some(on) = self.settings_window {
             v["settings_window"] = json!(on);
         }
+        if let Some((w, h)) = self.settings_window_size.filter(|(w, h)| valid_settings_window_size(*w, *h)) {
+            v[SETTINGS_WINDOW_SIZE] = json!({"w": w, "h": h});
+        }
         v.to_string()
     }
 }
@@ -523,6 +560,11 @@ pub enum Command {
     /// #366 F093: whether Ajustes opens in its own window (opt-in). `false`
     /// stores the default (in-island) as no key at all.
     SetSettingsWindow(bool),
+    /// T6.2: the remembered inner size of the own Ajustes window (logical px).
+    /// Deliberately NOT produced by [`parse_command`]: the WebView can read
+    /// neither the size nor the fact that one is stored — the size comes from
+    /// the window's own resize events, never from the page (like #264's position).
+    SetSettingsWindowSize(u32, u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -809,6 +851,12 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         // #366 F093: `false` is the default, so it stores no key at all (an
         // untouched file keeps its bytes) — the same rule as every optional field.
         Command::SetSettingsWindow(on) => next.settings_window = on.then_some(true),
+        // T6.2: the value gate ran nowhere else — apply is the ONLY boundary for
+        // this Rust-side command, so the bounds check runs here for every caller.
+        Command::SetSettingsWindowSize(w, h) => {
+            if !valid_settings_window_size(*w, *h) { return Err(CommandError); }
+            next.settings_window_size = Some((*w, *h));
+        }
     }
     Ok(next)
 }

@@ -1150,11 +1150,12 @@ mod chosen_models {
             custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("mint".into()) }]),
             monitor: Some("DP-1".into()),
             settings_window: None,
+            settings_window_size: Some((960, 640)),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
@@ -1580,4 +1581,77 @@ fn f093_default_is_in_island_and_hostile_stored_values_are_dropped() {
     assert_eq!(value["open_on_hover"], json!(true));
     assert_eq!(value["settings_window"], json!(true));
     assert!(value.get("stowaway").is_none(), "unknown keys are dropped");
+}
+
+// ---- T6.2: the remembered size of the own Ajustes window ----------------------
+
+/// T6.2: the window size is a typed optional pref — a closed `{"w":..,"h":..}`
+/// shape in logical px, absent from a file nobody resized the window in, so an
+/// untouched `prefs.json` keeps exactly the bytes it had. Every hostile shape
+/// (wrong type, padded, truncated, float, negative) reads as absent.
+#[test]
+fn t62_settings_window_size_defaults_to_absent_and_an_untouched_file_keeps_its_bytes() {
+    assert_eq!(Prefs::default().settings_window_size, None, "absent means the 960x640 default");
+    for bad in [
+        None, Some(""), Some("not json"), Some("{}"), Some(r#"{"v":2}"#),
+        Some(r#"{"v":1,"settings_window_size":"big"}"#),
+        Some(r#"{"v":1,"settings_window_size":960}"#),
+        Some(r#"{"v":1,"settings_window_size":{"w":960}}"#),
+        Some(r#"{"v":1,"settings_window_size":{"w":960,"h":640,"x":1}}"#),
+        Some(r#"{"v":1,"settings_window_size":{"w":960.0,"h":640}}"#),
+        Some(r#"{"v":1,"settings_window_size":{"w":-960,"h":640}}"#),
+        Some(r#"{"v":1,"settings_window_size":{"w":960,"h":null}}"#),
+        Some(r#"{"v":1,"settings_window_size":{"W":960,"H":640}}"#),
+    ] {
+        let p = Prefs::from_text(bad);
+        assert_eq!(p.settings_window_size, None, "{bad:?} must read as no remembered size");
+        assert!(!p.to_text().contains("settings_window_size"), "{bad:?} leaves no key behind");
+    }
+    let untouched = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#));
+    assert_eq!(untouched.settings_window_size, None);
+    assert_eq!(untouched.to_text(), r#"{"sound":true,"v":1}"#, "an untouched file keeps its bytes");
+}
+
+/// T6.2: the size is bounded to min..max sensible logical values and the page
+/// can NEVER supply one: `set_settings_window_size` is not a wire command (the
+/// closed `parse_command` refuses it; only Rust saves a size, like #264's position).
+#[test]
+fn t62_settings_window_size_bounds_and_the_page_never_supplies_one() {
+    let set = |w, h| apply(&Prefs::default(), &Command::SetSettingsWindowSize(w, h));
+    assert_eq!(set(960, 640).unwrap().settings_window_size, Some((960, 640)));
+    assert_eq!(set(720, 480).unwrap().settings_window_size, Some((720, 480)), "the min is a valid choice");
+    assert_eq!(set(3840, 2400).unwrap().settings_window_size, Some((3840, 2400)), "the max is a valid choice");
+    for (w, h) in [(719, 480), (960, 479), (3841, 2400), (960, 2401), (0, 0), (100_000, 100_000)] {
+        assert!(set(w, h).is_err(), "({w}, {h}) is outside the sensible bounds");
+    }
+    for bad in [
+        json!({"action":"set_settings_window_size","w":960,"h":640}),
+        json!({"action":"set_settings_window_size","size":{"w":960,"h":640}}),
+        json!({"action":"set_settings_window","settings_window":true,"w":960,"h":640}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}: the page never supplies a size");
+    }
+}
+
+/// T6.2: the size persists through the same v1 file, gate and atomic writer as
+/// every other preference; the bytes round-trip and a hostile stored value is
+/// dropped on load.
+#[test]
+fn t62_settings_window_size_persists_and_round_trips() {
+    let command = Command::SetSettingsWindowSize(960, 640);
+    let mut persisted = false;
+    let next = update(&Prefs::default(), &command, |_| { persisted = true; true }).unwrap();
+    assert!(persisted, "a changed size must reach disk");
+    let value = serde_json::from_str::<Value>(&next.to_text()).expect("to_text is JSON");
+    assert_eq!(value["settings_window_size"], json!({"w":960,"h":640}));
+    let reread = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(reread, next, "the stored size reads back exactly");
+    assert_eq!(reread.to_text(), next.to_text(), "stable bytes across a reload");
+    assert!(update(&Prefs::default(), &command, |_| false).is_err(), "a failed save must be reported");
+    // a hostile stored value is dropped on load, whatever the wire allowed
+    let hostile = Prefs::from_text(Some(r#"{"v":1,"settings_window_size":{"w":5000,"h":640}}"#));
+    assert_eq!(hostile.settings_window_size, None, "an out-of-bounds size reads as the default");
+    // an explicit equal-to-default size is still a stored choice (the human DID resize)
+    let default_sized = update(&Prefs::default(), &Command::SetSettingsWindowSize(960, 640), |_| true).unwrap();
+    assert!(default_sized.to_text().contains("settings_window_size"));
 }
