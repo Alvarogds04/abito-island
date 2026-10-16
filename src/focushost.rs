@@ -1,5 +1,6 @@
 //! F099 — closed, gated focus of an already-running terminal / agent session
-//! window / editor (F100's sibling command joins this module once wired). The
+//! window / editor. F100 (launch Claude Desktop) joins this module as its
+//! sibling command. The
 //! target comes from a CLOSED enum (`terminal` | `session` | `editor`): the
 //! payload never carries a command, a path or a window id, so a caller can
 //! only ask for a class of window the allowlists below already accept. When
@@ -355,4 +356,133 @@ mod x11 {
 #[cfg(target_os = "linux")]
 fn focus_on_display(display: Option<&str>, target: Target) -> Result<(), String> {
     x11::focus_on_display(display, target)
+}
+
+// ---------------------------------------------------------------------------
+// F100 — closed, gated launch of Claude Desktop.
+// ---------------------------------------------------------------------------
+
+/// Public Spanish reasons for the launch. Safe to show: they name the
+/// failure, never a path, a command or an internal.
+pub const ERR_INVALID_LAUNCH: &str = "Este comando no acepta parámetros.";
+pub const CLAUDE_NOT_INSTALLED_REASON: &str =
+    "Claude Desktop no está instalado en esta máquina.";
+pub const LAUNCH_FAILED_REASON: &str = "No pude abrir Claude Desktop.";
+pub const PLATFORM_LAUNCH_REASON: &str =
+    "Esta plataforma no permite abrir Claude Desktop.";
+
+/// The CLOSED desktop-entry names probed, in preference order. A caller can
+/// never name an entry, a file or a command: the probe only ever looks for
+/// these strings, and the only argument the launcher receives is a path the
+/// probe itself resolved.
+pub const CLAUDE_DESKTOP_ENTRIES: &[&str] =
+    &["claude.desktop", "claude-code.desktop", "Claude.desktop"];
+
+/// The CLOSED set of XDG application directories probed, in order.
+pub fn xdg_application_dirs() -> Vec<std::path::PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let data_home = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| format!("{home}/.local/share"));
+    vec![
+        std::path::PathBuf::from(data_home).join("applications"),
+        std::path::PathBuf::from(&home).join(".local/share/applications"),
+        std::path::PathBuf::from("/usr/local/share/applications"),
+        std::path::PathBuf::from("/usr/share/applications"),
+    ]
+}
+
+/// The closed probe: the FIRST directory (in the given order) holding a FILE
+/// named exactly like a closed entry (entry order inside the directory) wins;
+/// anything else — including unrelated files like `evil.desktop` — is
+/// invisible. `None` means "not installed", never a guess.
+pub fn find_desktop_entry(
+    dirs: &[std::path::PathBuf],
+    entries: &[&str],
+) -> Option<std::path::PathBuf> {
+    dirs.iter()
+        .flat_map(|dir| entries.iter().map(move |entry| dir.join(entry)))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The honest launch decision over a probed entry: absent → the Spanish
+/// not-installed reason with NO launch attempt; a failed launch → the launch
+/// reason. The launch closure receives only the probe-resolved PATH — never
+/// a caller-controlled value.
+pub fn launch_from_probe<F>(entry: Option<std::path::PathBuf>, launch: F) -> Result<(), String>
+where
+    F: FnOnce(std::path::PathBuf) -> bool,
+{
+    match entry {
+        None => Err(CLAUDE_NOT_INSTALLED_REASON.to_string()),
+        Some(path) => {
+            if launch(path) {
+                Ok(())
+            } else {
+                Err(LAUNCH_FAILED_REASON.to_string())
+            }
+        }
+    }
+}
+
+fn validated_empty_payload(payload: &Value) -> Result<(), BridgeError> {
+    let empty = payload.is_null() || payload.as_object().is_some_and(|map| map.is_empty());
+    if empty {
+        Ok(())
+    } else {
+        Err(BridgeError::denied(ERR_INVALID_LAUNCH))
+    }
+}
+
+/// The F100 command body: sender gate, closed-payload validation (the
+/// command takes NO parameters: `null` or `{}` only), rate gate, THEN the
+/// injected launch effect. A rejected call never consumes rate budget and
+/// never reaches the effect.
+pub fn launch_command<F>(
+    label: &str,
+    origin: &str,
+    payload: &Value,
+    rate: &mut RateLimiter,
+    now: u128,
+    launch: F,
+) -> Result<(), BridgeError>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    crate::bridge::sender_ok(label, origin)?;
+    validated_empty_payload(payload)?;
+    rate.check(now)?;
+    launch().map_err(|reason| BridgeError::denied(&reason))
+}
+
+/// The platform entry the command calls. On Linux this probes the closed
+/// desktop entries and hands the resolved path to `gio launch` (no shell, no
+/// caller-influenced argument, stdio detached); any other platform is an
+/// honest stub — the reason is Spanish and nothing is attempted.
+pub fn launch_claude_app() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let dirs = xdg_application_dirs();
+        launch_from_probe(find_desktop_entry(&dirs, CLAUDE_DESKTOP_ENTRIES), launch_desktop_entry)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(PLATFORM_LAUNCH_REASON.to_string())
+    }
+}
+
+/// `gio launch <path>` over the probe-resolved entry. No shell, no caller
+/// argument; best effort, never panics.
+#[cfg(target_os = "linux")]
+fn launch_desktop_entry(path: std::path::PathBuf) -> bool {
+    std::process::Command::new("gio")
+        .arg("launch")
+        .arg(&path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }

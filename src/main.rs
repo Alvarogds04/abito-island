@@ -914,6 +914,31 @@ async fn focus_host(
     )
 }
 
+/// F100: only a trusted local sender may ask the island to launch Claude
+/// Desktop. The probe is CLOSED (see `focushost`): the payload takes no
+/// parameters at all, the desktop entry is looked up among fixed names in
+/// the XDG application directories, and the only argument ever spawned is a
+/// path the probe itself resolved. An absent entry or an unwilling platform
+/// is an honest Spanish reason — never a false success, never a spawn with a
+/// caller-influenced argument.
+#[tauri::command]
+async fn launch_claude(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<(), BridgeError> {
+    let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    let mut rate = state.rate.lock().expect("rate lock");
+    abito_island::focushost::launch_command(
+        webview.label(),
+        &origin,
+        &payload,
+        &mut rate,
+        now_ms(),
+        abito_island::focushost::launch_claude_app,
+    )
+}
+
 /// The single IPC entry point behind `window.desktop.*` — Electron's
 /// `ipcMain.handle('desktop:action')`. The gate order mirrors main.cjs
 /// exactly: sender + payload validation FIRST, then the rate gate — an
@@ -1578,7 +1603,8 @@ fn main() {
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence,
-            focus_host
+            focus_host,
+            launch_claude
         ])
         // Electron `win.webContents.on('did-finish-load', publish)`.
         .on_page_load(|webview, _payload| {
