@@ -169,6 +169,40 @@ mod tests {
         }
     }
 
+    /// #366 F093: the commands reachable from the `settings` label are pinned EXACTLY. Every
+    /// other Tauri command must call `main_window_only` near its top, so a future command can
+    /// never silently become reachable from the settings window.
+    #[test]
+    fn f093_the_commands_reachable_from_settings_are_pinned_exactly() {
+        const REACHABLE: [&str; 7] = [
+            "agent_action", "daemon_action", "hotkey_action", "models_action",
+            "prefs_action", "settings_window_action", "specialists_action",
+        ];
+        let needle = concat!("#[tauri", "::command]");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut ungated = std::collections::BTreeSet::new();
+        let mut all = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(dir).expect("src dir") {
+            let path = entry.expect("entry").path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            if !name.ends_with(".rs") || name.ends_with("_tests.rs") { continue; }
+            let text = std::fs::read_to_string(&path).expect("read");
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if line.trim() != needle { continue; }
+                let Some(off) = lines[i + 1..].iter().position(|l| l.contains("fn ")) else { continue };
+                let decl = lines[i + 1 + off];
+                let fname = decl.split("fn ").nth(1).and_then(|r| r.split('(').next()).unwrap_or("").trim().to_string();
+                let window = lines[i + 1..(i + 16).min(lines.len())].join("\n");
+                all.insert(fname.clone());
+                if !window.contains("main_window_only(") { ungated.insert(fname); }
+            }
+        }
+        let want: std::collections::BTreeSet<String> = REACHABLE.iter().map(|s| s.to_string()).collect();
+        assert_eq!(ungated, want, "commands reachable from the settings label changed");
+        assert!(all.len() >= 20, "the scan must see every command, saw {all:?}");
+    }
+
     /// #366 F093: only the human's explicit opt-in opens the own window.
     #[test]
     fn f093_only_the_explicit_opt_in_opens_the_own_window() {

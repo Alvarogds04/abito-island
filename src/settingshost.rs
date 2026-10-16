@@ -223,6 +223,7 @@ pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<
 /// rectangle on close; the page never sends a number. Same sender gate and rate limiter as the others.
 #[tauri::command]
 pub async fn settings_view(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;

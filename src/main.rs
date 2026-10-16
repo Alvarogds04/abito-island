@@ -891,6 +891,7 @@ async fn open_chat_url(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<(), BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
     let mut child = None;
     {
@@ -924,6 +925,7 @@ async fn focus_host(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<(), BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
     let mut rate = state.rate.lock().expect("rate lock");
     abito_island::focushost::focus_command(
@@ -949,6 +951,7 @@ async fn launch_claude(
     state: State<'_, AppState>,
     payload: Value,
 ) -> Result<(), BridgeError> {
+    crate::settingswindow::main_window_only(webview.label())?;
     let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
     let mut rate = state.rate.lock().expect("rate lock");
     abito_island::focushost::launch_command(
@@ -1454,14 +1457,16 @@ fn dispatch_action(
 /// typed rejections, its own label/URL) so the read-back probe can print it.
 /// Not part of the preload surface and not rate limited.
 #[tauri::command]
-fn record_facade_evidence(state: State<AppState>, evidence: Value) {
+fn record_facade_evidence(webview: tauri::Webview, state: State<AppState>, evidence: Value) {
+    if settingswindow::main_window_only(webview.label()).is_err() { return; }
     *state.facade.lock().expect("facade lock") = Some(evidence);
 }
 
 /// U1 probe-only channel: the webview reports what the chat surface
 /// observed (DOM sizes, IPC answers). Not rate limited, stores at most 8.
 #[tauri::command]
-fn record_chat_evidence(state: State<AppState>, evidence: Value) {
+fn record_chat_evidence(webview: tauri::Webview, state: State<AppState>, evidence: Value) {
+    if settingswindow::main_window_only(webview.label()).is_err() { return; }
     let mut lines = state.chat_probe.lock().expect("chat probe lock");
     if lines.len() < 8 {
         lines.push(evidence);
@@ -1477,12 +1482,14 @@ fn record_chat_evidence(state: State<AppState>, evidence: Value) {
 /// user touches the island or any toggle happens (generation > 0).
 #[tauri::command]
 fn record_frontend_evidence(
+    webview: tauri::Webview,
     app: AppHandle,
     state: State<AppState>,
     svgs: usize,
     canvases: usize,
     revision: String,
 ) {
+    if settingswindow::main_window_only(webview.label()).is_err() { return; }
     *state.evidence.lock().expect("evidence lock") = Some(Evidence {
         svgs,
         canvases,
