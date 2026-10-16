@@ -108,6 +108,10 @@ independent verification, and explicit parent/human runtime gate.
 Cargo test/build receipts for this unit belong to task log L12, not inferred approval.
 Node or Cargo results do not prove WebKit/native rendering, transport roundtrip or live focus.
 
+## Type and space scale (T6.1, design §1/§3)
+
+As-built, from `design/abito-ui.fig` (DESIGN-NOTES §1/§3, Ajustes PNGs dark+light). `--fs-title/body/label/caption` (16/14/13/12) and `--space-4..32` (4/8/12/16/20/24/32) are declared at the TOP of `style.css`, before any rule that uses them. Ajustes surfaces (island column and own window): screen title 16/600, section label 12/600 uppercase sans, rows 40 with gap 8, group gap 20, rail 184 with 36-visual r10 tabs, buttons and fields 32 visual inside an invisible 44px hit area (buttons/tabs draw the pill on an `::after` inset layer; fields use a transparent 6px border with the background clipped to the padding box). Fonts come only from the ramp: rows 13, subs/hints 12, fields 14, buttons 13. Theme recolours only; the scale is theme-independent.
+
 ## Geometry ruling (parent, 2026-10-13)
 
 Preview geometry was adapted to native dimensions during the port: 66px compact dot, 640×160 overview, 400×640 work-area chat (native-owned; resize/geometry guards own these numbers). Settings (#408) is ONE panel, Ajustes, with a tablist (Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General; names live in `settings-view.js` `TABS`); the model picker is its tab. While it is open the island grows to the Rust-owned Settings size (720 × min(680, work area)) and gives the chat rectangle back on close. Tabs reuse the existing tokens (`--go` selected, `--line-soft`, 44px targets); provider cards (`.scard`) use `--fill-soft`, `--island-live` for in-progress and `--red-11` for errors, no new palette. Real host-backed models/accounts replace preview demo groups. The tall-column and vertical-account INTENT carries over; exact preview px values are not authority here. A 72px right safety gutter for notices and the native R6 ~128px were retained rather than breaking the existing overview contract.
