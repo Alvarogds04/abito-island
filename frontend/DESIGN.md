@@ -111,3 +111,24 @@ Node or Cargo results do not prove WebKit/native rendering, transport roundtrip 
 ## Geometry ruling (parent, 2026-10-13)
 
 Preview geometry was adapted to native dimensions during the port: 66px compact dot, 640×160 overview, 400×640 work-area chat (native-owned; resize/geometry guards own these numbers). Settings (#408) is ONE panel, Ajustes, with a tablist (Cuentas, Conectores, Modelos, Especialistas, Pills, Apariencia, General; names live in `settings-view.js` `TABS`); the model picker is its tab. While it is open the island grows to the Rust-owned Settings size (720 × min(680, work area)) and gives the chat rectangle back on close. Tabs reuse the existing tokens (`--go` selected, `--line-soft`, 44px targets); provider cards (`.scard`) use `--fill-soft`, `--island-live` for in-progress and `--red-11` for errors, no new palette. Real host-backed models/accounts replace preview demo groups. The tall-column and vertical-account INTENT carries over; exact preview px values are not authority here. A 72px right safety gutter for notices and the native R6 ~128px were retained rather than breaking the existing overview contract.
+
+## Chat transcript cards (#371, OD002/OD024/GD031)
+
+As-built, 2026-10-16. The transcript renders two field-driven card kinds in the
+chat log: tool-call receipts (`turn.tool_calls: [{call_id, name, state:
+running|done|failed, summary?}]`) and approval-decision cards (`turn.approvals:
+[{request_id, operation, decision: approved|denied|expired}]`), whose words
+reuse the #338 card vocabulary (Permitida/Denegada; Vencida keeps the honest
+expiry). Rows exist ONLY when the turn carries those fields — no producer emits
+them today (the local-model lane is text only), so plain messages render
+byte-identically and the cards stay dormant until the agent lane fills the
+contract. Everything is one bounded plain-text line per card: control
+characters collapse, names cap at 80 scalars, summaries at 240; an unmodelled
+state or decision is announced «Desconocido/Desconocida», never guessed.
+`chat-view.js` derives the rows (and keeps `rowKey` state-sensitive so
+running→done patches in place), `chat-cards.js` builds the DOM with text nodes
+and registry icons only, `chat-markdown.css` styles them from themed tokens
+(both palettes), and the cards carry no interactive control: decisions happen
+on the #338 island card, so nothing here can trap focus. Public checks:
+`test-node/transcript-cards-check.cjs` (RED observed before each fix;
+packaging's curated `FRONTEND_FILES` list gained `chat-cards.js`).
