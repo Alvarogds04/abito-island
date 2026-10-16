@@ -237,4 +237,50 @@ test('#336 L18 a click without a hover-open is unchanged: never cancelled (facad
   f.click();
 });
 
+// ---- #419: the approved countdown decoration surface -----------------------
+
+test('#419 index.html carries exactly one aria-hidden hidden countdown element inside #island', () => {
+  const html = read('index.html');
+  assert.equal((html.match(/id="island-countdown"/g) || []).length, 1, 'exactly one countdown element');
+  const el = html.match(/<div id="island-countdown"[^>]*><\/div>/);
+  assert.ok(el, 'the element is an empty decoration div');
+  assert.match(el[0], /aria-hidden="true"/, 'pure decoration: hidden from the tree');
+  assert.match(el[0], / hidden/, 'starts hidden; only the view shows it');
+  const island = html.indexOf('<div id="island">');
+  const at = html.indexOf('id="island-countdown"');
+  const header = html.indexOf('<header id="island-header"');
+  assert.ok(island >= 0 && island < at && at < header, 'the bar lives inside #island, before the header');
+  assert.doesNotMatch(el[0], /style=|onclick|on\w+=/, 'strict CSP: no inline style or handlers');
+});
+
+test('#419 island.js wires the published countdown into the guarded view (two spots only)', () => {
+  const src = read('island.js');
+  assert.equal((src.match(/createCountdownView\(/g) || []).length, 1, 'the view is created exactly once');
+  assert.match(src, /document\.getElementById\('island-countdown'\)/, 'the approved element is the only surface');
+  // guarded creation: a missing module, export or element keeps everything a no-op
+  const creation = src.match(/const countdownView = [\s\S]*?;/);
+  assert.ok(creation, 'one guarded view creation');
+  assert.match(creation[0], /window\.AbitoIslandInteraction\s*&&/, 'module present');
+  assert.match(creation[0], /createCountdownView/, 'export present');
+  assert.match(creation[0], /countdownEl/, 'element present');
+  assert.match(src, /onCountdown: value => \{ if \(countdownView\) countdownView\.update\(value\); \}/,
+    'the hook renders the published value and nothing else');
+  assert.doesNotMatch(src, /innerHTML/, 'no innerHTML anywhere (#411 unchanged)');
+});
+
+test('#419 style.css rules: theme tokens, transform token, reduced motion, no system media query', () => {
+  const css = read('style.css');
+  assert.ok(/#island-countdown \{/.test(css), 'the bar has rules');
+  assert.match(css, /transform: scaleX\(var\(--island-countdown-fraction/, 'the fraction drives the shrink');
+  const reduce = css.match(/html\[data-motion="reduce"\] #island-countdown[^{]*\{[^}]*\}/);
+  assert.ok(reduce && /transition:\s*none/.test(reduce[0]), 'Abito owns reduced motion: reduce removes the transition');
+  const block = css.match(/#island-countdown \{[^}]*\}/)[0];
+  assert.match(block, /position:\s*absolute/, 'no layout shift: the bar never reflows the island');
+  assert.match(block, /pointer-events:\s*none/, 'decoration never intercepts input');
+  assert.match(block, /var\(--faint\)/, 'track uses an existing theme token');
+  assert.ok(/#island-countdown::before \{[^}]*var\(--island-live\)/.test(css), 'fill uses an existing theme token');
+  assert.doesNotMatch(css.slice(css.indexOf('#island-countdown')), /@media[^{]*prefers-reduced-motion/,
+    'no system media query: island.js paints data-motion');
+});
+
 console.log(`island-interaction-wiring-check: ${passed} passed`);

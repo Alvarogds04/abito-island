@@ -402,6 +402,13 @@
   // wired here (no approved surface owns its markup/style yet), so
   // onCountdown stays silent — the close itself does not depend on it.
   let composingIME = false;
+  // countdown VISUAL (#419): the approved decoration surface is one element;
+  // the adapter renders the published fraction into it and never drives the
+  // close from it. A missing module, export or element keeps it a no-op.
+  const countdownEl = document.getElementById('island-countdown');
+  const countdownView = window.AbitoIslandInteraction &&
+    typeof window.AbitoIslandInteraction.createCountdownView === 'function' && countdownEl
+    ? window.AbitoIslandInteraction.createCountdownView(countdownEl) : null;
   const interaction = window.AbitoIslandInteraction
     ? window.AbitoIslandInteraction.createController({
         now: () => performance.now(),
@@ -409,7 +416,7 @@
         cancel: id => clearTimeout(id),
         open: () => (window.desktop ? window.desktop.expand() : Promise.reject(new Error('host unavailable'))),
         autoClose: () => (window.desktop ? window.desktop.autoClose() : Promise.reject(new Error('host unavailable'))),
-        onCountdown: () => { /* the countdown visual needs an approved surface (element + style); the close does not */ },
+        onCountdown: value => { if (countdownView) countdownView.update(value); },
       })
     : null;
   const TEXT_FIELD = 'input, textarea, [contenteditable="true"]';

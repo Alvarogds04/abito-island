@@ -64,6 +64,10 @@
            red triangle = channel down. Shape + colour; never text. -->
       <span id="compact-flag" role="img" hidden><span class="ico" id="compact-flag-icon"></span></span>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
+      <!-- #419: visual auto-close countdown — pure decoration (aria-hidden,
+           hidden by default). The interaction adapter renders the published
+           countdown fraction into it; it never drives the close. -->
+      <div id="island-countdown" aria-hidden="true" hidden></div>
       <!-- UI.1: visual overview (docs/desktop-visual-language.md). Icons come
            from icons.js (own inline SVG); every icon-only control has an
            aria-label; long sentences live behind the «i» buttons. -->

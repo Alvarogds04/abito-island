@@ -1253,3 +1253,34 @@ html[data-theme="light"] .sfield { color-scheme: light; }
 #settings-body[data-screen="accounts"] .sconn-row .srow-actions { justify-content: flex-end; }
 #settings-body[data-screen="accounts"] .sconn-row .sflow { border: 0; padding: 4px 0 0; width: 100%; }
 #settings-body[data-screen="accounts"] .sconn-row .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+
+/* ---- #419: visual auto-close countdown (decoration only) ----------------
+   A quiet thin bar at the island's inner bottom edge that shrinks with the
+   published inactivity countdown fraction (0..1) as the island approaches
+   its auto-close. aria-hidden, hidden by default, absolutely positioned:
+   it never reflows the island, never intercepts input and never decides
+   anything — the close stays the module's autoClose verb. Tokens only, so
+   «claro» y «oscuro» both keep working. */
+#island-countdown {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--faint);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+#island-countdown::before {
+  content: "";
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--island-live);
+  transform: scaleX(var(--island-countdown-fraction, 1));
+  transform-origin: center;
+  transition: transform var(--dur-state) linear;
+}
+html[data-motion="reduce"] #island-countdown::before { transition: none; }
