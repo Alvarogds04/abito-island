@@ -327,7 +327,77 @@
     return out;
   }
 
+  // ---- #442 T7.4: agents = a specialist record + its avatar colour + its place on the island ----------
+  // Pure projections only. Island membership is `prefs.islandAgents` (≤3 ids, null = default: the
+  // first three stored). Specialists beyond three stay stored and are listed in `stored`.
+  const MAX_ISLAND = 3;
+  // The colour contract (avatar-colors.js, #384) is INJECTED: this module carries no colour logic.
+  const palette = A => (A && Array.isArray(A.PALETTE) ? A.PALETTE : []);
+  const colorFor = (A, map, id) => (A && typeof A.resolveColor === 'function' ? A.resolveColor(id, map) : '');
+  const shortRole = text => {
+    const line = String(text || '').split('\n')[0].trim();
+    return Array.from(line).length > 28 ? Array.from(line).slice(0, 27).join('').trimEnd() + '…' : line;
+  };
+  function agentsView(store, prefs, A) {
+    const base = storeView(store, null);
+    if (base.kind !== 'ready') return { kind: base.kind, agents: [], stored: [], count: 0, full: false, max: MAX_ISLAND };
+    const p = prefs && typeof prefs === 'object' ? prefs : {};
+    const byId = new Map(base.rows.map(r => [r.id, r]));
+    const order = Array.isArray(p.islandAgents)
+      ? p.islandAgents.filter((id, i, all) => isStr(id) && byId.has(id) && all.indexOf(id) === i).slice(0, MAX_ISLAND)
+      : base.rows.slice(0, MAX_ISLAND).map(r => r.id);
+    const project = r => ({ id: r.id, name: r.name, instructions: r.instructions, role: shortRole(r.instructions), model: r.model,
+      modelLabel: r.modelLabel, modelReady: r.modelReady, color: colorFor(A, p.avatarColors, r.id) });
+    const agents = order.map(id => ({ ...project(byId.get(id)), active: true, state: 'rest', stateWord: 'En reposo' }));
+    const stored = base.rows.filter(r => !order.includes(r.id)).map(r => ({ ...project(r), active: false, state: 'paused', stateWord: 'Pausado' }));
+    return { kind: 'ready', agents, stored, count: agents.length, full: agents.length >= MAX_ISLAND, max: MAX_ISLAND };
+  }
+  // The next island order for one gesture, or null when it is refused (never a partial change).
+  function islandOrderAfter(order, allIds, op) {
+    const cur = Array.isArray(order) ? order.filter(id => allIds.includes(id)) : [];
+    if (!op || typeof op !== 'object') return null;
+    if (isStr(op.toggle)) {
+      if (!allIds.includes(op.toggle)) return null;
+      if (cur.includes(op.toggle)) return cur.filter(id => id !== op.toggle);
+      return cur.length >= MAX_ISLAND ? null : [...cur, op.toggle];
+    }
+    if (isStr(op.move) && (op.by === 1 || op.by === -1)) {
+      const at = cur.indexOf(op.move), to = at + op.by;
+      if (at < 0 || to < 0 || to >= cur.length) return null;
+      const next = [...cur]; next.splice(to, 0, next.splice(at, 1)[0]);
+      return next;
+    }
+    return null;
+  }
+  // Data the human already created (custom blobs, declared catalog pills) that no specialist
+  // carries yet: offered with an explicit «Convertir en agente», never converted or hidden silently.
+  function savedBefore(store, prefs, C, A) {
+    const base = storeView(store, null);
+    const taken = new Set(base.kind === 'ready' ? base.rows.map(r => r.name.toLowerCase()) : []);
+    const p = prefs && typeof prefs === 'object' ? prefs : {};
+    const out = [];
+    for (const b of Array.isArray(p.customBlobs) ? p.customBlobs : []) {
+      if (!b || !isStr(b.name) || taken.has(b.name.toLowerCase())) continue;
+      out.push({ key: `blob:${b.name}`, kind: 'blob', name: b.name, color: palette(A).includes(b.color) ? b.color : '',
+        instructions: `Agente que ya tenías guardado: ${b.name}.` });
+    }
+    for (const id of Array.isArray(p.declaredPills) ? p.declaredPills : []) {
+      const def = C && C.definition ? C.definition(id) : null;
+      if (!def || taken.has(def.name.toLowerCase())) continue;
+      const own = p.pillColors && Object.prototype.hasOwnProperty.call(p.pillColors, id) && palette(A).includes(p.pillColors[id]) ? p.pillColors[id] : '';
+      out.push({ key: `pill:${id}`, kind: 'pill', id, name: def.name, color: own,
+        instructions: `Ayuda con ${def.name}.` });
+    }
+    return out;
+  }
+  function catalogPrefill(C, id, prefs, A) {
+    const def = C && C.definition ? C.definition(id) : null;
+    if (!def) return null;
+    return { id, name: def.name, color: (prefs && prefs.pillColors && Object.prototype.hasOwnProperty.call(prefs.pillColors, id) && palette(A).includes(prefs.pillColors[id])) ? prefs.pillColors[id] : (colorFor(A, null, id) || ''), instructions: `Ayuda con ${def.name}.` };
+  }
+
   return {
+    agentsView, islandOrderAfter, savedBefore, catalogPrefill, MAX_ISLAND,
     makeForm, roleChoices, roleKeyIndex, MAX_SPECIALISTS, MAX_NAME, MAX_INSTRUCTIONS, MAX_SPACE, ID_RE, FORBIDDEN_IDS,
     PERMISSIONS, READ_ONLY, permissionLabel, sanitizePermissions,
     newId, randomId, validId, validateDraft, idTaken, storeView, identityView, roleChip, modelOptions, catalogNote, modelLabel, countWord,

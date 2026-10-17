@@ -366,4 +366,66 @@ test('wiring: the section shows ONE declarativo chip and drops the repeated decl
   assert.match(src, /specialists-declarativo/, 'the chip carries the stable id the checks can find');
 });
 
+
+// ---- #442 T7.4: agents = specialist records + colour + island order (max 3) ------------------------------
+const A = require(path.join(frontend, 'avatar-colors.js'));
+const rec = (id, name, extra = {}) => ({ id, name, instructions: extra.instructions || `Hace ${name}.`, model: null, space: null, spaces: [], permissions: ['read'] });
+const store = (...ids) => ({ v: 1, active: null, specialists: ids.map(i => rec(i, i.toUpperCase())), persisted: true, load_error: false });
+
+test('agentsView: island order is the stored one, else the first three stored; deleted ids drop; extra specialists stay stored', () => {
+  const st = store('esp-a', 'esp-b', 'esp-c', 'esp-d');
+  let v = S.agentsView(st, { islandAgents: null, avatarColors: {} }, A);
+  assert.deepEqual(v.agents.map(a => a.id), ['esp-a', 'esp-b', 'esp-c'], 'absent = first three');
+  assert.deepEqual(v.stored.map(a => a.id), ['esp-d'], 'the fourth is kept, not shown as a tile');
+  assert.equal(v.count, 3); assert.equal(v.full, true);
+  v = S.agentsView(st, { islandAgents: ['esp-d', 'esp-gone', 'esp-a'], avatarColors: {} }, A);
+  assert.deepEqual(v.agents.map(a => a.id), ['esp-d', 'esp-a'], 'order respected, unknown ids dropped');
+  assert.deepEqual(v.stored.map(a => a.id), ['esp-b', 'esp-c']);
+  assert.equal(v.full, false);
+  v = S.agentsView(st, { islandAgents: [], avatarColors: {} }, A);
+  assert.deepEqual(v.agents, [], 'an explicit empty order is «nobody on the island»');
+  assert.equal(S.agentsView(null, {}).kind, 'loading');
+  assert.equal(S.agentsView({ load_error: true }, {}).kind, 'unavailable');
+});
+
+test('agentsView: colour comes from avatarColors for the SAME id (green default), state chip is En reposo; short role is one line', () => {
+  const st = { ...store('esp-a'), specialists: [rec('esp-a', 'Notas', { instructions: 'Ordena tus notas y resume lo pendiente de la semana entera.\nSegunda línea.' })] };
+  const a = S.agentsView(st, { islandAgents: null, avatarColors: { 'esp-a': 'mint' } }, A).agents[0];
+  assert.equal(a.color, 'mint'); assert.equal(a.state, 'rest'); assert.equal(a.stateWord, 'En reposo');
+  assert.ok(a.role.length <= 28 && !a.role.includes('\n'), a.role);
+  assert.equal(S.agentsView(st, { avatarColors: {} }, A).agents[0].color, A.resolveColor('esp-a', {}), 'the default is the #384 contract\'s, not ours');
+  assert.equal(S.agentsView(st, { avatarColors: { 'esp-a': 'red' } }, A).agents[0].color, A.resolveColor('esp-a', {}), 'off-palette reads as the default');
+  assert.equal(S.agentsView(st, { avatarColors: Object.create({ 'esp-a': 'blue' }) }, A).agents[0].color, A.resolveColor('esp-a', {}), 'inherited keys never answer');
+});
+
+test('islandOrderAfter: toggle active (cap 3) and move; refusals return null', () => {
+  const all = ['esp-a', 'esp-b', 'esp-c', 'esp-d'];
+  assert.deepEqual(S.islandOrderAfter(['esp-a'], all, { toggle: 'esp-b' }), ['esp-a', 'esp-b']);
+  assert.deepEqual(S.islandOrderAfter(['esp-a', 'esp-b'], all, { toggle: 'esp-a' }), ['esp-b']);
+  assert.equal(S.islandOrderAfter(['esp-a', 'esp-b', 'esp-c'], all, { toggle: 'esp-d' }), null, 'a fourth is refused');
+  assert.equal(S.islandOrderAfter(['esp-a'], all, { toggle: 'esp-zzz' }), null);
+  assert.deepEqual(S.islandOrderAfter(['esp-a', 'esp-b', 'esp-c'], all, { move: 'esp-c', by: -1 }), ['esp-a', 'esp-c', 'esp-b']);
+  assert.equal(S.islandOrderAfter(['esp-a', 'esp-b'], all, { move: 'esp-a', by: -1 }), null, 'moving past the edge is refused');
+  assert.equal(S.islandOrderAfter(['esp-a'], all, {}), null);
+});
+
+test('savedBefore: custom blobs and declared catalog pills with no matching specialist, by name', () => {
+  const C = require(path.join(frontend, 'pill-catalog.js'));
+  const st = { ...store('esp-a'), specialists: [rec('esp-a', 'GitHub')] };
+  const rows = S.savedBefore(st, { customBlobs: [{ name: 'Notas', color: 'mint' }, { name: 'github', color: '' }],
+    declaredPills: ['integration_github', 'integration_n8n'], pillColors: { integration_n8n: 'purple' } }, C, A);
+  assert.deepEqual(rows.map(r => [r.kind, r.name, r.color]), [['blob', 'Notas', 'mint'], ['pill', 'n8n', 'purple']],
+    'a stored entry whose name already is a specialist is not offered again');
+  assert.ok(rows.every(r => r.instructions.length > 0 && r.instructions.length <= 2000 && r.key));
+  assert.deepEqual(S.savedBefore(st, {}, C, A), []);
+});
+
+test('catalogPrefill: name, colour and «Qué hace» from the offered catalog definition', () => {
+  const C = require(path.join(frontend, 'pill-catalog.js'));
+  const p = S.catalogPrefill(C, 'integration_github', { pillColors: { integration_github: 'blue' } }, A);
+  assert.equal(p.name, 'GitHub'); assert.equal(p.color, 'blue'); assert.ok(p.instructions.includes('GitHub'));
+  assert.ok(A.PALETTE.includes(S.catalogPrefill(C, 'integration_github', {}, A).color), 'an unset colour falls to the contract default');
+  assert.equal(S.catalogPrefill(C, 'nope', {}, A), null);
+});
+
 console.log(`specialists-view-check: ${passed} passed`);
