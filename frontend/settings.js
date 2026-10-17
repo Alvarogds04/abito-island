@@ -50,7 +50,7 @@
   const moreGroup = $('connections-more'); // FAKE services cards; render() wipes the body, so it is re-appended per render
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
-  let screen = 'accounts';
+  let screen = 'general'; // #442 T7.4: Ajustes opens on General (design §3 order, flows lane 4)
   let filter = '';
   let agentsAsk = null;   // { at: engine error counter when agents_list was sent, timer, timedOut }
   let loginTarget = null;  // #408: { providerId, phase: 'active'|'error'|'cancelled', sawFlow } — the login this page started
@@ -235,7 +235,7 @@
   window.addEventListener('resize', syncRail);
   function showScreen(id) {
     screen = id;
-    id = V.tabAlias(id) || 'accounts';
+    id = V.tabAlias(id) || 'general';
     screen = id;
     if (id !== 'accounts') { filter = ''; discardAccountForm(); }
     const def = V.tabById(id);
@@ -485,18 +485,7 @@
     if (conn) { chip.dataset.tone = conn.tone; chip.setAttribute('aria-label', conn.aria); putIcon($('settings-conn-icon'), conn.icon); $('settings-conn-word').textContent = conn.word; }
     if (screen === 'accounts') { renderAccounts(); renderConnectors(); }
     else if (screen === 'models') { /* models.js owns this panel */ }
-    else if (screen === 'specialists') {
-      // #327: the human creates a role, chooses it and goes back to the principal from here.
-      const panel = window.AbitoSpecialistsPanel;
-      if (panel) {
-        const host = el('div');
-        host.id = 'specialists-section';
-        body.append(host);
-        panel.renderSection(host);
-      } else {
-        body.append(el('p', 'snote', 'Los especialistas no están disponibles en esta compilación.'));
-      }
-    } else renderGeneral(); // pills / appearance / general: each section names its tab
+    else renderGeneral(); // pills / appearance / general: each section names its tab
     if (moreGroup) { moreGroup.hidden = !V.servicesGroupVisible(screen); if (!moreGroup.hidden) body.append(moreGroup); }
     body.scrollTop = keep;
     if (focused && $(focused) && body.contains($(focused))) {
@@ -1221,5 +1210,5 @@
   // #366 F093: inside the Rust-created settings window the SAME page opens
   // Ajustes at once — the panel IS the window (the island chrome stays hidden
   // by CSS, and the island's own phase machinery is never driven from here).
-  if (WINDOW_MODE) open('accounts');
+  if (WINDOW_MODE) open('general');
 })();

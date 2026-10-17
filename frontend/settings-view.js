@@ -13,25 +13,25 @@
   // ---- screens ------------------------------------------------------------------------------------------------
   // Copied from gentle-dot (MIT): one icon button per screen in the chat header; each screen COVERS the chat
   // body with a title, a close button and a one-line hint. Opening one closes the others.
-  // #408: ONE entry point (Ajustes), seven sub-tabs. This table is the single place to rename or
-  // reorder them: the tab strip, the title/hint and the deep-link seam all read it.
+  // #408: ONE entry point (Ajustes), five sub-tabs (#442 T7.4: Especialistas is merged into Blobs).
+  // This table is the single place to rename or reorder them: the tab strip, the title/hint and
+  // the deep-link seam all read it. Order per DESIGN-NOTES §3/§9: General first, then the rest.
   const TABS = Object.freeze([
+    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General',
+      hint: 'Atajo de teclado y sonido.' }),
     Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones',
       hint: 'Proveedores de IA, agentes de código y servicios en un solo lugar. Tu inicio de sesión queda en esta computadora. Preguntá antes de enviar o cambiar algo.' }),
     Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
       hint: 'Elegí qué modelos de tus proveedores conectados usa Abito. Los locales están más abajo.' }),
-    Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
-      hint: 'Roles manuales con sus propias instrucciones. Sólo se usan si los elegís.' }),
     Object.freeze({ id: 'pills', title: 'Blobs', icon: 'ring', label: 'Blobs',
-      hint: 'Una principal y hasta cuatro declaradas; elegir no conecta.' }),
+      hint: 'Cada blob es un agente: nombre, color, qué hace y modelo.' }),
     Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia',
       hint: 'Tema, colores, movimiento y cómo te saluda Abito.' }),
-    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General',
-      hint: 'Atajo de teclado y sonido.' }),
   ]);
   const tabById = id => TABS.find(x => x.id === id) || null;
-  // S8: Cuentas + Conectores are ONE tab now. Old ids (deep links, probe seam) resolve through this table.
-  const TAB_ALIASES = Object.freeze({ connectors: 'accounts' });
+  // S8: Cuentas + Conectores are ONE tab now. #442 T7.4: Especialistas merged into Blobs.
+  // Old ids (deep links, probe seam) resolve through this table.
+  const TAB_ALIASES = Object.freeze({ connectors: 'accounts', specialists: 'pills' });
   // Ajustes -> Conexiones owns the FAKE services group; no other tab shows it.
   const servicesGroupVisible = id => tabAlias(id) === 'accounts';
   const tabAlias = id => (Object.prototype.hasOwnProperty.call(TAB_ALIASES, id) ? TAB_ALIASES[id] : (tabById(id) ? id : null));

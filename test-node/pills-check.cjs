@@ -480,6 +480,8 @@ test('#409 T1 «Sacarlo»: Conexiones renders no Pi card, sends no pi_connection
   const b = boot({ store }); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
   b.click('open-screen-settings'); await flush();
+  // #442 T7.4: Ajustes opens on General now; these Conexiones rows need the tab opened explicitly
+  b.click('settings-tab-accounts'); await flush();
   assert.ok(!b.get('pi-connection'), 'no Pi card, even with an owned nan account');
   const text = allText(b.get('settings-body'));
   assert.ok(!text.includes('Usar la conexión de Pi'), 'no offer label anywhere');
@@ -496,6 +498,8 @@ test('#409 T2 «Quitar conexión» lives on the owned-account row: exact sentenc
   const b = boot({ store }); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
   b.click('open-screen-settings'); await flush();
+  // #442 T7.4: Ajustes opens on General now; these Conexiones rows need the tab opened explicitly
+  b.click('settings-tab-accounts'); await flush();
   assert.ok(buttons(b).includes('Quitar conexión'), 'the owned-account row offers deletion'); // RED before T2
   b.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Quitar conexión').fire('click'); await flush();
   assert.deepEqual(store.removes, ['nan'], 'abito_account_remove carries the accountId');
@@ -506,6 +510,7 @@ test('#409 T2 «Quitar conexión» lives on the owned-account row: exact sentenc
   const c = boot({ store: failing }); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) c.load(file);
   c.click('open-screen-settings'); await flush();
+  c.click('settings-tab-accounts'); await flush();
   c.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Quitar conexión').fire('click'); await flush();
   assert.equal(failing.view().accounts.length, 1, 'the store did not change');
   assert.ok(buttons(c).includes('Quitar conexión'), 'the row is still there');
@@ -518,6 +523,8 @@ test('#409 T3 the manual masked editor: full field set, credential options, writ
   const b = boot({ store }); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
   b.click('open-screen-settings'); await flush();
+  // #442 T7.4: Ajustes opens on General now; these Conexiones rows need the tab opened explicitly
+  b.click('settings-tab-accounts'); await flush();
   const openEditor = async () => {
     b.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Editar').fire('click'); await flush();
     const form = b.get('account-form'); assert.ok(form, 'the masked editor opens from the row'); return form;
@@ -595,6 +602,8 @@ test('#410 the credential state is an icon chip from the closed registry (same w
   const b = boot({ store: fakeStore({ accounts: [account] }) }); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
   b.click('open-screen-settings'); await flush();
+  // #442 T7.4: Ajustes opens on General now; these Conexiones rows need the tab opened explicitly
+  b.click('settings-tab-accounts'); await flush();
   const chip = findWhere(b.get('owned-accounts'), n => String(n.className || '').split(/\s+/).includes('chip'));
   assert.ok(chip, 'the row says the credential state with a chip, not a bare line of text');
   assert.equal(allText(chip), 'Clave guardada', 'the words are unchanged');
@@ -605,6 +614,7 @@ test('#410 the credential state is an icon chip from the closed registry (same w
   const c = boot({ store }); await flush();
   for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) c.load(file);
   c.click('open-screen-settings'); await flush();
+  c.click('settings-tab-accounts'); await flush();
   c.get('owned-accounts').querySelectorAll('button').find(x => allText(x) === 'Editar').fire('click'); await flush();
   c.get('account-credential').value = 'clear'; c.get('account-form').fire('submit'); await flush();
   const cleared = findWhere(c.get('owned-accounts'), n => String(n.className || '').split(/\s+/).includes('chip'));

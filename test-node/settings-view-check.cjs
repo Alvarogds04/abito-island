@@ -55,13 +55,15 @@ test('T6.3 auto-close segmented projection: presets, honest custom value, enable
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
-test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos, Especialistas, Blobs, Apariencia, General', () => {
-  assert.deepEqual(S.TABS.map(x => x.id), ['accounts', 'models', 'specialists', 'pills', 'appearance', 'general']);
-  assert.deepEqual(S.TABS.map(x => x.title), ['Conexiones', 'Modelos', 'Especialistas', 'Blobs', 'Apariencia', 'General']);
+test('#442 T7.4 five sub-tabs of ONE Ajustes entry, design order (DESIGN-NOTES §3/§9): General, Conexiones, Modelos, Blobs, Apariencia — Especialistas is merged into Blobs', () => {
+  assert.deepEqual(S.TABS.map(x => x.id), ['general', 'accounts', 'models', 'pills', 'appearance']);
+  assert.deepEqual(S.TABS.map(x => x.title), ['General', 'Conexiones', 'Modelos', 'Blobs', 'Apariencia']);
   // S8: the old ids still resolve (deep links), to the merged tab
   assert.equal(S.tabAlias('connectors'), 'accounts');
   assert.equal(S.tabAlias('accounts'), 'accounts');
   assert.equal(S.tabAlias('models'), 'models');
+  // #442 T7.4: the Especialistas deep link resolves to the tab that absorbed it
+  assert.equal(S.tabAlias('specialists'), 'pills');
   assert.equal(S.tabAlias('nope'), null);
   for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
   assert.equal(S.tabById('connectors'), null, 'resolved through tabAlias, not a tab of its own');
@@ -70,11 +72,13 @@ test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos,
 });
 
 test('#408 tablist keyboard: arrows wrap, Home/End jump, other keys are ignored', () => {
-  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'models');
   assert.equal(S.tabKeyTarget('general', 'ArrowRight'), 'accounts');
-  assert.equal(S.tabKeyTarget('accounts', 'ArrowLeft'), 'general');
-  assert.equal(S.tabKeyTarget('pills', 'Home'), 'accounts');
-  assert.equal(S.tabKeyTarget('pills', 'End'), 'general');
+  assert.equal(S.tabKeyTarget('accounts', 'ArrowRight'), 'models');
+  assert.equal(S.tabKeyTarget('models', 'ArrowRight'), 'pills');
+  assert.equal(S.tabKeyTarget('appearance', 'ArrowRight'), 'general');
+  assert.equal(S.tabKeyTarget('general', 'ArrowLeft'), 'appearance');
+  assert.equal(S.tabKeyTarget('pills', 'Home'), 'general');
+  assert.equal(S.tabKeyTarget('pills', 'End'), 'appearance');
   assert.equal(S.tabKeyTarget('pills', 'a'), null);
   assert.equal(S.tabKeyTarget('nope', 'ArrowRight'), null);
 });
@@ -1074,7 +1078,7 @@ console.log(`settings-view-check: ${passed} passed`);
 
 test('#408 rail: vertical tablist at the Settings size (Up/Down), wrapping row only as the 400 column fallback', () => {
   assert.equal(S.tabKeyTarget('pills', 'ArrowDown'), 'appearance');
-  assert.equal(S.tabKeyTarget('pills', 'ArrowUp'), 'specialists');
+  assert.equal(S.tabKeyTarget('pills', 'ArrowUp'), 'models');
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.match(src, /setAttribute\('aria-orientation', wide \? 'vertical' : 'horizontal'\)/);
   const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
