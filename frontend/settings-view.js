@@ -429,8 +429,13 @@
       const list = Array.isArray(store[p.id]) ? store[p.id].filter(x => typeof x === 'string') : [];
       return {
         id: p.id, name, connected: true,
+        // T7.2: the capability chips read ONLY the closed fields the engine frame already
+        // carries (agentclient `models` fold): reasoning and contextWindow. Nothing is
+        // invented — an absent/zero context and a false reasoning draw no chip.
         models: models.filter(m => m && m.provider === p.id && typeof m.id === 'string')
-          .map(m => ({ id: m.id, name: String(m.name || m.id), chosen: list.includes(m.id) })),
+          .map(m => ({ id: m.id, name: String(m.name || m.id), chosen: list.includes(m.id),
+            reasoning: m.reasoning === true,
+            contextWindow: Number.isFinite(m.contextWindow) && m.contextWindow > 0 ? m.contextWindow : null })),
       };
     });
     return { kind: 'ready', groups };
