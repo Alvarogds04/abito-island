@@ -224,6 +224,26 @@
     const i = input || {};
     return i.honorSystem === true && i.systemReduced === true ? 'reduce' : 'full';
   }
+
+  // #439 — the phase attribute the island reports while it animates. The spring's
+  // overshoot makes p cross the target and dip back, and the plain computation then
+  // toggled expanded↔expanding (and compact↔collapsing) PER FRAME; every §9.2 view
+  // rule is keyed on [data-phase="expanded"], so each toggle un-applied and re-applied
+  // the delayed enter/exit transitions — the navigation flashes — and re-fired every
+  // capsule MutationObserver mid-resize. `settled` is the landed phase this animation
+  // already reached (island.js computes it per frame); once landed toward the target
+  // it never regresses until the animation ends. With no animation state (idle) the
+  // helper stays the plain computed value.
+  function viewPhase(p, target, mode, settled) {
+    let phase = 'collapsing';
+    if (p >= 1) phase = 'expanded';
+    else if (p <= 0) phase = 'compact';
+    else if (target > p) phase = 'expanding';
+    if (mode === 'idle' || !settled) return phase;
+    if (target === 1 && settled === 'expanded') return 'expanded';
+    if (target === 0 && settled === 'compact') return 'compact';
+    return phase;
+  }
   // snapshot.motionOverride === true (the new default) = do NOT honor the system.
   const honorSystemMotion = snapshot => !!snapshot && snapshot.motionOverride === false;
 
@@ -284,5 +304,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

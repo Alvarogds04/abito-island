@@ -605,6 +605,52 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   assert.match(reduced, /html\[data-motion="reduce"\] #clay \{ transition: none !important/);
 });
 
+test('#439 viewPhase latches the settled phase: the overshoot dip never toggles the attribute back mid-animation', () => {
+  assert.equal(typeof O.viewPhase, 'function');
+  // The island-side bookkeeping under test: per frame, `landed` is the settled
+  // phase the animation reached (null otherwise), the latch survives while the
+  // animation runs and resets with it. viewPhase must never regress the phase.
+  const landed = (p, target) => {
+    if (target === 1 && p >= 1) return 'expanded';
+    if (target === 0 && p <= 0) return 'compact';
+    return null;
+  };
+  const simulate = frames => {
+    let settled = null;
+    return frames.map(([p, mode, target]) => {
+      const hit = landed(p, target);
+      if (mode === 'idle') settled = null;
+      else if (hit) settled = hit;
+      return O.viewPhase(p, target, mode, settled);
+    });
+  };
+  // grow with overshoot: expanding until the spring first reaches 1, then
+  // expanded for good — never expanding again while the spring oscillates.
+  assert.deepEqual(simulate([[0.3, 'spring', 1], [0.99, 'spring', 1], [1.02, 'spring', 1],
+    [0.97, 'spring', 1], [1.001, 'spring', 1], [1, 'idle', 1]]),
+    ['expanding', 'expanding', 'expanded', 'expanded', 'expanded', 'expanded']);
+  // shrink with a bounce near 0: collapsing until it lands, then compact —
+  // the bounce never turns the attribute back to collapsing.
+  assert.deepEqual(simulate([[1, 'shrink', 0], [0.5, 'shrink', 0], [0.02, 'shrink', 0],
+    [0, 'shrink', 0], [-0.01, 'shrink', 0], [0.03, 'shrink', 0], [0, 'idle', 0]]),
+    ['expanded', 'collapsing', 'collapsing', 'compact', 'compact', 'compact', 'compact']);
+  // interrupted: collapse mid-expand. setPhase resets the latch, so the old
+  // settled phase never outlives its animation and the shrink reaches compact.
+  assert.deepEqual(simulate([[0.9, 'spring', 1], [1.02, 'spring', 1], [0.97, 'shrink', 0],
+    [0, 'shrink', 0], [0.02, 'shrink', 0], [0, 'idle', 0]]),
+    ['expanding', 'expanded', 'collapsing', 'compact', 'compact', 'compact']);
+  // with no animation state the helper stays the plain computed value
+  assert.equal(O.viewPhase(0.5, 1, 'idle', null), 'expanding');
+  assert.equal(O.viewPhase(1, 0, 'idle', null), 'expanded');
+  assert.equal(O.viewPhase(0, 0, 'idle', null), 'compact');
+  // island.js delegates the phase write to the helper and never re-writes the
+  // same dataset value (a repeated write re-fires every capsule observer); a new
+  // setPhase resets the latch so an interrupted animation cannot inherit it
+  assert.match(islandSrc, /O\.viewPhase\(p, target, mode, settledPhase\)/);
+  assert.match(islandSrc, /if \(capsule\.dataset\.phase !== phase\)/);
+  assert.match(islandSrc, /settledPhase = null; \/\/ a new transition never inherits the previous latch/);
+});
+
 test('§5 chat header: R6 ~40px VISIBLE (box x 112/128 within 4px) and inside the header', () => {
   const [box, left, top] = /CHAT = \{[^}]*clay: (\d+), clayLeft: (\d+), clayTop: (\d+)/.exec(islandSrc).slice(1).map(Number);
   const vb = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
