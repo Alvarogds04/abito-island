@@ -462,7 +462,7 @@
 
   // ---- composer ---------------------------------------------------------------
   // #309: the composer grows with what is typed (a few lines, then it scrolls), like a column chat.
-  const MIN_INPUT = 44, MAX_INPUT = 120;
+  const MIN_INPUT = 36, MAX_INPUT = 120;
   function autosize() {
     input.style.height = 'auto';
     input.style.height = Math.max(MIN_INPUT, Math.min(MAX_INPUT, input.scrollHeight)) + 'px';

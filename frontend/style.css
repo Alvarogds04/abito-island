@@ -1793,6 +1793,38 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 /* §4.1: the own window uses the same panel at 272 wide. */
 #settings[data-rail="true"] #settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr) 272px; }
 
+/* ---- T7.3 island controls (design §1/§2, island PNGs): every island control is 32px VISUAL
+   inside its 44px HIT area — the T6.1 hit-ring pattern, so the visible pill is drawn on the
+   ::after inset layer and the button keeps its full 44px click target. The rail tab is 36px
+   visual (design §1: rail tab 36); the chat composer row is 36px. Scoped to the island's own
+   selectors: Ajustes controls (.sbtn/.sfield/.stab) keep their T7.2 rules. Tokens only (a V1
+   test slices style.css from its marker to EOF). ---- */
+#island-header .tab, #island-header .hdr-action { position: relative; z-index: 0; }
+#island-header .tab::after, #island-header .hdr-action::after { content: ""; position: absolute; inset: 4px; z-index: -1; border-radius: 10px; }
+#island-header .tab[aria-pressed="true"] { background: transparent; }
+#island-header .tab[aria-pressed="true"]::after { background: var(--tab-on); }
+#island-header .hdr-action { background: transparent; }
+#island-header .hdr-action::after { background: var(--fill-hover); }
+
+#capsule .icon-btn { position: relative; z-index: 0; border: 0; background: transparent; }
+#capsule .icon-btn::after { content: ""; position: absolute; inset: 6px; z-index: -1; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
+#capsule .icon-btn:hover::after { background: var(--fill-hover); }
+#capsule .icon-btn[aria-expanded="true"]::after { border-color: var(--go); }
+
+.q-option, #question-skip, #allow, #deny { position: relative; z-index: 0; background: transparent; border: 0; border-radius: 0; }
+.q-option::after, #question-skip::after, #allow::after, #deny::after { content: ""; position: absolute; inset: 6px; z-index: -1; border-radius: 10px; border: 0; background: var(--btn-bg); }
+#allow::after { background: var(--primary-bg); }
+#allow:hover:not(:disabled)::after { background: var(--primary-hover); }
+#deny:hover:not(:disabled)::after, .q-option:hover:not(:disabled)::after, #question-skip:hover:not(:disabled)::after { background: var(--btn-bg-hover); }
+.q-option, #question-skip, #allow, #deny { color: var(--ink-2); }
+#allow { color: var(--primary-ink); }
+
+#chat-composer .round { position: relative; z-index: 0; border: 0; background: transparent; }
+#chat-composer .round::after { content: ""; position: absolute; inset: 4px; z-index: -1; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
+#chat-send::after { background: var(--primary-bg); border: 0; }
+#chat-send:disabled::after { opacity: .4; }
+#chat-input, #question-text { min-height: 36px; }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
@@ -1826,4 +1858,3 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #settings-body[data-screen="accounts"] .sconn-row .srow-actions { justify-content: flex-end; }
 #settings-body[data-screen="accounts"] .sconn-row .sflow { border: 0; padding: 4px 0 0; width: 100%; }
 #settings-body[data-screen="accounts"] .sconn-row .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
-
