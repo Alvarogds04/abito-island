@@ -215,6 +215,40 @@ pub enum ClickKind { Question, Finished }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Click { pub id: String, pub kind: ClickKind }
 
+/// #437: the `dismiss` verb, display-only like the click. Argument-free
+/// (exactly {action}) it keeps the M2 behaviour: the FIRST notice goes. With
+/// exactly one extra key — a string `id` validated with the same canonical
+/// question ID validator as the click — EXACTLY that notice is dismissed.
+/// Anything else (a stowaway key, a non-string or malformed id, another
+/// action, a non-object) is refused: the list view's × must never fall back
+/// to the first notice (coordinator decision, T6.6 #437).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dismiss { pub id: Option<String> }
+
+pub fn parse_dismiss(payload: &Value) -> Result<Dismiss, BridgeError> {
+    if serde_json::to_vec(payload).unwrap_or_default().len() > MAX_ACTION_BYTES {
+        return Err(BridgeError::denied("payload too large"));
+    }
+    let map = payload
+        .as_object()
+        .ok_or_else(|| BridgeError::denied("dismiss must be an object"))?;
+    if map.get("action").and_then(Value::as_str) != Some("dismiss") {
+        return Err(BridgeError::denied("dismiss requires the dismiss action"));
+    }
+    match map.len() {
+        1 => Ok(Dismiss { id: None }),
+        2 if map.contains_key("id") => {
+            let id = map["id"]
+                .as_str()
+                .ok_or_else(|| BridgeError::denied("invalid notice id"))?;
+            crate::questioncmd::parse_command(&serde_json::json!({"action": "decline", "id": id}))
+                .map_err(|_| BridgeError::denied("invalid notice id"))?;
+            Ok(Dismiss { id: Some(id.into()) })
+        }
+        _ => Err(BridgeError::denied("dismiss carries at most one `id` key")),
+    }
+}
+
 /// Exact new boundary. Legacy validate_payload is unchanged. Reuse the
 /// canonical question ID validator without executing any question command.
 pub fn parse_click(payload: &Value) -> Result<Click, BridgeError> {
@@ -588,6 +622,31 @@ mod tests {
         }
         assert!(rl.check(999).is_err());
         assert!(rl.check(1_000).is_ok());
+    }
+
+    // --- #437: `dismiss` gains an optional exact notice id (per-row × in the
+    // notices list view). Exactly {action} or {action, id}: an unknown/malformed
+    // id or any stowaway key is refused; never a silent first-notice fallback.
+    const DISMISS_ID: &str = "3f2b8a40-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+
+    #[test]
+    fn parse_dismiss_is_argument_free_or_carries_exactly_one_valid_id() {
+        assert_eq!(parse_dismiss(&json!({"action": "dismiss"})).unwrap().id, None);
+        assert_eq!(
+            parse_dismiss(&json!({"action": "dismiss", "id": DISMISS_ID})).unwrap().id,
+            Some(DISMISS_ID.to_string())
+        );
+        for bad in [
+            json!({"action": "dismiss", "id": "not-a-uuid"}),
+            json!({"action": "dismiss", "id": 7}),
+            json!({"action": "dismiss", "id": null}),
+            json!({"action": "dismiss", "id": DISMISS_ID, "kind": "finished"}),
+            json!({"action": "dismiss", "index": 1}),
+            json!({"action": "click", "id": DISMISS_ID}),
+            json!("dismiss"),
+        ] {
+            assert!(parse_dismiss(&bad).is_err(), "{bad} must be refused");
+        }
     }
 
     // --- typed error surface ----------------------------------------------

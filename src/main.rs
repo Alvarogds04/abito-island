@@ -1095,6 +1095,27 @@ async fn desktop_action(
             .map_err(|_| BridgeError::denied("click aborted"))?
             .map_err(|_| BridgeError::denied("click aborted"))?;
     }
+    // #437: `dismiss` carries an optional exact notice id (the notices list
+    // view's per-row ×). Parsed BEFORE the generic validate_payload, which
+    // still refuses every stowaway key for the other argument-free verbs.
+    if payload.get("action").and_then(Value::as_str) == Some("dismiss") {
+        let dismiss = bridge::parse_dismiss(&payload)?;
+        state.rate.lock().expect("rate lock").check(now_ms())?;
+        // Same main-thread inline as the generic verb path: dismiss performs
+        // publish (window getters/ops); never across a lock off the main
+        // thread (R2 deadlock).
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let state = handle.state::<AppState>();
+            let _ = send.send(dispatch_dismiss(&handle, &state, dismiss));
+        })
+        .map_err(|_| BridgeError::denied("action scheduling failed"))?;
+        return tauri::async_runtime::spawn_blocking(move || receive.recv())
+            .await
+            .map_err(|_| BridgeError::denied("action aborted"))?
+            .map_err(|_| BridgeError::denied("action aborted"))?;
+    }
     let (action, index) = bridge::validate_payload(&payload)?;
     state.rate.lock().expect("rate lock").check(now_ms())?;
     // R2 routing: `runs_off_main_thread` is the SINGLE source of truth. The
@@ -1291,7 +1312,27 @@ fn dispatch_verb(
     dispatch_action(app, state, action, index)
 }
 
-/// #336 T1b-a: admission verdict for the NEW `autoClose` verb, decided from
+/// #437: the display-only dismissal the webview asks for. With no id the M2
+/// behaviour is untouched: the FIRST notice goes (the existing Dismiss arm,
+/// the same path the probe drives). With an id, EXACTLY that notice goes; an
+/// unknown id is refused with zero mutation and no publish — never a silent
+/// first-notice fallback (coordinator decision, T6.6 #437).
+fn dispatch_dismiss(
+    app: &AppHandle,
+    state: &AppState,
+    dismiss: bridge::Dismiss,
+) -> Result<Value, BridgeError> {
+    let Some(id) = dismiss.id else {
+        return dispatch_verb(app, state, Action::Dismiss, None);
+    };
+    let now = now_ms() as u64;
+    let removed = state.notices.lock().expect("notices lock").dismiss_exact(&id, now);
+    if !removed {
+        return Err(BridgeError::denied("unknown notice id"));
+    }
+    publish(app, state);
+    Ok(build_snapshot(app, state))
+}
 /// one snapshot of live facts taken under the established lock order. Every
 /// protected fact vetoes with the single approved sentence (L15 condition ii);
 /// a protected fact wins even over an already-compact island (fail closed),

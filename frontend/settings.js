@@ -341,6 +341,40 @@
     else if (e.detail !== 'chat' && isOpen()) close(false);
   });
   $('settings-close').addEventListener('click', e => { if (e.isTrusted === true) close(e.detail === 0); });
+  // #437 D9: «Ventana» in the in-island bar — the shortcut to the full Ajustes window.
+  // Built only for the in-island bar (in WINDOW_MODE the page already IS that window).
+  // The ONE closed window command only opens when the typed pref says so
+  // (settingswindow.rs answers open:false otherwise), so the click first saves the
+  // pref through the closed prefs command and then opens the window. «Ventana» means
+  // «open Ajustes in the window from now on»: the persistent pref flip is the point,
+  // and the General toggle («Abrir Ajustes en ventana») shows the new placement right
+  // away because prefs is the saved truth. A failed save or a failed open keeps the
+  // panel as it was: the pref is reverted and the failure is said, never silent.
+  const ventana = (() => {
+    if (WINDOW_MODE) return null;
+    const closeBtn = $('settings-close');
+    if (!closeBtn || !closeBtn.parentElement) return null;
+    const b = el('button', 'sbtn', 'Ventana');
+    b.type = 'button';
+    b.id = 'settings-window-open';
+    b.setAttribute('aria-label', 'Abrir Ajustes en ventana');
+    closeBtn.parentElement.insertBefore(b, closeBtn);
+    return b;
+  })();
+  if (ventana) ventana.addEventListener('click', e => {
+    if (e.isTrusted !== true || ventana.disabled) return;
+    ventana.disabled = true; // one flight at a time; the pref must not flip twice
+    call('prefs_action', { action: 'set_settings_window', settings_window: true }).then(p => {
+      prefs = p; render(); // the General toggle reflects the new placement immediately
+      return call('settings_window_action', { action: 'open' }).then(opened => {
+        if (opened && opened.open === true) { close(false); return; } // the panel yields to the window
+        throw new Error('the window was not opened');
+      });
+    }).catch(() => {
+      call('prefs_action', { action: 'set_settings_window', settings_window: false }).then(p => { prefs = p; render(); }, () => {});
+      say('No se pudo abrir la ventana. Ajustes sigue dentro de la isla.');
+    }).finally(() => { ventana.disabled = false; });
+  });
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {

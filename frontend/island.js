@@ -489,10 +489,14 @@
   const connectionEl = $('connection');
   const noticeTitle = $('notice-title');
   const noticeDetail = $('notice-detail');
-  const noticeCount = $('notice-count');
   const noticeDismiss = $('notice-dismiss');
   const noticePill = $('notice-pill');
   const noticeInfo = $('notice-info');
+  // #437: the design band state. `noticeBand` is the pure band view currently
+  // painted; `noticeListOpen` is the local «Ver» list (presentation only —
+  // never part of the native-confirmed navigation contract).
+  let noticeBand = null;
+  let noticeListOpen = false;
   const O = window.AbitoOverview;
   const NV = window.AbitoNotify;
   const ICONS = window.AbitoIcons;
@@ -512,6 +516,48 @@
   const putIcon = (host, node) => { if (host) host.replaceChildren(...(node ? [node] : [])); };
   // The waiting/status dot is an element too, never a literal `<span>`.
   const dotNode = () => { const dot = document.createElement('span'); dot.className = 'dot'; return dot; };
+  // ---- #437: the design band and the notices list (DOM nodes only, never markup) ----
+  // The band keeps the native-confirmed opener (#notice-open: ring + stacked
+  // title/age) and its own × (#notice-dismiss); the design's one action rides
+  // #notice-action («Abrir» keeps the native contract, «Ver» opens the local
+  // list). The old count badge is gone: the title says «N avisos» itself. The
+  // list view («Avisos · N» + «Descartar todos» + 32 px rows) is presentation
+  // only: every dismissal still rides the closed desktop verbs.
+  const noticeSub = document.createElement('span');
+  noticeSub.id = 'notice-sub';
+  const noticeAction = document.createElement('button');
+  noticeAction.type = 'button';
+  noticeAction.id = 'notice-action';
+  const noticeList = document.createElement('div');
+  noticeList.id = 'notice-list';
+  noticeList.hidden = true;
+  noticeList.setAttribute('role', 'group');
+  noticeList.setAttribute('aria-label', 'Avisos');
+  const noticeListHead = document.createElement('div');
+  noticeListHead.id = 'notice-list-head';
+  const noticeListTitle = document.createElement('strong');
+  noticeListTitle.id = 'notice-list-title';
+  const noticeClear = document.createElement('button');
+  noticeClear.type = 'button';
+  noticeClear.id = 'notice-clear';
+  noticeClear.textContent = 'Descartar todos';
+  noticeClear.setAttribute('aria-label', 'Descartar todos los avisos');
+  const noticeRows = document.createElement('div');
+  noticeRows.id = 'notice-rows';
+  noticeListHead.replaceChildren(noticeListTitle, noticeClear);
+  noticeList.replaceChildren(noticeListHead, noticeRows);
+  // Rebuild the strip's children ONCE at boot: the same static elements, the
+  // list rides last. The opener swallows the stacked title/age; the action and
+  // the × follow it inside the band.
+  const noticeChips = $('notice-row');
+  if (noticesEl && noticePill && noticeDetail && noticeChips) {
+    const noticeText = document.createElement('span');
+    noticeText.className = 'notice-text';
+    noticeText.replaceChildren(noticeTitle, noticeSub);
+    $('notice-open').replaceChildren($('notice-ring'), noticeText);
+    noticePill.replaceChildren($('notice-open'), noticeAction, noticeDismiss);
+    noticesEl.replaceChildren(noticeChips, noticePill, noticeDetail, noticeList);
+  }
   // #266: incoming-event reveal (Sileo-style). The pure gates in notify-view.js
   // decide WHICH snapshots are events (boot replays and churn are not); the pure
   // revealAction decides whether this capsule may act: a resting compact island
@@ -567,8 +613,8 @@
     }
   }
 
-  function paintRing(notices) {
-    const view = O && O.noticeView(notices, Date.now());
+  function paintBand(notices) {
+    const view = O.noticeBandView(notices, Date.now());
     if (view) putIcon($('notice-ring'), iconNode(ICONS.ring(view.fraction)));
     return view;
   }
@@ -601,16 +647,33 @@
       opener.disabled = !NV || !NV.openPayload({ isTrusted: true }, first, 'finished');
       opener.setAttribute('aria-label', first ? `Abrir aviso: ${first.title}` : 'Sin avisos');
     }
-    const view = paintRing(notices);
+    const view = paintBand(notices);
+    noticeBand = view;
     // #373 GD032: the strip carries the view's severity tone (error → red,
     // warning → sun); plain dataset writes below, never markup.
     noticesEl.dataset.tone = (view && view.tone) || '';
-    noticePill.hidden = !view;
-    noticesEl.dataset.count = view ? String(view.badge) : ''; // #423: the band hides a lone «1» badge
+    noticesEl.dataset.count = view ? String(view.count) : ''; // #437: no badge — the title says «N avisos» itself
+    noticePill.hidden = !view || noticeListOpen;
     if (view) {
       noticePill.setAttribute('aria-label', view.aria);
-      noticeTitle.textContent = view.text;
-      noticeCount.textContent = String(view.badge);
+      noticeTitle.textContent = view.title;
+      noticeSub.textContent = view.detail || '';
+      noticeAction.textContent = view.grouped ? 'Ver' : 'Abrir';
+      noticeAction.setAttribute('aria-label', view.grouped ? `Ver los ${view.count} avisos` : `Abrir aviso: ${first ? first.title : ''}`);
+    }
+    // #437: the list view — «Avisos · N» + «Descartar todos» + 32 px rows. It
+    // replaces the chips row and the band while it is open; fewer than two
+    // notices collapses it back to the band.
+    const list = O.noticeListView(notices, Date.now());
+    if (noticeListOpen && list && list.count > 1) {
+      noticeListTitle.textContent = `Avisos · ${list.count}`;
+      noticeRows.replaceChildren(...list.rows.map(noticeRowNode));
+      noticeList.hidden = false;
+      noticeChips.hidden = true;
+    } else {
+      noticeListOpen = false; // fewer than two (or nothing to show): back to the band
+      noticeList.hidden = true;
+      noticeChips.hidden = false;
     }
     noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : (bridge ? `${conn.detail} ${bridge.detail}` : conn.detail);
     noticeInfo.setAttribute('aria-label', O.infoLabel(first ? 'Ver detalle del aviso' : 'Ver detalle de la conexión', first ? view.aria : conn.aria));
@@ -662,15 +725,81 @@
     if (listen) listen('hotkey:state', event => paintHotkey(event && event.payload)).catch(() => {});
   }
   const noticeOpen = $('notice-open');
-  if (noticeOpen) noticeOpen.addEventListener('click', event => {
-    event.preventDefault();
+  // Native-confirmed navigation, shared by the band body and the single
+  // notice's «Abrir». Never switches optimistically or falls back to Expand:
+  // native liveness/expiry and ambiguity checks must complete before
+  // desktop:notice-open is emitted.
+  function openFirstNotice(event) {
     const first = current && Array.isArray(current.notices) ? current.notices[0] : null;
     const payload = NV && NV.openPayload(event, first, 'finished');
     if (!payload || !window.desktop || typeof window.desktop.click !== 'function') return;
-    // Never switch optimistically or fall back to Expand: native liveness/expiry
-    // and ambiguity checks must complete before desktop:notice-open is emitted.
     try { window.desktop.click(payload).catch(() => {}); } catch { /* fail closed */ }
+  }
+  if (noticeOpen) noticeOpen.addEventListener('click', event => {
+    event.preventDefault();
+    openFirstNotice(event);
   });
+  // #437: the band's one action. Grouped → «Ver» opens the LOCAL list (a
+  // presentation-only view, no native round trip); single → «Abrir» rides the
+  // same native-confirmed contract as the band body.
+  function toggleNoticeList(force) {
+    noticeListOpen = force === undefined ? !noticeListOpen : !!force;
+    renderNotices(current);
+  }
+  noticeAction.addEventListener('click', event => {
+    if (event.isTrusted !== true) return;
+    if (noticeBand && noticeBand.grouped) { toggleNoticeList(); return; }
+    openFirstNotice(event);
+  });
+  // One 32 px row of the list view. Its × dismisses EXACTLY that notice
+  // (desktop.dismiss(id)); Rust refuses an unknown id with zero mutation and
+  // the refusal path never falls back — it only refreshes what is shown.
+  function noticeRowNode(row) {
+    const li = document.createElement('div');
+    li.className = 'notice-list-row';
+    li.dataset.tone = row.tone || '';
+    const dot = document.createElement('span');
+    dot.className = 'notice-list-dot';
+    const title = document.createElement('span');
+    title.className = 'notice-list-title';
+    title.textContent = row.title;
+    const time = document.createElement('span');
+    time.className = 'notice-list-time';
+    time.textContent = row.time;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'notice-list-dismiss';
+    x.setAttribute('aria-label', `Descartar: ${row.title}`);
+    x.addEventListener('click', event => {
+      if (event.isTrusted !== true || !window.desktop || typeof window.desktop.dismiss !== 'function') return;
+      window.desktop.dismiss(row.id).then(snap => {
+        if (snap) { current = snap; syncToggle(snap.state); }
+        renderNotices(current); renderCard();
+      }, () => { renderNotices(current); }); // never falls back: refresh only
+    });
+    li.replaceChildren(dot, title, time, x);
+    return li;
+  }
+  // «Descartar todos»: the argument-free verb drops the FIRST notice, so the
+  // loop repeats it until the store is empty, bounded by the queue (8).
+  // Display-only; a dismissal never decides or approves anything.
+  noticeClear.addEventListener('click', event => {
+    if (event.isTrusted !== true || !window.desktop || typeof window.desktop.dismiss !== 'function') return;
+    let snap = current;
+    let guard = 8; // the notice queue is bounded at 8; never loop past it
+    const step = () => {
+      if (!snap || !Array.isArray(snap.notices) || !snap.notices.length || guard-- <= 0) {
+        if (snap) { current = snap; syncToggle(snap.state); }
+        renderNotices(current); renderCard();
+        return;
+      }
+      window.desktop.dismiss().then(next => { snap = next; step(); }, () => { renderNotices(current); });
+    };
+    step();
+  });
+  // The list is transient: Escape returns to the band; a view change closes it.
+  document.addEventListener('keydown', e => { if (e && e.key === 'Escape' && noticeListOpen) toggleNoticeList(false); });
+  document.addEventListener('island:view', () => { if (noticeListOpen) toggleNoticeList(false); });
   const listenNotice = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
   if (listenNotice) listenNotice('desktop:notice-open', event => {
     const payload = event && event.payload;

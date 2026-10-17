@@ -29,7 +29,12 @@
       close: () => action('close'),
       hide: () => action('hide'),
       quit: () => action('quit'),
-      dismiss: () => action('dismiss'),
+      // #437: argument-free = the FIRST notice goes (M2, unchanged); with an
+      // exact notice id, EXACTLY that notice goes — Rust validates it and
+      // refuses an unknown one with zero mutation, never a fallback.
+      dismiss: id => (id
+        ? invoke('desktop_action', { payload: { action: 'dismiss', id } })
+        : action('dismiss')),
       // Display-only opener. Rust validates the exact UUID/kind and current host identity.
       /** @param {{id: string, kind: 'question' | 'finished'}} notice */
       click: ({ id, kind }) => invoke('desktop_action', { payload: { action: 'click', id, kind } }),

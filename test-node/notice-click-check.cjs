@@ -31,6 +31,12 @@ const source = fs.readFileSync(path.join(__dirname, '../frontend/desktop.js'), '
     {command:'desktop_action',args:{payload:{action:'choose',index:1}}},
   ]));
   assert(!calls.some(c => ['allow','deny','answer','decline'].includes(c.args.payload.action)));
+  // #437: the per-row × dismisses an EXACT notice id; the argument-free call is
+  // unchanged above (the pinned M2 shape). The id is passed through as-is:
+  // Rust validates it (parse_dismiss) and refuses an unknown one with zero mutation.
+  const DISMISS_ID = '3f2b8a40-1c2d-4e5f-8a6b-7c8d9e0f1a2b';
+  await window.desktop.dismiss(DISMISS_ID);
+  assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify({command:'desktop_action',args:{payload:{action:'dismiss',id:DISMISS_ID}}}));
   assert(Object.isFrozen(window.desktop));
   // #336 U5: the additive autoClose verb rides the SAME single desktop_action
   // gate — one argument-free payload, nothing else (L17: one pinned assertion).
