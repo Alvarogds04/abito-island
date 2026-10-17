@@ -443,7 +443,7 @@
     const chip = $('settings-conn');
     chip.hidden = false; chip.dataset.tone = out.tone; chip.setAttribute('aria-label', out.say);
     putIcon($('settings-conn-icon'), out.icon); $('settings-conn-word').textContent = out.word;
-    clearTimeout(failureTimer); failureTimer = setTimeout(() => render(), 6000);
+    clearTimeout(failureTimer); failureTimer = setTimeout(() => { failureTimer = 0; render(); }, 6000);
   }
   let failureTimer = 0;
   function send(payload, okSay) {
@@ -472,8 +472,37 @@
   // them needs a decision about which store wins, not a patch here.
 
   // ---- rendering --------------------------------------------------------------------------------------------------------------
+  // #439: the portal pushes state about every 400 ms. A push that changes nothing
+  // the panel renders must not rebuild the DOM — every rebuild replays the view
+  // transitions and blinks Ajustes while the human navigates. The key is derived
+  // from the SAME inputs render() reads (keep the two in sync when editing either);
+  // live DRAFT VALUES (nameDraft, gainDraft, the makeDrafts fields) are
+  // deliberately excluded: the user's keystrokes are already in the DOM and every
+  // rebuild re-reads the same drafts, so they can never make the output stale.
+  // busy/waiting/accountGeneration render nothing and stay out too. There is no
+  // clock-driven text in this panel; the one timed visual is the failure chip,
+  // whose 6 s callback resets the failureTimer bit below before rendering.
+  let lastRenderKey = null;
+  function renderKey() {
+    return JSON.stringify([
+      screen, filter, prefs, hotkey, motionOverride, ownedAccounts,
+      accountForm ? 'form' : null, accountSaving, accountError, accountNote,
+      agentState && { connection: agentState.connection, providers: agentState.providers,
+        accounts: agentState.accounts, profiles: agentState.profiles, connectors: agentState.connectors,
+        agents: agentState.agents, hooks: agentState.hooks, last_error: agentState.last_error,
+        auth: agentState.auth, unavailable: agentState.unavailable },
+      agentsAsk ? [agentsAsk.at, agentsAsk.timedOut] : null,
+      loginTarget, pendingLogin, daemonBusy, daemonNote,
+      nameSaving, nameError, gainSaving, gainError, autoSaving, autoError, capturing,
+      themeError, colorErrors, pillSaving, pillError,
+      specialistIdentities(), failureTimer !== 0,
+    ]);
+  }
   function render() {
     if (!isOpen()) return;
+    const key = renderKey();
+    if (key === lastRenderKey) return;
+    lastRenderKey = key;
     const keep = body.scrollTop;
     const active = document.activeElement;
     const focused = active && active.id;
