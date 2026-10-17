@@ -69,6 +69,7 @@
   let pillError = '';
   let gainDraft = null;
   let gainSaving = false;
+  let gainPending = null; // latest slider value moved while a volume save was in flight
   let gainError = '';
   // #336 F003: same draft/saving/error pattern as the volume field.
   let autoSaving = false;
@@ -930,19 +931,26 @@
       if (!e.isTrusted) return;
       gainDraft = gainInput.value; gainError = ''; paintGain();
     });
-    gainInput.addEventListener('change', e => {
-      if (!e.isTrusted || gainSaving || V.soundGainProblem(gainInput.value)) return;
-      const typed = gainInput.value;
+    // A change made while a save is in flight is kept (latest wins) and saved when that save ends,
+    // instead of being dropped while the slider keeps showing a value that was never stored.
+    const saveGain = typed => {
       gainDraft = typed; gainError = ''; gainSaving = true; paintGain();
       call('prefs_action', { action: 'set_sound_gain', gain: Number(typed) }).then(p => {
         gainSaving = false; prefs = p;
-        if (gainDraft === typed) gainDraft = null;
+        const next = gainPending; gainPending = null;
+        if (next !== null && Number(next) !== p.gain && !V.soundGainProblem(next)) { saveGain(next); return; }
+        if (gainDraft === typed || gainDraft === next) gainDraft = null;
         render(); say('Volumen guardado.');
       }, () => {
-        gainSaving = false; gainError = 'No se pudo guardar. El volumen sigue sin cambios; probá de nuevo.';
+        gainSaving = false; gainPending = null; gainError = 'No se pudo guardar. El volumen sigue sin cambios; probá de nuevo.';
         render();
         const field = $('settings-sound-gain'); if (field) field.focus();
       });
+    };
+    gainInput.addEventListener('change', e => {
+      if (!e.isTrusted || V.soundGainProblem(gainInput.value)) return;
+      if (gainSaving) { gainPending = gainInput.value; gainDraft = gainPending; paintGain(); return; }
+      saveGain(gainInput.value);
     });
     volActions.append(gainInput, gainValue);
     volRow.append(volActions);

@@ -66,6 +66,10 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
           return failView ? Promise.reject(new Error('no ipc')) : Promise.resolve(clone(backend.prefs));
         }
         if (backend.rejectNext) { backend.rejectNext = false; return Promise.reject(new Error('save_failed')); }
+        if (backend.holdGain && payload.action === 'set_sound_gain') {
+          backend.holdGain = false; backend.writes++;
+          return new Promise(resolve => { backend.releaseGain = () => { backend.prefs.gain = payload.gain; resolve(clone(backend.prefs)); }; });
+        }
         const before = JSON.stringify(backend.prefs);
         const next = payload.action === 'set_main_pill' ? M.chooseMain(backend.prefs, payload.id) : payload.action === 'toggle_declared_pill' ? M.toggle(backend.prefs, payload.id) : payload.action === 'set_pill_color' ? M.setColor(backend.prefs, payload.id, payload.color) : payload.action === 'clear_pill_color' ? M.clearColor(backend.prefs, payload.id) : payload.action === 'create_blob' ? M.createBlob(backend.prefs, payload.name, payload.color || '') : payload.action === 'delete_blob' ? M.deleteBlob(backend.prefs, payload.name) : payload.action === 'set_blob_color' ? M.setBlobColor(backend.prefs, payload.name, payload.color) : payload.action === 'reorder_declared_pills' ? M.reorderDeclared(backend.prefs, payload.order) : payload.action === 'reorder_blobs' ? M.reorderBlobs(backend.prefs, payload.order) : null;
         if (next) Object.assign(backend.prefs, next);
@@ -254,6 +258,22 @@ test('T6.3 #434 volume slider: range 0..0.2, aria + percent text, commit on chan
   assert.equal(b.get('settings-sound-gain').getAttribute('aria-invalid'), 'true', 'the re-rendered slider is marked invalid');
   assert.match(b.get('settings-gain-error').textContent, /No se pudo guardar/);
   assert.equal(b.doc.activeElement && b.doc.activeElement.id, 'settings-sound-gain');
+});
+
+// RDD U10: a slider change that arrives while a save is in flight used to be dropped silently, so the
+// slider showed a value that was never stored. The latest value is kept and saved once the save ends.
+test('RDD U10 a volume change made while a save is in flight is saved afterwards, not dropped', async () => {
+  const b = await settingsBoot({}, 'general');
+  const gain = b.get('settings-sound-gain');
+  b.backend.holdGain = true;
+  gain.value = '0.05'; gain.fire('change'); await flush();
+  gain.value = '0.1'; gain.fire('change'); await flush();
+  assert.equal(writes(b).filter(x => x.payload.action === 'set_sound_gain').length, 1, 'only one save is in flight');
+  b.backend.releaseGain(); await flush(); await flush();
+  const sent = writes(b).filter(x => x.payload.action === 'set_sound_gain').map(x => x.payload.gain);
+  assert.deepEqual(sent, [0.05, 0.1], 'the later value is sent after the first save ends');
+  assert.equal(b.backend.prefs.gain, 0.1, 'the stored volume is what the slider shows');
+  assert.equal(b.get('settings-sound-gain').value, '0.1');
 });
 
 // T6.3 #434: General groups exactly as the design shows them, with the copy diet.
