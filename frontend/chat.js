@@ -250,6 +250,8 @@
     for (const turn of turns) for (const row of V.turnRows(turn)) rows.push(row);
     const placeholder = log.querySelector('li.empty');
     const g = turns.length ? null : V.emptyGreeting(view);
+    const historyLabel = $('chat-history-label'); // T7.3: «Conversación nueva» only while the conversation has no turns
+    if (historyLabel) historyLabel.hidden = turns.length > 0;
     if (!turns.length) {
       // §2.3: lock «local» + eye-off, centred; the whole sentence is aria.
       // F027: an explicit display name adds «Hola, <nombre>.» as visible text. The

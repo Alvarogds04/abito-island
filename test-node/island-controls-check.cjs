@@ -92,5 +92,25 @@ test('chat top bar: visible title «Abito» before the gear/back buttons (design
   assert.equal(t['font-size'], 'var(--fs-body)');
   assert.equal(t['font-weight'], '600');
 });
+test('chat «Conectado» chip sits in flow under the header, left aligned (design isla-chat-*)', () => {
+  const o = decls('#chat-status-strip');
+  assert.equal(o.position, 'static', 'in flow, above the body card (was an absolute centred pill)');
+  assert.equal(o.transform, 'none');
+});
+test('chat body top row: «+» and history left-aligned, then the label «Conversación nueva» (existing verbs only)', () => {
+  const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const row = html.slice(html.indexOf('id="chat-history-controls"'), html.indexOf('<ol id="chat-log"'));
+  assert.match(row, /id="chat-create"[^>]*>[\s\S]*data-icon="plus"[\s\S]*id="chat-conversations"[\s\S]*id="chat-history-label"[^>]*>Conversación nueva</);
+  assert.equal(decls('#chat-history-controls')['justify-content'], 'flex-start');
+  assert.equal(decls('#chat-history-controls')['align-items'], 'center');
+  assert.equal(decls('#chat-history-label')['font-size'], 'var(--fs-caption)');
+  assert.match(fs.readFileSync(path.join(dir, 'chat.js'), 'utf8'), /chat-history-label[\s\S]{0,200}turns\.length/, 'the label shows only while the conversation has no turns');
+  assert.ok(require(path.join(dir, 'icons.js')).NAMES.includes('plus'));
+});
+test('chat model chip is a 24px chip on the caption step (design chip 24/12)', () => {
+  const c = decls('#chat-model-btn');
+  assert.equal(c['min-height'], '24px');
+  assert.match(c.font || '', /var\(--fs-caption\)/);
+});
 console.log(`island-controls-check: ${failed ? failed + ' FAILED' : 'all passed'}`);
 if (failed) process.exitCode = 1;

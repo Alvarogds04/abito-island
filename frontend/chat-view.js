@@ -69,7 +69,7 @@
       return mk('busy', 'live', 'ring', ''); // thinking / streaming: blue open arc, spun by the page
     }
     const state = view.availability && view.availability.state;
-    if (state === 'ready') return mk('ready', 'go', '', '');
+    if (state === 'ready') return mk('ready', 'go', '', 'Conectado'); // T7.3 isla-chat-*: the visible state chip
     if (state === 'busy') return mk('occupied', 'live', 'clock', 'Ocupado');
     if (state === 'blocked') return mk('blocked', 'red', 'triangle', 'Bloqueado');
     if (state === 'unavailable') return mk('down', 'red', 'triangle', 'Modelo caído');

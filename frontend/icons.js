@@ -19,6 +19,7 @@
     'arrow-up': '<path d="M10 16V4M5 9l5-5 5 5"/>',
     'square': '<rect x="4" y="4" width="12" height="12" rx="2"/>',
     'arrow-left': '<path d="M16 10H4M9 5l-5 5 5 5"/>',
+    'plus': '<path d="M10 4v12M4 10h12"/>', // T7.3: «+ nueva conversación» (isla-chat-*)
     'arrow-right': '<path d="M4 10h12M11 5l5 5-5 5"/>', // T7.3: the approval fold chevron (isla-approval)
     'chip': '<rect x="5" y="5" width="10" height="10" rx="2"/><path d="M8 2v3M12 2v3M8 15v3M12 15v3M2 8h3M2 12h3M15 8h3M15 12h3"/>',
     'plug': PLUG,
