@@ -1257,34 +1257,38 @@ html[data-theme="light"] .sfield { color-scheme: light; }
    --radius/--fs), so light and dark resolve them with zero raw colors. The module is inert
    until index.html carries <section id="integrations" hidden> + one script tag (mount
    contract in the module header). textContent only; 44px click targets like Ajustes. */
-#integrations { display: grid; gap: 8px; }
+/* T7.2 design (ajustes-ventana-conexiones-*.png): Servicios as 3-column cards (auto-fill keeps
+   three at the 728 window and folds in the narrow island column), avatar + name over the state
+   sub + a «demo» badge on EVERY card (R7). The enable/refresh/pause/open controls stay reachable
+   in a compact row; they are 32px visual inside a 44px hit area (T6.1 ::after pattern). */
+#integrations { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 #integrations[hidden] { display: none; }
-.int-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.int-title { font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); }
-.int-count { font: 400 var(--fs-label)/1.2 var(--font-ui); color: var(--muted); }
-.int-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
 .int-service {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
   padding: 10px 12px; border-radius: var(--radius-xl);
   border: 1px solid var(--line-faint); background: var(--fill-alt);
 }
-.int-info { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
+.int-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--fill-hover); color: var(--island-ink); font: 700 var(--fs-label)/1 var(--font-ui); }
+.int-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .int-name { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.int-state { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.int-state { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
 .int-state--connected { color: var(--go); }
 .int-state--error { color: var(--red-11); }
 .int-state--paused { color: var(--sun); }
-.int-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.int-demo { padding: 0 8px; min-height: 24px; display: inline-flex; align-items: center; border-radius: var(--radius-full); background: var(--fill-hover); color: var(--island-muted); font: 400 var(--fs-caption)/1 var(--font-ui); }
+.int-actions { grid-column: 1 / -1; display: flex; gap: 0; flex-wrap: wrap; margin-top: 2px; }
 .int-actions button {
-  min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: var(--radius-full);
-  border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
-  font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
+  position: relative; z-index: 0; min-height: 44px; min-width: 44px; padding: 0 10px; border: 0; background: transparent;
+  color: var(--island-muted); font: 600 var(--fs-caption)/1.2 var(--font-ui); cursor: pointer;
 }
-.int-actions button:hover:not(:disabled) { background: var(--fill-hover); color: var(--island-ink); }
+.int-actions button::after { content: ""; position: absolute; inset: 6px 2px; z-index: -1; border-radius: 10px; border: 1px solid var(--line-soft); background: transparent; }
+.int-actions button:hover:not(:disabled)::after { background: var(--fill-hover); }
+.int-actions button:hover:not(:disabled) { color: var(--island-ink); }
 .int-actions button:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 .int-actions button:disabled { opacity: .45; cursor: default; }
-.int-actions .int-enable[aria-pressed="true"] { border-color: var(--go); color: var(--go); font-weight: 700; }
-.int-actions .int-open { border-color: var(--line); color: var(--island-ink); }
+.int-actions .int-enable[aria-pressed="true"] { color: var(--go); font-weight: 700; }
+.int-actions .int-enable[aria-pressed="true"]::after { border-color: var(--go); }
+.int-actions .int-open { color: var(--island-ink); }
 
 /* ---- #355/#370: Correo + Mail cards (append-only; theme tokens only, so light + dark resolve with no raw colour).
    Kept BEFORE the #410 compact block: that block is sliced from its first rule to EOF by a test. */

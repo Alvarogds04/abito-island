@@ -255,19 +255,21 @@
     }
     host.textContent = '';
     host.hidden = false;
-    const head = el('div', 'int-head');
-    head.append(el('span', 'int-title', 'Integraciones'));
-    head.append(el('span', 'int-count',
-      `${view.enabledCount} habilitados · ${view.connectedCount} conectados`));
-    host.append(head);
-    if (view.banner) host.append(el('p', 'int-fake', view.banner));
     for (const row of view.rows) {
       const card = el('article', 'int-service');
       card.dataset.serviceId = row.id;
+      // T7.2 design (R7): avatar + name over the state sub + a «demo» badge on EVERY card. The
+      // single banner paragraph is gone: sample data is marked where it cannot be missed.
+      card.append(el('span', 'int-avatar', Array.from(row.name)[0] || ''));
       const info = el('div', 'int-info');
       info.append(el('span', 'int-name', row.name));
       info.append(el('span', `int-state int-state--${row.state}`, row.stateLabel));
       card.append(info);
+      if (view.fake) {
+        const demo = el('span', 'int-demo', 'demo');
+        demo.title = 'Datos de ejemplo — nada está conectado todavía.';
+        card.append(demo);
+      }
       const actions = el('div', 'int-actions');
       actions.append(btn('int-enable', 'enable', row.id,
         row.enabled ? 'Deshabilitar' : 'Habilitar', false, row.enabled));
