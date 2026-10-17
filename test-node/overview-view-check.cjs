@@ -125,9 +125,9 @@ test('every non-pending view has a visible word or is an explicit dot/ring', () 
 });
 
 // ---- connection ----------------------------------------------------------
-test('no Pi -> unplugged icon + "Sin Pi" (the duplicate sentence is gone)', () => {
+test('no Pi -> unplugged icon + "Sin motor" (design ov-error chip; the duplicate sentence is gone)', () => {
   const v = O.connectionView({ unavailable: false, connections: 0 });
-  assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin Pi', 'faint']);
+  assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin motor', 'red']);
   assert.doesNotMatch(JSON.stringify(v), /Sin conexión con Pi/);
   // T7.3 design diet: the visible detail is one short line; the long honest
   // sentence stays reachable in aria (was a two-sentence visible disclaimer).
@@ -156,6 +156,22 @@ test('channel down -> red triangle + "Avisos caídos"', () => {
 
 test('connection view tolerates a missing snapshot', () => {
   assert.equal(O.connectionView(null).kind, 'down');
+});
+
+// ---- T7.3: the transport error band (design isla-ov-error) -----------------
+test('transport error band: "Sin conexión con el motor", red ring, NO invented action', () => {
+  const band = O.connectionBandView(O.connectionView({ unavailable: false, connections: 0 }));
+  assert.ok(band, 'the down connection carries the band');
+  assert.equal(band.title, 'Sin conexión con el motor');
+  assert.equal(band.tone, 'red', 'the band wears the red ring (#notices[data-tone=red])');
+  assert.equal(band.grouped, false);
+  assert.equal(band.action, null, 'the facade has no retry verb for a Pi-session transport; a dead button would lie');
+  assert.match(band.aria, /Sin motor|sesión/i);
+  // the design band is ONLY the engine-unreachable state: a healthy connection
+  // and the pinned "Avisos caídos" channel failure keep their own surfaces
+  assert.equal(O.connectionBandView(O.connectionView({ unavailable: false, connections: 1 })), null);
+  assert.equal(O.connectionBandView(O.connectionView({ unavailable: true, connections: 0 })), null);
+  assert.equal(O.connectionBandView(null), null);
 });
 
 // ---- notice pill ---------------------------------------------------------
@@ -493,7 +509,7 @@ test('«i» aria-label announces the real state', () => {
   assert.equal(O.infoLabel('Ver detalle de la decisión', card.aria),
     'Ver detalle de la decisión: No se pudo confirmar la decisión. Esperá una actualización.');
   const conn = O.connectionView({ connections: 0 });
-  assert.match(O.infoLabel('Ver detalle de la conexión', conn.aria), /^Ver detalle de la conexión: Sin Pi/);
+  assert.match(O.infoLabel('Ver detalle de la conexión', conn.aria), /^Ver detalle de la conexión: Sin motor/);
   assert.equal(O.infoLabel('Ver', ''), 'Ver');
   assert.match(islandSrc, /\$\('card-info'\)\.setAttribute\('aria-label', O\.infoLabel\(/);
   assert.match(islandSrc, /noticeInfo\.setAttribute\('aria-label', O\.infoLabel\(/);
@@ -505,7 +521,7 @@ test('§3: a card never hides a missing Pi / downed notices channel', () => {
   assert.match(html, /id="card-conn-word"/);
   assert.match(islandSrc, /card-conn/);
   assert.equal(O.cardConnection(O.connectionView({ connections: 1 })), null);
-  assert.equal(O.cardConnection(O.connectionView({ connections: 0 })).word, 'Sin Pi');
+  assert.equal(O.cardConnection(O.connectionView({ connections: 0 })).word, 'Sin motor');
   assert.equal(O.cardConnection(O.connectionView({ unavailable: true })).word, 'Avisos caídos');
 });
 

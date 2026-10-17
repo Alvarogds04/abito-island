@@ -74,9 +74,21 @@
         aria: 'Conexión local activa · identidad declarada como Pi. La conexión está activa; esto no confirma que Pi esté trabajando ni que una tarea haya terminado.',
         detail: 'Pi espera tu próxima tarea.' };
     }
-    return { kind: 'down', tone: 'faint', icon: 'plug-off', word: 'Sin Pi',
-      aria: 'Sin Pi: no hay una sesión conectada. Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.',
+    return { kind: 'down', tone: 'red', icon: 'plug-off', word: 'Sin motor',
+      aria: 'Sin motor: no hay una sesión conectada. Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.',
       detail: 'Conectá una sesión de Pi.' };
+  }
+
+  // ---- T7.3: the transport error band (design isla-ov-error) -----------------
+  // When the engine is unreachable (no session over the transport) the notices
+  // band itself carries the error: red ring, ONE short title, no invented
+  // action — the desktop facade has no verb that reconnects a Pi session
+  // (daemon_action restart fixes the agent daemon, a different component), and
+  // a button that does not fix what the band reports would lie. Pure + tested.
+  function connectionBandView(conn) {
+    if (!conn || conn.kind !== 'down') return null;
+    return { title: 'Sin conexión con el motor', detail: '', grouped: false,
+      tone: 'red', action: null, aria: conn.aria };
   }
 
   // ---- notice pill (Sileo) ---------------------------------------------------
@@ -288,5 +300,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, connectionBandView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });
