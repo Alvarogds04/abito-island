@@ -13,21 +13,18 @@
   // ---- screens ------------------------------------------------------------------------------------------------
   // Copied from gentle-dot (MIT): one icon button per screen in the chat header; each screen COVERS the chat
   // body with a title, a close button and a one-line hint. Opening one closes the others.
-  // #408: ONE entry point (Ajustes), seven sub-tabs. This table is the single place to rename or
+  // #408: ONE entry point (Ajustes), the sub-tabs. This table is the single place to rename or
   // reorder them: the tab strip, the title/hint and the deep-link seam all read it.
+  // T7.2 design §3: one title + one hint line at most — Modelos keeps the design's own line,
+  // the other tabs draw none (the regenerated ajustes-ventana-* PNGs show no hint line).
   const TABS = Object.freeze([
-    Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones',
-      hint: 'Proveedores de IA, agentes de código y servicios en un solo lugar. Tu inicio de sesión queda en esta computadora. Preguntá antes de enviar o cambiar algo.' }),
+    Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones', hint: '' }),
     Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
-      hint: 'Elegí qué modelos de tus proveedores conectados usa Abito. Los locales están más abajo.' }),
-    Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas',
-      hint: 'Roles manuales con sus propias instrucciones. Sólo se usan si los elegís.' }),
-    Object.freeze({ id: 'pills', title: 'Blobs', icon: 'ring', label: 'Blobs',
-      hint: 'Una principal y hasta cuatro declaradas; elegir no conecta.' }),
-    Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia',
-      hint: 'Tema, colores, movimiento y cómo te saluda Abito.' }),
-    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General',
-      hint: 'Atajo de teclado y sonido.' }),
+      hint: 'Modelos que usa Abito' }),
+    Object.freeze({ id: 'specialists', title: 'Especialistas', icon: 'bubble', label: 'Especialistas', hint: '' }),
+    Object.freeze({ id: 'pills', title: 'Blobs', icon: 'ring', label: 'Blobs', hint: '' }),
+    Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia', hint: '' }),
+    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General', hint: '' }),
   ]);
   const tabById = id => TABS.find(x => x.id === id) || null;
   // S8: Cuentas + Conectores are ONE tab now. Old ids (deep links, probe seam) resolve through this table.
@@ -72,7 +69,6 @@
   // `portal_rejected` wording belongs to that worker — nothing here ever renders it).
   const DAEMON_RESTART = Object.freeze({
     title: 'Motor del agente',
-    hint: 'El motor local que ejecuta los proveedores y los agentes. Reiniciar corta lo que esté en curso y vuelve a conectar.',
     label: 'Reiniciar motor',
     busyLabel: 'Reiniciando…',
     ok: 'Motor reiniciado.',
@@ -84,7 +80,6 @@
   function daemonRestartView(busy) {
     return {
       title: DAEMON_RESTART.title,
-      hint: DAEMON_RESTART.hint,
       action: { label: busy === true ? DAEMON_RESTART.busyLabel : DAEMON_RESTART.label, disabled: busy === true,
         aria: 'Reiniciar el motor del agente' },
     };
@@ -191,7 +186,7 @@
     connected: ['', '', 'go'], failed: ['Falló', 'triangle', 'red'], disabled: ['Apagado', 'plug-off', 'faint'],
     needs_setup: ['Falta configurar', 'info', 'sun'],
   });
-  const CONNECTORS_NOTE = 'Estado guardado en este equipo; puede no coincidir con lo que está pasando ahora.';
+  // T7.2 copy diet: the services state line is gone (the design draws no note under Servicios).
   function connectorsView(state) {
     const c = (state && state.connectors) || { state: 'loading', items: [] };
     if (c.state === 'unavailable') return { kind: 'unavailable', word: 'No disponible', icon: 'plug-off', tone: 'faint', aria: 'No disponible: el motor no tiene conectores configurados.' };
@@ -298,8 +293,8 @@
 
   // ---- Cuentas: the two method cards, the provider list, the login plan (gentle-dot AccountsPanel) ------------------
   const METHOD_CARDS = Object.freeze([
-    Object.freeze({ id: 'oauth', title: 'Usar una suscripción', hint: 'Iniciá sesión con un plan que ya pagás, como ChatGPT, GitHub Copilot o Grok.' }),
-    Object.freeze({ id: 'api_key', title: 'Usar una clave de API', hint: 'Pegá una clave de la web del proveedor. Funciona con todos los servicios.' }),
+    Object.freeze({ id: 'oauth', title: 'Usar una suscripción' }),
+    Object.freeze({ id: 'api_key', title: 'Usar una clave de API' }),
   ]);
   function accountOfProvider(state, providerId) {
     return ((state && state.accounts) || []).find(a => a.provider === providerId && a.local !== true) || null;
@@ -737,7 +732,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,

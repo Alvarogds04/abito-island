@@ -514,7 +514,6 @@
   function renderOwnedAccounts() {
     const section = el('section', 'ssec'); section.id = 'owned-accounts';
     section.append(sectionTitle('Configuración de proveedores'));
-    section.append(el('p', 'snote', 'Guardado local en Abito. Conexión no probada; no cambia el modelo del chat.'));
     if (ownedAccounts === null) {
       section.append(el('p', 'snote', 'El almacén de cuentas no está disponible. No se modificó ninguna cuenta.'));
     } else if (accountForm) {
@@ -648,7 +647,6 @@
     const v = V.daemonRestartView(daemonBusy);
     const sec = el('section', 'ssec'); sec.id = 'daemon-restart';
     sec.append(sectionTitle(v.title));
-    sec.append(el('p', 'snote', v.hint));
     const row = el('div', 'srow');
     row.append(el('span', 'srow-title', 'Motor'));
     const actions = el('span', 'srow-actions');
@@ -850,7 +848,7 @@
         list.append(li);
       }
       if (v.empty) list.append(el('li', 'sempty', 'Sin servicios'));
-      svc.append(list, el('p', 'snote', V.CONNECTORS_NOTE + ' Por ahora sólo se pueden ver; conectarlos llega con el motor.'));
+      svc.append(list);
     }
     body.append(svc);
   }
@@ -1045,14 +1043,14 @@
       }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
     }));
     paintAuto();
-    const motion = group('appearance', 'Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
+    const motion = group('appearance', 'Movimiento', '');
     motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
     // #380: the theme. Three fixed choices; the SAVED mode is the truth (the row renders from
     // `prefs`), and applying it is theme.js's job after the host confirms the write.
-    const theme = group('appearance', 'Tema', 'Con «Sistema» Abito usa el tema de tu computadora y lo sigue cuando cambia. Con «Claro» u «Oscuro» queda fijo.');
+    const theme = group('appearance', 'Tema', '');
     const themePick = V.themeView(prefs);
     const picker = el('span', 'stheme-options');
     picker.setAttribute('role', 'radiogroup');
@@ -1095,7 +1093,7 @@
     const identities = specialistIdentities();
     const rows = V.colorRows(prefs, AVATAR ? [{ id: AVATAR.PRINCIPAL_ID, name: 'Abito' }, ...identities.identities] : [], AVATAR);
     if (rows.length) {
-      const color = group('appearance', 'Color', 'Abito mantiene su color en la isla. El especialista muestra el suyo en su indicador; los colores pueden repetirse.');
+      const color = group('appearance', 'Color', 'Abito mantiene su color en la isla.');
       for (const row of rows) color.append(colorRow(row));
       if (identities.kind !== 'ready') {
         const notice = el('p', 'snote', identities.kind === 'loading' ? 'Leyendo los colores de tus especialistas…' : 'Colores de especialistas no disponibles: no se pudieron cargar sus identidades.');

@@ -63,7 +63,14 @@ test('#408 six sub-tabs of ONE Ajustes entry, in one table: Conexiones, Modelos,
   assert.equal(S.tabAlias('accounts'), 'accounts');
   assert.equal(S.tabAlias('models'), 'models');
   assert.equal(S.tabAlias('nope'), null);
-  for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
+  // T7.2 design §3: one title + one hint line at most. Modelos keeps the design's own line; the
+  // other tabs draw none (the regenerated ajustes-ventana-* PNGs show no hint line). Was: every
+  // tab a multi-sentence hint (hint.length > 10).
+  for (const x of S.TABS) {
+    assert.ok(x.icon, x.id);
+    if (x.id === 'models') assert.equal(x.hint, 'Modelos que usa Abito', x.id);
+    else assert.equal(x.hint, '', x.id);
+  }
   assert.equal(S.tabById('connectors'), null, 'resolved through tabAlias, not a tab of its own');
   assert.equal(S.tabById('nope'), null);
   assert.equal(S.SCREENS, undefined);
@@ -199,8 +206,8 @@ test('connectors: honest «no disponible» when the daemon has no connectorsComm
   assert.equal(ready.items[1].sends, true, 'read_and_send is shown (chip «puede enviar»)');
   assert.equal(ready.items[0].sends, false);
   assert.equal(S.connectorsView({ connectors: { state: 'ready', items: [] } }).empty, true);
-  // these are the PERSISTED values, not live: say so
-  assert.match(S.CONNECTORS_NOTE, /guardad/i);
+  // T7.2 copy diet: the services note paragraph is gone (design draws none). Was: CONNECTORS_NOTE /guardad/i.
+  assert.ok(!('CONNECTORS_NOTE' in S), 'the services note paragraph is removed with its constant');
 });
 
 // ---- general --------------------------------------------------------------------------------------------------------
@@ -447,7 +454,8 @@ test('accounts: two method cards, in gentle-dot wording', () => {
   assert.deepEqual(S.METHOD_CARDS.map(c => c.id), ['oauth', 'api_key']);
   assert.equal(S.METHOD_CARDS[0].title, 'Usar una suscripción');
   assert.equal(S.METHOD_CARDS[1].title, 'Usar una clave de API');
-  for (const c of S.METHOD_CARDS) assert.ok(c.hint.length > 30);
+  // T7.2 copy diet: the method cards draw titles only (design shows no method-card hints).
+  for (const c of S.METHOD_CARDS) assert.equal(c.hint, undefined);
 });
 
 test('accounts: the provider list is filtered by method and by the search box', () => {
@@ -721,7 +729,6 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
   const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.tabById('accounts').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 
@@ -1240,7 +1247,7 @@ test('#390 GD027: the restart control is one closed neutral label with honest ou
   assert.equal(idle.action.label, 'Reiniciar motor');
   assert.equal(idle.action.disabled, false);
   assert.ok(idle.title.length > 0, 'the section names itself');
-  assert.ok(idle.hint.length > 10, 'the human learns what a restart does');
+  assert.ok(!('hint' in idle), 'the design gives the Motor row a sub line, not a hint paragraph');
   const busy = S.daemonRestartView(true);
   assert.equal(busy.action.label, 'Reiniciando…');
   assert.equal(busy.action.disabled, true, 'one restart at a time, from the button itself');
