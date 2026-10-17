@@ -282,7 +282,7 @@ const AbitoClay = (() => {
   const G = { paused: false, forced: false, osReduced: MQ.matches, manual: false, error: null, frames: 0, lastFrameAt: 0, scheduled: false };
   const reducedNow = () => G.osReduced && !G.forced;
   const listeners = new Set();
-  const notify = () => listeners.forEach(fn => { try { fn(); } catch (_) { /* listener errors are not the loop's */ } });
+  const notify = () => listeners.forEach(fn => { try { fn(); } catch { /* listener errors are not the loop's */ } });
   let raf = 0, lastTs = null;
   const shouldRun = () => !G.manual && !reducedNow() && !G.paused && !document.hidden && !G.error && instances.size > 0;
   function frame(ts) {
@@ -299,8 +299,12 @@ const AbitoClay = (() => {
   function halt() { if (raf) cancelAnimationFrame(raf); raf = 0; lastTs = null; G.scheduled = false; }
   const loop = { sync() { if (shouldRun()) { lastTs = null; schedule(); } else halt(); notify(); } };
   function fail(err) { G.error = String(err && err.message || err).slice(0, 140); halt(); notify(); }
-  addEventListener('error', e => fail(e.error || e.message));
-  addEventListener('unhandledrejection', e => fail(e.reason));
+  // Window events are not proof that this engine failed. Keep the last bounded diagnostic,
+  // without suppressing browser reporting or stopping unrelated, healthy clay instances.
+  let externalError = null;
+  const observeExternalError = err => { externalError = String(err && err.message || err).slice(0, 140); };
+  addEventListener('error', e => observeExternalError(e.error || e.message));
+  addEventListener('unhandledrejection', e => observeExternalError(e.reason));
   document.addEventListener('visibilitychange', () => { if (document.hidden) instances.forEach(i => i.cancelReaction()); loop.sync(); });
   MQ.addEventListener('change', e => { G.osReduced = e.matches; if (reducedNow()) instances.forEach(i => i.staticPose()); loop.sync(); });
   const running = () => G.scheduled && performance.now() - G.lastFrameAt < 600;
@@ -316,7 +320,7 @@ const AbitoClay = (() => {
   }
   return {
     REVISION, STATES, ORDER, EMOTES: EMOTE_NAMES, create, statusKind, running, reducedNow,
-    get paused() { return G.paused; }, get forced() { return G.forced; }, get osReduced() { return G.osReduced; }, get error() { return G.error; }, get frames() { return G.frames; },
+    get paused() { return G.paused; }, get forced() { return G.forced; }, get osReduced() { return G.osReduced; }, get error() { return G.error; }, get externalError() { return externalError; }, get frames() { return G.frames; },
     setPaused(p) { G.paused = !!p; if (G.paused) instances.forEach(i => i.cancelReaction()); loop.sync(); },
     setForced(f) { G.forced = !!f; if (reducedNow()) instances.forEach(i => i.staticPose()); loop.sync(); },
     setManual(m) { G.manual = !!m; loop.sync(); },

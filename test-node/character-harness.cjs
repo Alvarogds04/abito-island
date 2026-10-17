@@ -5,20 +5,21 @@ const path = require('node:path');
 const vm = require('node:vm');
 function engine(reduced = false) {
   let at = 0, mediaListener; let next = 1;
-  const frames = new Map(), events = new Map();
+  const frames = new Map(), events = new Map(), windowEvents = new Map();
   const document = { hidden: false, addEventListener(name, fn) { events.set(name, fn); } };
   const context = vm.createContext({ matchMedia: () => ({ matches: reduced, addEventListener(_, fn) { mediaListener = fn; } }),
-    addEventListener() {}, document, performance: { now: () => at },
+    addEventListener(name, fn) { windowEvents.set(name, fn); }, document, performance: { now: () => at },
     requestAnimationFrame(fn) { const id = next++; frames.set(id, fn); return id; },
     cancelAnimationFrame(id) { frames.delete(id); } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../frontend/clay-engine.js'), 'utf8') + '\nthis.clay = AbitoClay;', context);
-  const doc = { createElementNS: tag => element(tag) };
+  const doc = { createElementNS: (_ns, tag) => element(tag) };
   function element(tag = 'svg') {
     const attrs = {}, children = [];
     return { tag, children, ownerDocument: doc, setAttribute(k, v) { attrs[k] = String(v); }, getAttribute: k => attrs[k],
       replaceChildren() { children.length = 0; }, appendChild(e) { children.push(e); }, remove() {}, attrs };
   }
   return { api: context.clay, svg: element(), element,
+    emitWindow(name, event) { windowEvents.get(name)?.(event); },
     os(value) { mediaListener({ matches: value }); },
     hide(value) { document.hidden = value; events.get('visibilitychange')(); },
     frame(ms = 17) { at += ms; const list = [...frames.values()]; frames.clear(); for (const fn of list) fn(at); },
