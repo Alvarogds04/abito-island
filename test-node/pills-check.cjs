@@ -15,7 +15,8 @@ const clone = value => {
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 function boot({ prefs = {}, failView = false, deferView = false, store = null, specs = [], extraPrefs = {} } = {}) {
-  const nodes = new Map(), events = {}, native = {}, calls = [], observers = [];
+  const nodes = new Map(), events = {}, native = {}, calls = [], observers = [], frames = new Map();
+  let frameAt = 0, nextFrame = 1;
   let doc;
   class Element {
     constructor(tag = 'div') {
@@ -110,9 +111,9 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     } },
     event: { listen(name, fn) { (native[name] ||= []).push(fn); return Promise.resolve(() => {}); } },
   } };
-  const ctx = vm.createContext({ MutationObserver: class { constructor(fn) { this.fn = fn; } observe(target) { observers.push({ target, fn: this.fn }); } }, matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => 0 }, cancelAnimationFrame() {}, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
+  const ctx = vm.createContext({ MutationObserver: class { constructor(fn) { this.fn = fn; } observe(target) { observers.push({ target, fn: this.fn }); } }, matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => frameAt }, cancelAnimationFrame(id) { frames.delete(id); }, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
     DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } },
-    crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => { if (fn.name !== 'frame') fn(0); return 1; }, setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
+    crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => { const id = nextFrame++; if (fn.name === 'frame') frames.set(id, fn); else fn(frameAt); return id; }, setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     Event: class { constructor(type) { this.type = type; } }, console });
   const load = file => vm.runInContext(read(file), ctx, { filename: file });
@@ -120,7 +121,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
   vm.runInContext(`const testedClays = []; const realCreate = AbitoClay.create; AbitoClay.create = (...args) => { const instance = realCreate(...args); testedClays.push(instance); const destroy = instance.destroy; instance.destroy = () => { instance.testDestroyed = true; destroy(); }; return instance; };`, ctx);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
+  return { advanceFrames(n = 1) { for (let i = 0; i < n; i++) { frameAt += 17; const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(frameAt); } }, mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
 }
 
 test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
@@ -932,4 +933,41 @@ test('#442 real island characters stop outside overview and use static poses for
   assert.ok(islandClays().every(i => i.sample().d), 'reduced mode still draws real engine geometry');
   b.doc.documentElement.dataset.motion = 'full'; b.mutate(b.doc.documentElement);
   assert.ok(islandClays().every(i => i.live === true));
+});
+
+
+test('S13 unrelated prefs preserve Blobs nodes, editor caret and actual continuing engine frames', async () => {
+  const b = await settingsBoot({ specs: SPECS });
+  b.click('blob-tile-esp-a'); await flush();
+  const tile = b.get('blob-tile-esp-a'), what = b.get('blob-editor-what');
+  what.value = 'Unsent draft'; what.selectionStart = 3; what.selectionEnd = 7; what.focus();
+  const clay = b.clayStatus().findLast(i => !i.testDestroyed && tile.contains(i.svg));
+  b.advanceFrames(12); const before = clay.sample(); const created = b.clayStatus().length;
+  b.emit({ gain: 0.08, sound: true, displayName: 'Someone', autoCloseSeconds: 30 });
+  assert.ok(b.get('blob-tile-esp-a') === tile, 'no re-created DOM tile');
+  assert.ok(b.get('blob-editor-what') === what, 'same editor and selection');
+  assert.equal(what.value, 'Unsent draft'); assert.equal(what.selectionStart, 3); assert.equal(what.selectionEnd, 7);
+  assert.equal(b.clayStatus().length, created, 'no re-created engine instances');
+  assert.equal(clay.testDestroyed, undefined);
+  b.advanceFrames(12); const after = clay.sample();
+  assert.ok(after.t > before.t); assert.notEqual(after.d, before.d, 'actual scheduled frames change the live SVG geometry');
+});
+
+test('S13 Blobs disposes real instances on Models and Connections exits and remounts on return', async () => {
+  const b = await settingsBoot({ specs: SPECS });
+  for (const tab of ['models', 'accounts']) {
+    const instances = b.clayStatus().filter(i => !i.testDestroyed && b.get('settings-body').contains(i.svg));
+    assert.ok(instances.length > 0);
+    b.advanceFrames(8);
+    b.click('settings-tab-' + tab); await flush();
+    assert.ok(instances.every(i => i.testDestroyed), tab + ' exit unregisters every Blobs instance');
+    const stopped = instances.map(i => i.sample().t);
+    b.advanceFrames(12);
+    assert.deepEqual(instances.map(i => i.sample().t), stopped, 'detached characters stop receiving frames');
+    b.click('settings-tab-pills'); await flush();
+    const resumed = b.clayStatus().filter(i => !i.testDestroyed && b.get('settings-body').contains(i.svg));
+    assert.ok(resumed.length > 0);
+    const before = resumed[0].sample(); b.advanceFrames(12);
+    assert.ok(resumed[0].sample().t > before.t); assert.notEqual(resumed[0].sample().d, before.d);
+  }
 });

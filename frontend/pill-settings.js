@@ -30,6 +30,16 @@
   }
   const seedOf = text => { let h = 505; for (const ch of String(text)) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) || 505; };
 
+  // Shared semantic input key: unrelated preferences must not restart this screen or its clay.
+  // Keep this list aligned with build() and savedBefore/catalogPrefill in specialists-view.js.
+  function inputKey(input) {
+    const raw = input || {}, p = raw.prefs || {};
+    return JSON.stringify([
+      p.avatarColors, p.islandAgents, p.abitoInstructions, p.mainPill,
+      p.declaredPills, p.customBlobs, p.pillColors, raw.store, raw.listing,
+    ]);
+  }
+
   function render(host, input, options) {
     const e = entryOf(host);
     e.args = [input, options || {}];
@@ -38,7 +48,7 @@
     // an identical push while the human types must not rebuild the screen under the caret.
     const sigOf = () => {
       const { createName, createColor, createWhat, createModel, catalogSearch, catalogPick, ...stable } = e.ui; // eslint-disable-line no-unused-vars
-      return JSON.stringify([input, stable, o.saving === true, o.error || '']);
+      return JSON.stringify([inputKey(input), stable, o.saving === true, o.error || '']);
     };
     if (e.sig && sigOf() === e.sig) return;
     build(host, e);
@@ -445,5 +455,5 @@
     host.append(layout);
   }
 
-  root.AbitoPillSettings = Object.freeze({ render, dispose });
+  root.AbitoPillSettings = Object.freeze({ render, dispose, inputKey });
 })(typeof window !== 'undefined' ? window : this);

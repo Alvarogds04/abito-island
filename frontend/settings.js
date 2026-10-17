@@ -440,6 +440,10 @@
   // whose 6 s callback resets the failureTimer bit below before rendering.
   let lastRenderKey = null;
   function renderKey() {
+    // Blobs owns its visible-input projection. A sound/account push must not detach this screen.
+    if (screen === 'pills' && window.AbitoPillSettings) {
+      return JSON.stringify([screen, window.AbitoPillSettings.inputKey({ prefs, ...ownerState() }), pillSaving, pillError]);
+    }
     return JSON.stringify([
       screen, filter, prefs, hotkey, motionOverride, ownedAccounts,
       accountForm ? 'form' : null, accountSaving, accountError, accountNote,
@@ -456,6 +460,11 @@
   }
   function render() {
     if (!isOpen()) return;
+    // Every tab exit disposes Blobs, including Models/Connections, which bypass renderGeneral().
+    if (screen !== 'pills' && blobsMounted) {
+      window.AbitoPillSettings?.dispose(blobsHost);
+      blobsMounted = false;
+    }
     const key = renderKey();
     if (key === lastRenderKey) return;
     lastRenderKey = key;
