@@ -1826,6 +1826,15 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #chat-send:disabled::after { opacity: .4; }
 #chat-input, #question-text { min-height: 36px; }
 
+/* ---- T7.3 approval card (design isla-approval): chip «Decisión pendiente», the command in a surface
+   strip, «Permitir» (primary) + «Rechazar» + the fold chevron on ONE row, «Espera tu respuesta» 12 px. ---- */
+#permission #operation { padding: 6px 10px; border-radius: 10px; background: var(--surface); font-weight: 500; }
+#card-actions { align-items: center; flex-direction: row; justify-content: flex-start; }
+#card-fold { position: relative; top: auto; right: auto; }
+#card-wait { color: var(--island-muted); font-size: var(--fs-caption); line-height: 1.2; }
+#card-wait[hidden] { display: none; }
+#card-head { padding-right: 56px; } /* only «i» is pinned to the corner now; the fold moved to the action row */
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role

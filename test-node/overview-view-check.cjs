@@ -16,7 +16,7 @@ const test = (_name, fn) => { fn(); passed += 1; };
 
 // ---- icons ---------------------------------------------------------------
 const CONTRACT = ['bubble', 'arrow-up', 'square', 'arrow-left', 'chip', 'plug', 'plug-off',
-  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info', 'plane'];
+  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info', 'plane', 'arrow-right'];
 
 test('registry has every contract icon (14 rows, plug/unplugged = 2 shapes)', () => {
   for (const name of CONTRACT) assert.ok(I.NAMES.includes(name), name);
@@ -69,11 +69,11 @@ test('expiry aria keeps the exact ISO date', () => {
 });
 
 // ---- approval card state -------------------------------------------------
-test('pending: sun tone, no extra word, actionable', () => {
+test('pending: sun tone, the design chip word «Decisión pendiente», actionable', () => {
   const v = O.cardView(null);
   assert.equal(v.kind, 'pending');
   assert.equal(v.tone, 'sun');
-  assert.equal(v.word, '');
+  assert.equal(v.word, 'Decisión pendiente'); // T7.3 isla-approval chip (was '')
   assert.equal(v.actionable, true);
 });
 
@@ -359,7 +359,7 @@ test('every icon-only control in index.html has an aria-label', () => {
     assert.match(m[0], /aria-label="[^"]{3,}"/, `#${id} aria-label`);
   }
   for (const id of ['allow', 'deny']) { // icon + WORD (human decision)
-    assert.match(html, new RegExp(`id="${id}"[^>]*>[\\s\\S]*?<span class="btn-word">(Permitir|Denegar)</span>`), id);
+    assert.match(html, new RegExp(`id="${id}"[^>]*>[\\s\\S]*?<span class="btn-word">(Permitir|Rechazar)</span>`), id); // T7.3: «Denegar» -> «Rechazar» (isla-approval)
   }
   assert.match(html, /<script defer src="icons\.js"><\/script>/);
   assert.match(html, /<script defer src="overview-view\.js"><\/script>/);
@@ -883,3 +883,15 @@ test('#423 the notice title keeps a readable width in the 228px band (measured 1
 });
 
 console.log(`overview-view-check: ${passed} passed`);
+
+test('T7.3 approval card markup: «Espera tu respuesta» caption, fold inside the action row, command strip', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  const perm = html.slice(html.indexOf('<div id="permission"'), html.indexOf('<div id="question"'));
+  const actions = perm.slice(perm.indexOf('id="card-actions"'));
+  assert.match(actions, /id="allow"[\s\S]*id="deny"[\s\S]*id="card-fold"[\s\S]*id="card-wait"[^>]*>Espera tu respuesta</, 'Permitir, Rechazar, fold, caption in design order');
+  assert.doesNotMatch(perm, /Denegar/);
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /#permission #operation \{[^}]*background: var\(--surface\)/, 'the command sits in a surface strip');
+  assert.match(css, /#card-wait \{[^}]*font-size: var\(--fs-caption\)/, 'caption is 12 px');
+  assert.match(fs.readFileSync(path.join(frontend, 'island.js'), 'utf8'), /card-wait/, 'island.js shows the caption only while the human may decide');
+});

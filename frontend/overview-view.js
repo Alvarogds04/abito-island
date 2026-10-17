@@ -42,7 +42,7 @@
   // `reason` is the host/feedback reason, or null while the human may decide.
   function cardView(reason) {
     if (reason == null) {
-      return { kind: 'pending', tone: 'sun', icon: '', word: '', aria: 'Esperando tu decisión', actionable: true };
+      return { kind: 'pending', tone: 'sun', icon: '', word: 'Decisión pendiente', aria: 'Esperando tu decisión', actionable: true };
     }
     const text = String(reason);
     const inert = (kind, tone, icon, word, aria) => ({ kind, tone, icon, word, aria, actionable: false });

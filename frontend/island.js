@@ -943,6 +943,8 @@
     $('card-info').hidden = !reason;
     $('card-info').setAttribute('aria-label', O.infoLabel('Ver detalle de la decisión', view.aria));
     allow.disabled = deny.disabled = Boolean(reason || cardFlight);
+    const wait = $('card-wait'); // T7.3: «Espera tu respuesta» only while the human may still decide
+    if (wait) wait.hidden = Boolean(reason);
   }
   const cardInfo = $('card-info');
   if (cardInfo) cardInfo.addEventListener('click', () => {
