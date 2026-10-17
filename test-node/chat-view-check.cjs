@@ -527,10 +527,11 @@ test('greeting: an explicit name yields «Hola, <nombre>.», absent or blank kee
   const named = V.emptyGreeting({ display_name: 'Ana' });
   assert.equal(named.greeting, 'Hola, Ana.');
   assert.equal(named.aria, `Hola, Ana. ${NEUTRAL_EMPTY_ARIA}`);
-  assert.deepEqual(named.icons, ['lock', 'eye-off'], 'the lock + eye-off icons of §2.3 are untouched');
+  assert.deepEqual(named.icons, [], 'T7.3 design isla-chat-empty: no lock/eye-off icons (was [lock, eye-off])');
+  assert.equal(named.line, 'Escribile a Abito', 'the one visible line of the empty state');
   for (const view of [undefined, null, {}, { display_name: null }, { display_name: '' },
     { display_name: '   ' }, { display_name: '\n\t ' }, { display_name: '\u0000\u001f' }]) {
-    assert.deepEqual(V.emptyGreeting(view), { greeting: '', aria: NEUTRAL_EMPTY_ARIA, icons: ['lock', 'eye-off'] },
+    assert.deepEqual(V.emptyGreeting(view), { greeting: '', aria: NEUTRAL_EMPTY_ARIA, icons: [], line: 'Escribile a Abito' },
       JSON.stringify(view));
   }
 });

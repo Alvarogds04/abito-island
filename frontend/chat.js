@@ -272,7 +272,11 @@
           if (node) i.append(node);
           icons.append(i);
         }
-        li.append(icons);
+        if (g.icons.length) li.append(icons);
+        const line = document.createElement('p'); // T7.3: the one visible line of the design
+        line.className = 'empty-line';
+        line.textContent = g.line;
+        li.append(line);
         if (g.greeting) {
           const word = document.createElement('p');
           word.className = 'empty-greeting';
