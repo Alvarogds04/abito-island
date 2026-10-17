@@ -1125,7 +1125,12 @@
   const specCall = payload => (owner() ? owner().act(payload) : Promise.reject(new Error('no specialists')));
   const prefsCall = payload => call('prefs_action', payload).then(applyPrefs);
   const setIsland = order => prefsCall({ action: 'set_island_agents', order });
-  const joinIsland = id => (shownIds().length < SV.MAX_ISLAND ? setIsland([...shownIds(), id]) : Promise.resolve());
+  // Idempotent: with no stored island order the default projection (first three stored) can already
+  // include the agent that was just created, and the backend refuses an order with a repeated id.
+  const joinIsland = id => {
+    const shown = shownIds();
+    return shown.includes(id) || shown.length >= SV.MAX_ISLAND ? Promise.resolve() : setIsland([...shown, id]);
+  };
   function createAgent(draft) {
     const id = SV.randomId();
     if (!SV.validId(id) || SV.idTaken(ownerState().store, id)) return Promise.reject(new Error('id'));

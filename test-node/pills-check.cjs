@@ -693,6 +693,25 @@ test('#442 «Nuevo agente · Propio» creates the specialist, its colour and its
   assert.equal(b.get('blob-count').textContent, '3/3');
 });
 
+for (const existing of [0, 1]) {
+  test(`#451 creating an agent with ${existing} existing and no stored island order never sends a duplicate island order`, async () => {
+    const b = await settingsBoot({ specs: SPECS.slice(0, existing) });
+    b.click('blob-tile-new'); await flush();
+    if (b.get('create-kind-custom')) { b.click('create-kind-custom'); await flush(); }
+    b.get('blob-create-input').value = 'Música'; b.get('blob-create-input').fire('input');
+    swatchOf(b, 'orange').fire('click'); await flush();
+    b.get('blob-create-what').value = 'Pone música'; b.get('blob-create-what').fire('input');
+    b.click('blob-create-button'); await flush(); await flush();
+    const made = b.backend.specs.specialists.find(x => x.name === 'Música');
+    assert.ok(made, 'the specialist is created');
+    const orders = writes(b).filter(x => x.payload.action === 'set_island_agents').map(x => x.payload.order);
+    for (const o of orders) assert.equal(new Set(o).size, o.length, 'no duplicate ids in a set_island_agents order');
+    assert.ok(!b.get('blob-error') || !/No se pudo crear/.test(b.get('blob-error').textContent || ''), 'no creation failure is reported');
+    assert.equal(b.get('blob-editor-name').value, 'Música', 'the new agent is selected');
+    assert.equal(b.get('blob-count').textContent, `${existing + 1}/3`);
+  });
+}
+
 test('#442 «Del catálogo» keeps today\'s declaration gates AND creates the prefilled agent; deleting it quits the declaration (remove/re-add regression)', async () => {
   const b = await settingsBoot({ prefs: { declaredPills: ['integration_resend'] }, specs: SPECS });
   b.click('blob-tile-new'); await flush();
