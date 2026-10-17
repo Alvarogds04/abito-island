@@ -1806,7 +1806,8 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #island-header .hdr-action { background: transparent; }
 #island-header .hdr-action::after { background: var(--fill-hover); }
 
-#capsule .icon-btn { position: relative; z-index: 0; border: 0; background: transparent; }
+.icon-btn { position: relative; z-index: 0; } /* base class (0,1,0): ids such as #card-fold keep their absolute placement */
+#capsule .icon-btn { border: 0; background: transparent; }
 #capsule .icon-btn::after { content: ""; position: absolute; inset: 6px; z-index: -1; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
 #capsule .icon-btn:hover::after { background: var(--fill-hover); }
 #capsule .icon-btn[aria-expanded="true"]::after { border-color: var(--go); }

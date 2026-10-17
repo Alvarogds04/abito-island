@@ -78,5 +78,10 @@ test('chat composer: 36px input row, 36px round buttons in 44px hit areas (desig
 test('the free-text question field matches the 36px composer row (design §2)', () => {
   assert.equal(decls('#question-text')['min-height'], '36px');
 });
+test('island icon buttons never override the absolute placement of #card-info/#card-fold/#notice-info', () => {
+  assert.equal(decls('#capsule .icon-btn').position, undefined, 'a (1,1,0) position rule would beat the (1,0,0) absolute rules');
+  assert.equal(decls('.icon-btn').position, 'relative', 'the ::after ring anchors on the base class (0,1,0), which ids still override');
+  assert.equal(decls('#card-fold').position, 'absolute');
+});
 console.log(`island-controls-check: ${failed ? failed + ' FAILED' : 'all passed'}`);
 if (failed) process.exitCode = 1;
