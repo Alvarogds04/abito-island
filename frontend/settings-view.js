@@ -13,20 +13,14 @@
   // ---- screens ------------------------------------------------------------------------------------------------
   // Copied from gentle-dot (MIT): one icon button per screen in the chat header; each screen COVERS the chat
   // body with a title, a close button and a one-line hint. Opening one closes the others.
-  // #408: ONE entry point (Ajustes), five sub-tabs (#442 T7.4: Especialistas is merged into Blobs).
-  // This table is the single place to rename or reorder them: the tab strip, the title/hint and
-  // the deep-link seam all read it. Order per DESIGN-NOTES §3/§9: General first, then the rest.
+// #442: five tabs, General first; #440 keeps the design's copy diet.
   const TABS = Object.freeze([
-    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General',
-      hint: 'Atajo de teclado y sonido.' }),
-    Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones',
-      hint: 'Proveedores de IA, agentes de código y servicios en un solo lugar. Tu inicio de sesión queda en esta computadora. Preguntá antes de enviar o cambiar algo.' }),
-    Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos',
-      hint: 'Elegí qué modelos de tus proveedores conectados usa Abito. Los locales están más abajo.' }),
-    Object.freeze({ id: 'pills', title: 'Blobs', icon: 'ring', label: 'Blobs',
-      hint: 'Cada blob es un agente: nombre, color, qué hace y modelo.' }),
-    Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia',
-      hint: 'Tema, colores, movimiento y cómo te saluda Abito.' }),
+    Object.freeze({ id: 'general', title: 'General', icon: 'gear', label: 'General', hint: '' }),
+    Object.freeze({ id: 'accounts', title: 'Conexiones', icon: 'plug', label: 'Conexiones', hint: '' }),
+    Object.freeze({ id: 'models', title: 'Modelos', icon: 'chip', label: 'Modelos', hint: 'Modelos que usa Abito' }),
+    Object.freeze({ id: 'pills', title: 'Blobs', icon: 'ring', label: 'Blobs', hint: '' }),
+    Object.freeze({ id: 'appearance', title: 'Apariencia', icon: 'eye', label: 'Apariencia', hint: '' }),
+
   ]);
   const tabById = id => TABS.find(x => x.id === id) || null;
   // S8: Cuentas + Conectores are ONE tab now. #442 T7.4: Especialistas merged into Blobs.
@@ -70,10 +64,14 @@
   // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
   // Closed shape and OUR words only: the engine never writes this panel (and #305's
   // `portal_rejected` wording belongs to that worker — nothing here ever renders it).
+  // T7.2 design (ajustes-ventana-conexiones-*.png): the Motor group is one card row —
+  // «Motor local» with the «Último estado conocido» sub (the honest read: the chip shows the last
+  // known state) — and the design's own «Reiniciar» button word.
   const DAEMON_RESTART = Object.freeze({
-    title: 'Motor del agente',
-    hint: 'El motor local que ejecuta los proveedores y los agentes. Reiniciar corta lo que esté en curso y vuelve a conectar.',
-    label: 'Reiniciar motor',
+    title: 'Motor',
+    rowTitle: 'Motor local',
+    rowSub: 'Último estado conocido',
+    label: 'Reiniciar',
     busyLabel: 'Reiniciando…',
     ok: 'Motor reiniciado.',
     refused: 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.',
@@ -84,7 +82,8 @@
   function daemonRestartView(busy) {
     return {
       title: DAEMON_RESTART.title,
-      hint: DAEMON_RESTART.hint,
+      rowTitle: DAEMON_RESTART.rowTitle,
+      rowSub: DAEMON_RESTART.rowSub,
       action: { label: busy === true ? DAEMON_RESTART.busyLabel : DAEMON_RESTART.label, disabled: busy === true,
         aria: 'Reiniciar el motor del agente' },
     };
@@ -191,7 +190,7 @@
     connected: ['', '', 'go'], failed: ['Falló', 'triangle', 'red'], disabled: ['Apagado', 'plug-off', 'faint'],
     needs_setup: ['Falta configurar', 'info', 'sun'],
   });
-  const CONNECTORS_NOTE = 'Estado guardado en este equipo; puede no coincidir con lo que está pasando ahora.';
+  // T7.2 copy diet: the services state line is gone (the design draws no note under Servicios).
   function connectorsView(state) {
     const c = (state && state.connectors) || { state: 'loading', items: [] };
     if (c.state === 'unavailable') return { kind: 'unavailable', word: 'No disponible', icon: 'plug-off', tone: 'faint', aria: 'No disponible: el motor no tiene conectores configurados.' };
@@ -298,8 +297,8 @@
 
   // ---- Cuentas: the two method cards, the provider list, the login plan (gentle-dot AccountsPanel) ------------------
   const METHOD_CARDS = Object.freeze([
-    Object.freeze({ id: 'oauth', title: 'Usar una suscripción', hint: 'Iniciá sesión con un plan que ya pagás, como ChatGPT, GitHub Copilot o Grok.' }),
-    Object.freeze({ id: 'api_key', title: 'Usar una clave de API', hint: 'Pegá una clave de la web del proveedor. Funciona con todos los servicios.' }),
+    Object.freeze({ id: 'oauth', title: 'Usar una suscripción' }),
+    Object.freeze({ id: 'api_key', title: 'Usar una clave de API' }),
   ]);
   function accountOfProvider(state, providerId) {
     return ((state && state.accounts) || []).find(a => a.provider === providerId && a.local !== true) || null;
@@ -412,6 +411,7 @@
     const provider = providerOf(state, providerId);
     return !!provider && (provider.configured === true || !!accountOfProvider(state, providerId));
   }
+  const UNPROVEN_SUB = 'Guardado · sin probar';
   function modelsTabView(state, chosen) {
     // No engine (or not yet answered) is a wait or a problem in the same words as Conexiones.
     const cv = connectionView(state);
@@ -421,14 +421,25 @@
     const models = Array.isArray(state.models) ? state.models : [];
     const groups = ((state.providers) || []).map(p => {
       const name = String(p.name || p.id);
-      if (!isProviderConnected(state, p.id)) {
+      // T7.2 (Q2): a provider whose ONLY account is a locally saved key (accounts frame:
+      // local===true + configured, no engine account, provider not configured) lists its models
+      // but is saved, never proven: «Guardado · sin probar». No new wire field.
+      const savedLocal = ((state.accounts) || []).some(a => a && a.provider === p.id && a.local === true && a.configured === true);
+      const onlyLocal = savedLocal && p.configured !== true && !accountOfProvider(state, p.id);
+      if (!isProviderConnected(state, p.id) && !onlyLocal) {
         return { id: p.id, name, connected: false, hint: `Conectá ${name} en Conexiones para ver sus modelos.` };
       }
       const list = Array.isArray(store[p.id]) ? store[p.id].filter(x => typeof x === 'string') : [];
       return {
         id: p.id, name, connected: true,
+        // T7.2: the capability chips read ONLY the closed fields the engine frame already
+        // carries (agentclient `models` fold): reasoning and contextWindow. Nothing is
+        // invented — an absent/zero context and a false reasoning draw no chip.
         models: models.filter(m => m && m.provider === p.id && typeof m.id === 'string')
-          .map(m => ({ id: m.id, name: String(m.name || m.id), chosen: list.includes(m.id) })),
+          .map(m => ({ id: m.id, name: String(m.name || m.id), chosen: list.includes(m.id),
+            sub: onlyLocal ? UNPROVEN_SUB : '',
+            reasoning: m.reasoning === true,
+            contextWindow: Number.isFinite(m.contextWindow) && m.contextWindow > 0 ? m.contextWindow : null })),
       };
     });
     return { kind: 'ready', groups };
@@ -737,7 +748,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, CONNECTORS_NOTE, connectionView, accountRows, loginMethods, createValidity,
+  return { ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,

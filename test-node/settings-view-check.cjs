@@ -65,7 +65,14 @@ test('#442 T7.4 five sub-tabs of ONE Ajustes entry, design order (DESIGN-NOTES �
   // #442 T7.4: the Especialistas deep link resolves to the tab that absorbed it
   assert.equal(S.tabAlias('specialists'), 'pills');
   assert.equal(S.tabAlias('nope'), null);
-  for (const x of S.TABS) { assert.ok(x.icon, x.id); assert.ok(x.hint.length > 10, x.id); }
+  // T7.2 design §3: one title + one hint line at most. Modelos keeps the design's own line; the
+  // other tabs draw none (the regenerated ajustes-ventana-* PNGs show no hint line). Was: every
+  // tab a multi-sentence hint (hint.length > 10).
+  for (const x of S.TABS) {
+    assert.ok(x.icon, x.id);
+    if (x.id === 'models') assert.equal(x.hint, 'Modelos que usa Abito', x.id);
+    else assert.equal(x.hint, '', x.id);
+  }
   assert.equal(S.tabById('connectors'), null, 'resolved through tabAlias, not a tab of its own');
   assert.equal(S.tabById('nope'), null);
   assert.equal(S.SCREENS, undefined);
@@ -203,8 +210,8 @@ test('connectors: honest «no disponible» when the daemon has no connectorsComm
   assert.equal(ready.items[1].sends, true, 'read_and_send is shown (chip «puede enviar»)');
   assert.equal(ready.items[0].sends, false);
   assert.equal(S.connectorsView({ connectors: { state: 'ready', items: [] } }).empty, true);
-  // these are the PERSISTED values, not live: say so
-  assert.match(S.CONNECTORS_NOTE, /guardad/i);
+  // T7.2 copy diet: the services note paragraph is gone (design draws none). Was: CONNECTORS_NOTE /guardad/i.
+  assert.ok(!('CONNECTORS_NOTE' in S), 'the services note paragraph is removed with its constant');
 });
 
 // ---- general --------------------------------------------------------------------------------------------------------
@@ -451,7 +458,8 @@ test('accounts: two method cards, in gentle-dot wording', () => {
   assert.deepEqual(S.METHOD_CARDS.map(c => c.id), ['oauth', 'api_key']);
   assert.equal(S.METHOD_CARDS[0].title, 'Usar una suscripción');
   assert.equal(S.METHOD_CARDS[1].title, 'Usar una clave de API');
-  for (const c of S.METHOD_CARDS) assert.ok(c.hint.length > 30);
+  // T7.2 copy diet: the method cards draw titles only (design shows no method-card hints).
+  for (const c of S.METHOD_CARDS) assert.equal(c.hint, undefined);
 });
 
 test('accounts: the provider list is filtered by method and by the search box', () => {
@@ -725,7 +733,6 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
 test('copy: voseo everywhere (the human writes in Rioplatense Spanish)', () => {
   const all = JSON.stringify(S.TABS) + fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8') + fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   assert.doesNotMatch(all, /Pregunta antes/, '«Pregunta» (tú) -> «Preguntá» (vos)');
-  assert.match(S.tabById('accounts').hint, /Preguntá antes de enviar/);
   assert.doesNotMatch(all, /\b(Conecta|Pega|Inicia|Introduce|Elige|Haz|Pulsa|Escribe)\b(?= [a-zñáéíóú])/, 'no tú imperatives');
 });
 
@@ -1039,6 +1046,32 @@ test('#414 modelsTabView: one group per engine provider, connected ones with the
   assert.ok(!JSON.stringify(v).includes('"x"'), 'a model of an unknown provider never leaks in');
 });
 
+test('T7.2 modelsTabView: «Guardado · sin probar» only where the provider\'s ONLY account is a locally saved key', () => {
+  const state = {
+    connection: 'connected',
+    providers: [
+      { id: 'anthropic', name: 'Anthropic', methods: ['api_key'], configured: false },
+      { id: 'openai', name: 'OpenAI', methods: ['oauth', 'api_key'], configured: true },
+      { id: 'both', name: 'Both', methods: ['api_key'], configured: false },
+    ],
+    accounts: [
+      { accountId: 'l1', provider: 'anthropic', local: true, configured: true },
+      { accountId: 'a1', provider: 'openai', configured: true },
+      { accountId: 'l2', provider: 'both', local: true, configured: true },
+      { accountId: 'a2', provider: 'both', configured: true },
+    ],
+    models: [
+      { provider: 'anthropic', id: 'c1', name: 'C1' }, { provider: 'openai', id: 'g1', name: 'G1' }, { provider: 'both', id: 'b1', name: 'B1' },
+    ],
+  };
+  const v = S.modelsTabView(state, {});
+  const by = id => v.groups.find(g => g.id === id);
+  assert.equal(by('anthropic').connected, true, 'a saved key lists its models');
+  assert.equal(by('anthropic').models[0].sub, 'Guardado · sin probar');
+  assert.equal(by('openai').models[0].sub, '', 'an engine account stays bare');
+  assert.equal(by('both').models[0].sub, '', 'a local key next to an engine account is not the ONLY account');
+});
+
 test('#414 modelsTabView: the chosen map arrives only from typed prefs and never marks unknown models', () => {
   const state = { connection: 'connected', providers: [{ id: 'p', name: 'P', methods: ['api_key'], configured: true }], models: [{ provider: 'p', id: 'm1', name: 'M1' }] };
   const v = S.modelsTabView(state, { p: ['other', 'm1'] });
@@ -1238,13 +1271,31 @@ test('T6.1 visible-layer contract: hover, selected, primary and aria-invalid pai
   assert.doesNotMatch(invalid, /border-color:/, 'the invisible hit border never paints');
 });
 
+// T7.2 audit: the controls this unit added keep the 44px hit area (design: 32 visual / 44 hit).
+test('T7.2 controls: theme thumbnails and service actions keep a 44px hit area; the visual layer is inset', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, `${sel} exists`); return css.slice(i, css.indexOf('}', i)); };
+  assert.match(rule('.stheme.stheme-card'), /min-height: 44px/);
+  assert.match(rule('.stheme.stheme-card'), /min-width: 92px/);
+  assert.match(rule('.int-actions button'), /min-height: 44px/);
+  assert.match(rule('.int-actions button'), /min-width: 44px/);
+  assert.match(rule('.int-actions button::after'), /inset: 6px/, 'service buttons: 44px element, 32px visual');
+  assert.match(rule('.switch'), /height: 44px/);
+  assert.match(rule('.models-prov-model'), /min-height: 44px/);
+});
+
 // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
 test('#390 GD027: the restart control is one closed neutral label with honest outcomes', () => {
   const idle = S.daemonRestartView();
-  assert.equal(idle.action.label, 'Reiniciar motor');
+  // T7.2 design (ajustes-ventana-conexiones-*.png): the Motor group is «Motor local» with the
+  // «Último estado conocido» sub line; the button word is the design's own «Reiniciar». Was: 'Reiniciar motor'.
+  assert.equal(idle.title, 'Motor');
+  assert.equal(idle.rowTitle, 'Motor local');
+  assert.equal(idle.rowSub, 'Último estado conocido');
+  assert.equal(idle.action.label, 'Reiniciar');
   assert.equal(idle.action.disabled, false);
   assert.ok(idle.title.length > 0, 'the section names itself');
-  assert.ok(idle.hint.length > 10, 'the human learns what a restart does');
+  assert.ok(!('hint' in idle), 'the design gives the Motor row a sub line, not a hint paragraph');
   const busy = S.daemonRestartView(true);
   assert.equal(busy.action.label, 'Reiniciando…');
   assert.equal(busy.action.disabled, true, 'one restart at a time, from the button itself');

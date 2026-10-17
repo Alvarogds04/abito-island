@@ -132,6 +132,7 @@
   let target = 0;
   let mode = 'idle';    // 'idle' | 'spring' | 'shrink'
   let t0 = 0, p0 = 0, last = 0, raf = 0;
+  let settledPhase = null; // #439: the landed phase this animation reached (see O.viewPhase)
   let edge = 'top';     // docked vertical edge (mirrors the Rust state)
   // U1: second channel, 0 = overview, 1 = chat (same contract motion).
   const q = { x: 0, v: 0, target: 0, mode: 'idle', t0: 0, x0: 0, last: 0 };
@@ -199,19 +200,28 @@
     clayEl.style.left = lerp(lerp(w / 2, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
     // Coucou companion follows the live composer, not a demo success pose.
     clayEl.style.top = lerp(overviewTop, CHAT.h - 76, q.x) + 'px';
-    capsule.dataset.edge = edge;
-    capsule.dataset.view = q.target === 1 ? 'chat' : noticeLane && noticeLane.view === 'notices' ? 'notices' : 'overview';
+    if (capsule.dataset.edge !== edge) capsule.dataset.edge = edge;
+    const view = q.target === 1 ? 'chat' : noticeLane && noticeLane.view === 'notices' ? 'notices' : 'overview';
+    if (capsule.dataset.view !== view) capsule.dataset.view = view;
     const home = $('home-tab');
-    if (home) home.setAttribute('aria-pressed', q.target === 0 && !noticeLane ? 'true' : 'false');
+    if (home && home.getAttribute('aria-pressed') !== (q.target === 0 && !noticeLane ? 'true' : 'false'))
+      home.setAttribute('aria-pressed', q.target === 0 && !noticeLane ? 'true' : 'false');
     const chatTab = $('open-chat');
-    if (chatTab) chatTab.setAttribute('aria-pressed', q.target === 1 ? 'true' : 'false');
+    if (chatTab && chatTab.getAttribute('aria-pressed') !== (q.target === 1 ? 'true' : 'false'))
+      chatTab.setAttribute('aria-pressed', q.target === 1 ? 'true' : 'false');
     // M1 semantics unchanged: expanded as soon as the island reached it
     // (spring overshoot included); the chat is a VIEW of the expanded phase.
-    let phase = 'collapsing';
-    if (p >= 1) phase = 'expanded';
-    else if (p <= 0) phase = 'compact';
-    else if (target > p) phase = 'expanding';
-    capsule.dataset.phase = phase;
+    // #439: the settled phase latches while an animation runs — the spring's
+    // overshoot dip used to toggle expanded/expanding (and compact/collapsing)
+    // per frame, which re-applied every delayed view rule and re-fired the
+    // capsule observers mid-resize: the navigation flashes. See O.viewPhase.
+    const landed = mode !== 'idle'
+      ? (target === 1 && p >= 1 ? 'expanded' : target === 0 && p <= 0 ? 'compact' : null)
+      : null;
+    if (mode === 'idle') settledPhase = null;
+    else if (landed) settledPhase = landed;
+    const phase = O.viewPhase(p, target, mode, settledPhase);
+    if (capsule.dataset.phase !== phase) capsule.dataset.phase = phase;
   }
 
   function tick(now) {
@@ -276,6 +286,7 @@
   // Called from Rust (WebviewWindow::eval) after every core toggle.
   function setPhase(phase, nextEdge) {
     if (nextEdge === 'top' || nextEdge === 'bottom') edge = nextEdge;
+    settledPhase = null; // a new transition never inherits the previous latch
     const t = phase === 'overview' ? 1 : 0;
     target = t;
     // A collapse always leaves the chat view (Rust resets it too).
@@ -647,7 +658,10 @@
       opener.disabled = !NV || !NV.openPayload({ isTrusted: true }, first, 'finished');
       opener.setAttribute('aria-label', first ? `Abrir aviso: ${first.title}` : 'Sin avisos');
     }
-    const view = paintBand(notices);
+    // T7.3 (design isla-ov-error): with no host notice, an unreachable engine
+    // itself carries the band — red ring, one short title, no action (the
+    // facade has no verb that reconnects a Pi-session transport).
+    const view = paintBand(notices) || O.connectionBandView(conn);
     noticeBand = view;
     // #373 GD032: the strip carries the view's severity tone (error → red,
     // warning → sun); plain dataset writes below, never markup.
@@ -658,6 +672,9 @@
       noticePill.setAttribute('aria-label', view.aria);
       noticeTitle.textContent = view.title;
       noticeSub.textContent = view.detail || '';
+      // T7.3: the transport-error band has no action — a button that does not
+      // fix what the band reports would lie. Host notices keep Abrir/Ver.
+      noticeAction.hidden = view.action == null;
       noticeAction.textContent = view.grouped ? 'Ver' : 'Abrir';
       noticeAction.setAttribute('aria-label', view.grouped ? `Ver los ${view.count} avisos` : `Abrir aviso: ${first ? first.title : ''}`);
     }
@@ -937,6 +954,8 @@
     $('card-info').hidden = !reason;
     $('card-info').setAttribute('aria-label', O.infoLabel('Ver detalle de la decisión', view.aria));
     allow.disabled = deny.disabled = Boolean(reason || cardFlight);
+    const wait = $('card-wait'); // T7.3: «Espera tu respuesta» only while the human may still decide
+    if (wait) wait.hidden = Boolean(reason);
   }
   const cardInfo = $('card-info');
   if (cardInfo) cardInfo.addEventListener('click', () => {
@@ -1098,10 +1117,17 @@
     if (!minis) return;
     if (capsule.dataset.phase === 'expanded' && capsule.dataset.view === 'overview') minis.sync(characterView); else minis.clear();
   };
-  new MutationObserver(syncMinis).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view'] });
+  // #439: at most ONE minis render per frame — the capsule observers used to
+  // fire per frame during the spring and re-sync the minis mid-transition.
+  let minisFrame = 0;
+  const syncMinisSoon = () => {
+    if (minisFrame) return;
+    minisFrame = requestAnimationFrame(() => { minisFrame = 0; syncMinis(); });
+  };
+  new MutationObserver(syncMinisSoon).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view'] });
   const characterChat = view => {
     characterView = view;
-    syncMinis();
+    syncMinisSoon();
     characterTurnBusy = !!(view && view.active_turn && Array.isArray(view.turns) &&
       view.turns.some(t => t.turn_id === view.active_turn && ['queued', 'thinking', 'streaming', 'waiting_approval'].includes(t.state)));
     characterBusy();

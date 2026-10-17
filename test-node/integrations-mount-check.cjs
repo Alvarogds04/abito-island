@@ -22,9 +22,11 @@ test('the group wrapper lives inside #settings, outside #settings-body (render()
   assert.ok(settings.indexOf('<div id="connections-more"') > settings.indexOf('</div>', bodyTag), 'wrapper must not be nested in the body');
 });
 
-test('group title is «Servicios (datos de ejemplo)», a heading', () => {
+// T7.2 design (R7): the group label is the design's own «Servicios · Datos de ejemplo».
+// Was: «Servicios (datos de ejemplo)».
+test('group title is «Servicios · Datos de ejemplo», a heading', () => {
   const g = html.match(GROUP)[1];
-  assert.match(g, /<h3[^>]*>Servicios \(datos de ejemplo\)<\/h3>/);
+  assert.match(g, /<h3[^>]*>Servicios · Datos de ejemplo<\/h3>/);
 });
 
 test('framework container and every card get their OWN hidden sibling section inside the group', () => {

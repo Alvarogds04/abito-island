@@ -11,6 +11,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const frontend = path.join(__dirname, '..', 'frontend');
 const read = file => fs.readFileSync(path.join(frontend, file), 'utf8');
+// the stub below serves the REAL pure phase view (#439): the island's render
+// loop delegates dataset.phase to O.viewPhase, so the fixture must too
+const OV = require(path.join(frontend, 'overview-view.js'));
 let passed = 0;
 const test = (_name, fn) => { fn(); passed += 1; };
 
@@ -151,11 +154,13 @@ function engagementFixture(openOnHover) {
     DOMParser: class { parseFromString() { return { documentElement: { nodeName: 'svg' } }; } },
     MutationObserver: class { constructor(cb) { this.cb = cb; observers.push(this); } observe() {} disconnect() {} },
     AbitoOverview: {
+      viewPhase: OV.viewPhase,
       motionState: () => 'full', honorSystemMotion: () => false, choosePose: () => 'idle',
       hostPoseView: () => ({ tracker: { failing: false, since: 0 }, pose: null }),
       connectionView: () => ({ word: '', detail: '', tone: '', aria: '', icon: '' }),
       bridgeView: () => null, noticeView: () => null, hotkeyView: () => null,
-      noticeBandView: () => null, noticeListView: () => null, // #437: the stub keeps the strip empty, like noticeView
+      noticeBandView: () => null, connectionBandView: () => null, // T7.3: the transport-error band is exercised in overview-view-check
+      noticeListView: () => null, // #437: the stub keeps the strip empty, like noticeView
       cardConnection: () => null, expiryLabel: () => '', expiryAria: () => '',
       cardView: () => ({ kind: 'inert', tone: '', icon: null, word: '', aria: '' }),
       infoLabel: a => a, hoverScale: () => 1,

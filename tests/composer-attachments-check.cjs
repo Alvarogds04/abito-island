@@ -293,6 +293,12 @@ async function check(name, fn) {
     await refused.drop(['/tmp/prohibido.bin']);
     assert.equal(refused.invocations.filter(i => i.cmd === 'chat_attach').length, 1, 'the attempt reached the command (Rust owns the verdict)');
     assert.equal(refused.chips().length, 0, 'the refusal never becomes a chip');
+    // T7.3 (design isla-chat-atterr): the refusal IS shown, as a display-only error chip + one reason line.
+    const errs = refused.strip().children.filter(c => /composer-attachment-error/.test(c.className));
+    assert.equal(errs.length, 1, 'one error chip');
+    assert.equal(errs[0].tagName, 'DIV', 'not a listitem attachment chip');
+    assert.match(refused.strip().children.find(c => c.className === 'composer-attachment-reason').textContent, /no está permitido/);
+    assert.equal(refused.strip().hidden, false);
     assert.match(refused.live(), /no está permitido/);
   });
 

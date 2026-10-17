@@ -16,7 +16,7 @@ const test = (_name, fn) => { fn(); passed += 1; };
 
 // ---- icons ---------------------------------------------------------------
 const CONTRACT = ['bubble', 'arrow-up', 'square', 'arrow-left', 'chip', 'plug', 'plug-off',
-  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info', 'plane'];
+  'check', 'cross', 'clock', 'triangle', 'eye-off', 'lock', 'refresh', 'info', 'plane', 'arrow-right'];
 
 test('registry has every contract icon (14 rows, plug/unplugged = 2 shapes)', () => {
   for (const name of CONTRACT) assert.ok(I.NAMES.includes(name), name);
@@ -69,11 +69,11 @@ test('expiry aria keeps the exact ISO date', () => {
 });
 
 // ---- approval card state -------------------------------------------------
-test('pending: sun tone, no extra word, actionable', () => {
+test('pending: sun tone, the design chip word «Decisión pendiente», actionable', () => {
   const v = O.cardView(null);
   assert.equal(v.kind, 'pending');
   assert.equal(v.tone, 'sun');
-  assert.equal(v.word, '');
+  assert.equal(v.word, 'Decisión pendiente'); // T7.3 isla-approval chip (was '')
   assert.equal(v.actionable, true);
 });
 
@@ -125,29 +125,53 @@ test('every non-pending view has a visible word or is an explicit dot/ring', () 
 });
 
 // ---- connection ----------------------------------------------------------
-test('no Pi -> unplugged icon + "Sin Pi" (the duplicate sentence is gone)', () => {
+test('no Pi -> unplugged icon + "Sin motor" (design ov-error chip; the duplicate sentence is gone)', () => {
   const v = O.connectionView({ unavailable: false, connections: 0 });
-  assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin Pi', 'faint']);
+  assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin motor', 'red']);
   assert.doesNotMatch(JSON.stringify(v), /Sin conexión con Pi/);
-  assert.match(v.detail, /conectás/);
-  assert.doesNotMatch(v.detail, /conectas/);
+  // T7.3 design diet: the visible detail is one short line; the long honest
+  // sentence stays reachable in aria (was a two-sentence visible disclaimer).
+  assert.equal(v.detail, 'Conectá una sesión de Pi.');
+  assert.match(v.aria, /solo si conectás/);
+  assert.doesNotMatch(v.aria, /conectas/);
 });
 
 test('connected -> plug, go, no word; the "declared identity" caveat lives in aria/detail', () => {
   const v = O.connectionView({ unavailable: false, connections: 1 });
   assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['connected', 'plug', '', 'go']);
   assert.match(v.aria, /identidad declarada como Pi/);
-  assert.match(v.detail, /no confirma/i);
+  // T7.3 design diet (isla-ov-normal): the idle overview line replaces the
+  // visible disclaimer; the honest caveat stays in aria.
+  assert.equal(v.detail, 'Pi espera tu próxima tarea.');
+  assert.match(v.aria, /no confirma/i);
 });
 
 test('channel down -> red triangle + "Avisos caídos"', () => {
   const v = O.connectionView({ unavailable: true, connections: 0 });
   assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['unavailable', 'triangle', 'Avisos caídos', 'red']);
-  assert.match(v.detail, /no pudo iniciarse/);
+  // T7.3 design diet: one short visible line; the cause stays in aria.
+  assert.equal(v.detail, 'Sin avisos locales.');
+  assert.match(v.aria, /no pudo iniciarse/);
 });
 
 test('connection view tolerates a missing snapshot', () => {
   assert.equal(O.connectionView(null).kind, 'down');
+});
+
+// ---- T7.3: the transport error band (design isla-ov-error) -----------------
+test('transport error band: "Sin conexión con el motor", red ring, NO invented action', () => {
+  const band = O.connectionBandView(O.connectionView({ unavailable: false, connections: 0 }));
+  assert.ok(band, 'the down connection carries the band');
+  assert.equal(band.title, 'Sin conexión con el motor');
+  assert.equal(band.tone, 'red', 'the band wears the red ring (#notices[data-tone=red])');
+  assert.equal(band.grouped, false);
+  assert.equal(band.action, null, 'the facade has no retry verb for a Pi-session transport; a dead button would lie');
+  assert.match(band.aria, /Sin motor|sesión/i);
+  // the design band is ONLY the engine-unreachable state: a healthy connection
+  // and the pinned "Avisos caídos" channel failure keep their own surfaces
+  assert.equal(O.connectionBandView(O.connectionView({ unavailable: false, connections: 1 })), null);
+  assert.equal(O.connectionBandView(O.connectionView({ unavailable: true, connections: 0 })), null);
+  assert.equal(O.connectionBandView(null), null);
 });
 
 // ---- notice pill ---------------------------------------------------------
@@ -335,7 +359,7 @@ test('every icon-only control in index.html has an aria-label', () => {
     assert.match(m[0], /aria-label="[^"]{3,}"/, `#${id} aria-label`);
   }
   for (const id of ['allow', 'deny']) { // icon + WORD (human decision)
-    assert.match(html, new RegExp(`id="${id}"[^>]*>[\\s\\S]*?<span class="btn-word">(Permitir|Denegar)</span>`), id);
+    assert.match(html, new RegExp(`id="${id}"[^>]*>[\\s\\S]*?<span class="btn-word">(Permitir|Rechazar)</span>`), id); // T7.3: «Denegar» -> «Rechazar» (isla-approval)
   }
   assert.match(html, /<script defer src="icons\.js"><\/script>/);
   assert.match(html, /<script defer src="overview-view\.js"><\/script>/);
@@ -485,7 +509,7 @@ test('«i» aria-label announces the real state', () => {
   assert.equal(O.infoLabel('Ver detalle de la decisión', card.aria),
     'Ver detalle de la decisión: No se pudo confirmar la decisión. Esperá una actualización.');
   const conn = O.connectionView({ connections: 0 });
-  assert.match(O.infoLabel('Ver detalle de la conexión', conn.aria), /^Ver detalle de la conexión: Sin Pi/);
+  assert.match(O.infoLabel('Ver detalle de la conexión', conn.aria), /^Ver detalle de la conexión: Sin motor/);
   assert.equal(O.infoLabel('Ver', ''), 'Ver');
   assert.match(islandSrc, /\$\('card-info'\)\.setAttribute\('aria-label', O\.infoLabel\(/);
   assert.match(islandSrc, /noticeInfo\.setAttribute\('aria-label', O\.infoLabel\(/);
@@ -497,7 +521,7 @@ test('§3: a card never hides a missing Pi / downed notices channel', () => {
   assert.match(html, /id="card-conn-word"/);
   assert.match(islandSrc, /card-conn/);
   assert.equal(O.cardConnection(O.connectionView({ connections: 1 })), null);
-  assert.equal(O.cardConnection(O.connectionView({ connections: 0 })).word, 'Sin Pi');
+  assert.equal(O.cardConnection(O.connectionView({ connections: 0 })).word, 'Sin motor');
   assert.equal(O.cardConnection(O.connectionView({ unavailable: true })).word, 'Avisos caídos');
 });
 
@@ -603,6 +627,52 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   const reduced = [...css.matchAll(/html\[data-motion="reduce"\][^{]*\{[^}]*\}/g)].map(m => m[0]).join('\n');
   assert.match(reduced, /html\[data-motion="reduce"\] #notices, html\[data-motion="reduce"\] #permission, html\[data-motion="reduce"\] #open-chat, html\[data-motion="reduce"\] #chat, html\[data-motion="reduce"\] #models, html\[data-motion="reduce"\] #chat-body, html\[data-motion="reduce"\] #question \{ transition: none !important; transform: none !important/);
   assert.match(reduced, /html\[data-motion="reduce"\] #clay \{ transition: none !important/);
+});
+
+test('#439 viewPhase latches the settled phase: the overshoot dip never toggles the attribute back mid-animation', () => {
+  assert.equal(typeof O.viewPhase, 'function');
+  // The island-side bookkeeping under test: per frame, `landed` is the settled
+  // phase the animation reached (null otherwise), the latch survives while the
+  // animation runs and resets with it. viewPhase must never regress the phase.
+  const landed = (p, target) => {
+    if (target === 1 && p >= 1) return 'expanded';
+    if (target === 0 && p <= 0) return 'compact';
+    return null;
+  };
+  const simulate = frames => {
+    let settled = null;
+    return frames.map(([p, mode, target]) => {
+      const hit = landed(p, target);
+      if (mode === 'idle') settled = null;
+      else if (hit) settled = hit;
+      return O.viewPhase(p, target, mode, settled);
+    });
+  };
+  // grow with overshoot: expanding until the spring first reaches 1, then
+  // expanded for good — never expanding again while the spring oscillates.
+  assert.deepEqual(simulate([[0.3, 'spring', 1], [0.99, 'spring', 1], [1.02, 'spring', 1],
+    [0.97, 'spring', 1], [1.001, 'spring', 1], [1, 'idle', 1]]),
+    ['expanding', 'expanding', 'expanded', 'expanded', 'expanded', 'expanded']);
+  // shrink with a bounce near 0: collapsing until it lands, then compact —
+  // the bounce never turns the attribute back to collapsing.
+  assert.deepEqual(simulate([[1, 'shrink', 0], [0.5, 'shrink', 0], [0.02, 'shrink', 0],
+    [0, 'shrink', 0], [-0.01, 'shrink', 0], [0.03, 'shrink', 0], [0, 'idle', 0]]),
+    ['expanded', 'collapsing', 'collapsing', 'compact', 'compact', 'compact', 'compact']);
+  // interrupted: collapse mid-expand. setPhase resets the latch, so the old
+  // settled phase never outlives its animation and the shrink reaches compact.
+  assert.deepEqual(simulate([[0.9, 'spring', 1], [1.02, 'spring', 1], [0.97, 'shrink', 0],
+    [0, 'shrink', 0], [0.02, 'shrink', 0], [0, 'idle', 0]]),
+    ['expanding', 'expanded', 'collapsing', 'compact', 'compact', 'compact']);
+  // with no animation state the helper stays the plain computed value
+  assert.equal(O.viewPhase(0.5, 1, 'idle', null), 'expanding');
+  assert.equal(O.viewPhase(1, 0, 'idle', null), 'expanded');
+  assert.equal(O.viewPhase(0, 0, 'idle', null), 'compact');
+  // island.js delegates the phase write to the helper and never re-writes the
+  // same dataset value (a repeated write re-fires every capsule observer); a new
+  // setPhase resets the latch so an interrupted animation cannot inherit it
+  assert.match(islandSrc, /O\.viewPhase\(p, target, mode, settledPhase\)/);
+  assert.match(islandSrc, /if \(capsule\.dataset\.phase !== phase\)/);
+  assert.match(islandSrc, /settledPhase = null; \/\/ a new transition never inherits the previous latch/);
 });
 
 test('§5 chat header: R6 ~40px VISIBLE (box x 112/128 within 4px) and inside the header', () => {
@@ -724,12 +794,18 @@ test('#302 round dot: the compact island is gentle-dot\'s 66px disc, in step wit
   assert.ok(visible >= 44 && visible <= diameter - 12, `the visible character (${visible.toFixed(1)}px) sits inside the disc with a clear rim`);
 });
 
-test('#302 the dot keeps the badge/contour vocabulary: sun/red badge sits ON the disc rim; sun contour only in compact', () => {
+test('#302 the dot keeps the badge/contour vocabulary: T7.3 design isla-compacta-sun/red puts the badge at x58-67,y8-16 of the 78px window (over the rim); sun contour only in compact', () => {
+  // T7.3 (D11, design wins): was «badge centre on the rim, INSIDE the disc» (dist <= 33). The design
+  // draws it over the rim: centre (62.5, 12) in window coordinates = 35.8px from the dot centre.
   const flag = /#compact-flag \{([^}]*)\}/.exec(css)[1];
-  const right = Number(/right:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
-  const cx = 66 - right - size / 2, cy = top + size / 2; // badge centre, from the dot's top-left
-  const dist = Math.hypot(cx - 33, cy - 33);
-  assert.ok(dist <= 33 && dist >= 33 - size / 2 - 4, `badge centre ${dist.toFixed(1)}px from the dot centre must be on the rim, inside the disc`);
+  const left = Number(/left:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
+  const cx = left + size / 2, cy = top + size / 2;
+  assert.ok(Math.abs(cx - 62.5) <= 1 && Math.abs(cy - 12) <= 1, `badge centre (${cx}, ${cy}) matches the design (62.5, 12)`);
+  // outside #island (overflow: hidden clips the rim), inside #capsule, so the overhang is drawn
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  const chat = html.indexOf('id="chat-live"'); // last element inside #island
+  assert.ok(html.indexOf('id="compact-flag"') > chat, 'the badge is after the last #island child');
+  assert.match(html.slice(chat, html.indexOf('id="compact-flag"')), /<\/section>\s*<\/div>/, '#island closes before the badge');
   assert.match(css, /#capsule\[data-card-tone="sun"\] #island \{ box-shadow: inset 0 0 0 2px var\(--sun\)/);
 });
 
@@ -817,6 +893,9 @@ test('#305b hotkey feedback: the OS permission dialog is explained (accept once)
   const denied = O.hotkeyView(v('permission_denied'));
   assert.deepEqual([denied.word, denied.icon, denied.tone], ['Atajo sin permiso', 'triangle', 'red']);
   assert.match(denied.aria, /rechazaste|rechazó|no diste/i);
+  // T7.3 design diet: the long disclaimer sentence is gone; the meaning stays
+  // short and honest (the decline fact + the X11 fallback, one clause each).
+  assert.doesNotMatch(denied.aria, /no se activó porque/);
   // the portal route working = silence (never «limitado»); the X11 fallback on Wayland = limited
   assert.equal(O.hotkeyView(v('active', { backend: 'portal', limited: false })), null);
   assert.equal(O.hotkeyView(v('active', { backend: 'x11', limited: true })).word, 'Atajo limitado');
@@ -856,3 +935,15 @@ test('#423 the notice title keeps a readable width in the 228px band (measured 1
 });
 
 console.log(`overview-view-check: ${passed} passed`);
+
+test('T7.3 approval card markup: «Espera tu respuesta» caption, fold inside the action row, command strip', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  const perm = html.slice(html.indexOf('<div id="permission"'), html.indexOf('<div id="question"'));
+  const actions = perm.slice(perm.indexOf('id="card-actions"'));
+  assert.match(actions, /id="allow"[\s\S]*id="deny"[\s\S]*id="card-fold"[\s\S]*id="card-wait"[^>]*>Espera tu respuesta</, 'Permitir, Rechazar, fold, caption in design order');
+  assert.doesNotMatch(perm, /Denegar/);
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /#permission #operation \{[^}]*background: var\(--surface\)/, 'the command sits in a surface strip');
+  assert.match(css, /#card-wait \{[^}]*font-size: var\(--fs-caption\)/, 'caption is 12 px');
+  assert.match(fs.readFileSync(path.join(frontend, 'island.js'), 'utf8'), /card-wait/, 'island.js shows the caption only while the human may decide');
+});

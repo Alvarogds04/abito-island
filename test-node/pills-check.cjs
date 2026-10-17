@@ -792,3 +792,61 @@ test('#442 settings uses the lexical clay engine and destroys all characters whe
   b.click('settings-close'); await flush();
   assert.equal(destroyed, instances.length, 'all mounted real characters stop on close');
 });
+
+// #439 T7.1: the portal pushes state about every 400 ms. A push that changes
+// nothing the panel renders must NOT rebuild the DOM: every rebuild replays the
+// view transitions and blinks Ajustes while the human navigates.
+const nodesStable = (body, before) => before.length === body.children.length && before.every((n, i) => body.children[i] === n);
+
+test('#439 an identical state push keeps the Ajustes DOM: same nodes, no rebuild; a changed input rebuilds', async () => {
+  const b = boot(); await flush();
+  // wrap the harness listener registry so the test can push agent:state too
+  const pushed = {};
+  const origListen = b.window.__TAURI__.event.listen;
+  b.window.__TAURI__.event.listen = (name, fn) => { (pushed[name] ||= []).push(fn); return origListen(name, fn); };
+  for (const file of ['avatar-colors.js', 'settings-view.js', 'pill-settings.js', 'settings.js']) b.load(file);
+  b.click('open-screen-settings'); await flush();
+  const body = b.get('settings-body');
+  assert.ok(body.children.length, 'the panel rendered');
+  // prefs: an identical push preserves node identity (no transition replay),
+  // a changed pref rebuilds
+  let before = [...body.children];
+  b.emit({}); await flush();
+  assert.ok(nodesStable(body, before), 'identical prefs push: node identity preserved');
+  b.emit({ sound: true }); await flush();
+  assert.ok(!nodesStable(body, before), 'a changed pref rebuilds the panel');
+  // agent state: identical push preserves, a changed connection rebuilds
+  before = [...body.children];
+  for (const fn of pushed['agent:state'] || []) fn({ payload: { connection: 'no_daemon' } });
+  await flush();
+  assert.ok(nodesStable(body, before), 'identical agent push: node identity preserved');
+  for (const fn of pushed['agent:state'] || []) fn({ payload: { connection: 'lost' } });
+  await flush();
+  assert.ok(!nodesStable(body, before), 'a changed agent state rebuilds the panel');
+});
+
+test('#439 a screen switch rebuilds; a typed draft survives an identical push and rides the next rebuild', async () => {
+  const b = await settingsBoot(undefined, 'general');
+  const body = b.get('settings-body');
+  const before = [...body.children];
+  b.click('settings-tab-accounts'); await flush(); // screen is a key input: the push category must rebuild
+  assert.ok(!nodesStable(body, before), 'a screen switch rebuilds the panel');
+  // a draft typed into the live field renders identically from live state: an
+  // identical push must not rebuild, and the keystrokes must survive the next one
+  b.click('settings-tab-general'); await flush();
+  const field = b.get('settings-display-name');
+  assert.ok(field, 'the name field renders on General');
+  const typed = field;
+  typed.value = 'Ana'; typed.fire('input'); // sets the draft, renders nothing
+  const kids = [...body.children];
+  b.emit({}); await flush();
+  assert.ok(nodesStable(body, kids), 'identical push while typing: no rebuild, keystrokes stay');
+  assert.equal(b.get('settings-display-name').value, 'Ana');
+  b.emit({ sound: true }); await flush();
+  assert.ok(!nodesStable(body, kids), 'a real change rebuilds the panel');
+  assert.equal(b.get('settings-display-name').value, 'Ana', 'the draft rides the rebuild (never stale)');
+  // the failure chip clears through its own timer: the 6 s callback must reset
+  // the key bit BEFORE rendering, or a skipped render would freeze the chip
+  const src = read('settings.js');
+  assert.match(src, /failureTimer = 0; render\(\)/, 'the failure timer re-arms the key before rendering');
+});

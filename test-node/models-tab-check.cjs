@@ -109,7 +109,12 @@ function makeDom() {
   };
 }
 
-const clone = value => JSON.parse(JSON.stringify(value));
+// Static fixture shapes only; a clone failure is a harness bug, so it is re-raised with context
+// (never silently swallowed) instead of throwing raw from JSON.parse.
+const clone = value => {
+  try { return JSON.parse(JSON.stringify(value)); }
+  catch (err) { throw new Error(`models-tab-check fixture clone failed: ${err.message}`); }
+};
 
 async function loadPage(opts) {
   const o = opts || {};
@@ -176,9 +181,12 @@ async function loadPage(opts) {
     prefs: () => prefs,
     panel: () => dom.el('models'),
     section: () => dom.el('models-providers'),
-    groups: () => (dom.el('models-providers').children.filter(n => n.dataset && n.dataset.provider)),
-    toggles: () => dom.el('models-providers').children.flatMap(g => g.children.filter(n => n.tagName === 'UL'))
-      .flatMap(ul => ul.children.flatMap(li => li.children.filter(n => n.tagName === 'BUTTON'))),
+    listEl: () => dom.el('models-providers').children.find(n => n.tagName === 'UL'),
+    rows: () => { const ul = dom.el('models-providers').children.find(n => n.tagName === 'UL'); return ul ? ul.children : []; },
+    toggles: () => {
+      const ul = dom.el('models-providers').children.find(n => n.tagName === 'UL');
+      return ul ? ul.children.flatMap(li => li.children.filter(n => n.tagName === 'BUTTON')) : [];
+    },
   };
 }
 
@@ -209,30 +217,35 @@ async function main() {
     const html = fs.readFileSync(path.join(FRONTEND, 'index.html'), 'utf8');
     assert.match(html, /<div id="models" inert role="tabpanel"/);
     assert.match(html, /id="models-list"/, 'the local picker list is still there');
-    // the provider groups ship with the page: the section's own rules and the shared choose control
+    // the provider section ships with the page: the flat radio-row list rules, the «Locales»
+    // group label and the shared choose control. T7.2: the disconnected-provider hint is gone
+    // (the design draws no disconnected group; was: .models-prov-hint + «Conectá … en Conexiones»).
     const css = fs.readFileSync(path.join(FRONTEND, 'style.css'), 'utf8');
-    assert.match(css, /\.models-prov-group \{[^}]*min-height: 44px/);
-    assert.match(css, /\.models-prov-hint/);
     assert.match(css, /#models-list \.choose, \.models-prov \.choose/, 'the toggle reuses the local picker circle control');
-    const viewSrc = fs.readFileSync(path.join(FRONTEND, 'settings-view.js'), 'utf8');
-    assert.match(viewSrc, /Conectá .* en Conexiones para ver sus modelos/, 'the disconnected hint is our own closed sentence');
+    assert.match(css, /\.models-prov-title/, 'the group label «Cuentas conectadas»');
+    assert.match(css, /\.models-prov-model \{[^}]*min-height: 44px/, 'radio rows keep the 44px row');
+    assert.ok(!css.includes('.models-prov-hint'), 'the provider hint styles are gone');
+    assert.match(css, /\.models-local-label/, 'the «Locales» group label above the local picker');
   });
 
-  await check('#414 one group per engine provider; models only for the CONNECTED ones, a hint for the rest', async () => {
+  const rowTitles = row => row.children.find(n => n.className === 'model-titles');
+  const rowTitle = row => { const w = rowTitles(row); const t = w && w.children.find(n => n.className === 'model-title'); return t ? text(t) : ''; };
+  const rowSub = row => { const w = rowTitles(row); const t = w && w.children.find(n => n.className === 'model-sub'); return t ? text(t) : ''; };
+  const rowProvider = row => { const c = row.children.find(n => n.className === 'chip models-prov-chip'); return c ? text(c) : ''; };
+  const rowCaps = row => { const c = row.children.find(n => n.className === 'model-chips'); return c ? text(c) : ''; };
+
+  await check('T7.2 design: one flat radio-row list under «Cuentas conectadas»; disconnected providers draw nothing', async () => {
     const page = await loadPage();
     await page.openModelsTab();
     const section = page.section();
-    assert.ok(section.children.length >= 3, 'a title plus one group per provider');
-    const groups = page.groups();
-    assert.deepEqual(groups.map(g => g.dataset.provider), ['anthropic', 'openai'], 'one group per provider, engine order');
-    const [anthropic, openai] = groups;
-    assert.match(text(anthropic), /Anthropic/, 'the group names its provider');
-    assert.match(text(anthropic), /Conectado/);
-    const rows = anthropic.children.filter(n => n.tagName === 'UL').flatMap(ul => ul.children);
-    assert.deepEqual(rows.map(r => text(r)), ['Claude Sonnet 4.5', 'Claude Opus 4.6'], 'the engine-reported models, engine order');
-    // the disconnected one: a hint to Conexiones, never invented models
-    assert.match(text(openai), /Conexiones/);
-    assert.equal(openai.children.filter(n => n.tagName === 'UL').length, 0, 'a disconnected group shows no models');
+    const head = section.children.find(n => n.tagName === 'H3');
+    assert.match(text(head), /Cuentas conectadas/, 'the group label of the design');
+    const rows = page.rows();
+    // openai is fully disconnected: the design draws no row and no hint for it
+    assert.deepEqual(rows.map(rowTitle), ['Claude Sonnet 4.5', 'Claude Opus 4.6'], 'only the models of the connected accounts, engine order');
+    for (const row of rows) assert.equal(rowProvider(row), 'Anthropic', 'each row names its provider (design chip)');
+    assert.ok(rows.every(row => /200k/.test(rowCaps(row))), 'context capability chip from the engine frame');
+    assert.ok(rows.every(row => /Razonamiento/.test(rowCaps(row))), 'reasoning capability chip from the engine frame');
     // the toggle state comes from the typed pref
     const chosen = page.toggles().find(b => b.getAttribute('aria-pressed') === 'true');
     assert.ok(chosen, 'the chosen model of the pref is marked');
@@ -261,14 +274,26 @@ async function main() {
       { action: 'set_chosen_models', provider: 'anthropic', models: ['claude-sonnet-4-5'] });
   });
 
-  await check('#414 the section re-renders from the streams: agent:state and prefs:state, no engine text, no secrets', async () => {
+  await check('T7.2 «Guardado · sin probar» sub only for a provider whose only account is a locally saved key', async () => {
+    const view = clone(AGENT_VIEW);
+    view.providers[0].configured = false;
+    view.accounts = [{ accountId: 'l1', provider: 'anthropic', local: true, configured: true }];
+    const page = await loadPage({ agentView: view });
+    await page.openModelsTab();
+    assert.deepEqual(page.rows().map(rowSub), ['Guardado · sin probar', 'Guardado · sin probar']);
+    const bare = await loadPage();
+    await bare.openModelsTab();
+    assert.deepEqual(bare.rows().map(rowSub), ['', ''], 'an engine-configured provider stays bare');
+  });
+
+  await check('T7.2 the section re-renders from the streams: agent:state and prefs:state, no engine text, no secrets', async () => {
     const page = await loadPage({ agentView: { connection: 'connecting' } });
     await page.openModelsTab();
     assert.ok(/Conectando/.test(text(page.section())), 'no engine yet is a wait, in our words');
     page.setAgentView(AGENT_VIEW);
     page.emit('agent:state', AGENT_VIEW);
     await page.settle();
-    assert.deepEqual(page.groups().map(g => g.dataset.provider), ['anthropic', 'openai'], 'the state stream fills the groups');
+    assert.deepEqual(page.rows().map(rowTitle), ['Claude Sonnet 4.5', 'Claude Opus 4.6'], 'the state stream fills the rows');
     // a prefs push marks the new choice without a reload
     page.emit('prefs:state', { v: 1, sound: false, chosenModels: { anthropic: ['claude-sonnet-4-5'] } });
     await page.settle();

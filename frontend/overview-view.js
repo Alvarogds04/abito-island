@@ -42,7 +42,7 @@
   // `reason` is the host/feedback reason, or null while the human may decide.
   function cardView(reason) {
     if (reason == null) {
-      return { kind: 'pending', tone: 'sun', icon: '', word: '', aria: 'Esperando tu decisión', actionable: true };
+      return { kind: 'pending', tone: 'sun', icon: '', word: 'Decisión pendiente', aria: 'Esperando tu decisión', actionable: true };
     }
     const text = String(reason);
     const inert = (kind, tone, icon, word, aria) => ({ kind, tone, icon, word, aria, actionable: false });
@@ -63,17 +63,32 @@
     const connections = typeof s.connections === 'number' ? s.connections : 0;
     if (s.unavailable === true) {
       return { kind: 'unavailable', tone: 'red', icon: 'triangle', word: 'Avisos caídos',
-        aria: 'Avisos locales no disponibles',
-        detail: 'El canal local de avisos no pudo iniciarse. No se hizo ninguna conexión con Pi.' };
+        aria: 'Avisos locales no disponibles: el canal local de avisos no pudo iniciarse; no se hizo ninguna conexión con Pi.',
+        detail: 'Sin avisos locales.' };
     }
     if (connections > 0) {
+      // T7.3 design diet (isla-ov-normal): the overview shows the short idle
+      // line; the honest caveat rides aria, where the full sentence stays
+      // reachable (coordinator condition: short VISIBLE, honest REACHABLE).
       return { kind: 'connected', tone: 'go', icon: 'plug', word: '',
-        aria: 'Conexión local activa · identidad declarada como Pi',
-        detail: 'La conexión está activa. Esto no confirma que Pi esté trabajando ni que una tarea haya terminado.' };
+        aria: 'Conexión local activa · identidad declarada como Pi. La conexión está activa; esto no confirma que Pi esté trabajando ni que una tarea haya terminado.',
+        detail: 'Pi espera tu próxima tarea.' };
     }
-    return { kind: 'down', tone: 'faint', icon: 'plug-off', word: 'Sin Pi',
-      aria: 'Sin Pi: no hay una sesión conectada',
-      detail: 'Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.' };
+    return { kind: 'down', tone: 'red', icon: 'plug-off', word: 'Sin motor',
+      aria: 'Sin motor: no hay una sesión conectada. Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.',
+      detail: 'Conectá una sesión de Pi.' };
+  }
+
+  // ---- T7.3: the transport error band (design isla-ov-error) -----------------
+  // When the engine is unreachable (no session over the transport) the notices
+  // band itself carries the error: red ring, ONE short title, no invented
+  // action — the desktop facade has no verb that reconnects a Pi session
+  // (daemon_action restart fixes the agent daemon, a different component), and
+  // a button that does not fix what the band reports would lie. Pure + tested.
+  function connectionBandView(conn) {
+    if (!conn || conn.kind !== 'down') return null;
+    return { title: 'Sin conexión con el motor', detail: '', grouped: false,
+      tone: 'red', action: null, aria: conn.aria };
   }
 
   // ---- notice pill (Sileo) ---------------------------------------------------
@@ -188,8 +203,8 @@
     const bridge = snapshot && snapshot.bridgeStatus && snapshot.bridgeStatus.state;
     if (bridge !== 'unhealthy' && bridge !== 'stopped') return null;
     return { kind: 'down', tone: 'red', icon: 'triangle', word: 'Sin puente',
-      aria: 'Sin puente: el puente de aprobación no responde; no se puede decidir hasta que vuelva',
-      detail: 'El puente que lleva tu decisión al backend no responde. Las decisiones quedan sin enviar.' };
+      aria: 'Sin puente: el puente de aprobación no responde; no se puede decidir hasta que vuelva. Las decisiones quedan sin enviar.',
+      detail: 'Las decisiones quedan sin enviar.' };
   }
 
   // ---- R6 error face from the HOST: time-boxed, never a permanent mask ------
@@ -224,6 +239,26 @@
     const i = input || {};
     return i.honorSystem === true && i.systemReduced === true ? 'reduce' : 'full';
   }
+
+  // #439 — the phase attribute the island reports while it animates. The spring's
+  // overshoot makes p cross the target and dip back, and the plain computation then
+  // toggled expanded↔expanding (and compact↔collapsing) PER FRAME; every §9.2 view
+  // rule is keyed on [data-phase="expanded"], so each toggle un-applied and re-applied
+  // the delayed enter/exit transitions — the navigation flashes — and re-fired every
+  // capsule MutationObserver mid-resize. `settled` is the landed phase this animation
+  // already reached (island.js computes it per frame); once landed toward the target
+  // it never regresses until the animation ends. With no animation state (idle) the
+  // helper stays the plain computed value.
+  function viewPhase(p, target, mode, settled) {
+    let phase = 'collapsing';
+    if (p >= 1) phase = 'expanded';
+    else if (p <= 0) phase = 'compact';
+    else if (target > p) phase = 'expanding';
+    if (mode === 'idle' || !settled) return phase;
+    if (target === 1 && settled === 'expanded') return 'expanded';
+    if (target === 0 && settled === 'compact') return 'compact';
+    return phase;
+  }
   // snapshot.motionOverride === true (the new default) = do NOT honor the system.
   const honorSystemMotion = snapshot => !!snapshot && snapshot.motionOverride === false;
 
@@ -233,8 +268,9 @@
     taken: ['Atajo ocupado', 'triangle', 'red', 'está en uso por otra aplicación; elegí otra combinación'],
     unsupported: ['Atajo sin soporte', 'triangle', 'red', 'no se pudo registrar: no hay un servidor X11 accesible'],
     invalid: ['Atajo inválido', 'triangle', 'red', 'no es una combinación válida: necesita Ctrl, Alt o Súper'],
-    // portal route (#305b): the OS asks the human ONCE; a decline is visible and the X11 fallback takes over
-    permission_denied: ['Atajo sin permiso', 'triangle', 'red', 'no se activó porque rechazaste el permiso del sistema; usamos el atajo limitado de X11'],
+    // portal route (#305b): the OS asks the human ONCE; a decline is visible and the X11 fallback takes over.
+    // T7.3 design diet: the long disclaimer sentence is gone; the meaning stays short and honest.
+    permission_denied: ['Atajo sin permiso', 'triangle', 'red', 'rechazaste el permiso del sistema; queda el atajo limitado de X11'],
   });
   // U3a: the unsupported reason above blames X11, and on Windows that is a lie (there
   // is no X server to blame). Only that one tuple changes per backend; everything else
@@ -284,5 +320,5 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { expiryLabel, expiryAria, cardView, connectionView, connectionBandView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

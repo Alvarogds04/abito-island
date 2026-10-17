@@ -32,25 +32,30 @@
   min-width: 0;
   max-height: 84px; /* a few chip rows, then scroll: never push the composer out of the window */
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin: 4px 2px 0;
 }
+/* T7.3 (design isla-chat-att1/att5): a 28px chip, r10, on the surface tone: name + ×. */
 .composer-attachment {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 100%;
   min-width: 0;
-  padding: 3px 4px 3px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
-  font: 12px/1.4 system-ui, sans-serif;
+  min-height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  font: 400 var(--fs-caption)/1.2 var(--font-ui);
 }
-.composer-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-attachment-size { color: var(--island-muted, rgba(255, 255, 255, .6)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.composer-attachment-name { min-width: 0; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment-size { display: none; } /* design: icon, name, × only; the size stays in the data */
+/* error chip (design isla-chat-atterr): red ring + ONE reason line under the strip */
+.composer-attachment-error { box-shadow: inset 0 0 0 1px var(--red-11); }
+.composer-attachment-reason { flex-basis: 100%; margin: 0; color: var(--red-11); font-size: var(--fs-caption); line-height: 1.2; }
 .composer-attachment-remove {
   position: relative;
   display: grid;

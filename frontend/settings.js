@@ -449,7 +449,7 @@
     const chip = $('settings-conn');
     chip.hidden = false; chip.dataset.tone = out.tone; chip.setAttribute('aria-label', out.say);
     putIcon($('settings-conn-icon'), out.icon); $('settings-conn-word').textContent = out.word;
-    clearTimeout(failureTimer); failureTimer = setTimeout(() => render(), 6000);
+    clearTimeout(failureTimer); failureTimer = setTimeout(() => { failureTimer = 0; render(); }, 6000);
   }
   let failureTimer = 0;
   function send(payload, okSay) {
@@ -478,8 +478,37 @@
   // them needs a decision about which store wins, not a patch here.
 
   // ---- rendering --------------------------------------------------------------------------------------------------------------
+  // #439: the portal pushes state about every 400 ms. A push that changes nothing
+  // the panel renders must not rebuild the DOM — every rebuild replays the view
+  // transitions and blinks Ajustes while the human navigates. The key is derived
+  // from the SAME inputs render() reads (keep the two in sync when editing either);
+  // live DRAFT VALUES (nameDraft, gainDraft, the makeDrafts fields) are
+  // deliberately excluded: the user's keystrokes are already in the DOM and every
+  // rebuild re-reads the same drafts, so they can never make the output stale.
+  // busy/waiting/accountGeneration render nothing and stay out too. There is no
+  // clock-driven text in this panel; the one timed visual is the failure chip,
+  // whose 6 s callback resets the failureTimer bit below before rendering.
+  let lastRenderKey = null;
+  function renderKey() {
+    return JSON.stringify([
+      screen, filter, prefs, hotkey, motionOverride, ownedAccounts,
+      accountForm ? 'form' : null, accountSaving, accountError, accountNote,
+      agentState && { connection: agentState.connection, providers: agentState.providers,
+        accounts: agentState.accounts, profiles: agentState.profiles, connectors: agentState.connectors,
+        agents: agentState.agents, hooks: agentState.hooks, last_error: agentState.last_error,
+        auth: agentState.auth, unavailable: agentState.unavailable },
+      agentsAsk ? [agentsAsk.at, agentsAsk.timedOut] : null,
+      loginTarget, pendingLogin, daemonBusy, daemonNote,
+      nameSaving, nameError, gainSaving, gainError, autoSaving, autoError, capturing,
+      themeError, colorErrors, pillSaving, pillError,
+      specialistIdentities(), failureTimer !== 0,
+    ]);
+  }
   function render() {
     if (!isOpen()) return;
+    const key = renderKey();
+    if (key === lastRenderKey) return;
+    lastRenderKey = key;
     const keep = body.scrollTop;
     const active = document.activeElement;
     const focused = active && active.id;
@@ -509,7 +538,6 @@
   function renderOwnedAccounts() {
     const section = el('section', 'ssec'); section.id = 'owned-accounts';
     section.append(sectionTitle('Configuración de proveedores'));
-    section.append(el('p', 'snote', 'Guardado local en Abito. Conexión no probada; no cambia el modelo del chat.'));
     if (ownedAccounts === null) {
       section.append(el('p', 'snote', 'El almacén de cuentas no está disponible. No se modificó ninguna cuenta.'));
     } else if (accountForm) {
@@ -643,9 +671,16 @@
     const v = V.daemonRestartView(daemonBusy);
     const sec = el('section', 'ssec'); sec.id = 'daemon-restart';
     sec.append(sectionTitle(v.title));
-    sec.append(el('p', 'snote', v.hint));
-    const row = el('div', 'srow');
-    row.append(el('span', 'srow-title', 'Motor'));
+    // T7.2 design (ajustes-ventana-conexiones-*.png): one card row — «Motor local» over the
+    // «Último estado conocido» sub, the LAST KNOWN state as a chip (honest: it is what the page
+    // last heard, not a live probe), then the design's «Reiniciar» button.
+    const row = el('div', 'srow sdaemon-row');
+    const titles = el('span', 'srow-titles');
+    titles.append(el('span', 'srow-title', v.rowTitle));
+    titles.append(el('span', 'srow-sub', v.rowSub));
+    row.append(titles);
+    const conn = V.connectionView(agentState);
+    if (conn) row.append(chipNode({ tone: conn.tone, icon: conn.icon, word: conn.word, aria: conn.aria }));
     const actions = el('span', 'srow-actions');
     actions.append(wordBtn(v.action.label, () => restartDaemon(), { icon: 'refresh', disabled: v.action.disabled, aria: v.action.aria }));
     row.append(actions);
@@ -705,7 +740,7 @@
     search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
     search.addEventListener('input', () => { filter = search.value; render(); });
     body.append(search);
-    const sec = el('section', 'ssec'); sec.id = 'provider-list'; sec.append(sectionTitle('Proveedores de IA'));
+    const sec = el('section', 'ssec'); sec.id = 'provider-list'; sec.append(sectionTitle('Proveedores'));
     const rows = V.providerRows(st, { filter, flow: loginTarget });
     const list = el('ul', 'srows sconn'); list.setAttribute('aria-label', 'Proveedores');
     for (const r of rows) {
@@ -845,7 +880,7 @@
         list.append(li);
       }
       if (v.empty) list.append(el('li', 'sempty', 'Sin servicios'));
-      svc.append(list, el('p', 'snote', V.CONNECTORS_NOTE + ' Por ahora sólo se pueden ver; conectarlos llega con el motor.'));
+      svc.append(list);
     }
     body.append(svc);
   }
@@ -1040,20 +1075,20 @@
       }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
     }));
     paintAuto();
-    const motion = group('appearance', 'Movimiento', 'Qué hace la isla cuando tu sistema pide menos animación.');
-    motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
+    const motion = group('appearance', 'Movimiento', '');
+    motion.append(toggleRow('sw-motion', 'Animación reducida', g.motion.respectSystem, () => {
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
     // #380: the theme. Three fixed choices; the SAVED mode is the truth (the row renders from
     // `prefs`), and applying it is theme.js's job after the host confirms the write.
-    const theme = group('appearance', 'Tema', 'Con «Sistema» Abito usa el tema de tu computadora y lo sigue cuando cambia. Con «Claro» u «Oscuro» queda fijo.');
+    const theme = group('appearance', 'Tema', '');
     const themePick = V.themeView(prefs);
     const picker = el('span', 'stheme-options');
     picker.setAttribute('role', 'radiogroup');
     picker.setAttribute('aria-label', 'Tema');
     for (const option of themePick.options) {
-      const b = el('button', 'stheme');
+      const b = el('button', 'stheme stheme-card');
       b.type = 'button';
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
@@ -1061,7 +1096,18 @@
       b.id = `theme-mode-${option.id}`;
       b.dataset.mode = option.id;
       b.tabIndex = option.selected ? 0 : -1;
-      b.append(el('span', 'stheme-label', option.label));
+      // T7.2 design (ajustes-ventana-apariencia-*.png): a LIVE thumbnail per theme — the dot,
+      // one ink line, one muted line and two chips drawn with that theme's palette. Sistema
+      // follows the CURRENT theme tokens; Claro/Oscuro are the literal palettes of DESIGN-NOTES
+      // §1, because a preview must not flip with the theme it sits in. Decorative: the words and
+      // aria-labels carry the meaning.
+      const thumb = el('span', 'stheme-thumb');
+      thumb.setAttribute('aria-hidden', 'true');
+      thumb.append(el('span', 't-dot'), el('span', 't-line t-line-1'), el('span', 't-line t-line-2'));
+      const mini = el('span', 't-chips');
+      mini.append(el('span'), el('span'));
+      thumb.append(mini);
+      b.append(thumb, el('span', 'stheme-label', option.label));
       b.addEventListener('keydown', e => {
         if (e.isTrusted !== true || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
         e.preventDefault();
@@ -1090,7 +1136,7 @@
     const identities = specialistIdentities();
     const rows = V.colorRows(prefs, AVATAR ? [{ id: AVATAR.PRINCIPAL_ID, name: 'Abito' }, ...identities.identities] : [], AVATAR);
     if (rows.length) {
-      const color = group('appearance', 'Color', 'Abito mantiene su color en la isla. El especialista muestra el suyo en su indicador; los colores pueden repetirse.');
+      const color = group('appearance', 'Color', 'Abito mantiene su color en la isla.');
       for (const row of rows) color.append(colorRow(row));
       if (identities.kind !== 'ready') {
         const notice = el('p', 'snote', identities.kind === 'loading' ? 'Leyendo los colores de tus especialistas…' : 'Colores de especialistas no disponibles: no se pudieron cargar sus identidades.');

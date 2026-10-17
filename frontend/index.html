@@ -71,9 +71,6 @@
            its focus ring is drawn on #island). Enter/Space opens the
            overview from compact; in the overview it closes it. -->
       <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
-      <!-- UI.2: compact indicator (§6): sun dot = something waits for your yes,
-           red triangle = channel down. Shape + colour; never text. -->
-      <span id="compact-flag" role="img" hidden><span class="ico" id="compact-flag-icon"></span></span>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <!-- #419: visual auto-close countdown — pure decoration (aria-hidden,
            hidden by default). The interaction adapter renders the published
@@ -137,17 +134,19 @@
           <span id="card-conn" class="chip" role="img" hidden><span class="ico" id="card-conn-icon"></span><span class="word" id="card-conn-word"></span></span>
           <span id="card-bridge" class="chip" role="img" hidden><span class="ico" id="card-bridge-icon"></span><span class="word" id="card-bridge-word"></span></span>
           <button id="card-info" class="icon-btn" type="button" aria-label="Ver detalle de la decisión" aria-expanded="false" aria-controls="card-reason"><span class="ico" data-icon="info"></span></button>
-          <!-- F014 (#338): fold the waiting card down to the compact island
-               WITHOUT deciding it (upstream `foldApproval`, windows
-               /src/island/island.ts:144-154): the host keeps the card, the
-               request keeps waiting, reopening shows it again. -->
-          <button id="card-fold" class="icon-btn" type="button" aria-label="Plegar la tarjeta y dejar la solicitud esperando"><span class="ico" data-icon="arrow-up"></span></button>
         </div>
         <p id="operation"></p>
         <p id="card-reason" role="status" hidden></p>
         <div id="card-actions">
           <button id="allow" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="check"></span><span class="btn-word">Permitir</span></button>
-          <button id="deny" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="cross"></span><span class="btn-word">Denegar</span></button>
+          <button id="deny" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="cross"></span><span class="btn-word">Rechazar</span></button>
+          <!-- T7.3: the fold sits in the action row (isla-approval). -->
+          <!-- F014 (#338): fold the waiting card down to the compact island
+               WITHOUT deciding it (upstream `foldApproval`, windows
+               /src/island/island.ts:144-154): the host keeps the card, the
+               request keeps waiting, reopening shows it again. -->
+          <button id="card-fold" class="icon-btn" type="button" aria-label="Plegar la tarjeta y dejar la solicitud esperando"><span class="ico" data-icon="arrow-right"></span></button>
+          <span id="card-wait">Espera tu respuesta</span>
         </div>
       </div>
       <!-- N6: Pi question / notification with 1..N reply options. DISPLAY only:
@@ -176,6 +175,7 @@
            Every text below is written with textContent: plain text only. -->
       <section id="chat" inert aria-label="Conversación con Abito">
         <header id="chat-header">
+          <h2 id="chat-title">Abito</h2>
           <span id="chat-target-chip" class="chip" role="img"><span class="ico" data-icon="lock"></span><span class="word">local</span></span>
           <span id="chat-target" class="sr-only"></span>
           <!-- #327: the role in use, when the human chose one. Status only: the role itself is
@@ -196,9 +196,11 @@
           <ul id="conversations-list" aria-label="Conversaciones guardadas"></ul>
         </div>
         <div id="chat-body">
+          <div id="chat-drop" hidden aria-hidden="true"><strong>Soltá para adjuntar</strong><span>Imágenes y texto</span></div>
           <div id="chat-history-controls" role="group" aria-label="Conversaciones">
-            <button id="chat-create" class="icon-btn" type="button" aria-label="Nueva conversación (Ctrl+N)" title="Nueva conversación (Ctrl+N)"><span class="ico" data-icon="bubble"></span></button>
+            <button id="chat-create" class="icon-btn" type="button" aria-label="Nueva conversación (Ctrl+N)" title="Nueva conversación (Ctrl+N)"><span class="ico" data-icon="plus"></span></button>
             <button id="chat-conversations" class="icon-btn" type="button" aria-label="Conversaciones guardadas" aria-expanded="false" aria-controls="conversations"><span class="ico" data-icon="clock"></span></button>
+            <span id="chat-history-label">Conversación nueva</span>
           </div>
           <ol id="chat-log" tabindex="0" aria-label="Historial de la conversación"></ol>
           <button id="chat-new" type="button" hidden aria-label="Respuesta nueva"><span class="ico" data-icon="arrow-down"></span><span class="dot"></span></button>
@@ -241,7 +243,7 @@
           <div id="settings-body" tabindex="-1" role="tabpanel"></div>
           <!-- Servicios (datos de ejemplo): FAKE cards. settings.js re-appends this group to the body only on the Conexiones tab (render() wipes the body). -->
           <div id="connections-more" hidden>
-            <h3 class="ssection">Servicios (datos de ejemplo)</h3>
+            <h3 class="ssection">Servicios · Datos de ejemplo</h3>
             <section id="integrations" hidden></section>
             <section id="integrations-github" hidden></section>
             <section id="integrations-deployments" hidden></section>
@@ -274,6 +276,11 @@
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
       </section>
     </div>
+    <!-- UI.2: compact indicator (§6): sun dot = something waits for your yes,
+         red triangle = channel down. Shape + colour; never text. T7.3 (design
+         isla-compacta-sun/red): it sits OVER the disc rim, so it lives in #capsule
+         after #island (which clips its children), not inside it. -->
+    <span id="compact-flag" role="img" hidden><span class="ico" id="compact-flag-icon"></span></span>
   </main>
 </body>
 </html>
