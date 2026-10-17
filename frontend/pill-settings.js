@@ -240,7 +240,10 @@
     const field = (label, node) => { const wrap = el('div', 'blob-field'); wrap.append(el('span', 'srow-title', label), node); return wrap; };
     const swatchRow = (current, label, pick) => {
       const row = el('div', 'swatch-row'); row.setAttribute('role', 'radiogroup'); row.setAttribute('aria-label', label);
-      const set = color => { for (const b of row.children) { const on = b.dataset.color === color; b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; } };
+      // R3-keyboard-swatch-entry: roving tabindex with an entry point — with no colour yet the FIRST
+      // swatch keeps tabindex 0 so the radiogroup is reachable by Tab; a selection moves the entry point.
+      const set = color => { const kids = [...row.children]; const entry = color || (kids[0] ? kids[0].dataset.color : '');
+        for (const b of kids) { const on = b.dataset.color === color; b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = b.dataset.color === entry ? 0 : -1; } };
       for (const color of A.PALETTE) {
         const b = el('button', 'swatch'); b.type = 'button'; b.dataset.color = color; b.setAttribute('role', 'radio');
         b.setAttribute('aria-label', A.label(color)); b.disabled = o.saving === true;

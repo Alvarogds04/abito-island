@@ -210,6 +210,31 @@ test('S7 nuevo · propio: Crear disabled until name + colour; switching mode kee
   assert.deepEqual(b.intents.pop(), { type: 'create_agent', name: 'Música', instructions: 'Pone música', model: null, color: 'orange' });
 });
 
+test('S7b keyboard swatch entry: with no colour the FIRST swatch is the single tabindex-0 entry point; a selection moves it; ArrowRight chooses the next colour', () => {
+  // create form, no colour yet: the radiogroup must have exactly one Tab entry point, the first swatch
+  const b = boot(TWO());
+  byId(b.host, 'blob-tile-new').fire('click'); byId(b.host, 'create-kind-custom').fire('click');
+  const swatches = byClass(byId(b.host, 'blob-editor'), 'swatch');
+  assert.equal(swatches.filter(x => x.tabIndex === 0).length, 1, 'exactly one entry point with no colour');
+  assert.equal(swatches[0].tabIndex, 0, 'the first swatch is the Tab entry');
+  assert.ok(swatches.slice(1).every(x => x.tabIndex === -1), 'the rest are roved out');
+  // keyboard entry then ArrowRight chooses the next colour: with a name typed, Crear enables
+  const input = byId(b.host, 'blob-create-input'); input.value = 'Música'; input.fire('input');
+  swatches[0].fire('keydown', { key: 'ArrowRight' });
+  assert.equal(byId(b.host, 'blob-create-button').disabled, false, 'ArrowRight picked the next colour');
+  // once a colour is picked in the create form, only the picked swatch is 0
+  const cs = byClass(byId(b.host, 'blob-editor'), 'swatch');
+  assert.equal(cs.find(x => x.dataset.color === A.PALETTE[1]).tabIndex, 0);
+  assert.equal(cs.filter(x => x.tabIndex === 0).length, 1);
+  byId(b.host, 'blob-create-button').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'create_agent', name: 'Música', instructions: 'Ayuda con Música.', model: null, color: A.PALETTE[1] });
+  // agent editor with a selection: unchanged behaviour, only the selected colour is 0
+  const e = boot(TWO());
+  const ed = byClass(byId(e.host, 'blob-editor'), 'swatch');
+  assert.equal(ed.filter(x => x.tabIndex === 0).length, 1);
+  assert.equal(ed.find(x => x.dataset.color === 'green').tabIndex, 0, 'esp-a green is the only entry');
+});
+
 test('S8 «Guardados de antes»: stored blobs and declared pills without a specialist are listed with an explicit «Convertir en agente»; nothing converts by itself', () => {
   const x = TWO(); x.prefs.customBlobs = [{ name: 'Música', color: 'purple' }]; x.prefs.declaredPills = ['integration_n8n'];
   const b = boot(x);
