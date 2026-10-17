@@ -1841,6 +1841,9 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #chat-drop strong { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); }
 #chat-drop span { font-size: var(--fs-caption); color: var(--island-muted); }
 
+/* ---- T7.3 chat top bar (design isla-chat-*): the title «Abito» sits right of the character, buttons right. ---- */
+#chat-title { margin: 0 auto 0 0; padding-left: 40px; font-size: var(--fs-body); font-weight: 600; line-height: 1.2; color: var(--island-ink); }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role

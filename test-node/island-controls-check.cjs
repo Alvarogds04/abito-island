@@ -84,5 +84,13 @@ test('island icon buttons never override the absolute placement of #card-info/#n
   assert.equal(decls('#card-info').position, 'absolute', 'the info button keeps its corner placement');
   assert.equal(decls('#card-fold').position, 'relative', 'T7.3: the fold sits in the action row (isla-approval)');
 });
+test('chat top bar: visible title «Abito» before the gear/back buttons (design isla-chat-*)', () => {
+  const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const header = html.slice(html.indexOf('<header id="chat-header">'), html.indexOf('</header>', html.indexOf('<header id="chat-header">')));
+  assert.match(header, /<h2 id="chat-title">Abito<\/h2>[\s\S]*id="open-screen-settings"[\s\S]*id="chat-back"/);
+  const t = decls('#chat-title');
+  assert.equal(t['font-size'], 'var(--fs-body)');
+  assert.equal(t['font-weight'], '600');
+});
 console.log(`island-controls-check: ${failed ? failed + ' FAILED' : 'all passed'}`);
 if (failed) process.exitCode = 1;
