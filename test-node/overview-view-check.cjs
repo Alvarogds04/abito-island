@@ -748,12 +748,18 @@ test('#302 round dot: the compact island is gentle-dot\'s 66px disc, in step wit
   assert.ok(visible >= 44 && visible <= diameter - 12, `the visible character (${visible.toFixed(1)}px) sits inside the disc with a clear rim`);
 });
 
-test('#302 the dot keeps the badge/contour vocabulary: sun/red badge sits ON the disc rim; sun contour only in compact', () => {
+test('#302 the dot keeps the badge/contour vocabulary: T7.3 design isla-compacta-sun/red puts the badge at x58-67,y8-16 of the 78px window (over the rim); sun contour only in compact', () => {
+  // T7.3 (D11, design wins): was «badge centre on the rim, INSIDE the disc» (dist <= 33). The design
+  // draws it over the rim: centre (62.5, 12) in window coordinates = 35.8px from the dot centre.
   const flag = /#compact-flag \{([^}]*)\}/.exec(css)[1];
-  const right = Number(/right:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
-  const cx = 66 - right - size / 2, cy = top + size / 2; // badge centre, from the dot's top-left
-  const dist = Math.hypot(cx - 33, cy - 33);
-  assert.ok(dist <= 33 && dist >= 33 - size / 2 - 4, `badge centre ${dist.toFixed(1)}px from the dot centre must be on the rim, inside the disc`);
+  const left = Number(/left:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
+  const cx = left + size / 2, cy = top + size / 2;
+  assert.ok(Math.abs(cx - 62.5) <= 1 && Math.abs(cy - 12) <= 1, `badge centre (${cx}, ${cy}) matches the design (62.5, 12)`);
+  // outside #island (overflow: hidden clips the rim), inside #capsule, so the overhang is drawn
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  const chat = html.indexOf('id="chat-live"'); // last element inside #island
+  assert.ok(html.indexOf('id="compact-flag"') > chat, 'the badge is after the last #island child');
+  assert.match(html.slice(chat, html.indexOf('id="compact-flag"')), /<\/section>\s*<\/div>/, '#island closes before the badge');
   assert.match(css, /#capsule\[data-card-tone="sun"\] #island \{ box-shadow: inset 0 0 0 2px var\(--sun\)/);
 });
 

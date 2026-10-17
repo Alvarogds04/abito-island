@@ -91,7 +91,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   background: var(--island);
   will-change: width, height;
 }
-#compact-flag { position: absolute; z-index: 2; right: 3px; top: 3px; width: 18px; height: 18px; display: none; place-items: center; pointer-events: none; }
+#compact-flag { position: absolute; z-index: 2; left: 54px; top: 3px; width: 18px; height: 18px; display: none; place-items: center; pointer-events: none; }
 #compact-flag .ico svg { width: 14px; height: 14px; }
 #compact-flag[data-tone="sun"] { color: var(--sun); }
 #compact-flag[data-tone="red"] { color: var(--red-11); }

@@ -71,9 +71,6 @@
            its focus ring is drawn on #island). Enter/Space opens the
            overview from compact; in the overview it closes it. -->
       <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
-      <!-- UI.2: compact indicator (§6): sun dot = something waits for your yes,
-           red triangle = channel down. Shape + colour; never text. -->
-      <span id="compact-flag" role="img" hidden><span class="ico" id="compact-flag-icon"></span></span>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <!-- #419: visual auto-close countdown — pure decoration (aria-hidden,
            hidden by default). The interaction adapter renders the published
@@ -279,6 +276,11 @@
         <p id="chat-live" class="sr-only" role="status" aria-live="polite"></p>
       </section>
     </div>
+    <!-- UI.2: compact indicator (§6): sun dot = something waits for your yes,
+         red triangle = channel down. Shape + colour; never text. T7.3 (design
+         isla-compacta-sun/red): it sits OVER the disc rim, so it lives in #capsule
+         after #island (which clips its children), not inside it. -->
+    <span id="compact-flag" role="img" hidden><span class="ico" id="compact-flag-icon"></span></span>
   </main>
 </body>
 </html>
