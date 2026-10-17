@@ -94,6 +94,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "chosenModels": p.chosen_models,
         "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
         "customBlobs": p.custom_blobs_view(),
+        "islandAgents": p.island_agents_view(),
         "monitor": p.monitor,
         "settingsWindow": p.settings_window_on()})
 }
@@ -171,6 +172,20 @@ pub fn save_settings_window_size(app: &AppHandle, w: u32, h: u32) -> bool {
         |p| persist_prefs(app, p),
         |_| {},
     ).is_ok()
+}
+
+/// #442 T7.4: a deleted specialist leaves the island order. Rust-internal (never a wire
+/// command); a no-op when the id is not in the stored order, so it never writes needlessly.
+pub fn prune_island_agent(app: &AppHandle, id: &str) {
+    let state = app.state::<AppState>();
+    let command = Command::PruneIslandAgent(id.to_owned());
+    let _ = prefs::transact(
+        &state.settings.prefs_serial,
+        &state.settings.prefs,
+        &command,
+        |p| persist_prefs(app, p),
+        |snapshot| { let _ = app.emit("prefs:state", view_prefs(snapshot)); },
+    );
 }
 
 /// Closed preference commands: view, sound_on/off, set_sound_gain (0..=0.2),

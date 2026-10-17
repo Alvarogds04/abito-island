@@ -1151,11 +1151,12 @@ mod chosen_models {
             monitor: Some("DP-1".into()),
             settings_window: None,
             settings_window_size: Some((960, 640)),
+            island_agents: Some(vec!["esp-a1".into(), "esp-b2".into()]),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size", "island_agents"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
@@ -1784,4 +1785,94 @@ fn reorder_blobs_is_a_strict_permutation_gate_by_exact_name() {
     // with no blobs at all, an empty order is valid and stores nothing
     let none = update(&Prefs::default(), &parse_command(&json!({"action":"reorder_blobs","order":[]})).unwrap(), |_| true).unwrap();
     assert_eq!(none.custom_blobs, None, "an empty order never creates the field");
+}
+
+// ---- #442 T7.4: island_agents — which (at most 3) specialists are on the island, in order ---------------
+
+fn agents(order: &[&str]) -> Command {
+    parse_command(&json!({"action":"set_island_agents","order":order})).unwrap()
+}
+
+#[test]
+fn island_agents_is_absent_by_default_and_an_untouched_file_keeps_its_bytes() {
+    assert_eq!(Prefs::default().island_agents, None);
+    let text = r#"{"v":1,"sound":true}"#;
+    let p = Prefs::from_text(Some(text));
+    assert_eq!(p.island_agents, None);
+    assert!(!p.to_text().contains("island_agents"), "no key is invented");
+    assert_eq!(Prefs::from_text(Some(&p.to_text())), p);
+}
+
+#[test]
+fn set_island_agents_is_an_exact_closed_two_key_command_with_at_most_three_unique_ids() {
+    assert!(parse_command(&json!({"action":"set_island_agents","order":[]})).is_ok());
+    assert!(parse_command(&json!({"action":"set_island_agents","order":["esp-a","esp-b","esp-c"]})).is_ok());
+    for bad in [
+        json!({"action":"set_island_agents"}),
+        json!({"action":"set_island_agents","order":"esp-a"}),
+        json!({"action":"set_island_agents","order":[1]}),
+        json!({"action":"set_island_agents","order":["esp-a","esp-a"]}),
+        json!({"action":"set_island_agents","order":["esp-a","esp-b","esp-c","esp-d"]}),
+        json!({"action":"set_island_agents","order":["ESP-A"]}),
+        json!({"action":"set_island_agents","order":["__proto__"]}),
+        json!({"action":"set_island_agents","order":[""]}),
+        json!({"action":"set_island_agents","order":["esp-a"],"extra":1}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}");
+    }
+}
+
+#[test]
+fn set_island_agents_stores_the_order_and_round_trips_and_a_refusal_changes_nothing() {
+    let start = Prefs { sound: true, ..Prefs::default() };
+    let next = update(&start, &agents(&["esp-b", "esp-a"]), |_| true).unwrap();
+    assert_eq!(next.island_agents, Some(vec!["esp-b".to_string(), "esp-a".to_string()]));
+    assert_eq!(Prefs::from_text(Some(&next.to_text())), next);
+    let value: Value = serde_json::from_str(&next.to_text()).unwrap();
+    assert_eq!(value["island_agents"], json!(["esp-b", "esp-a"]));
+    // direct callers hit the same gates as the wire
+    for bad in [
+        Command::SetIslandAgents(vec!["esp-a".into(), "esp-a".into()]),
+        Command::SetIslandAgents(vec!["a".into(), "b".into(), "c".into(), "d".into()]),
+        Command::SetIslandAgents(vec!["Bad Id".into()]),
+    ] {
+        assert_eq!(apply(&next, &bad), Err(CommandError));
+    }
+    // a failed disk write installs nothing
+    assert_eq!(update(&next, &agents(&["esp-c"]), |_| false), Err(CommandError));
+    // writing the same order skips the disk entirely
+    assert_eq!(update(&next, &agents(&["esp-b", "esp-a"]), |_| panic!("idempotent write")).unwrap(), next);
+    // the empty order is a real, stored choice («nobody on the island»), distinct from absent
+    let none = update(&next, &agents(&[]), |_| true).unwrap();
+    assert_eq!(none.island_agents, Some(vec![]));
+    assert!(none.to_text().contains(r#""island_agents":[]"#));
+}
+
+#[test]
+fn hostile_stored_island_agents_read_as_clean_ids_and_never_crash() {
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1,"island_agents":"esp-a"}"#)).island_agents, None);
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1,"island_agents":{"a":1}}"#)).island_agents, None);
+    let p = Prefs::from_text(Some(r#"{"v":1,"island_agents":["esp-a",7,"esp-a","Bad Id","__proto__","esp-b","esp-c","esp-d"]}"#));
+    assert_eq!(p.island_agents, Some(vec!["esp-a".to_string(), "esp-b".to_string(), "esp-c".to_string()]),
+        "bad shapes and duplicates are dropped, the cap is three");
+}
+
+#[test]
+fn pruning_a_deleted_specialist_takes_it_out_of_the_island_order_only() {
+    let start = update(&Prefs::default(), &agents(&["esp-a", "esp-b"]), |_| true).unwrap();
+    let pruned = update(&start, &Command::PruneIslandAgent("esp-a".into()), |_| true).unwrap();
+    assert_eq!(pruned.island_agents, Some(vec!["esp-b".to_string()]));
+    // an id that is not in the order changes nothing and never touches the disk
+    assert_eq!(update(&pruned, &Command::PruneIslandAgent("esp-z".into()), |_| panic!("no write")).unwrap(), pruned);
+    // absent stays absent (the default is derived, never materialised by a prune)
+    assert_eq!(update(&Prefs::default(), &Command::PruneIslandAgent("esp-a".into()), |_| panic!("no write")).unwrap().island_agents, None);
+    // the prune is Rust-internal: the WebView can never send it
+    assert_eq!(parse_command(&json!({"action":"prune_island_agent","id":"esp-a"})), Err(CommandError));
+}
+
+#[test]
+fn island_agents_projection_is_null_when_absent_and_the_stored_order_otherwise() {
+    assert_eq!(Prefs::default().island_agents_view(), Value::Null);
+    let p = Prefs { island_agents: Some(vec!["esp-a".into()]), ..Prefs::default() };
+    assert_eq!(p.island_agents_view(), json!(["esp-a"]));
 }

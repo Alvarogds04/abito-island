@@ -26,6 +26,33 @@ pub const MAX_CUSTOM_BLOBS: usize = 8;
 pub const MAX_BLOB_NAME_CHARS: usize = 40;
 const CUSTOM_BLOBS: &str = "custom_blobs";
 
+/// #442 T7.4: the specialists (agents) on the island, in order — at most three ids. The
+/// shape mirrors the specialist id contract (`specialists::valid_id`); membership against the
+/// live specialist store is the host's job. Absent = the default (first three stored), and an
+/// untouched file keeps its bytes.
+pub const MAX_ISLAND_AGENTS: usize = 3;
+const ISLAND_AGENTS: &str = "island_agents";
+
+fn valid_agent_id(id: &str) -> bool {
+    let b = id.as_bytes();
+    !b.is_empty() && b.len() <= 32
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'-' | b'_'))
+        && !RESERVED.contains(&id) && id != "abito"
+}
+
+/// Stored order that survives validation: clean ids only, deduplicated, capped. A non-array is absent.
+fn island_agents_from(value: Option<&Value>) -> Option<Vec<String>> {
+    let list = value?.as_array()?;
+    let mut out: Vec<String> = Vec::new();
+    for id in list.iter().filter_map(Value::as_str) {
+        if valid_agent_id(id) && !out.iter().any(|x| x == id) && out.len() < MAX_ISLAND_AGENTS {
+            out.push(id.to_owned());
+        }
+    }
+    Some(out)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomBlob {
     pub name: String,
@@ -219,6 +246,9 @@ pub settings_window: Option<bool>,
     /// stored size outside the bounds below is hostile data, dropped on load —
     /// fitting the CURRENT screen is the opening path's job (`settingswindow::opening_size`).
     pub settings_window_size: Option<(u32, u32)>,
+    /// #442 T7.4: ordered ids (at most three) of the specialists on the island. `None` means
+    /// the default and is never written, so an untouched file keeps its bytes.
+    pub island_agents: Option<Vec<String>>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -411,6 +441,13 @@ impl Prefs {
             None => Value::Null,
         }
     }
+    /// #442 T7.4: the WebView projection of the island order; absent is null.
+    pub fn island_agents_view(&self) -> Value {
+        match &self.island_agents {
+            Some(ids) => json!(ids),
+            None => Value::Null,
+        }
+    }
     /// The effective mode: an absent or unreadable field is `system`.
     pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
 
@@ -458,6 +495,7 @@ impl Prefs {
                 .filter(|key| valid_monitor_key(key)).map(str::to_owned),
             settings_window: v.get("settings_window").and_then(Value::as_bool),
             settings_window_size: settings_window_size_from(v.get(SETTINGS_WINDOW_SIZE)),
+            island_agents: island_agents_from(v.get(ISLAND_AGENTS)),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -514,6 +552,9 @@ impl Prefs {
         }
         if let Some((w, h)) = self.settings_window_size.filter(|(w, h)| valid_settings_window_size(*w, *h)) {
             v[SETTINGS_WINDOW_SIZE] = json!({"w": w, "h": h});
+        }
+        if let Some(ids) = &self.island_agents {
+            v[ISLAND_AGENTS] = json!(ids);
         }
         v.to_string()
     }
@@ -583,6 +624,12 @@ pub enum Command {
     /// neither the size nor the fact that one is stored — the size comes from
     /// the window's own resize events, never from the page (like #264's position).
     SetSettingsWindowSize(u32, u32),
+    /// #442 T7.4: the specialists on the island, in order: at most three unique, well-shaped ids.
+    /// Membership against the live specialist store is checked by the host (it owns that store).
+    SetIslandAgents(Vec<String>),
+    /// #442 T7.4: a deleted specialist leaves the island order. Rust-internal (the specialists
+    /// host sends it after a delete): deliberately NOT produced by [`parse_command`].
+    PruneIslandAgent(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -752,8 +799,20 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             let on = map.get("settings_window").and_then(Value::as_bool).ok_or(CommandError)?;
             Ok(Command::SetSettingsWindow(on))
         }
+        // #442 T7.4: exactly action + order (≤3 unique well-shaped ids).
+        Some("set_island_agents") if map.len() == 2 => {
+            let order = ordered_strings(map.get("order"))?;
+            if !valid_island_order(&order) { return Err(CommandError); }
+            Ok(Command::SetIslandAgents(order))
+        }
         _ => Err(CommandError),
     }
+}
+
+fn valid_island_order(order: &[String]) -> bool {
+    order.len() <= MAX_ISLAND_AGENTS
+        && order.iter().all(|id| valid_agent_id(id))
+        && order.iter().collect::<std::collections::HashSet<_>>().len() == order.len()
 }
 
 /// Change only the selected field. Validate direct callers as well as IPC input.
@@ -922,6 +981,13 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::SetSettingsWindowSize(w, h) => {
             if !valid_settings_window_size(*w, *h) { return Err(CommandError); }
             next.settings_window_size = Some((*w, *h));
+        }
+        Command::SetIslandAgents(order) => {
+            if !valid_island_order(order) { return Err(CommandError); }
+            next.island_agents = Some(order.clone());
+        }
+        Command::PruneIslandAgent(id) => {
+            if let Some(ids) = next.island_agents.as_mut() { ids.retain(|x| x != id); }
         }
     }
     Ok(next)

@@ -183,13 +183,17 @@ pub async fn specialists_action(
         .map_err(|_| err("invalid_schema", "Pedido de especialistas inválido."))?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
     let registry = modelshost::registry(&state);
-    state.specialists.execute(config_dir(&app).as_deref(), &registry, command, |view| {
+    let deleted = match &command { Command::Delete { id } => Some(id.clone()), _ => None };
+    let view = state.specialists.execute(config_dir(&app).as_deref(), &registry, command, |view| {
         if !QUITTING.load(Ordering::SeqCst) {
             if let Err(e) = app.emit("specialists:state", view) {
                 eprintln!("specialists:state emit failed: {e}");
             }
         }
-    })
+    })?;
+    // #442 T7.4: a deleted specialist also leaves the island order (read-time filtering covers a failure here).
+    if let Some(id) = deleted { crate::settingshost::prune_island_agent(&app, &id); }
+    Ok(view)
 }
 
 #[cfg(test)]
