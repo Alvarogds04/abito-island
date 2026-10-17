@@ -154,7 +154,7 @@ test('UI.2 meters: used share, numbers only in aria, unknown stays honest', () =
 test('UI.2 chat status: a word only for problems; shapes carry the rest', () => {
   const base = { turns: [], active_turn: null, queue_note: null };
   const v = (state, msg) => V.statusView({ ...base, availability: { state, message: msg || '' } });
-  assert.deepEqual([v('ready').kind, v('ready').word, v('ready').tone], ['ready', '', 'go']);
+  assert.deepEqual([v('ready').kind, v('ready').word, v('ready').tone], ['ready', 'Conectado', 'go']); // T7.3 isla-chat-*: the «Conectado» chip (was '')
   assert.equal(v('unavailable', 'El modelo local no responde').word, 'Modelo caído');
   assert.equal(v('unavailable', 'x').tone, 'red');
   assert.equal(v('blocked').word, 'Bloqueado');
@@ -384,9 +384,10 @@ test('column: the horizontal chat constants are gone from the page', () => {
 
 test('column: the status strip never changes height (a strip that appears and disappears pushed the whole history: the flash on send)', () => {
   const strip = rule('#chat-status-strip');
-  assert.match(strip, /height:\s*28px|min-height:\s*28px/, 'it always keeps its row');
+  assert.match(strip, /height:\s*24px|min-height:\s*24px/, 'it always keeps its row (design §2: status strip 24)');
   assert.doesNotMatch(css, /#chat-status-strip:has\([^)]*\)\s*\{[^}]*display:\s*none/, 'no rule may collapse it');
-  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind="ready"\]\)\s*\{[^}]*visibility:\s*hidden/, 'calm = invisible, but the space stays');
+  assert.doesNotMatch(css, /#chat-status-strip:has\(#chat-state\[data-kind="ready"\]\)/, 'T7.3: ready shows the «Conectado» chip (was invisible)');
+  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind=""\]\)\s*\{[^}]*visibility:\s*hidden/, 'an undrawn state is invisible, but the space stays');
 });
 
 // ---- #309 verifier: Settings and Models were designed for 640 and broke in the 400 column ---------
@@ -527,10 +528,11 @@ test('greeting: an explicit name yields «Hola, <nombre>.», absent or blank kee
   const named = V.emptyGreeting({ display_name: 'Ana' });
   assert.equal(named.greeting, 'Hola, Ana.');
   assert.equal(named.aria, `Hola, Ana. ${NEUTRAL_EMPTY_ARIA}`);
-  assert.deepEqual(named.icons, ['lock', 'eye-off'], 'the lock + eye-off icons of §2.3 are untouched');
+  assert.deepEqual(named.icons, [], 'T7.3 design isla-chat-empty: no lock/eye-off icons (was [lock, eye-off])');
+  assert.equal(named.line, 'Escribile a Abito', 'the one visible line of the empty state');
   for (const view of [undefined, null, {}, { display_name: null }, { display_name: '' },
     { display_name: '   ' }, { display_name: '\n\t ' }, { display_name: '\u0000\u001f' }]) {
-    assert.deepEqual(V.emptyGreeting(view), { greeting: '', aria: NEUTRAL_EMPTY_ARIA, icons: ['lock', 'eye-off'] },
+    assert.deepEqual(V.emptyGreeting(view), { greeting: '', aria: NEUTRAL_EMPTY_ARIA, icons: [], line: 'Escribile a Abito' },
       JSON.stringify(view));
   }
 });

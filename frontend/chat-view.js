@@ -69,7 +69,7 @@
       return mk('busy', 'live', 'ring', ''); // thinking / streaming: blue open arc, spun by the page
     }
     const state = view.availability && view.availability.state;
-    if (state === 'ready') return mk('ready', 'go', '', '');
+    if (state === 'ready') return mk('ready', 'go', '', 'Conectado'); // T7.3 isla-chat-*: the visible state chip
     if (state === 'busy') return mk('occupied', 'live', 'clock', 'Ocupado');
     if (state === 'blocked') return mk('blocked', 'red', 'triangle', 'Bloqueado');
     if (state === 'unavailable') return mk('down', 'red', 'triangle', 'Modelo caído');
@@ -123,7 +123,9 @@
   // v1. Nothing here guesses a name from the OS, an account, another profile,
   // a provider or the branding: no explicit field, no greeting (S2).
   const DISPLAY_NAME_MAX = 80; // mirrors prefs.rs DISPLAY_NAME_MAX
-  const EMPTY_ICONS = Object.freeze(['lock', 'eye-off']);
+  // T7.3 (design isla-chat-empty): the empty state is ONE visible line; the long honest sentence stays in aria.
+  const EMPTY_ICONS = Object.freeze([]);
+  const EMPTY_LINE = 'Escribile a Abito';
   const EMPTY_ARIA = 'Escribile a Abito. Responde el modelo local de esta máquina; no ve tu pantalla ni ejecuta nada.';
 
   // A name is text the person typed: never markup. A non-string is absent (fail
@@ -142,8 +144,8 @@
   // ('' = nothing visible) and `aria` is what the whole row is announced as.
   function emptyGreeting(view) {
     const name = cleanDisplayName(view && view.display_name);
-    if (!name) return { greeting: '', aria: EMPTY_ARIA, icons: EMPTY_ICONS };
-    return { greeting: `Hola, ${name}.`, aria: `Hola, ${name}. ${EMPTY_ARIA}`, icons: EMPTY_ICONS };
+    if (!name) return { greeting: '', aria: EMPTY_ARIA, icons: EMPTY_ICONS, line: EMPTY_LINE };
+    return { greeting: `Hola, ${name}.`, aria: `Hola, ${name}. ${EMPTY_ARIA}`, icons: EMPTY_ICONS, line: EMPTY_LINE };
   }
 
   function newRequestId(bytes) {

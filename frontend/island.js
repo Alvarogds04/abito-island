@@ -658,7 +658,10 @@
       opener.disabled = !NV || !NV.openPayload({ isTrusted: true }, first, 'finished');
       opener.setAttribute('aria-label', first ? `Abrir aviso: ${first.title}` : 'Sin avisos');
     }
-    const view = paintBand(notices);
+    // T7.3 (design isla-ov-error): with no host notice, an unreachable engine
+    // itself carries the band — red ring, one short title, no action (the
+    // facade has no verb that reconnects a Pi-session transport).
+    const view = paintBand(notices) || O.connectionBandView(conn);
     noticeBand = view;
     // #373 GD032: the strip carries the view's severity tone (error → red,
     // warning → sun); plain dataset writes below, never markup.
@@ -669,6 +672,9 @@
       noticePill.setAttribute('aria-label', view.aria);
       noticeTitle.textContent = view.title;
       noticeSub.textContent = view.detail || '';
+      // T7.3: the transport-error band has no action — a button that does not
+      // fix what the band reports would lie. Host notices keep Abrir/Ver.
+      noticeAction.hidden = view.action == null;
       noticeAction.textContent = view.grouped ? 'Ver' : 'Abrir';
       noticeAction.setAttribute('aria-label', view.grouped ? `Ver los ${view.count} avisos` : `Abrir aviso: ${first ? first.title : ''}`);
     }
@@ -948,6 +954,8 @@
     $('card-info').hidden = !reason;
     $('card-info').setAttribute('aria-label', O.infoLabel('Ver detalle de la decisión', view.aria));
     allow.disabled = deny.disabled = Boolean(reason || cardFlight);
+    const wait = $('card-wait'); // T7.3: «Espera tu respuesta» only while the human may still decide
+    if (wait) wait.hidden = Boolean(reason);
   }
   const cardInfo = $('card-info');
   if (cardInfo) cardInfo.addEventListener('click', () => {

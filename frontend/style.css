@@ -91,7 +91,7 @@ body.probe-capture-bg { background: #d8c9a3; }
   background: var(--island);
   will-change: width, height;
 }
-#compact-flag { position: absolute; z-index: 2; right: 3px; top: 3px; width: 18px; height: 18px; display: none; place-items: center; pointer-events: none; }
+#compact-flag { position: absolute; z-index: 2; left: 54px; top: 3px; width: 18px; height: 18px; display: none; place-items: center; pointer-events: none; }
 #compact-flag .ico svg { width: 14px; height: 14px; }
 #compact-flag[data-tone="sun"] { color: var(--sun); }
 #compact-flag[data-tone="red"] { color: var(--red-11); }
@@ -386,9 +386,8 @@ html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
 #chat:has(#chat-specialist:not([hidden])) #settings { top: 114px; }
 /* #309: the agent state (ready / thinking / writing / down) is a strip of its own, full width,
    so a long state word never fights the model and back buttons for the header row. */
-#chat-status-strip { display: flex; align-items: center; min-height: 28px; padding: 0 4px 4px; }
+#chat-status-strip { display: flex; align-items: center; min-height: 24px; padding: 0 4px 4px; }
 /* #310: the calm state is invisible but KEEPS its row: a strip that appeared and disappeared moved the whole history */
-#chat-status-strip:has(#chat-state[data-kind="ready"]) { visibility: hidden; }
 #chat-status-strip:has(#chat-state[data-kind=""]) { visibility: hidden; }
 #chat-target-chip .ico { color: var(--island-muted); }
 #capsule[data-chat-availability="unavailable"] #chat-state .word,
@@ -1828,6 +1827,65 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 /* §4.1: the own window uses the same panel at 272 wide. */
 #settings[data-rail="true"] #settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr) 272px; }
 
+/* ---- T7.3 island controls (design §1/§2, island PNGs): every island control is 32px VISUAL
+   inside its 44px HIT area — the T6.1 hit-ring pattern, so the visible pill is drawn on the
+   ::after inset layer and the button keeps its full 44px click target. The rail tab is 36px
+   visual (design §1: rail tab 36); the chat composer row is 36px. Scoped to the island's own
+   selectors: Ajustes controls (.sbtn/.sfield/.stab) keep their T7.2 rules. Tokens only (a V1
+   test slices style.css from its marker to EOF). ---- */
+#island-header .tab, #island-header .hdr-action { position: relative; z-index: 0; }
+#island-header .tab::after, #island-header .hdr-action::after { content: ""; position: absolute; inset: 4px; z-index: -1; border-radius: 10px; }
+#island-header .tab[aria-pressed="true"] { background: transparent; }
+#island-header .tab[aria-pressed="true"]::after { background: var(--tab-on); }
+#island-header .hdr-action { background: transparent; }
+#island-header .hdr-action::after { background: var(--fill-hover); }
+
+.icon-btn { position: relative; z-index: 0; } /* base class (0,1,0): ids such as #card-fold keep their absolute placement */
+#capsule .icon-btn { border: 0; background: transparent; }
+#capsule .icon-btn::after { content: ""; position: absolute; inset: 6px; z-index: -1; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
+#capsule .icon-btn:hover::after { background: var(--fill-hover); }
+#capsule .icon-btn[aria-expanded="true"]::after { border-color: var(--go); }
+
+.q-option, #question-skip, #allow, #deny { position: relative; z-index: 0; background: transparent; border: 0; border-radius: 0; }
+.q-option::after, #question-skip::after, #allow::after, #deny::after { content: ""; position: absolute; inset: 6px; z-index: -1; border-radius: 10px; border: 0; background: var(--btn-bg); }
+#allow::after { background: var(--primary-bg); }
+#allow:hover:not(:disabled)::after { background: var(--primary-hover); }
+#deny:hover:not(:disabled)::after, .q-option:hover:not(:disabled)::after, #question-skip:hover:not(:disabled)::after { background: var(--btn-bg-hover); }
+.q-option, #question-skip, #allow, #deny { color: var(--ink-2); }
+#allow { color: var(--primary-ink); }
+
+#chat-composer .round { position: relative; z-index: 0; border: 0; background: transparent; }
+#chat-composer .round::after { content: ""; position: absolute; inset: 4px; z-index: -1; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
+#chat-send::after { background: var(--primary-bg); border: 0; }
+#chat-send:disabled::after { opacity: .4; }
+#chat-input, #question-text { min-height: 36px; }
+
+/* ---- T7.3 approval card (design isla-approval): chip «Decisión pendiente», the command in a surface
+   strip, «Permitir» (primary) + «Rechazar» + the fold chevron on ONE row, «Espera tu respuesta» 12 px. ---- */
+#permission #operation { padding: 6px 10px; border-radius: 10px; background: var(--surface); font-weight: 500; }
+#card-actions { align-items: center; flex-direction: row; justify-content: flex-start; }
+#card-fold { position: relative; top: auto; right: auto; }
+#card-wait { color: var(--island-muted); font-size: var(--fs-caption); line-height: 1.2; }
+#card-wait[hidden] { display: none; }
+#card-head { padding-right: 56px; } /* only «i» is pinned to the corner now; the fold moved to the action row */
+
+/* ---- T7.3 drag-over card (design isla-chat-drag): one card replaces the body while a file is dragged over. ---- */
+#chat-drop { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 2px solid var(--island-live); border-radius: 16px; background: var(--card-bg); text-align: center; pointer-events: none; }
+#chat-drop[hidden] { display: none; }
+#chat-drop strong { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); }
+#chat-drop span { font-size: var(--fs-caption); color: var(--island-muted); }
+
+/* ---- T7.3 chat top bar (design isla-chat-*): the title «Abito» sits right of the character, buttons right. ---- */
+#chat-title { margin: 0 auto 0 0; padding-left: 40px; font-size: var(--fs-body); font-weight: 600; line-height: 1.2; color: var(--island-ink); }
+
+/* ---- T7.3 chat (design isla-chat-*): «Conectado» chip in flow under the header, «+»/history/label row
+   at the top of the body card, model chip 24 high on the caption step. ---- */
+#chat-status-strip { position: static; transform: none; min-height: 24px; padding: 0 4px 4px; background: transparent; border-radius: 0; }
+#chat-history-controls { justify-content: flex-start; align-items: center; }
+#chat-history-label { color: var(--island-muted); font-size: var(--fs-caption); line-height: 1.2; }
+#chat-history-label[hidden] { display: none; }
+#chat-model-btn { min-height: 24px; font: 600 var(--fs-caption)/1.2 var(--font-ui); background: var(--surface); }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role
@@ -1861,4 +1919,3 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #settings-body[data-screen="accounts"] .sconn-row .srow-actions { justify-content: flex-end; }
 #settings-body[data-screen="accounts"] .sconn-row .sflow { border: 0; padding: 4px 0 0; width: 100%; }
 #settings-body[data-screen="accounts"] .sconn-row .sline.sub { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
-
