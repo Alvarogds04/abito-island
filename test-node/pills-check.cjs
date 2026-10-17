@@ -352,10 +352,10 @@ test('T6.3 #434 General groups: Perfil / Isla / Sonido y atajo, name in Perfil, 
   assert.ok(!b.get('settings-display-name'), 'the name lives in PERFIL (General) now');
 });
 
-// T6.3 #434 (coordinator split): segmented Auto-cierre «8 s / 15 s / 30 s / Nunca» on the
-// EXISTING contract: presets save through the closed pair, a stored non-preset stays honest,
-// «Nunca» is visibly disabled (no contract behind it yet).
-test('T6.3 #434 auto-close segmented: presets save, custom value stays honest, Nunca disabled', async () => {
+// T6.3 #434, #438: segmented Auto-cierre «8 s / 15 s / 30 s / Nunca» on the {0} ∪ 5..=120
+// contract: presets save through the closed pair, a stored non-preset stays honest, and
+// «Nunca» is a real enabled choice that stores 0 through the same closed pair.
+test('T6.3 #434 auto-close segmented: presets save, custom value stays honest, Nunca stores 0', async () => {
   const b = await settingsBoot({}, 'general');
   const group = b.get('settings-autoclose-options');
   assert.equal(group.getAttribute('role'), 'radiogroup');
@@ -366,13 +366,25 @@ test('T6.3 #434 auto-close segmented: presets save, custom value stays honest, N
     assert.equal(seg(id).getAttribute('aria-checked'), id === '15' ? 'true' : 'false', id);
   }
   const never = seg('never');
-  assert.equal(never.disabled, true, 'Nunca is drawn but does not work yet');
-  assert.equal(never.getAttribute('title'), 'Próximamente');
+  assert.equal(never.disabled, false, '#438: «Nunca» is a real choice now');
+  assert.equal(never.getAttribute('title'), null);
+  assert.equal(never.getAttribute('aria-checked'), 'false');
+  // «Nunca» saves 0 through the same closed pair, and the projection keeps it as 0
+  const beforeNever = writes(b).length;
+  b.click('autoclose-never'); await flush();
+  assert.equal(b.backend.prefs.autoCloseSeconds, 0);
+  assert.equal(writes(b).length, beforeNever + 1, 'exactly one save');
+  assert.equal(writes(b).at(-1).payload.action, 'set_island_interaction');
+  assert.equal(writes(b).at(-1).payload.auto_close_seconds, 0);
+  assert.equal(writes(b).at(-1).payload.open_on_hover, false, 'the closed pair always carries both fields');
+  await flush();
+  assert.equal(b.get('autoclose-never').getAttribute('aria-checked'), 'true', 'a stored 0 selects «Nunca»');
   // a preset saves through the closed pair
   b.click('autoclose-8'); await flush();
   assert.equal(b.backend.prefs.autoCloseSeconds, 8);
-  assert.deepEqual(writes(b).map(x => x.payload.action), ['set_island_interaction']);
-  assert.equal(writes(b)[0].payload.open_on_hover, false, 'the closed pair always carries both fields');
+  assert.equal(writes(b).length, beforeNever + 2, 'exactly one more save');
+  assert.equal(writes(b).at(-1).payload.auto_close_seconds, 8);
+  assert.equal(writes(b).at(-1).payload.open_on_hover, false, 'the closed pair always carries both fields');
   // a stored non-preset value renders as its own selected segment, never rewritten
   b.emit({ autoCloseSeconds: 20 }); await flush();
   const custom = b.get('autoclose-20');
@@ -385,6 +397,10 @@ test('T6.3 #434 auto-close segmented: presets save, custom value stays honest, N
   b.click('autoclose-30'); await flush();
   assert.equal(b.backend.prefs.autoCloseSeconds, 20);
   assert.match(b.get('settings-autoclose-error').textContent, /No se pudo guardar\. La interacción sigue sin cambios/);
+  // #438: a stored «Nunca» (0) renders selected after the custom-value flow too
+  b.emit({ autoCloseSeconds: 0 }); await flush();
+  assert.equal(b.get('autoclose-never').getAttribute('aria-checked'), 'true');
+  assert.ok(!b.get('autoclose-20'), '0 is not a foreign value: no extra segment is invented');
 });
 
 test('#408 Cuentas renders the provider-list section (and tab selection follows the click) without an engine', async () => {

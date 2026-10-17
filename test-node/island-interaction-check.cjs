@@ -56,10 +56,38 @@ function fixture(effects = {}) {
 (async () => {
   await test('S4 defaults, inclusive integer bounds and exact preference shape', () => {
     assert.deepEqual(I.DEFAULTS, prefs()); assert.ok(Object.isFrozen(I.DEFAULTS));
-    for (const n of [5, 15, 120]) assert.equal(I.validPreferences(prefs(n)), true);
-    for (const n of [4, 121, 5.5, NaN, Infinity, '15', null]) assert.equal(I.validPreferences(prefs(n)), false);
+    for (const n of [0, 5, 15, 120]) assert.equal(I.validPreferences(prefs(n)), true);
+    for (const n of [1, 2, 3, 4, 121, 5.5, NaN, Infinity, '15', null]) assert.equal(I.validPreferences(prefs(n)), false);
     for (const bad of [null, [], {}, { autoCloseSeconds: 15 }, { ...prefs(), extra: 1 }, prefs(15, 1)])
       assert.equal(I.validPreferences(bad), false);
+  });
+  await test('#438 «Nunca» (0): a pinned/clicked-open island never schedules a close nor publishes a countdown', async () => {
+    const f = fixture(); f.controller.setPreferences(prefs(0)); f.controller.update(overview());
+    f.advance(600000); assert.deepEqual(f.calls, []); assert.equal(f.jobs.size, 0);
+    assert.ok(f.counts.every(v => v === null), 'no countdown values ever published');
+    assert.equal(f.controller.snapshot().deadline, null);
+    // engagement, snapshot churn and re-eligibility never resurrect a deadline
+    f.controller.engage(click()); f.advance(600000); assert.deepEqual(f.calls, []);
+    for (const revision of [2, 3, 4]) f.controller.update(overview({ revision }));
+    f.advance(600000);
+    assert.deepEqual(f.calls, []); assert.equal(f.jobs.size, 0);
+    assert.ok(f.counts.every(v => v === null), 'no countdown values ever published');
+    assert.equal(I.countdown(15000, 6000, 0), null, '«Nunca» never produces a countdown object');
+  });
+  await test('#438 «Nunca» (0): the hover-open grace still closes, with no countdown bar', async () => {
+    const f = fixture(); f.controller.setPreferences(prefs(0, true));
+    f.controller.update(overview({ state: 'compact' }));
+    assert.equal(f.controller.enter(mouse()), true); await flush();
+    f.controller.update(overview()); f.controller.leave(mouse());
+    f.advance(599); assert.deepEqual(f.calls, ['open']);
+    assert.ok(f.counts.every(v => v === null), 'the grace publishes no countdown');
+    f.advance(1); assert.deepEqual(f.calls, ['open', 'autoClose']);
+    // engagement converts the grace into a permanent pin: never closes again
+    f.controller.update(overview({ state: 'compact' }));
+    assert.equal(f.controller.enter(mouse()), true); await flush(); f.controller.update(overview());
+    f.controller.engage(click()); f.controller.leave(mouse()); f.advance(600000);
+    assert.deepEqual(f.calls, ['open', 'autoClose', 'open']); assert.equal(f.jobs.size, 0);
+    assert.ok(f.counts.every(v => v === null), 'no countdown values ever published');
   });
   await test('S3 eligibility is overview-only and fails closed for every unknown guard', () => {
     assert.equal(I.eligible(overview()), true);

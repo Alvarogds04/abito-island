@@ -257,19 +257,20 @@
       : 60; // the same default generalView models (0.12)
   }
 
-  // T6.3 #434 (coordinator split): the design draws Auto-cierre as a segmented control
-  // «8 s / 15 s / 30 s / Nunca», but the contract only knows integer seconds 5..120 (no «Nunca»
-  // behind it yet). Presets use the existing closed pair; a stored non-preset value stays honest
-  // as its own selected segment; «Nunca» renders visibly disabled («Próximamente»). Hostile
+  // T6.3 #434, #438 (coordinator split): the design draws Auto-cierre as a segmented control
+  // «8 s / 15 s / 30 s / Nunca» on the contract's {0} ∪ 5..=120: «Nunca» is stored 0 through
+  // the same closed pair and is enabled. Presets use the existing closed pair; a stored
+  // non-preset value stays honest as its own selected segment (never rewritten) and hostile
   // input reads as the same 15 s default islandInteractionView models.
   const AUTO_CLOSE_PRESETS = Object.freeze([8, 15, 30]);
   function autoCloseSegments(seconds) {
-    const valid = Number.isInteger(seconds) && seconds >= 5 && seconds <= 120 ? seconds : 15;
+    const valid = Number.isInteger(seconds) && (seconds === 0 || (seconds >= 5 && seconds <= 120)) ? seconds : 15;
     const segments = AUTO_CLOSE_PRESETS.map(value => ({ seconds: value, label: `${value} s`, selected: value === valid, disabled: false, title: '' }));
-    if (!AUTO_CLOSE_PRESETS.includes(valid)) {
+    if (valid !== 0 && !AUTO_CLOSE_PRESETS.includes(valid)) {
       segments.push({ seconds: valid, label: `${valid} s`, selected: true, disabled: false, title: '' });
     }
-    segments.push({ seconds: null, label: 'Nunca', selected: false, disabled: true, title: 'Próximamente' });
+    // #438: «Nunca» is stored 0 on the same closed pair — enabled, selected on a stored 0.
+    segments.push({ seconds: 0, label: 'Nunca', selected: valid === 0, disabled: false, title: '' });
     return segments;
   }
 
@@ -710,23 +711,24 @@
   // #336 F003/F004 — the typed interaction pair as the panel shows it: the
   // effective values behind the projection, each field falling back to the
   // public contract's default (15 seconds / hover off) on its own, never
-  // coercing a foreign value.
+  // coercing a foreign value. #438: 0 is «Nunca» — a real stored value, never clamped.
   function islandInteractionView(input) {
     const i = input || {};
     const seconds = i.autoCloseSeconds;
     return {
-      autoCloseSeconds: Number.isInteger(seconds) && seconds >= 5 && seconds <= 120 ? seconds : 15,
+      autoCloseSeconds: Number.isInteger(seconds) && (seconds === 0 || (seconds >= 5 && seconds <= 120)) ? seconds : 15,
       openOnHover: i.openOnHover === true,
     };
   }
 
   // Canonical integer text only ('15', 15, ' 15 '): no floats, no exponents,
-  // no signed forms, no coercion — the inclusive 5..120 range of the wire.
+  // no signed forms, no coercion — 0 («Nunca») or the inclusive 5..120 range
+  // of the wire (#438).
   function autoCloseProblem(text) {
     const raw = String(text).trim();
     const n = Number(raw);
-    return /^\d+$/.test(raw) && Number.isSafeInteger(n) && n >= 5 && n <= 120
-      ? '' : 'Ingresá un entero entre 5 y 120 segundos.';
+    return /^\d+$/.test(raw) && Number.isSafeInteger(n) && (n === 0 || (n >= 5 && n <= 120))
+      ? '' : 'Ingresá 0 (nunca) o un entero entre 5 y 120 segundos.';
   }
 
   function displayNameProblem(text) {

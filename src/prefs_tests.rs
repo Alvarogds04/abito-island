@@ -1161,19 +1161,19 @@ mod chosen_models {
     }
 }
 
-/// #336 T1b-a (L15): `set_island_interaction` is an exact three-key closed
-/// command — integer `auto_close_seconds` 5..=120 inclusive and boolean
-/// `open_on_hover`, no coercion, no extra or camelCase keys. This is the
+/// #336 T1b-a (L15), #438: `set_island_interaction` is an exact three-key closed
+/// command — integer `auto_close_seconds` 0 («Nunca») or 5..=120 inclusive and
+/// boolean `open_on_hover`, no coercion, no extra or camelCase keys. This is the
 /// invalid-schema-before-rate/disk/publish boundary: `prefs_action` parses
 /// before it takes the rate limiter.
 #[test]
 fn set_island_interaction_is_an_exact_closed_three_key_command() {
     let exact = json!({"action":"set_island_interaction","auto_close_seconds":15,"open_on_hover":false});
     assert!(parse_command(&exact).is_ok(), "the exact closed shape parses");
-    for seconds in [json!(5), json!(120), json!(15)] {
+    for seconds in [json!(0), json!(5), json!(120), json!(15)] {
         assert!(parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":seconds,"open_on_hover":true})).is_ok(), "{seconds}");
     }
-    for seconds in [json!(4), json!(121), json!(0), json!(-5), json!(15.5), json!("15"), json!(null), json!(true)] {
+    for seconds in [json!(1), json!(2), json!(3), json!(4), json!(121), json!(-5), json!(15.5), json!("15"), json!(null), json!(true)] {
         assert!(parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":seconds,"open_on_hover":false})).is_err(), "{seconds} must be refused");
     }
     for hover in [json!("true"), json!(1), json!(null), json!(1.0)] {
@@ -1253,6 +1253,7 @@ fn island_interaction_defaults_are_15_seconds_and_hover_off() {
     assert_eq!(boundary.auto_close_seconds(), 120);
     for text in [
         r#"{"v":1,"auto_close_seconds":4}"#, r#"{"v":1,"auto_close_seconds":121}"#,
+        r#"{"v":1,"auto_close_seconds":1}"#, r#"{"v":1,"auto_close_seconds":2}"#, r#"{"v":1,"auto_close_seconds":3}"#,
         r#"{"v":1,"auto_close_seconds":"15"}"#, r#"{"v":1,"auto_close_seconds":15.5}"#,
         r#"{"v":1,"auto_close_seconds":-5}"#, r#"{"v":1,"auto_close_seconds":null}"#,
         r#"{"v":1,"open_on_hover":"true"}"#, r#"{"v":1,"open_on_hover":1}"#,
@@ -1270,6 +1271,47 @@ fn island_interaction_defaults_are_15_seconds_and_hover_off() {
     assert_eq!(encoded, r#"{"sound":true,"v":1}"#, "an untouched file keeps its bytes");
     assert_eq!(serde_json::from_str::<Value>(&encoded).unwrap(), json!({"v":1,"sound":true}),
         "no key gained regardless of input order");
+}
+
+/// #438: «Nunca» is stored `auto_close_seconds: 0` on the SAME closed command and
+/// the SAME stored key. Accepted values are {0} ∪ 5..=120; stored 0 round-trips
+/// (read → 0, written as 0); every previous 5..=120 value keeps working; and a
+/// refused command reaches no persist callback, so the stored bytes are untouched.
+#[test]
+fn auto_close_never_is_stored_zero_and_refusals_never_persist() {
+    let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2}"#));
+    // 0 parses, applies and round-trips through the stored key.
+    let command = parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":0,"open_on_hover":true})).unwrap();
+    let next = apply(&current, &command).unwrap();
+    assert_eq!(next.auto_close_seconds, Some(0));
+    assert_eq!(next.auto_close_seconds(), 0, "«Nunca» reads back as 0, never clamped");
+    assert!(next.open_on_hover());
+    let written = next.to_text();
+    assert_eq!(serde_json::from_str::<Value>(&written).unwrap()["auto_close_seconds"], json!(0),
+        "«Nunca» is written as a literal 0");
+    assert_eq!(Prefs::from_text(Some(&written)).auto_close_seconds(), 0, "stored 0 round-trips");
+    // previous values 5..=120 keep working through the same closed pair
+    for seconds in [5u16, 15, 30, 120] {
+        let command = parse_command(&json!({"action":"set_island_interaction","auto_close_seconds":seconds,"open_on_hover":false})).unwrap();
+        let next = apply(&current, &command).unwrap();
+        assert_eq!(next.auto_close_seconds(), seconds);
+        assert_eq!(serde_json::from_str::<Value>(&next.to_text()).unwrap()["auto_close_seconds"], json!(seconds));
+    }
+    // the direct-caller gate refuses every integer outside {0} ∪ 5..=120
+    for seconds in [1u16, 2, 3, 4, 121, 122, 999] {
+        assert!(apply(&current, &Command::SetIslandInteraction { auto_close_seconds: seconds, open_on_hover: true }).is_err(),
+            "{seconds} must be refused");
+    }
+    // a refused command never persists: the stored bytes stay exactly as they were
+    let before = current.to_text();
+    let persisted = std::cell::Cell::new(false);
+    for seconds in [1u16, 4, 121] {
+        let result = update(&current, &Command::SetIslandInteraction { auto_close_seconds: seconds, open_on_hover: true },
+            |_| { persisted.set(true); true });
+        assert!(result.is_err(), "{seconds} must be refused without persisting");
+        assert!(!persisted.get(), "refused {seconds} must not reach the persist callback");
+        assert_eq!(current.to_text(), before, "refused input leaves the stored bytes unchanged");
+    }
 }
 
 /// #415 WU2: created blobs are a typed optional pref — `custom_blobs`, a list of
