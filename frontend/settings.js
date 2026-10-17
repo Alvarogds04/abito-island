@@ -1052,7 +1052,7 @@
     }));
     paintAuto();
     const motion = group('appearance', 'Movimiento', '');
-    motion.append(toggleRow('sw-motion', 'Respetar el movimiento del sistema', g.motion.respectSystem, () => {
+    motion.append(toggleRow('sw-motion', 'Animación reducida', g.motion.respectSystem, () => {
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
@@ -1064,7 +1064,7 @@
     picker.setAttribute('role', 'radiogroup');
     picker.setAttribute('aria-label', 'Tema');
     for (const option of themePick.options) {
-      const b = el('button', 'stheme');
+      const b = el('button', 'stheme stheme-card');
       b.type = 'button';
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
@@ -1072,7 +1072,18 @@
       b.id = `theme-mode-${option.id}`;
       b.dataset.mode = option.id;
       b.tabIndex = option.selected ? 0 : -1;
-      b.append(el('span', 'stheme-label', option.label));
+      // T7.2 design (ajustes-ventana-apariencia-*.png): a LIVE thumbnail per theme — the dot,
+      // one ink line, one muted line and two chips drawn with that theme's palette. Sistema
+      // follows the CURRENT theme tokens; Claro/Oscuro are the literal palettes of DESIGN-NOTES
+      // §1, because a preview must not flip with the theme it sits in. Decorative: the words and
+      // aria-labels carry the meaning.
+      const thumb = el('span', 'stheme-thumb');
+      thumb.setAttribute('aria-hidden', 'true');
+      thumb.append(el('span', 't-dot'), el('span', 't-line t-line-1'), el('span', 't-line t-line-2'));
+      const mini = el('span', 't-chips');
+      mini.append(el('span'), el('span'));
+      thumb.append(mini);
+      b.append(thumb, el('span', 'stheme-label', option.label));
       b.addEventListener('keydown', e => {
         if (e.isTrusted !== true || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
         e.preventDefault();

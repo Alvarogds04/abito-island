@@ -153,6 +153,34 @@ body.probe-capture-bg { background: #d8c9a3; }
 }
 .stheme-label { display: inline-block; }
 .stheme[aria-checked="true"] { background: var(--go); border-color: var(--go); color: #000; }
+/* T7.2 design (ajustes-ventana-apariencia-*.png): the tab's theme picker is THREE LIVE
+   THUMBNAILS (Sistema / Claro / Oscuro) instead of text pills. The quick panel keeps the text
+   pill (.stheme base above). The card variant draws a mini preview of each theme: dot, ink
+   line, muted line, two chips. Sistema follows the CURRENT theme tokens; Claro/Oscuro are the
+   literal palettes of DESIGN-NOTES §1 — a preview must not flip with the theme it sits in,
+   so these few raw colours are the design's own values, not theme tokens. Selection is the
+   design's 2px live ring on the thumbnail (words still carry the state; never colour alone). */
+.stheme.stheme-card {
+  flex-direction: column; gap: 6px; min-width: 92px; min-height: 44px; padding: 0;
+  border: 0; border-radius: 14px; background: transparent; color: var(--island-ink);
+}
+.stheme.stheme-card[aria-checked="true"] { background: transparent; color: var(--island-ink); }
+.stheme-thumb { display: flex; flex-direction: column; gap: 4px; width: 92px; height: 64px; padding: 10px; box-sizing: border-box; border-radius: 14px; background: var(--card-bg); border: 1px solid var(--line); }
+.stheme[aria-checked="true"] .stheme-thumb { border-color: transparent; box-shadow: 0 0 0 2px var(--island-live); }
+.stheme-thumb .t-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--island-live); }
+.stheme-thumb .t-line { height: 4px; border-radius: 2px; background: var(--island-ink); }
+.stheme-thumb .t-line-1 { width: 60%; }
+.stheme-thumb .t-line-2 { width: 82%; background: var(--island-muted); }
+.stheme-thumb .t-chips { display: flex; gap: 4px; margin-top: auto; }
+.stheme-thumb .t-chips span { width: 16px; height: 10px; border-radius: 3px; background: var(--island-muted); opacity: .75; }
+.stheme[data-mode="light"] .stheme-thumb { background: #F7F2E7; border-color: rgba(26, 25, 21, .08); }
+.stheme[data-mode="light"] .stheme-thumb .t-dot { background: #2F6FB8; }
+.stheme[data-mode="light"] .stheme-thumb .t-line { background: #1A1915; }
+.stheme[data-mode="light"] .stheme-thumb .t-line-2, .stheme[data-mode="light"] .stheme-thumb .t-chips span { background: #5F5C54; }
+.stheme[data-mode="dark"] .stheme-thumb { background: #141518; border-color: rgba(245, 246, 248, .08); }
+.stheme[data-mode="dark"] .stheme-thumb .t-dot { background: #63B3FF; }
+.stheme[data-mode="dark"] .stheme-thumb .t-line { background: #F5F6F8; }
+.stheme[data-mode="dark"] .stheme-thumb .t-line-2, .stheme[data-mode="dark"] .stheme-thumb .t-chips span { background: #8E939C; }
 .stheme:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 html[data-motion="reduce"] .stheme { transition: none; }
 #theme-error:empty { display: none; }
