@@ -217,8 +217,10 @@ pub struct Click { pub id: String, pub kind: ClickKind }
 
 /// #437: the `dismiss` verb, display-only like the click. Argument-free
 /// (exactly {action}) it keeps the M2 behaviour: the FIRST notice goes. With
-/// exactly one extra key — a string `id` validated with the same canonical
-/// question ID validator as the click — EXACTLY that notice is dismissed.
+/// exactly one extra key — a string `id` validated against the NOTICE id
+/// domain (protocol::token, the same rule the wire and NoticeStore::accept
+/// enforce on settled event ids: [a-zA-Z0-9_-]{1,128}, #450) — EXACTLY that
+/// notice is dismissed.
 /// Anything else (a stowaway key, a non-string or malformed id, another
 /// action, a non-object) is refused: the list view's × must never fall back
 /// to the first notice (coordinator decision, T6.6 #437).
@@ -241,8 +243,13 @@ pub fn parse_dismiss(payload: &Value) -> Result<Dismiss, BridgeError> {
             let id = map["id"]
                 .as_str()
                 .ok_or_else(|| BridgeError::denied("invalid notice id"))?;
-            crate::questioncmd::parse_command(&serde_json::json!({"action": "decline", "id": id}))
-                .map_err(|_| BridgeError::denied("invalid notice id"))?;
+            // #450: the notice store admits settled notices with ids like
+            // `event-1`; the boundary must accept every id the store admits,
+            // so validate against the NOTICE id domain (protocol::token),
+            // not the question UUID validator.
+            if !crate::protocol::token(id) {
+                return Err(BridgeError::denied("invalid notice id"));
+            }
             Ok(Dismiss { id: Some(id.into()) })
         }
         _ => Err(BridgeError::denied("dismiss carries at most one `id` key")),
@@ -636,8 +643,9 @@ mod tests {
             parse_dismiss(&json!({"action": "dismiss", "id": DISMISS_ID})).unwrap().id,
             Some(DISMISS_ID.to_string())
         );
+        // #450: a UUID is just one member of the notice id domain; non-UUID
+        // ids the store admits pass too (covered boundary-to-store below).
         for bad in [
-            json!({"action": "dismiss", "id": "not-a-uuid"}),
             json!({"action": "dismiss", "id": 7}),
             json!({"action": "dismiss", "id": null}),
             json!({"action": "dismiss", "id": DISMISS_ID, "kind": "finished"}),
@@ -646,6 +654,56 @@ mod tests {
             json!("dismiss"),
         ] {
             assert!(parse_dismiss(&bad).is_err(), "{bad} must be refused");
+        }
+    }
+
+    // --- #450 (S3): the dismiss `id` is a NOTICE id, not a question UUID.
+    // The notice store admits settled notices with ids like `event-1` (the
+    // wire id domain, protocol::token: [a-zA-Z0-9_-]{1,128}); the boundary
+    // must accept EVERY id the store admits, and keep refusing everything
+    // else with the same `invalid notice id` error.
+    #[test]
+    fn parse_dismiss_accepts_notice_ids_the_store_admits() {
+        // boundary-to-store: a non-UUID id the store admits as a settled
+        // notice passes parse_dismiss and dismiss_exact removes exactly it.
+        let project = "/project".to_string();
+        let mut store = crate::protocol::NoticeStore::new(project.clone());
+        let event = crate::protocol::Message {
+            v: 1,
+            kind: "settled".into(),
+            project: project.clone(),
+            session_id: "session-1".into(),
+            at: 1_000,
+            id: Some("event-1".into()),
+        };
+        let other = crate::protocol::Message {
+            id: Some("event-2".into()),
+            ..event.clone()
+        };
+        assert!(store.accept(&event, 1_000), "the store admits event-1");
+        assert!(store.accept(&other, 1_000), "the store admits event-2");
+
+        let dismiss = parse_dismiss(&json!({"action": "dismiss", "id": "event-1"}))
+            .expect("an admitted notice id must pass the boundary");
+        assert_eq!(dismiss.id.as_deref(), Some("event-1"));
+        assert!(store.dismiss_exact(dismiss.id.as_deref().unwrap(), 1_000));
+        let left = store.snapshot(1_000);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "event-2");
+    }
+
+    #[test]
+    fn parse_dismiss_still_rejects_ids_outside_the_notice_id_domain() {
+        for bad in [
+            "",
+            "with space",
+            "f".repeat(129).as_str(),
+            "bad\u{7}id",
+        ] {
+            let error = parse_dismiss(&json!({"action": "dismiss", "id": bad}))
+                .expect_err("{bad:?} must be refused");
+            assert_eq!(error.code, "denied");
+            assert_eq!(error.message, "Denied: invalid notice id");
         }
     }
 
