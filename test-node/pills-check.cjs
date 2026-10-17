@@ -259,14 +259,14 @@ test('T6.3 #434 volume slider: range 0..0.2, aria + percent text, commit on chan
 test('T6.3 #434 General groups: Perfil / Isla / Sonido y atajo, name in Perfil, no hint walls', async () => {
   const b = await settingsBoot({}, 'general');
   const text = b.get('settings-body').textContent;
-  for (const word of ['Perfil', 'Isla', 'Sonido y atajo', 'Nombre', 'Auto-cierre', 'Abrir al pasar el mouse', 'Abrir Ajustes en ventana', 'Volumen', 'Atajo global']) {
+  for (const word of ['Perfil', 'Isla', 'Sonido y atajo', 'Nombre', 'Auto-cierre', 'Abrir al pasar el mouse', 'Volumen', 'Atajo global']) {
     assert.ok(text.includes(word), word);
   }
   const name = b.get('settings-display-name');
   assert.ok(name, 'the display name moved into PERFIL on the General tab');
   assert.equal(name.getAttribute('placeholder'), 'Tu nombre (opcional)');
-  const win = b.get('sw-settings-window');
-  assert.equal(win.getAttribute('aria-label'), 'Abrir Ajustes en ventana');
+  assert.equal(b.get('sw-settings-window'), null, '#444: no standalone placement control');
+  assert.ok(!text.includes('Abrir Ajustes en ventana'));
   assert.equal(b.get('sw-island-hover').getAttribute('aria-label'), 'Abrir al pasar el mouse');
   // the hint walls are gone; the ONE allowed hint is the limited-shortcut note
   assert.ok(!text.includes('Avisos sonoros de la isla'));

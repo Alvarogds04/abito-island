@@ -1,18 +1,6 @@
-//! #366 F093 host: Ajustes in its own window (opt-in).
-//!
-//! ONE closed command, `settings_window_action`, with exactly
-//! `{"action":"open"|"close"}`. The typed pref (`prefs.json`
-//! `settings_window`, T1) is the only chooser: `open` creates (or shows) the
-//! window ONLY when the human opted in, and answers `{"open":false}`
-//! otherwise so the page falls back to the in-island panel (#408 default).
-//! Any failure is an error the page also falls back from — the island
-//! default is never lost.
-//!
-//! The window is created by RUST ONLY: the label and the SAME page URL
-//! (`index.html`, the same closed allowlist entry the island uses) never
-//! come from the page. The window shares the main sender gate (extended to
-//! the exact `settings` label, approved narrowly) and the shared rate
-//! limiter. No secret, token or path crosses to the WebView here.
+//! #444 L12: compatibility command for Settings, now always inside the island.
+//! The exact open/close schema and sender/rate gates remain; legacy placement
+//! and remembered window sizes stay stored without creating a separate window.
 
 use crate::AppState;
 use abito_island::bridge::{self, BridgeError};
@@ -20,7 +8,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Once;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, State};
 
 /// The exact window label the sender gate admits for the settings window.
 /// The gate is exact-string (approved): no other label shares the bridge.
@@ -128,7 +116,7 @@ pub(crate) fn main_window_only(label: &str) -> Result<(), BridgeError> {
 }
 
 fn err(code: &str) -> BridgeError {
-    BridgeError { code: code.into(), message: "No se pudo abrir Ajustes en su ventana.".into() }
+    BridgeError { code: code.into(), message: "No se pudo abrir Ajustes en la isla.".into() }
 }
 
 /// The closed payload: exactly `{"action":"open"}` or `{"action":"close"}` —
@@ -145,50 +133,13 @@ pub(crate) fn parse_settings_window_action(payload: &Value) -> Option<&'static s
     }
 }
 
-/// #366 F093: the typed pref is the ONLY chooser (pure, testable). Only the
-/// human's explicit opt-in opens the own window; absent/`false` keeps the
-/// in-island default (#408) and the answer tells the page to fall back.
-pub(crate) fn opens_own_window(pref: Option<bool>) -> bool {
-    pref == Some(true)
-}
-
-/// The window, created or shown by Rust only. A repeat `open` shows and
-/// focuses the existing window instead of building a second one. The URL is
-/// the SAME page as the island (the closed `index.html` entry); the window is
-/// decorated, resizable and NOT always-on-top — it is a normal window.
-fn open_window(app: &AppHandle) -> tauri::Result<()> {
-    if let Some(win) = app.get_webview_window(SETTINGS_LABEL) {
-        win.show()?;
-        let _ = win.unminimize();
-        win.set_focus()?;
-        return Ok(());
-    }
-    // T6.2: the remembered size (a typed pref, never page-supplied) when it fits
-    // the CURRENT screen, else the design default — clamped to the work area,
-    // never below the minimum. The main window's work area is the best available
-    // source before this window exists.
-    let work = app.get_webview_window("main")
-        .map(|main| {
-            let rect = crate::workarea::current(&main).rect;
-            (rect.w.max(0) as u32, rect.h.max(0) as u32)
-        })
-        .unwrap_or((u32::MAX, u32::MAX));
-    let (w, h) = opening_size(crate::settingshost::settings_window_size(app), work);
-    WebviewWindowBuilder::new(
-        app,
-        SETTINGS_LABEL,
-        WebviewUrl::App(std::path::PathBuf::from("index.html")),
-    )
-    .title("Ajustes")
-    .inner_size(w, h)
-    .min_inner_size(MIN_INNER_SIZE.0, MIN_INNER_SIZE.1)
-    .resizable(true)
-    .build()
-    .map(|_| ())
+/// Stored legacy placement is deliberately inert (no migration or deletion).
+pub(crate) fn opens_own_window(_pref: Option<bool>) -> bool {
+    false
 }
 
 #[tauri::command]
-pub async fn settings_window_action(
+pub fn settings_window_action(
     app: AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
@@ -202,16 +153,12 @@ pub async fn settings_window_action(
     let action = parse_settings_window_action(&payload).ok_or_else(|| err("invalid_schema"))?;
     match action {
         "open" => {
-            let pref = crate::settingshost::settings_window_on(&state.settings);
-            if !opens_own_window(Some(pref)) {
-                // The typed pref chose in-island: an honest answer, never an error.
-                return Ok(json!({"action": "open", "open": false}));
-            }
-            open_window(&app).map_err(|e| {
-                eprintln!("settings window open failed: {e}");
-                err("window_failed")
-            })?;
-            Ok(json!({"action": "open", "open": true}))
+            // Native/legacy entry points use the same public in-island route as
+            // the keyboard. No builder exists here, even for a stored true pref.
+            // Synchronous Tauri commands run on the main thread: native geometry
+            // must not be measured from an async runtime worker (#431).
+            crate::open_settings_in_island(&app, &state)?;
+            Ok(json!({"action": "open", "open": false}))
         }
         // Closing asks the window to close; the ordinary CloseRequested path
         // (allowed for this label only) does the rest. A missing window is fine.
@@ -307,10 +254,10 @@ mod tests {
         assert!(all.len() >= 20, "the scan must see every command, saw {all:?}");
     }
 
-    /// #366 F093: only the human's explicit opt-in opens the own window.
+    /// #444 L12: no stored value may reopen the removed standalone surface.
     #[test]
-    fn f093_only_the_explicit_opt_in_opens_the_own_window() {
-        assert!(opens_own_window(Some(true)));
+    fn l12_legacy_placement_never_opens_a_separate_window() {
+        assert!(!opens_own_window(Some(true)), "legacy true must remain inert");
         assert!(!opens_own_window(Some(false)), "false is the in-island default (#408)");
         assert!(!opens_own_window(None), "absent is the in-island default");
     }
