@@ -189,6 +189,16 @@ pub fn prune_island_agent(app: &AppHandle, id: &str) {
     );
 }
 
+// Shared dispatch gate: executed before any preference transaction or persistence.
+fn check_island_membership(command: &Command, specialists: &crate::specialists::Store) -> Result<(), BridgeError> {
+    if let Command::SetIslandAgents(order) = command {
+        if order.iter().any(|id| specialists.find(id).is_none()) {
+            return Err(err("invalid_schema"));
+        }
+    }
+    Ok(())
+}
+
 /// Closed preference commands: view, sound_on/off, set_sound_gain (0..=0.2),
 /// set_display_name, set/clear_avatar_color, set_main_pill, toggle_declared_pill and
 /// set_theme (system|light|dark). Pill actions take exactly action + id; selection never
@@ -200,6 +210,7 @@ pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     let command = prefs::parse_command(&payload).map_err(|_| err("invalid_schema"))?;
+    check_island_membership(&command, &state.specialists.snapshot())?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
     let mut attempted_write = false;
     let next = prefs::transact(
@@ -629,4 +640,34 @@ mod settings_view_tests {
         assert_eq!(view["theme"], json!("system"));
         assert_eq!(view["sound"], json!(false));
     }
+    #[test]
+    fn island_membership_dispatch_refuses_unknown_ids_before_persistence() {
+        use super::{check_island_membership, err, prefs, BridgeError, Command, Prefs, Value};
+        let specialists = crate::specialists::Store::from_text(Some(
+            r#"{"v":1,"active":null,"specialists":[{"id":"esp-known","name":"Notes","instructions":"Sort notes","model":null}]}"#));
+        assert_eq!(specialists.items.len(), 1);
+        let current = Prefs::default();
+        let mut disk_bytes = current.to_text().into_bytes();
+        let before = disk_bytes.clone();
+        let mut writes = 0;
+        let mut dispatch = |payload: Value| -> Result<Prefs, BridgeError> {
+            let command = prefs::parse_command(&payload).map_err(|_| err("invalid_schema"))?;
+            check_island_membership(&command, &specialists)?;
+            prefs::update(&current, &command, |next| {
+                writes += 1;
+                disk_bytes = next.to_text().into_bytes();
+                true
+            }).map_err(|_| err("save_failed"))
+        };
+        assert!(dispatch(json!({"action":"set_island_agents","order":["esp-missing"]})).is_err());
+        assert!(dispatch(json!({"action":"set_island_agents","order":["esp-known","esp-missing"]})).is_err());
+        drop(dispatch);
+        assert_eq!(writes, 0);
+        assert_eq!(disk_bytes, before, "refused input never reaches the persistence callback");
+        let command = prefs::parse_command(&json!({"action":"set_island_agents","order":["esp-known"]})).unwrap();
+        assert!(check_island_membership(&command, &specialists).is_ok());
+        assert_eq!(prefs::apply(&current, &command).unwrap().island_agents, Some(vec!["esp-known".into()]));
+        assert!(check_island_membership(&Command::SetIslandAgents(vec![]), &specialists).is_ok());
+    }
+
 }
