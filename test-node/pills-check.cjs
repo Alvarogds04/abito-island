@@ -94,7 +94,8 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
         if (backend.rejectSpec) { backend.rejectSpec = false; return Promise.reject(new Error('invalid_specialist')); }
         if (payload.action === 'create') sp.specialists.push({ id: payload.id, name: payload.name, instructions: payload.instructions, model: payload.model, space: null, spaces: [], permissions: ['read'] });
         else if (payload.action === 'update') Object.assign(sp.specialists.find(x => x.id === payload.id), { name: payload.name, instructions: payload.instructions, model: payload.model });
-        else if (payload.action === 'delete') { sp.specialists = sp.specialists.filter(x => x.id !== payload.id); if (backend.prefs.islandAgents) backend.prefs.islandAgents = backend.prefs.islandAgents.filter(x => x !== payload.id); }
+        else if (payload.action === 'select') sp.active = payload.id;
+        else if (payload.action === 'delete') { if (sp.active === payload.id) sp.active = null; sp.specialists = sp.specialists.filter(x => x.id !== payload.id); if (backend.prefs.islandAgents) backend.prefs.islandAgents = backend.prefs.islandAgents.filter(x => x !== payload.id); }
         else return Promise.reject(new Error('invalid_schema'));
         backend.specCalls.push(clone(payload));
         return Promise.resolve(clone(sp));
@@ -122,78 +123,74 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
   return { clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
 }
 
-test('S3/S4 actual shipped overview starts with main+four default choices and named states', async () => {
+test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
   const b = boot(); await flush();
-  assert.equal(b.get('pill-name').textContent, 'VS Code');
-  assert.equal(b.get('pill-state').textContent, 'Sin conexión');
-  const buttons = b.get('pill-choices').children;
-  assert.deepEqual(buttons.map(x => x.dataset.pillId), [M.DEFAULT_MAIN, ...M.DEFAULT_DECLARED]);
-  assert.equal(buttons[0].getAttribute('aria-pressed'), 'true');
-  for (const button of buttons) { assert.equal(button.tagName, 'BUTTON'); assert.ok(button.getAttribute('aria-label')); }
-  assert.deepEqual(b.calls, [{ cmd: 'prefs_action', payload: { action: 'view' } }]);
-  const scripts = [...read('index.html').matchAll(/src="([^"]+\.js)"/g)].map(x => x[1]);
-  for (const file of ['pill-catalog.js', 'avatar-colors.js', 'pills.js', 'pills-view.js']) assert.ok(scripts.includes(file));
-  assert.ok(scripts.indexOf('pill-catalog.js') < scripts.indexOf('pills.js'));
-  assert.ok(scripts.indexOf('avatar-colors.js') < scripts.indexOf('pills.js'), 'the closed palette module loads before the pill model reads it');
-  assert.ok(scripts.indexOf('icons.js') < scripts.indexOf('pills-view.js'));
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  assert.equal(b.get('pill-state').textContent, 'En reposo');
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito']);
+  assert.equal(writes(b).length, 0);
 });
 
-test('S6 trusted actual selection is local-only; synthetic and covered gestures do nothing', async () => {
-  const b = boot(); await flush();
-  const id = 'pill-choice-integration_resend';
-  b.click(id, { isTrusted: false }); assert.equal(b.get('pill-name').textContent, 'VS Code');
-  b.click(id, { detail: 0 }); assert.equal(b.get('pill-name').textContent, 'Resend');
-  assert.equal(b.get('pill-state').textContent, 'Sin conexión');
-  assert.match(b.get('pill-detail').textContent, /no conecta/i);
+test('#442 target selection uses the existing role command; synthetic, covered and failed gestures do not change it', async () => {
+  const b = boot({ specs: SPECS }); b.load('specialists.js'); await flush();
+  const id = 'pill-choice-esp-a';
+  b.click(id, { isTrusted: false }); await flush();
+  assert.equal(b.get('pill-name').textContent, 'Abito');
   for (const fields of [{ phase: 'compact' }, { phase: 'expanded', view: 'chat' },
     { phase: 'expanded', view: 'overview', card: 'pending' },
-    { phase: 'expanded', view: 'overview', question: 'pending' },
-    { phase: 'expanded', view: 'overview', question: 'expired' },
-    { phase: 'expanded', view: 'overview', question: 'outcome' },
+    { phase: 'expanded', view: 'overview', settings: 'open' },
+    ...['pending', 'expired', 'outcome'].map(question => ({ phase: 'expanded', view: 'overview', question })),
     { phase: 'expanded', view: 'overview', noticeView: 'notices' }]) {
-    b.get('capsule').dataset = fields; b.click('pill-choice-integration_github');
-    assert.equal(b.get('pill-name').textContent, 'Resend');
+    b.get('capsule').dataset = fields; b.click(id); await flush();
+    assert.equal(b.get('pill-name').textContent, 'Abito');
   }
-  assert.equal(b.calls.length, 1, 'selection never sends IPC, provider, connector or native actions');
+  assert.equal(b.backend.specCalls.length, 0);
+  b.get('capsule').dataset = { phase: 'expanded', view: 'overview' };
+  b.backend.rejectSpec = true; b.click(id); await flush();
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  assert.match(b.get('pill-live').textContent, /No se pudo/);
+  b.click(id); await flush();
+  assert.equal(b.get('pill-name').textContent, 'Revisor');
+  assert.deepEqual(b.backend.specCalls.at(-1), { action: 'select', id: 'esp-a' });
+  b.click('pill-choice-abito'); await flush();
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  assert.deepEqual(b.backend.specCalls.at(-1), { action: 'select', id: null });
+  assert.match(b.get('pill-detail').textContent, /no inicia tareas/);
 });
 
-test('S4 prefs event reconciles new main/removal/order and focus without erasing connection controls', async () => {
-  const b = boot(); await flush();
+test('#442 membership reconciliation preserves motor controls and the actual conversation target', async () => {
+  const b = boot({ specs: SPECS }); b.load('specialists.js'); await flush();
   b.get('overview-status').textContent = 'Motor caído'; b.get('overview-detail').textContent = 'Conexión previa';
-  b.click('pill-choice-integration_github'); b.get('pill-choice-integration_github').focus();
-  b.emit({ mainPill: 'agent_cursor', declaredPills: ['ai_google', 'agent_amp'] });
-  assert.equal(b.get('pill-name').textContent, 'Cursor');
-  // #435: stored order — before this change the catalog index gave ['agent_cursor', 'agent_amp', 'ai_google'].
-  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_cursor', 'ai_google', 'agent_amp']);
-  assert.equal(b.doc.activeElement.id, 'pill-choice-agent_cursor');
+  b.click('pill-choice-esp-a'); await flush(); b.get('pill-choice-esp-a').focus();
+  b.emit({ islandAgents: ['esp-b'] });
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-b']);
+  assert.equal(b.get('pill-name').textContent, 'Revisor');
+  assert.equal(b.get('pill-state').textContent, 'Fuera de la isla');
+  assert.equal(b.doc.activeElement.id, 'pill-choice-abito');
   assert.equal(b.get('overview-status').textContent, 'Motor caído');
   assert.equal(b.get('overview-detail').textContent, 'Conexión previa');
-  for (const id of ['notice-open', 'notice-dismiss', 'allow', 'deny', 'open-chat', 'open-settings']) assert.ok(b.get(id), id);
 });
 
-test('S6 unknown saved inputs are normalized but never rendered as markup or invented sessions', async () => {
+test('#442 unknown legacy inputs never become island markup or invented agents', async () => {
   const b = boot(); await flush();
-  b.emit({ mainPill: '<img>', declaredPills: ['__proto__', '<img>', 'integration_music', 'agent_claude-desktop', 'ai_openai', 'ai_openai'] });
-  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), [M.DEFAULT_MAIN, 'ai_openai']);
+  b.emit({ mainPill: '<img>', declaredPills: ['__proto__', '<img>'], islandAgents: ['esp-missing'] });
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito']);
   assert.equal(b.get('pill-choices').textContent.includes('<img>'), false);
-  b.emit({ declaredPills: [] }); assert.equal(b.get('pill-choices').children.length, 1);
-  assert.equal(b.calls.length, 1);
+  assert.equal(writes(b).length, 0);
 });
 
-test('S6 failed preference read reports unconfirmed defaults, not successful persistence', async () => {
+test('#442 failed preference read says so and shows Abito without writing', async () => {
   const b = boot({ failView: true }); await flush();
   assert.match(b.get('pill-live').textContent, /no se pudieron leer/i);
-  assert.equal(b.get('pill-state').textContent, 'Sin conexión');
-  assert.equal(b.get('pill-name').textContent, 'VS Code');
-  assert.equal(b.calls.length, 1);
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  assert.equal(writes(b).length, 0);
 });
 
-test('S6 initial prefs read cannot overwrite a newer pushed choice snapshot', async () => {
-  const b = boot({ deferView: true });
-  b.emit({ mainPill: 'agent_codex', declaredPills: ['agent_amp'] });
-  b.backend.pendingView(M.normalize({})); await flush();
-  assert.equal(b.get('pill-name').textContent, 'Codex');
-  assert.deepEqual(b.get('pill-choices').children.map(x => x.dataset.pillId), ['agent_codex', 'agent_amp']);
+test('#442 initial prefs read cannot overwrite newer pushed island membership', async () => {
+  const b = boot({ deferView: true, specs: SPECS }); b.load('specialists.js');
+  b.emit({ islandAgents: ['esp-b'] });
+  b.backend.pendingView({ islandAgents: [] }); await flush();
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-b']);
 });
 
 
@@ -226,7 +223,7 @@ test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices
   b.click('dot-color-abito-blue'); await flush(); assert.equal(b.backend.prefs.avatarColors.abito,'blue');
   assert.equal(b.backend.prefs.mainPill,'agent_codex'); assert.deepEqual(b.backend.prefs.declaredPills,['ai_google']);
   assert.deepEqual(writes(b).map(x=>x.payload.action),['sound_on','set_sound_gain','set_display_name','set_avatar_color']);
-  assert.equal(b.get('pill-name').textContent,'Codex');
+  assert.equal(b.get('pill-name').textContent,'Abito');
   assert.ok(!b.get('open-screen-accounts'), '#408: no separate Cuentas/Conectores header buttons'); assert.ok(b.get('settings-tab-accounts')); assert.ok(!b.get('settings-tab-connectors'), 'S8: merged into Conexiones');
 });
 
@@ -550,18 +547,15 @@ test('#410 the credential state is an icon chip from the closed registry (same w
 });
 
 // #346 F033 — per-pill colours at the DOM/event boundary: validated name in, painted name out.
-test('#346 overview paints dataset.color only with an already-validated palette name', async () => {
-  const b = boot({ prefs: { pillColors: { integration_claude: 'blue', integration_n8n: 'mint', integration_vercel: '<img src=x>', integration_github: 'MINT' } } });
-  await flush();
-  assert.equal(b.get('pill-choice-integration_claude').dataset.color, 'blue');
-  assert.equal(b.get('pill-choice-integration_n8n').dataset.color, 'mint');
-  assert.equal(b.get('pill-choice-integration_vercel').dataset.color, undefined, 'a hostile stored value never paints');
-  assert.equal(b.get('pill-choice-integration_github').dataset.color, undefined, 'an off-set value never paints');
-  let pushedHostile;
-  try { pushedHostile = JSON.parse('{"integration_resend":"expression(alert(1))","integration_claude":"purple"}'); } catch { pushedHostile = null; }
-  b.emit({ pillColors: pushedHostile });
-  assert.equal(b.get('pill-choice-integration_resend').dataset.color, undefined, 'a hostile pushed value never paints');
-  assert.equal(b.get('pill-choice-integration_claude').dataset.color, 'purple', 'the validated name repaints');
+test('#442 overview avatar palette rejects hostile values and repaints the same stable identity', async () => {
+  const b = boot({ specs: SPECS, extraPrefs: { avatarColors: { abito: 'blue', 'esp-a': 'mint', 'esp-b': '<img>' } } });
+  b.load('specialists.js'); await flush();
+  assert.equal(b.get('pill-choice-abito').dataset.color, 'blue');
+  assert.equal(b.get('pill-choice-esp-a').dataset.color, 'mint');
+  assert.notEqual(b.get('pill-choice-esp-b').dataset.color, '<img>');
+  b.emit({ avatarColors: { abito: 'purple', 'esp-a': 'expression(alert(1))' } });
+  assert.equal(b.get('pill-choice-abito').dataset.color, 'purple');
+  assert.notEqual(b.get('pill-choice-esp-a').dataset.color, 'expression(alert(1))');
   assert.equal(b.get('pill-choices').textContent.includes('<img'), false);
 });
 
@@ -603,22 +597,12 @@ test('#415 the blob model creates the human examples and refuses bad names, dupl
   assert.equal(M.colorOfBlob(grown, 'Abito Reviewer'), '');
 });
 
-test('#415 the overview shows created blobs after the catalog order, as label+colour buttons without connection', async () => {
-  const b = boot({ prefs: { customBlobs: [{ name: 'Abito GitHub', color: 'mint' }, { name: 'Abito Reviewer' }] } });
-  await flush();
-  const buttons = b.get('pill-choices').children;
-  assert.deepEqual(buttons.map(x => x.dataset.pillId).filter(Boolean), [M.DEFAULT_MAIN, ...M.DEFAULT_DECLARED], 'catalog order unchanged, blobs carry no pillId');
-  assert.deepEqual(buttons.map(x => x.dataset.blobName), [undefined, undefined, undefined, undefined, undefined, 'Abito GitHub', 'Abito Reviewer']);
-  assert.equal(buttons[5].dataset.color, 'mint');
-  assert.equal(buttons[6].dataset.color, undefined);
-  assert.match(buttons[5].getAttribute('aria-label'), /Abito GitHub/);
-  assert.equal(buttons[5].textContent.includes('Abito GitHub'), true);
-  b.emit({ customBlobs: [{ name: 'Abito correo' }] });
-  await flush();
-  const after = b.get('pill-choices').children;
-  assert.equal(after.length, 6, 'the push replaces the whole list');
-  assert.deepEqual(after.map(x => x.dataset.blobName), [undefined, undefined, undefined, undefined, undefined, 'Abito correo']);
-  assert.deepEqual(after.map(x => x.dataset.pillId).filter(Boolean), [M.DEFAULT_MAIN, ...M.DEFAULT_DECLARED]);
+test('#442 legacy custom blobs stay stored and only appear through explicit Settings conversion', async () => {
+  const blobs = [{ name: 'Abito GitHub', color: 'mint' }, { name: 'Abito Reviewer', color: '' }];
+  const b = boot({ extraPrefs: { customBlobs: blobs } }); await flush();
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito']);
+  assert.deepEqual(b.backend.prefs.customBlobs, blobs);
+  assert.equal(writes(b).length, 0);
 });
 
 async function blobBootUnused() {
@@ -787,7 +771,7 @@ test('#442 settings uses the lexical clay engine and destroys all characters whe
   const b = await settingsBoot({ specs: SPECS });
   assert.ok(b.clayStatus().length > 0, 'the engine is lexical AbitoClay, not window.AbitoClay');
   let destroyed = 0;
-  const instances = b.clayStatus();
+  const instances = b.clayStatus().filter(i => !b.get('pill-choices').contains(i.svg));
   for (const instance of instances) { const destroy = instance.destroy; instance.destroy = () => { destroyed++; destroy(); }; }
   b.click('settings-close'); await flush();
   assert.equal(destroyed, instances.length, 'all mounted real characters stop on close');
@@ -849,4 +833,70 @@ test('#439 a screen switch rebuilds; a typed draft survives an identical push an
   // the key bit BEFORE rendering, or a skipped render would freeze the chip
   const src = read('settings.js');
   assert.match(src, /failureTimer = 0; render\(\)/, 'the failure timer re-arms the key before rendering');
+});
+
+
+test('#442 island consumes stored specialist projection, ordered membership, stale removal and unchanged legacy data', async () => {
+  const b = boot({ specs: SPECS, extraPrefs: { islandAgents: ['esp-b', 'esp-a'], avatarColors: { 'esp-b': 'purple' } } });
+  b.load('specialists.js'); await flush();
+  const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
+  assert.deepEqual(ids(), ['abito', 'esp-b', 'esp-a']);
+  assert.match(b.get('pill-choice-esp-b').textContent, /Notas/);
+  assert.equal(b.get('pill-choice-esp-b').dataset.color, 'purple');
+  const legacy = clone({ mainPill: b.backend.prefs.mainPill, declaredPills: b.backend.prefs.declaredPills, customBlobs: b.backend.prefs.customBlobs });
+  for (const order of [[], ['esp-a'], ['esp-b', 'esp-a'], ['esp-a', 'esp-b', 'esp-missing']]) {
+    b.emit({ islandAgents: order });
+    assert.deepEqual(ids(), ['abito', ...order.filter(x => x !== 'esp-missing')]);
+  }
+  assert.deepEqual(clone({ mainPill: b.backend.prefs.mainPill, declaredPills: b.backend.prefs.declaredPills, customBlobs: b.backend.prefs.customBlobs }), legacy);
+  assert.equal(writes(b).length, 0, 'reading membership never migrates legacy storage');
+});
+
+
+test('#442 off-island active target stays honest, Abito stays reachable, deleted target follows backend null projection', async () => {
+  const b = boot({ specs: SPECS }); b.load('specialists.js'); await flush();
+  b.click('pill-choice-esp-a'); await flush();
+  b.emit({ islandAgents: ['esp-b'] });
+  assert.equal(b.backend.specs.active, 'esp-a');
+  assert.equal(b.get('pill-name').textContent, 'Revisor');
+  assert.equal(b.get('pill-state').textContent, 'Fuera de la isla');
+  assert.equal(b.get('pill-choice-abito').getAttribute('aria-pressed'), 'false');
+  b.click('pill-choice-abito'); await flush();
+  assert.deepEqual(b.backend.specCalls.at(-1), { action: 'select', id: null });
+  assert.equal(b.backend.specs.active, null);
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  b.emit({ islandAgents: ['esp-a', 'esp-b'] });
+  b.click('pill-choice-esp-a'); await flush();
+  await b.window.AbitoSpecialistsPanel.act({ action: 'delete', id: 'esp-a' });
+  assert.equal(b.backend.specs.active, null, 'the backend deletion projection clears target');
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  assert.equal(b.get('pill-choice-esp-a'), null);
+});
+
+test('#442 all 0..3 slots follow saved order and unchanged pushes preserve real clay instances', async () => {
+  const b = boot({ specs: [...SPECS, { id: 'esp-c', name: 'Correo', instructions: 'Correo', model: null }] });
+  b.load('specialists.js'); await flush();
+  for (const order of [[], ['esp-c'], ['esp-b', 'esp-c'], ['esp-c', 'esp-a', 'esp-b']]) {
+    b.emit({ islandAgents: order });
+    assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', ...order]);
+  }
+  const count = b.clayStatus().length;
+  b.emit({ islandAgents: ['esp-c', 'esp-a', 'esp-b'] });
+  assert.equal(b.clayStatus().length, count, 'no real engine recreation on unchanged push');
+  const css = read('style.css');
+  for (const color of b.window.AbitoAvatarColors.PALETTE) {
+    for (let n = 1; n <= 3; n++) assert.ok(css.includes(`.island-agent-clay[data-color="${color}"] radialGradient[id$="skin"] stop:nth-child(${n}) { stop-color: var(--dot-${color}-${n}); }`), `${color} stop ${n} really tinted`);
+  }
+});
+
+
+test('#442 merged render skip observes specialist content and remounts Settings clay after close/reopen', async () => {
+  const b = await settingsBoot({ specs: SPECS });
+  b.click('blob-tile-esp-a'); await flush();
+  await b.window.AbitoSpecialistsPanel.act({ action: 'update', id: 'esp-a', name: 'Revisor', instructions: 'Changed specialty', model: null });
+  assert.equal(b.get('blob-editor-what').value, 'Changed specialty');
+  b.click('settings-close'); await flush();
+  const before = b.clayStatus().length;
+  b.click('open-screen-settings'); await flush();
+  assert.ok(b.clayStatus().length > before, 'real clay remounts after reopen, even if source snapshots stayed identical');
 });

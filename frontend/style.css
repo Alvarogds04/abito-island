@@ -1117,6 +1117,24 @@ html[data-motion="reduce"] #overview-view { transition: none !important; }
 .pill-choice[aria-pressed="true"] { background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.3); }
 .pill-choice:focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
 
+/* #442: the actual island agents wear the same closed skin palette as Settings. */
+.island-agent-clay { flex: none; }
+.island-agent-clay[data-color="green"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-green-1); }
+.island-agent-clay[data-color="green"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-green-2); }
+.island-agent-clay[data-color="green"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-green-3); }
+.island-agent-clay[data-color="blue"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-blue-1); }
+.island-agent-clay[data-color="blue"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-blue-2); }
+.island-agent-clay[data-color="blue"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-blue-3); }
+.island-agent-clay[data-color="mint"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-mint-1); }
+.island-agent-clay[data-color="mint"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-mint-2); }
+.island-agent-clay[data-color="mint"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-mint-3); }
+.island-agent-clay[data-color="orange"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-orange-1); }
+.island-agent-clay[data-color="orange"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-orange-2); }
+.island-agent-clay[data-color="orange"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-orange-3); }
+.island-agent-clay[data-color="purple"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-purple-1); }
+.island-agent-clay[data-color="purple"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-purple-2); }
+.island-agent-clay[data-color="purple"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-purple-3); }
+
 /* ---- #346 F033: per-pill palette override — closed data-color set (avatar-colors.js PALETTE);
    the identity colours are NEVER themed, so both #380 palettes paint the same name. Only an
    already-validated name can put the attribute on the element (pills-view.js / pill-settings.js).

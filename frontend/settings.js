@@ -288,6 +288,7 @@
     $('settings-close').focus();
   }
   function close(byKeyboard) {
+    lastRenderKey = null;
     // Stop every mounted character, including in the dedicated Settings window.
     if (blobsMounted && window.AbitoPillSettings) {
       window.AbitoPillSettings.dispose(blobsHost);
@@ -501,7 +502,7 @@
       loginTarget, pendingLogin, daemonBusy, daemonNote,
       nameSaving, nameError, gainSaving, gainError, autoSaving, autoError, capturing,
       themeError, colorErrors, pillSaving, pillError,
-      specialistIdentities(), failureTimer !== 0,
+      specialistIdentities(), screen === 'pills' ? ownerState() : null, failureTimer !== 0,
     ]);
   }
   function render() {

@@ -1,82 +1,68 @@
 'use strict';
-// #345 actual overview controller. Selection is local, never connection/session
-// execution. Existing island host connection/notices/cards retain their owners.
+// #442: the island is Abito + at most three stored specialists. Selection uses the existing
+// role target command; it never connects a service, starts work, or migrates legacy pill data.
 (function (root) {
-  const C = root.AbitoPillCatalog, P = root.AbitoPills, I = root.AbitoIcons;
   const doc = typeof document === 'object' ? document : null;
-  if (!C || !P || !doc || !I) return;
+  if (!doc || !root.AbitoAvatarColors) return;
   const get = id => doc.getElementById(id);
   const host = get('pill-choices'), name = get('pill-name'), state = get('pill-state');
   const detail = get('pill-detail'), live = get('pill-live'), capsule = get('capsule');
   if (!host || !name || !state || !detail || !capsule) return;
-  let prefs = P.normalize({}), selected = prefs.mainPill, version = 0;
-  const parser = new DOMParser();
+  const A = root.AbitoAvatarColors;
+  let prefs = {}, version = 0, busy = false;
+  const mounted = new Map();
+  const owner = () => root.AbitoSpecialistsPanel;
+  const store = () => owner()?.state().store;
   const onScreen = () => {
     const d = capsule.dataset;
     return d.phase === 'expanded' && d.view === 'overview' && !d.card && d.settings !== 'open' &&
       !['pending', 'expired', 'outcome'].includes(d.question) && d.noticeView !== 'notices';
   };
+  const say = text => { if (live) live.textContent = text; };
+  function choose(id) {
+    if (busy || !owner()) return;
+    busy = true;
+    owner().act({ action: 'select', id: id === A.PRINCIPAL_ID ? null : id }).then(() => {
+      busy = false; paint(); say('Destino elegido. No se inició ninguna tarea.');
+    }, () => { busy = false; paint(); say('No se pudo elegir el destino; se mantuvo el anterior.'); });
+  }
   function paint() {
     const focused = doc.activeElement && host.contains(doc.activeElement) ? doc.activeElement.id : null;
-    selected = P.selection(prefs, selected);
-    // #415 WU2: a created blob is chosen like any pill — a label entry, never a connection.
-    const blob = prefs.blobs.find(b => b.name === selected);
-    const view = blob ? { name: blob.name, word: 'Sin conexión',
-      aria: `${blob.name}: Sin conexión. Elegir no conecta el servicio.` } : P.detail(selected);
-    name.textContent = view.name; state.textContent = view.word;
-    detail.textContent = 'Elegir no conecta el servicio.';
-    detail.setAttribute('aria-label', view.aria);
-    host.textContent = '';
-    for (const def of P.visible(prefs)) {
-      const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
-      button.id = `pill-choice-${def.id}`; button.dataset.pillId = def.id;
-      // #346 F033: only an already-validated palette name ever reaches the DOM.
-      const color = P.colorOf(prefs, def.id);
-      if (color) button.dataset.color = color;
-      button.setAttribute('aria-pressed', selected === def.id ? 'true' : 'false');
-      button.setAttribute('aria-label', `${def.name}${def.id === prefs.mainPill ? ', principal' : ''}: sin conexión`);
-      const glyph = parser.parseFromString(I.svg('plug-off'), 'image/svg+xml').documentElement;
-      if (glyph && glyph.nodeName === 'svg') {
-        const holder = doc.createElement('span'); holder.className = 'ico';
-        holder.append(doc.importNode(glyph, true)); button.append(holder);
+    const currentStore = store();
+    const agents = root.AbitoSpecialists?.agentsView(currentStore, prefs, A).agents || [];
+    const rows = [{ id: A.PRINCIPAL_ID, name: 'Abito', color: A.resolveColor(A.PRINCIPAL_ID, prefs.avatarColors) }, ...agents];
+    const storedActive = currentStore?.specialists?.find(r => r.id === currentStore.active);
+    const selected = storedActive ? storedActive.id : A.PRINCIPAL_ID;
+    const picked = storedActive || rows[0];
+    name.textContent = picked.name;
+    state.textContent = storedActive && !rows.some(r => r.id === selected) ? 'Fuera de la isla' : 'En reposo';
+    detail.textContent = 'Elegir un destino no inicia tareas.';
+    detail.setAttribute('aria-label', `${picked.name}: destino de conversación. No se inició ninguna tarea.`);
+    const alive = new Set(rows.map(r => r.id));
+    for (const [id, item] of mounted) if (!alive.has(id)) { item.clay?.destroy(); mounted.delete(id); }
+    const buttons = rows.map(row => {
+      let item = mounted.get(row.id);
+      if (!item) {
+        const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
+        button.id = `pill-choice-${row.id}`; button.dataset.pillId = row.id;
+        const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'island-agent-clay');
+        svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('width', '28'); svg.setAttribute('height', '28');
+        const label = doc.createElement('span'); button.append(svg, label);
+        const clay = typeof AbitoClay !== 'undefined' ? AbitoClay.create(svg, { state: 'idle', viewBox: '36 32 128 128', shadow: false }) : null;
+        item = { button, label, svg, clay }; mounted.set(row.id, item);
+        button.addEventListener('click', event => { if (event.isTrusted === true && onScreen()) choose(row.id); });
       }
-      const label = doc.createElement('span'); label.textContent = def.name; button.append(label);
-      button.addEventListener('click', event => {
-        if (event.isTrusted !== true || !onScreen()) return;
-        selected = def.id; paint();
-        if (live) live.textContent = P.detail(selected).aria;
-      });
-      host.append(button);
-    }
-    // #415 WU2: created blobs render after the catalog order, in creation order —
-    // label + colour buttons only (no agent behaviour, nothing connects).
-    for (const blob of prefs.blobs) {
-      const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
-      button.dataset.blobName = blob.name;
-      const color = P.colorOfBlob(prefs, blob.name);
-      if (color) button.dataset.color = color;
-      button.setAttribute('aria-pressed', selected === blob.name ? 'true' : 'false');
-      button.setAttribute('aria-label', `${blob.name}: sin conexión`);
-      const glyph = parser.parseFromString(I.svg('plug-off'), 'image/svg+xml').documentElement;
-      if (glyph && glyph.nodeName === 'svg') {
-        const holder = doc.createElement('span'); holder.className = 'ico';
-        holder.append(doc.importNode(glyph, true)); button.append(holder);
-      }
-      const label = doc.createElement('span'); label.textContent = blob.name; button.append(label);
-      button.addEventListener('click', event => {
-        if (event.isTrusted !== true || !onScreen()) return;
-        selected = blob.name; paint();
-        if (live) live.textContent = `${blob.name}: sin conexión. Elegir no conecta el servicio.`;
-      });
-      host.append(button);
-    }
-    if (focused) (get(focused) || get(`pill-choice-${selected}`))?.focus();
+      item.label.textContent = row.name; item.button.dataset.color = row.color; item.svg.dataset.color = row.color;
+      item.button.setAttribute('aria-pressed', selected === row.id ? 'true' : 'false');
+      item.button.setAttribute('aria-label', `${row.name}${row.id === A.PRINCIPAL_ID ? ', principal' : ''}: destino de conversación`);
+      return item.button;
+    });
+    host.replaceChildren(...buttons);
+    if (focused) (get(focused) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
   }
-  function apply(raw) {
-    const next = P.normalize(raw);
-    if (next.mainPill !== prefs.mainPill) selected = next.mainPill;
-    prefs = next; paint();
-  }
+  function apply(raw) { prefs = raw && typeof raw === 'object' ? raw : {}; paint(); }
+  doc.addEventListener('abito:specialists-changed', paint);
   paint();
   const invoke = root.__TAURI__?.core?.invoke || root.__TAURI_INTERNALS__?.invoke;
   const listen = root.__TAURI__?.event?.listen;
@@ -84,7 +70,7 @@
   if (invoke) {
     const observed = version;
     invoke('prefs_action', { payload: { action: 'view' } }).then(raw => {
-      if (version === observed) apply(raw); // initial read cannot overwrite a newer pushed snapshot
-    }, () => { if (live) live.textContent = 'No se pudieron leer tus blobs guardados. Se muestran los valores predeterminados sin guardar.'; });
-  } else if (live) live.textContent = 'Sin acceso a preferencias. Se muestran los valores predeterminados sin guardar.';
+      if (version === observed) apply(raw);
+    }, () => say('No se pudieron leer tus blobs guardados. Se muestra Abito sin guardar.'));
+  } else say('Sin acceso a preferencias. Se muestra Abito sin guardar.');
 })(typeof window !== 'undefined' ? window : this);
