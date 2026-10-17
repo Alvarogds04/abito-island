@@ -261,6 +261,32 @@ function hsl(hex) {
   const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
   return { s: sat, l };
 }
+// Human request («toda la interfaz con colores neones»): the other three identity families and the four STATUS
+// colours (go / sun / red / live) are neon too. Status colours are read as text and rings on the black island, so
+// besides saturation they must stay bright enough to read (WCAG contrast against #000 >= 7:1).
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+test('neon palette: blue / orange / purple identity tokens and go / sun / red / live status tokens are vivid', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const tok = name => { const m = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`)); assert.ok(m, name); return m[1]; };
+  for (const fam of ['blue', 'orange', 'purple']) {
+    for (const n of [1, 2, 3]) {
+      const h = hsl(tok(`dot-${fam}-${n}`));
+      assert.ok(h.s >= 0.85, `--dot-${fam}-${n} saturation ${h.s.toFixed(2)} must be neon (>= 0.85)`);
+    }
+    const body = hsl(tok(`dot-${fam}-2`));
+    assert.ok(body.l >= 0.4 && body.l <= 0.75, `--dot-${fam}-2 (the body tone) lightness ${body.l.toFixed(2)} stays vivid, not pastel`);
+  }
+  for (const [name, minL] of [['go', 0.45], ['sun', 0.45], ['red-11', 0.4], ['island-live', 0.4]]) {
+    const hex = tok(name), h = hsl(hex);
+    assert.ok(h.s >= 0.85, `--${name} saturation ${h.s.toFixed(2)} must be neon (>= 0.85)`);
+    assert.ok(h.l >= minL, `--${name} lightness ${h.l.toFixed(2)}`);
+    assert.ok((luminance(hex) + 0.05) / 0.05 >= 7, `--${name} keeps WCAG contrast >= 7:1 on the black island`);
+  }
+});
+
 test('neon greens: the green and mint tokens are vivid, and the default green is painted by CSS over the engine', () => {
   const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
   const tok = name => { const m = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`)); assert.ok(m, name); return m[1]; };

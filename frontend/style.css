@@ -8,20 +8,20 @@
   --island: #000;
   --island-ink: #fff;
   --island-muted: #a1a1aa;
-  --go: #bdee63;
-  --sun: #ffd23f;        /* waits for your yes */
-  --red-11: #ff9592;     /* real error */
-  --island-live: #63b3ff; /* in progress */
+  --go: #b8ff2e;
+  --sun: #ffe100;        /* waits for your yes */
+  --red-11: #ff5c75;     /* real error */
+  --island-live: #2eb4ff; /* in progress */
   --faint: #6f6d66;      /* off / inert: shapes only, never words */
   /* #384: the Dot's own colour family. These are IDENTITY colours (who the Dot is), not the
      status colours above (what is happening): they never carry a state, and the default green
      needs no override selector — it is the frozen engine's own paint, reproduced below only
      so the Ajustes swatch can show it. */
   --dot-green-1: #d8ff7a;  --dot-green-2: #8dff2b;  --dot-green-3: #3fe00f;  /* neon lime: vivid on the black island */
-  --dot-blue-1: #bcd7ff;   --dot-blue-2: #8ab4f8;  --dot-blue-3: #5b86d9;
+  --dot-blue-1: #a8d8ff;   --dot-blue-2: #2ea8ff;  --dot-blue-3: #0a6dff;  /* neon blue */
   --dot-mint-1: #b4ffe3;   --dot-mint-2: #2dffac;  --dot-mint-3: #00d482;  /* neon mint */
-  --dot-orange-1: #ffd9a8; --dot-orange-2: #ffab5e; --dot-orange-3: #d97f2a;
-  --dot-purple-1: #dcc8ff; --dot-purple-2: #b18cf0; --dot-purple-3: #8560c8;
+  --dot-orange-1: #ffd08a; --dot-orange-2: #ff8a00; --dot-orange-3: #e05a00;  /* neon orange */
+  --dot-purple-1: #e3c4ff; --dot-purple-2: #b04dff; --dot-purple-3: #7000ff;  /* neon purple */
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --radius-xl: .75rem;
   --radius-2xl: 1.125rem;

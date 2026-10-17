@@ -286,7 +286,7 @@ test('#380 css: the dark palette is Abito\'s own palette, verbatim (the default 
   assert.match(darkBlock, /--line:\s*rgba\(255, 255, 255, \.25\)/);
   assert.match(darkBlock, /--fill:\s*rgba\(255, 255, 255, \.06\)/);
   // role and identity colours are NOT themed (same meanings on both palettes)
-  for (const role of ['--go: #bdee63', '--sun: #ffd23f', '--red-11: #ff9592', '--island-live: #63b3ff', '--faint: #6f6d66']) {
+  for (const role of ['--go: #b8ff2e', '--sun: #ffe100', '--red-11: #ff5c75', '--island-live: #2eb4ff', '--faint: #6f6d66']) {
     assert.ok(css.includes(role), role);
   }
   for (const dot of ['--dot-green-1', '--dot-blue-1', '--dot-mint-1', '--dot-orange-1', '--dot-purple-1']) assert.ok(css.includes(dot), dot);
@@ -301,7 +301,7 @@ test('#380 css: the light palette overrides every surface/ink/line token AFTER t
     '--island-ink:', '--island-muted:', '--line:', '--line-soft:', '--fill:', '--bubble:', '--btn-bg:', '--primary-bg:', '--primary-ink:']) {
     assert.ok(body.includes(token), `light block misses ${token}`);
   }
-  assert.doesNotMatch(body, /#bdee63|#ffd23f|#ff9592/, 'role colours never flip with the theme');
+  assert.doesNotMatch(body, /#b8ff2e|#ffe100|#ff5c75/, 'role colours never flip with the theme');
   // the native form controls of #309 flip too (the dark `color-scheme: dark` rule stays for dark)
   assert.match(css, /html\[data-theme="light"\] \.sfield \{ color-scheme:\s*light;?\s*\}/);
   assert.match(css.slice(css.indexOf('.sfield {')), /color-scheme:\s*dark/, 'the dark fix of #309 is untouched');
