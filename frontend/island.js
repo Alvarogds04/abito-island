@@ -311,7 +311,9 @@
   window.__islandSetView = (view, vw, vh) => {
     noticeLane = null;
     delete capsule.dataset.noticeView;
-    if (Number.isInteger(vw) && Number.isInteger(vh) && vw > 0 && vh > 0) { CHAT.w = vw; CHAT.h = vh; }
+    // Rust also sends the OVERVIEW target size on return. Retain outgoing
+    // chat geometry until q shrinks; replacing it here snaps before animation.
+    if (view === 'chat' && Number.isInteger(vw) && Number.isInteger(vh) && vw > 0 && vh > 0) { CHAT.w = vw; CHAT.h = vh; }
     moveView(view === 'chat' ? 1 : 0);
     render();
     if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
@@ -667,6 +669,13 @@
     // warning → sun); plain dataset writes below, never markup.
     noticesEl.dataset.tone = (view && view.tone) || '';
     noticesEl.dataset.count = view ? String(view.count) : ''; // #437: no badge — the title says «N avisos» itself
+    // #444: settle list state BEFORE painting the band. A 2→1 push must
+    // reveal the remaining notice now, not wait for a second snapshot.
+    const list = O.noticeListView(notices, Date.now());
+    if (!list || list.count < 2) noticeListOpen = false;
+    noticesEl.dataset.grouped = view && view.grouped ? 'true' : 'false';
+    noticesEl.dataset.list = noticeListOpen ? 'open' : 'closed';
+    if (capsule.dataset.noticeList !== noticesEl.dataset.list) capsule.dataset.noticeList = noticesEl.dataset.list;
     noticePill.hidden = !view || noticeListOpen;
     if (view) {
       noticePill.setAttribute('aria-label', view.aria);
@@ -681,7 +690,6 @@
     // #437: the list view — «Avisos · N» + «Descartar todos» + 32 px rows. It
     // replaces the chips row and the band while it is open; fewer than two
     // notices collapses it back to the band.
-    const list = O.noticeListView(notices, Date.now());
     if (noticeListOpen && list && list.count > 1) {
       noticeListTitle.textContent = `Avisos · ${list.count}`;
       noticeRows.replaceChildren(...list.rows.map(noticeRowNode));

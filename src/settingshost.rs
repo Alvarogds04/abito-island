@@ -95,7 +95,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
         "customBlobs": p.custom_blobs_view(),
         "monitor": p.monitor,
-        "settingsWindow": p.settings_window_on()})
+        "settingsWindow": false})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -103,12 +103,8 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()
 }
 
-/// #366 F093: the effective Ajustes placement, read by the settings window host
-/// (the field is private to this module; the projection and this accessor are
-/// the only readers outside `prefs.rs`).
-pub fn settings_window_on(host: &SettingsHost) -> bool {
-    host.prefs.lock().expect("prefs lock").settings_window_on()
-}
+// Legacy settings_window and settings_window_size remain stored for compatibility.
+// Neither participates in opening Settings after #444 L12.
 
 /// T6.2: the remembered inner size of the own Ajustes window (logical px), read
 /// when the window opens. Read-only: the WebView never receives it — the size is
@@ -513,16 +509,15 @@ mod settings_view_tests {
         assert_eq!(view["chosenModels"], json!(null));
     }
 
-    /// #366 F093: the projection carries the Ajustes placement choice — the
-    /// in-island default (false) when no key is stored, the choice when present,
-    /// and the default again when a hostile stored value was dropped at load.
+    /// #444 L12: the effective projection is always in-island; legacy data is retained.
     #[test]
     fn f093_the_webview_projection_carries_the_settings_window_choice() {
         use abito_island::prefs::Prefs;
         let defaults = view_prefs(&Prefs::default());
         assert_eq!(defaults["settingsWindow"], json!(false), "absent reads as the in-island default");
         let saved = Prefs::from_text(Some(r#"{"v":1,"settings_window":true}"#));
-        assert_eq!(view_prefs(&saved)["settingsWindow"], json!(true));
+        assert_eq!(view_prefs(&saved)["settingsWindow"], json!(false), "L12: legacy true stays stored but placement is in-island");
+        assert!(saved.settings_window_on(), "no data migration");
         let hostile = Prefs::from_text(Some(r#"{"v":1,"settings_window":"yes"}"#));
         assert_eq!(view_prefs(&hostile)["settingsWindow"], json!(false), "a dropped value reads as the default");
         // the established projection shapes are untouched

@@ -1091,6 +1091,29 @@ html[data-motion="reduce"] #overview-view { transition: none !important; }
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notices { left: calc(50% - 212px); right: 72px; width: 460px; height: 140px; padding: 12px; overflow: visible; } /* notices-lane keeps the full pane: the band geometry above applies only to the plain overview */
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notice-pill { order: 0; margin-right: 0; }
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notice-info { top: 4px; }
+
+/* #444: isla-ov-several/list use x152..568 of the 640px island. The
+   LOCAL list is not native-confirmed notice navigation: no admission changes,
+   no native resize. Its 144px pane fits inside the existing 160px overview
+   (672x176 native); eight rows scroll INSIDE the remaining row viewport. */
+#capsule[data-view="overview"] #notices[data-grouped="true"],
+#capsule[data-view="overview"] #notices[data-list="open"] {
+  left: calc(50% - 168px); right: 72px; width: 416px;
+  top: 12px; bottom: auto; height: 44px; padding: 0;
+  overflow: visible; background: transparent; box-shadow: none;
+}
+#capsule[data-view="overview"] #notices[data-grouped="true"] #notice-pill {
+  margin: 0; width: 100%; height: 40px; flex: 0 0 40px;
+  background: var(--card-bg); /* opaque design band: overview text must not bleed through */
+}
+#capsule[data-view="overview"] #notices[data-grouped="true"] #notice-row,
+#capsule[data-view="overview"] #notices[data-list="open"] #notice-row { display: none; }
+#capsule[data-view="overview"] #notices[data-list="open"] { top: 8px; height: 144px; }
+#capsule[data-view="overview"] #notices[data-list="open"] #notice-list { flex: 1 1 auto; height: 100%; min-height: 0; }
+#capsule[data-view="overview"] #notices[data-list="open"] #notice-list-head { flex: 0 0 32px; }
+#capsule[data-view="overview"] #notices[data-list="open"] #notice-rows { flex: 1 1 auto; min-height: 0; }
+#capsule[data-view="overview"] #notices[data-list="open"] .notice-list-row { flex: 0 0 32px; }
+#capsule[data-view="overview"][data-notice-list="open"] #island #overview-view { opacity: 0; visibility: hidden; pointer-events: none; transition: none; }
 #question, #permission { left: calc(50% - 216px); right: 72px; width: 464px; bottom: 8px; height: 144px; }
 
 /* #345 + #335 F002: fit the catalog into the existing 558x140 overview, no native

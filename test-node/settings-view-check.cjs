@@ -1403,7 +1403,7 @@ test('T6.3 General screen source contract: slider, segmented auto-close, groups,
   assert.match(src, /'Perfil'/);
   assert.match(src, /'Isla'/);
   assert.match(src, /'Sonido y atajo'/);
-  assert.match(src, /'Abrir Ajustes en ventana'/);
+  assert.doesNotMatch(src, /'Abrir Ajustes en ventana'/, '#444 L12 supersedes D9');
   assert.match(src, /'Atajo global'/);
   // copy diet: the explanatory paragraphs of the General screen are gone
   assert.doesNotMatch(src, /Dónde se abre Ajustes/);
@@ -1436,51 +1436,22 @@ test('F093 the settings window view models the General toggle from the projectio
   assert.deepEqual(S.settingsWindowView('junk'), { on: false });
 });
 
-test('#366 settings window seam contract: the closed command, the honest fallback and the window-mode page', () => {
+test('#444 L12 removes the standalone window route and controls without changing close lifecycle', () => {
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
-  // the ONE closed command carries exactly its two closed actions
-  assert.match(src, /settings_window_action/);
-  assert.match(src, /action: 'open'/);
-  assert.match(src, /action: 'close'/);
-  // the typed pref chooses: an answer that says the window was not used falls back to in-island
-  assert.match(src, /windowOpen\.open === true/);
-  assert.match(src, /open\(screen\)/);
-  // any failure falls back to in-island Settings too
-  assert.match(src, /\.catch\(\(\) => open\(screen\)\)/);
-  // the settings window runs the same page in window mode: body flag for the CSS,
-  // the island size call is skipped, closing asks the closed command
-  assert.match(src, /dataset\.window = 'settings'/);
-  assert.match(src, /WINDOW_MODE/);
-  // the Ajustes → General toggle stores the typed choice through the closed prefs command
-  assert.match(src, /set_settings_window/);
-  // a settings-window close never resizes the island (no askSize there)
-  const windowModeClose = src.slice(src.indexOf('function close('), src.indexOf('const isOpen'));
-  assert.doesNotMatch(windowModeClose, /askSize\(false\)[^\n]*\n[^\n]*WINDOW_MODE/, 'close asks the closed command first');
-});
-
-test('#437 D9 «Ventana»: the in-island bar opens the full window through the existing closed verbs', () => {
-  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
-  // the button is built only for the in-island bar: the settings window runs the same
-  // page in WINDOW_MODE and must not grow a button that opens the window it already is
-  assert.match(src, /id = 'settings-window-open'/);
-  assert.match(src, /insertBefore\(b, closeBtn\)/, '«Ventana» sits before the close button, as drawn');
-  const build = src.slice(src.indexOf("id = 'settings-window-open'") - 400, src.indexOf("id = 'settings-window-open'") + 200);
-  assert.match(build, /if \(WINDOW_MODE\) return/, 'no «Ventana» inside the settings window');
-  // the ONE closed window command only opens when the typed pref says so
-  // (settingswindow.rs answers open:false otherwise), so the click first saves
-  // the pref through the closed prefs command, then opens the window
-  const click = src.slice(src.indexOf("ventana.addEventListener('click'"), src.indexOf("ventana.addEventListener('click'") + 1600);
-  assert.match(click, /e\.isTrusted !== true/, 'only a trusted gesture opens the window');
-  assert.match(click, /action: 'set_settings_window', settings_window: true/, 'the pref flip rides the closed prefs command');
-  assert.match(click, /settings_window_action/, 'the ONE closed window command opens it');
-  assert.match(click, /action: 'open'/);
-  assert.match(click, /opened\.open === true/, 'the honest answer decides, never optimism');
-  assert.match(click, /close\(false\)/, 'the in-island panel yields to the window');
-  // a failed save or a failed open: the pref is reverted, the panel stays, the failure is said
-  assert.match(click, /settings_window: false/, 'the pref is reverted on failure');
-  assert.match(click, /No se pudo abrir la ventana/, 'the failure is said, never silent');
-  // the General toggle reflects the new placement (prefs is the saved truth)
-  assert.match(click, /prefs = p/);
+  assert.match(src, /const WINDOW_MODE = false/);
+  assert.doesNotMatch(src, /openWindowOrInIsland|set_settings_window|settings-window-open|sw-settings-window/);
+  assert.doesNotMatch(src, /dataset\.window = 'settings'/);
+  const native = fs.readFileSync(path.join(frontend, '../src/settingswindow.rs'), 'utf8');
+  assert.doesNotMatch(native, /WebviewWindowBuilder|fn open_window/);
+  assert.match(native, /crate::open_settings_in_island\(&app, &state\)/);
+  const main = fs.readFileSync(path.join(frontend, '../src/main.rs'), 'utf8');
+  const route = main.slice(main.indexOf('fn open_settings_in_island('), main.indexOf('fn open_chat_and_type('));
+  assert.ok(route.indexOf('Action::Expand') < route.indexOf('abito:settings-select'), 'native entry expands/reveals before opening Settings');
+  assert.match(route, /win\.show\(\)/);
+  assert.match(route, /sync_host_visible/);
+  assert.match(native, /bridge::sender_ok\(webview.label\(\), &url\)\?/);
+  assert.match(native, /chat_rate.*\.check\(crate::now_ms\(\)\)\?/);
+  assert.match(native, /parse_settings_window_action\(&payload\)/);
 });
 
 // ---- #366 F094: the quick panel inside the island -------------------------------------------------

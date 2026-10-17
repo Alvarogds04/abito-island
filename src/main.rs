@@ -840,6 +840,20 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
     publish(app, state);
 }
 
+/// #444 L12: native Settings entries reveal/expand the MAIN island first,
+/// including Compact/Hidden, then use the same public Settings event as the
+/// keyboard. Called by the synchronous command on the main thread (#431).
+fn open_settings_in_island(app: &AppHandle, state: &AppState) -> Result<(), BridgeError> {
+    dispatch_verb(app, state, Action::Expand, None)?;
+    let win = main_window(app);
+    let failed = |_| BridgeError { code: "window_failed".into(), message: "No se pudo abrir Ajustes en la isla.".into() };
+    win.unminimize().map_err(failed)?;
+    win.show().map_err(failed)?;
+    sync_host_visible(&win);
+    win.eval("document.dispatchEvent(new CustomEvent('abito:settings-select',{detail:'open'}));")
+        .map_err(failed)
+}
+
 /// Q1: the deliberate "Open Abito chat and type" activation (second launch
 /// with `--chat`): expand, switch to the chat view, take focus, and put the
 /// caret in the composer. The ONLY path that calls `set_focus`.

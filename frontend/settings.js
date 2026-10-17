@@ -41,12 +41,8 @@
   const agent = payload => call('agent_action', payload);
 
   const openers = [$('open-screen-settings')].filter(Boolean); // the chat header gear: the ONE entry (#408)
-  // #366 F093: the SAME page runs inside the Rust-created settings window. There the panel
-  // fills the window (body[data-window="settings"] CSS) and the island's size is not this
-  // page's business. The label is the exact one the sender gate admits (narrow approval).
-  const WINDOW_MODE = V.isSettingsWindow(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
-    && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label);
-  if (WINDOW_MODE) document.body.dataset.window = 'settings';
+  // #444 L12: Settings always belongs to the island. Legacy placement stays stored, inert.
+  const WINDOW_MODE = false;
   const moreGroup = $('connections-more'); // FAKE services cards; render() wipes the body, so it is re-appended per render
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
@@ -312,27 +308,15 @@
   }
   const isOpen = () => panel.dataset.open === 'true';
 
-  // #366 F093: the typed pref chooses. ONE closed command asks Rust for the own window;
-  // an answer that says the window was not used (the pref chose in-island) and ANY failure
-  // both fall back to the in-island panel — the #408 default is never a dead gear.
-  function openWindowOrInIsland() {
-    const id = screen;
-    call('settings_window_action', { action: 'open' }).then(windowOpen => {
-      if (windowOpen && windowOpen.open === true) return; // the own window is up (Rust created it)
-      open(id); // the typed pref chose in-island
-    }).catch(() => open(screen)); // any failure falls back to in-island Settings too
-  }
   // the chat-header gear toggles Ajustes; the gear of the overview opens the chat view first
   for (const b of openers) b.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
     if (isOpen()) close(e.detail === 0);
-    else if (V.settingsWindowView(prefs).on) openWindowOrInIsland();
     else open(screen);
   });
   const gear = $('open-settings');
   if (gear) gear.addEventListener('click', e => {
     if (e.isTrusted !== true) return;
-    if (V.settingsWindowView(prefs).on) { openWindowOrInIsland(); return; } // #366: no island detour needed
     pendingOpen = screen;
     call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; });
   });
@@ -341,40 +325,6 @@
     else if (e.detail !== 'chat' && isOpen()) close(false);
   });
   $('settings-close').addEventListener('click', e => { if (e.isTrusted === true) close(e.detail === 0); });
-  // #437 D9: «Ventana» in the in-island bar — the shortcut to the full Ajustes window.
-  // Built only for the in-island bar (in WINDOW_MODE the page already IS that window).
-  // The ONE closed window command only opens when the typed pref says so
-  // (settingswindow.rs answers open:false otherwise), so the click first saves the
-  // pref through the closed prefs command and then opens the window. «Ventana» means
-  // «open Ajustes in the window from now on»: the persistent pref flip is the point,
-  // and the General toggle («Abrir Ajustes en ventana») shows the new placement right
-  // away because prefs is the saved truth. A failed save or a failed open keeps the
-  // panel as it was: the pref is reverted and the failure is said, never silent.
-  const ventana = (() => {
-    if (WINDOW_MODE) return null;
-    const closeBtn = $('settings-close');
-    if (!closeBtn || !closeBtn.parentElement) return null;
-    const b = el('button', 'sbtn', 'Ventana');
-    b.type = 'button';
-    b.id = 'settings-window-open';
-    b.setAttribute('aria-label', 'Abrir Ajustes en ventana');
-    closeBtn.parentElement.insertBefore(b, closeBtn);
-    return b;
-  })();
-  if (ventana) ventana.addEventListener('click', e => {
-    if (e.isTrusted !== true || ventana.disabled) return;
-    ventana.disabled = true; // one flight at a time; the pref must not flip twice
-    call('prefs_action', { action: 'set_settings_window', settings_window: true }).then(p => {
-      prefs = p; render(); // the General toggle reflects the new placement immediately
-      return call('settings_window_action', { action: 'open' }).then(opened => {
-        if (opened && opened.open === true) { close(false); return; } // the panel yields to the window
-        throw new Error('the window was not opened');
-      });
-    }).catch(() => {
-      call('prefs_action', { action: 'set_settings_window', settings_window: false }).then(p => { prefs = p; render(); }, () => {});
-      say('No se pudo abrir la ventana. Ajustes sigue dentro de la isla.');
-    }).finally(() => { ventana.disabled = false; });
-  });
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
@@ -408,8 +358,7 @@
     call('hotkey_action', { action: 'view' }).then(h => { hotkey = h; render(); }, () => {});
     if (window.desktop) window.desktop.snapshot().then(s => { motionOverride = s.motionOverride !== false; render(); }, () => {});
   }
-  // #366 F093: the gear consults the placement pref even before the panel was ever
-  // opened, so the typed choice survives a page reload: one honest view fetch at startup.
+  // Fetch saved preferences at startup; legacy placement never participates in routing.
   if (!WINDOW_MODE) call('prefs_action', { action: 'view' }).then(p => { prefs = p; }, () => {});
   function applyAgent(next) {
     if (next && typeof next === 'object') {
@@ -1068,16 +1017,6 @@
       call('prefs_action', payload).then(
         p => { prefs = p; render(); say(island.openOnHover ? 'La isla ya no se abre al pasar el mouse.' : 'La isla se abre al pasar el mouse.'); },
         () => say('No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'));
-    }));
-    // #366 F093: where Ajustes opens — inside the island (default, #408) or in its own
-    // window. The typed pref is the only chooser; a failed save keeps the previous
-    // placement and says so.
-    const placementOn = V.settingsWindowView(prefs).on;
-    isla.append(toggleRow('sw-settings-window', 'Abrir Ajustes en ventana', placementOn, () => {
-      call('prefs_action', { action: 'set_settings_window', settings_window: !placementOn }).then(p => {
-        prefs = p; render();
-        say(!placementOn ? 'Ajustes se abre en su ventana.' : 'Ajustes se abre dentro de la isla.');
-      }, () => say('No se pudo guardar. La ubicación sigue sin cambios; probá de nuevo.'));
     }));
     paintAuto();
     const motion = group('appearance', 'Movimiento', '');
