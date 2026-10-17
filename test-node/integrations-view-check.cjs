@@ -170,7 +170,8 @@ test('open target: every allowlisted URL satisfies the host open_chat_url valida
   for (const [id, raw] of Object.entries(T.ALLOWLIST)) {
     assert.ok(raw.length > 0 && raw.length <= 2000, `${id}: length`);
     assert.doesNotMatch(raw, /[\s\u0000-\u001f\u007f-\u009f]/, `${id}: no whitespace or controls`);
-    const url = new URL(raw);
+    let url;
+    try { url = new URL(raw); } catch { assert.fail(`${id}: not an absolute URL`); }
     assert.ok(['http:', 'https:'].includes(url.protocol), `${id}: scheme ${url.protocol}`);
     assert.ok(url.hostname.length > 0, `${id}: host present`);
     assert.equal(url.username, '', `${id}: no username`);
@@ -285,7 +286,15 @@ test('render: builds the 9 cards in registry order, textContent only, buttons wi
   assert.equal(host.hidden, false);
   const cards = [...host.querySelectorAll('[data-service-id]')];
   assert.deepEqual(cards.map(c => c.dataset.serviceId), T.SERVICES.map(s => s.id));
-  assert.ok(host.querySelector('.int-fake').textContent.includes('datos de ejemplo'));
+  // T7.2 design (R7): NO banner paragraph any more — the fake marker rides ON EVERY CARD as the
+  // visible «demo» badge. Was: one .int-fake paragraph above the cards.
+  assert.equal(host.querySelector('.int-fake'), null, 'the banner paragraph is gone');
+  for (const card of cards) {
+    const demo = card.querySelector('.int-demo');
+    assert.ok(demo, 'every card carries the demo badge (R7)');
+    assert.equal(demo.textContent, 'demo');
+    assert.match(demo.getAttribute('title'), /Datos de ejemplo/);
+  }
   for (const name of ['GitHub', 'Despliegues', 'Correo', 'Pagos', 'Notion', 'n8n', 'Calendario', 'Slack', 'Finanzas']) {
     assert.ok(cards.some(c => c.querySelector('.int-name').textContent === name), name);
   }
@@ -305,7 +314,7 @@ test('render: builds the 9 cards in registry order, textContent only, buttons wi
   assert.equal(cal.querySelector('[data-action="refresh"]').disabled, true, 'disabled service cannot refresh');
 });
 
-test('render: an invalid view clears and hides the host; a real view never shows the banner', () => {
+test('render: an invalid view clears and hides the host; a real view never claims to be an example', () => {
   if (typeof document === 'undefined') return;
   const host = document.createElement('div');
   T.render(host, T.view(T.storeFromFrame(T.fakeFrame()), 1700000000000));
@@ -315,8 +324,11 @@ test('render: an invalid view clears and hides the host; a real view never shows
   assert.equal(host.children.length, 0);
   T.render(host, T.view(T.storeFromFrame({ type: 'integrations', schema: T.SCHEMA, fake: false, services: [] }), 1700000000000));
   assert.equal(host.hidden, false);
+  // T7.2: the old head (title + count line) is gone; the group heading in index.html names the
+  // section. Was: .int-fake absent + .int-count '0 habilitados · 0 conectados'.
   assert.equal(host.querySelector('.int-fake'), null, 'a real view never claims to be an example');
-  assert.equal(host.querySelector('.int-count').textContent, '0 habilitados · 0 conectados');
+  assert.equal(host.querySelector('.int-demo'), null, 'a real view draws no demo badge');
+  assert.equal(host.querySelector('.int-head'), null, 'the count line is gone');
 });
 
 test('mount is wired: guarded on the container, trusted clicks only, open routes through open_chat_url', () => {

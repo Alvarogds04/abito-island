@@ -53,6 +53,7 @@
   let agentState = null;      // `agent_action view` + `agent:state`
   let prefsView = null;       // `prefs_action view` + `prefs:state`
   let provSection = null;
+  let localLabel = null;
   const agent = payload => (invoke ? invoke('agent_action', { payload }) : Promise.reject(new Error('no ipc')));
   const prefsAction = payload => (invoke ? invoke('prefs_action', { payload }) : Promise.reject(new Error('no ipc')));
   const currentChosen = () => (prefsView && prefsView.chosenModels && typeof prefsView.chosenModels === 'object'
@@ -87,39 +88,60 @@
       panel.insertBefore(provSection, list); // leads the tab, above the local picker
     }
     provSection.replaceChildren();
-    provSection.append(el('h3', 'models-prov-title', 'Tus proveedores'));
+    provSection.append(el('h3', 'models-prov-title', 'Cuentas conectadas'));
     const view = S.modelsTabView(agentState, currentChosen());
     if (view.kind !== 'ready') {
       provSection.append(chipNode({ icon: view.icon, text: view.word, label: view.word || view.aria }));
       return;
     }
+    // T7.2 design (ajustes-ventana-modelos-*.png): ONE flat list of radio rows — the model name,
+    // its provider chip and the capability chips the engine frame already carries. A provider
+    // the engine does not name as connected draws nothing (no row, no hint — the design wins).
+    const ul = el('ul', 'models-prov-models');
+    ul.setAttribute('aria-label', 'Modelos de tus cuentas conectadas');
     for (const g of view.groups) {
-      const group = el('div', 'models-prov-group');
-      group.dataset.provider = g.id;
-      group.append(el('b', 'models-prov-name', g.name));
-      if (g.connected) {
-        group.append(chipNode({ icon: 'check', text: 'Conectado', label: `${g.name}: Conectado` }));
-        const ul = el('ul', 'models-prov-models');
-        ul.setAttribute('aria-label', `Modelos de ${g.name}`);
-        if (!g.models.length) ul.append(el('li', 'models-prov-hint', 'El proveedor todavía no informó modelos.'));
-        for (const m of g.models) {
-          const li = el('li', 'models-prov-model');
-          li.append(el('span', 'model-title', m.name));
-          const b = el('button', 'choose');
-          b.type = 'button';
-          b.setAttribute('aria-pressed', m.chosen ? 'true' : 'false');
-          b.setAttribute('aria-label', `${m.chosen ? 'Elegido' : 'Elegir'} ${m.name} de ${g.name}`);
-          if (m.chosen) putIcon(b, 'check');
-          b.addEventListener('click', () => toggleModel(g.id, m.id));
-          li.append(b);
-          ul.append(li);
-        }
-        group.append(ul);
-      } else {
-        group.append(el('p', 'models-prov-hint', g.hint));
+      if (!g.connected) continue;
+      for (const m of g.models) {
+        const li = el('li', 'models-prov-model');
+        const b = el('button', 'choose');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', m.chosen ? 'true' : 'false');
+        b.setAttribute('aria-label', `${m.chosen ? 'Elegido' : 'Elegir'} ${m.name} de ${g.name}`);
+        if (m.chosen) putIcon(b, 'check');
+        b.addEventListener('click', () => toggleModel(g.id, m.id));
+        li.append(b);
+        const titles = el('span', 'model-titles');
+        titles.append(el('span', 'model-title', m.name));
+        if (m.sub) titles.append(el('span', 'model-sub', m.sub));
+        li.append(titles);
+        const prov = chipNode({ icon: '', text: g.name, label: `${m.name} de ${g.name}` });
+        prov.className = 'chip models-prov-chip';
+        li.append(prov);
+        const caps = el('span', 'model-chips');
+        for (const c of capabilityChips(m)) caps.append(chipNode(c));
+        li.append(caps);
+        ul.append(li);
       }
-      provSection.append(group);
     }
+    provSection.append(ul);
+    // T7.2: the local picker keeps its «Locales» group label (design section LOCALES).
+    if (!localLabel) {
+      localLabel = el('h3', 'models-local-label', 'Locales');
+      panel.insertBefore(localLabel, list);
+    }
+  }
+
+  // Capability chips read ONLY the closed fields the engine frame already carries
+  // (agentclient `models` fold: reasoning, contextWindow). Nothing is invented: an
+  // absent/zero context and a false reasoning draw no chip. No new wire fields.
+  const capWindow = n => !Number.isFinite(n) || n <= 0 ? null
+    : n >= 1e6 ? `${+(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : `${Math.round(n / 1e3)}k`;
+  function capabilityChips(m) {
+    const chips = [];
+    const w = capWindow(m.contextWindow);
+    if (w) chips.push({ icon: '', text: w, label: `Contexto ${w}` });
+    if (m.reasoning === true) chips.push({ icon: '', text: 'Razonamiento', label: 'Razona paso a paso' });
+    return chips;
   }
 
   function say(text) { if (text) { live.textContent = ''; requestAnimationFrame(() => { live.textContent = text; }); } }

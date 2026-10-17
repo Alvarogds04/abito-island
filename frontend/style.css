@@ -153,6 +153,34 @@ body.probe-capture-bg { background: #d8c9a3; }
 }
 .stheme-label { display: inline-block; }
 .stheme[aria-checked="true"] { background: var(--go); border-color: var(--go); color: #000; }
+/* T7.2 design (ajustes-ventana-apariencia-*.png): the tab's theme picker is THREE LIVE
+   THUMBNAILS (Sistema / Claro / Oscuro) instead of text pills. The quick panel keeps the text
+   pill (.stheme base above). The card variant draws a mini preview of each theme: dot, ink
+   line, muted line, two chips. Sistema follows the CURRENT theme tokens; Claro/Oscuro are the
+   literal palettes of DESIGN-NOTES §1 — a preview must not flip with the theme it sits in,
+   so these few raw colours are the design's own values, not theme tokens. Selection is the
+   design's 2px live ring on the thumbnail (words still carry the state; never colour alone). */
+.stheme.stheme-card {
+  flex-direction: column; gap: 6px; min-width: 92px; min-height: 44px; padding: 0;
+  border: 0; border-radius: 14px; background: transparent; color: var(--island-ink);
+}
+.stheme.stheme-card[aria-checked="true"] { background: transparent; color: var(--island-ink); }
+.stheme-thumb { display: flex; flex-direction: column; gap: 4px; width: 92px; height: 64px; padding: 10px; box-sizing: border-box; border-radius: 14px; background: var(--card-bg); border: 1px solid var(--line); }
+.stheme[aria-checked="true"] .stheme-thumb { border-color: transparent; box-shadow: 0 0 0 2px var(--island-live); }
+.stheme-thumb .t-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--island-live); }
+.stheme-thumb .t-line { height: 4px; border-radius: 2px; background: var(--island-ink); }
+.stheme-thumb .t-line-1 { width: 60%; }
+.stheme-thumb .t-line-2 { width: 82%; background: var(--island-muted); }
+.stheme-thumb .t-chips { display: flex; gap: 4px; margin-top: auto; }
+.stheme-thumb .t-chips span { width: 16px; height: 10px; border-radius: 3px; background: var(--island-muted); opacity: .75; }
+.stheme[data-mode="light"] .stheme-thumb { background: #F7F2E7; border-color: rgba(26, 25, 21, .08); }
+.stheme[data-mode="light"] .stheme-thumb .t-dot { background: #2F6FB8; }
+.stheme[data-mode="light"] .stheme-thumb .t-line { background: #1A1915; }
+.stheme[data-mode="light"] .stheme-thumb .t-line-2, .stheme[data-mode="light"] .stheme-thumb .t-chips span { background: #5F5C54; }
+.stheme[data-mode="dark"] .stheme-thumb { background: #141518; border-color: rgba(245, 246, 248, .08); }
+.stheme[data-mode="dark"] .stheme-thumb .t-dot { background: #63B3FF; }
+.stheme[data-mode="dark"] .stheme-thumb .t-line { background: #F5F6F8; }
+.stheme[data-mode="dark"] .stheme-thumb .t-line-2, .stheme[data-mode="dark"] .stheme-thumb .t-chips span { background: #8E939C; }
 .stheme:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 html[data-motion="reduce"] .stheme { transition: none; }
 #theme-error:empty { display: none; }
@@ -564,16 +592,19 @@ html[data-motion="reduce"] #chat-log { scroll-behavior: auto; }
 html[data-motion="reduce"] #models-list .skeleton, html[data-motion="reduce"] #models-list .choose[aria-pressed="true"] .ico, html[data-motion="reduce"] .models-prov .choose[aria-pressed="true"] .ico { animation: none; }
 html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduce"] .models-prov .choose::before, html[data-motion="reduce"] .icon-btn, html[data-motion="reduce"] :where(button, textarea) { transition: none; }
 
-/* ---- #414: Ajustes → Modelos — the provider groups above the local picker ---- */
+/* ---- #414/T7.2: Ajustes → Modelos — one flat radio-row list above the local picker ----
+   Design ajustes-ventana-modelos-*.png: group label «Cuentas conectadas», one row per model
+   (radio + name + provider chip + capability chips); a disconnected provider draws nothing
+   (the old per-provider group + hint rules are gone). */
 .models-prov { flex: 0 0 auto; margin: 0; padding: 0 0 8px; border-bottom: 1px solid var(--line-ring); }
-.models-prov-title { margin: 2px 0 4px; color: var(--island-muted); font: 600 11px/1.3 var(--font-ui); text-transform: uppercase; letter-spacing: .04em; }
-.models-prov-group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-height: 44px; padding: 2px 0 2px 2px; }
-.models-prov-name { color: var(--island-ink); font: 600 13px/1.2 var(--font-ui); }
-.models-prov-group .chip { min-height: 24px; font-size: 12px; }
-.models-prov-hint { flex: 1 1 100%; margin: 0 0 4px; color: var(--island-muted); font: 400 12px/1.35 var(--font-ui); }
-.models-prov-models { flex: 1 1 100%; margin: 0 0 4px; padding: 0; list-style: none; }
+.models-prov-title { margin: 2px 0 4px; color: var(--island-muted); font: 600 var(--fs-caption)/1.3 var(--font-ui); text-transform: uppercase; letter-spacing: .04em; }
+.models-prov-models { margin: 0 0 4px; padding: 0; list-style: none; }
 .models-prov-model { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 0 0 2px; }
-.models-prov-model .model-title { flex: 1; max-width: none; }
+.models-prov-model .model-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.models-prov-model .model-title { max-width: none; }
+.model-sub { color: var(--island-muted); font: 400 var(--fs-caption)/1.2 var(--font-ui); }
+.models-prov-chip { flex: none; min-height: 24px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
+.models-local-label { margin: 10px 0 4px; color: var(--island-muted); font: 600 var(--fs-caption)/1.3 var(--font-ui); text-transform: uppercase; letter-spacing: .04em; }
 
 /* ---- Q1: keyboard focus of the island itself -------------------------- */
 #capsule:has(#island-toggle:focus-visible) #island { outline: 2px solid var(--go); outline-offset: 2px; }
@@ -1228,34 +1259,38 @@ html[data-theme="light"] .sfield { color-scheme: light; }
    --radius/--fs), so light and dark resolve them with zero raw colors. The module is inert
    until index.html carries <section id="integrations" hidden> + one script tag (mount
    contract in the module header). textContent only; 44px click targets like Ajustes. */
-#integrations { display: grid; gap: 8px; }
+/* T7.2 design (ajustes-ventana-conexiones-*.png): Servicios as 3-column cards (auto-fill keeps
+   three at the 728 window and folds in the narrow island column), avatar + name over the state
+   sub + a «demo» badge on EVERY card (R7). The enable/refresh/pause/open controls stay reachable
+   in a compact row; they are 32px visual inside a 44px hit area (T6.1 ::after pattern). */
+#integrations { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 #integrations[hidden] { display: none; }
-.int-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.int-title { font: 700 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); }
-.int-count { font: 400 var(--fs-label)/1.2 var(--font-ui); color: var(--muted); }
-.int-fake { margin: 0; font: 600 var(--fs-label)/1.4 var(--font-ui); color: var(--sun); }
 .int-service {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
   padding: 10px 12px; border-radius: var(--radius-xl);
   border: 1px solid var(--line-faint); background: var(--fill-alt);
 }
-.int-info { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
+.int-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--fill-hover); color: var(--island-ink); font: 700 var(--fs-label)/1 var(--font-ui); }
+.int-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .int-name { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.int-state { font: 600 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
+.int-state { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--muted); white-space: nowrap; }
 .int-state--connected { color: var(--go); }
 .int-state--error { color: var(--red-11); }
 .int-state--paused { color: var(--sun); }
-.int-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.int-demo { padding: 0 8px; min-height: 24px; display: inline-flex; align-items: center; border-radius: var(--radius-full); background: var(--fill-hover); color: var(--island-muted); font: 400 var(--fs-caption)/1 var(--font-ui); }
+.int-actions { grid-column: 1 / -1; display: flex; gap: 0; flex-wrap: wrap; margin-top: 2px; }
 .int-actions button {
-  min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: var(--radius-full);
-  border: 1px solid var(--line-soft); background: transparent; color: var(--island-muted);
-  font: 600 var(--fs-label)/1.2 var(--font-ui); cursor: pointer;
+  position: relative; z-index: 0; min-height: 44px; min-width: 44px; padding: 0 10px; border: 0; background: transparent;
+  color: var(--island-muted); font: 600 var(--fs-caption)/1.2 var(--font-ui); cursor: pointer;
 }
-.int-actions button:hover:not(:disabled) { background: var(--fill-hover); color: var(--island-ink); }
+.int-actions button::after { content: ""; position: absolute; inset: 6px 2px; z-index: -1; border-radius: 10px; border: 1px solid var(--line-soft); background: transparent; }
+.int-actions button:hover:not(:disabled)::after { background: var(--fill-hover); }
+.int-actions button:hover:not(:disabled) { color: var(--island-ink); }
 .int-actions button:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 .int-actions button:disabled { opacity: .45; cursor: default; }
-.int-actions .int-enable[aria-pressed="true"] { border-color: var(--go); color: var(--go); font-weight: 700; }
-.int-actions .int-open { border-color: var(--line); color: var(--island-ink); }
+.int-actions .int-enable[aria-pressed="true"] { color: var(--go); font-weight: 700; }
+.int-actions .int-enable[aria-pressed="true"]::after { border-color: var(--go); }
+.int-actions .int-open { color: var(--island-ink); }
 
 /* ---- #355/#370: Correo + Mail cards (append-only; theme tokens only, so light + dark resolve with no raw colour).
    Kept BEFORE the #410 compact block: that block is sliced from its first rule to EOF by a test. */
