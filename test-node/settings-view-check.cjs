@@ -1267,6 +1267,19 @@ test('T6.1 visible-layer contract: hover, selected, primary and aria-invalid pai
   assert.doesNotMatch(invalid, /border-color:/, 'the invisible hit border never paints');
 });
 
+// T7.2 audit: the controls this unit added keep the 44px hit area (design: 32 visual / 44 hit).
+test('T7.2 controls: theme thumbnails and service actions keep a 44px hit area; the visual layer is inset', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const rule = sel => { const i = css.lastIndexOf(sel + ' {'); assert.ok(i >= 0, `${sel} exists`); return css.slice(i, css.indexOf('}', i)); };
+  assert.match(rule('.stheme.stheme-card'), /min-height: 44px/);
+  assert.match(rule('.stheme.stheme-card'), /min-width: 92px/);
+  assert.match(rule('.int-actions button'), /min-height: 44px/);
+  assert.match(rule('.int-actions button'), /min-width: 44px/);
+  assert.match(rule('.int-actions button::after'), /inset: 6px/, 'service buttons: 44px element, 32px visual');
+  assert.match(rule('.switch'), /height: 44px/);
+  assert.match(rule('.models-prov-model'), /min-height: 44px/);
+});
+
 // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
 test('#390 GD027: the restart control is one closed neutral label with honest outcomes', () => {
   const idle = S.daemonRestartView();
