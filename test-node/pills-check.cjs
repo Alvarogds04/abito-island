@@ -15,7 +15,7 @@ const clone = value => {
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 function boot({ prefs = {}, failView = false, deferView = false, store = null, specs = [], extraPrefs = {} } = {}) {
-  const nodes = new Map(), events = {}, native = {}, calls = [];
+  const nodes = new Map(), events = {}, native = {}, calls = [], observers = [];
   let doc;
   class Element {
     constructor(tag = 'div') {
@@ -29,7 +29,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     get textContent() { return this._text + this.children.map(x => x.textContent).join(''); }
     append(...items) { for (const item of items) { const n = typeof item === 'string' ? Object.assign(new Element('#text'), { textContent: item }) : item; this.children.push(n); n.parentNode = this; } }
     appendChild(item) { this.append(item); return item; }
-    replaceChildren(...items) { this.textContent = ''; this.append(...items); }
+    replaceChildren(...items) { this.replaceCalls = (this.replaceCalls || 0) + 1; this.textContent = ''; this.append(...items); }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
     removeAttribute(k) { delete this.attrs[k]; }
@@ -110,17 +110,17 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     } },
     event: { listen(name, fn) { (native[name] ||= []).push(fn); return Promise.resolve(() => {}); } },
   } };
-  const ctx = vm.createContext({ matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => 0 }, cancelAnimationFrame() {}, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
+  const ctx = vm.createContext({ MutationObserver: class { constructor(fn) { this.fn = fn; } observe(target) { observers.push({ target, fn: this.fn }); } }, matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => 0 }, cancelAnimationFrame() {}, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
     DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } },
     crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => { if (fn.name !== 'frame') fn(0); return 1; }, setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     Event: class { constructor(type) { this.type = type; } }, console });
   const load = file => vm.runInContext(read(file), ctx, { filename: file });
   for (const file of ['clay-engine.js', 'pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js', 'specialists-view.js']) load(file);
-  vm.runInContext(`const testedClays = []; const realCreate = AbitoClay.create; AbitoClay.create = (...args) => { const instance = realCreate(...args); testedClays.push(instance); return instance; };`, ctx);
+  vm.runInContext(`const testedClays = []; const realCreate = AbitoClay.create; AbitoClay.create = (...args) => { const instance = realCreate(...args); testedClays.push(instance); const destroy = instance.destroy; instance.destroy = () => { instance.testDestroyed = true; destroy(); }; return instance; };`, ctx);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
+  return { mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
 }
 
 test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
@@ -899,4 +899,37 @@ test('#442 merged render skip observes specialist content and remounts Settings 
   const before = b.clayStatus().length;
   b.click('open-screen-settings'); await flush();
   assert.ok(b.clayStatus().length > before, 'real clay remounts after reopen, even if source snapshots stayed identical');
+});
+
+
+test('#442 unchanged island rows never detach surviving real clay SVG nodes', async () => {
+  const b = boot({ specs: SPECS }); b.load('specialists.js'); await flush();
+  const host = b.get('pill-choices'), before = host.replaceCalls;
+  const nodes = [...host.children];
+  const instances = b.clayStatus().length;
+  b.emit({ gain: 0.1 });
+  assert.equal(host.replaceCalls, before, 'no DOM detach/reinsert on an unrelated prefs push');
+  assert.deepEqual(host.children, nodes);
+  assert.equal(b.clayStatus().length, instances);
+});
+
+test('#442 real island characters stop outside overview and use static poses for the actual data-motion setting', async () => {
+  const b = boot({ specs: SPECS }); b.load('specialists.js'); await flush();
+  const islandClays = () => b.clayStatus().filter(i => b.get('pill-choices').contains(i.svg) && !i.testDestroyed);
+  assert.equal(islandClays().length, 3);
+  for (const covered of [{ phase: 'compact', view: 'overview' }, { phase: 'expanded', view: 'chat' },
+    { phase: 'expanded', view: 'overview', settings: 'open' },
+    { phase: 'expanded', view: 'overview', card: 'pending' },
+    { phase: 'expanded', view: 'overview', noticeView: 'notices' }]) {
+    b.get('capsule').dataset = covered; b.mutate(b.get('capsule'));
+    assert.equal(islandClays().length, 0, 'invisible characters unregister from the real engine loop');
+    b.get('capsule').dataset = { phase: 'expanded', view: 'overview' }; b.mutate(b.get('capsule'));
+    assert.equal(islandClays().length, 3);
+  }
+  b.doc.documentElement.dataset.motion = 'reduce'; b.mutate(b.doc.documentElement);
+  assert.equal(islandClays().length, 3);
+  assert.ok(islandClays().every(i => i.live === false), 'staticPose instances are never registered in the real shared loop');
+  assert.ok(islandClays().every(i => i.sample().d), 'reduced mode still draws real engine geometry');
+  b.doc.documentElement.dataset.motion = 'full'; b.mutate(b.doc.documentElement);
+  assert.ok(islandClays().every(i => i.live === true));
 });

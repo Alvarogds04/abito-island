@@ -19,6 +19,16 @@
       !['pending', 'expired', 'outcome'].includes(d.question) && d.noticeView !== 'notices';
   };
   const say = text => { if (live) live.textContent = text; };
+  function syncClay(item) {
+    // Per-instance lifecycle: never change the shared engine's global policy (Abito owns it).
+    const mode = !onScreen() || doc.hidden ? 'hidden' : doc.documentElement.dataset.motion === 'reduce' ? 'static' : 'live';
+    if (item.mode === mode) return;
+    item.clay?.destroy(); item.clay = null; item.mode = mode;
+    if (mode !== 'hidden' && typeof AbitoClay !== 'undefined') {
+      item.clay = AbitoClay.create(item.svg, { state: 'idle', live: mode === 'live', viewBox: '36 32 128 128', shadow: false });
+    }
+  }
+  const syncVisibility = () => { for (const item of mounted.values()) syncClay(item); };
   function choose(id) {
     if (busy || !owner()) return;
     busy = true;
@@ -49,20 +59,29 @@
         svg.setAttribute('class', 'island-agent-clay');
         svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('width', '28'); svg.setAttribute('height', '28');
         const label = doc.createElement('span'); button.append(svg, label);
-        const clay = typeof AbitoClay !== 'undefined' ? AbitoClay.create(svg, { state: 'idle', viewBox: '36 32 128 128', shadow: false }) : null;
-        item = { button, label, svg, clay }; mounted.set(row.id, item);
+        item = { button, label, svg, clay: null, mode: null }; mounted.set(row.id, item);
         button.addEventListener('click', event => { if (event.isTrusted === true && onScreen()) choose(row.id); });
       }
       item.label.textContent = row.name; item.button.dataset.color = row.color; item.svg.dataset.color = row.color;
       item.button.setAttribute('aria-pressed', selected === row.id ? 'true' : 'false');
       item.button.setAttribute('aria-label', `${row.name}${row.id === A.PRINCIPAL_ID ? ', principal' : ''}: destino de conversación`);
+      syncClay(item);
       return item.button;
     });
-    host.replaceChildren(...buttons);
+    // Updating labels/colours must not detach surviving SVGs or restart browser animations.
+    if (host.children.length !== buttons.length || buttons.some((button, i) => host.children[i] !== button)) {
+      host.replaceChildren(...buttons);
+    }
     if (focused) (get(focused) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
   }
   function apply(raw) { prefs = raw && typeof raw === 'object' ? raw : {}; paint(); }
   doc.addEventListener('abito:specialists-changed', paint);
+  doc.addEventListener('visibilitychange', syncVisibility);
+  if (typeof MutationObserver !== 'undefined') {
+    const visibility = new MutationObserver(syncVisibility);
+    visibility.observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view', 'data-settings', 'data-card', 'data-question', 'data-notice-view'] });
+    visibility.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-motion'] });
+  }
   paint();
   const invoke = root.__TAURI__?.core?.invoke || root.__TAURI_INTERNALS__?.invoke;
   const listen = root.__TAURI__?.event?.listen;
