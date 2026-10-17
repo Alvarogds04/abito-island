@@ -87,7 +87,7 @@
   // a button that does not fix what the band reports would lie. Pure + tested.
   function connectionBandView(conn) {
     if (!conn || conn.kind !== 'down') return null;
-    return { title: 'Sin conexión con el motor', detail: '', grouped: false,
+    return { title: 'Sin conexión', detail: '', grouped: false,
       tone: 'red', action: null, aria: conn.aria };
   }
 

@@ -159,10 +159,14 @@ test('connection view tolerates a missing snapshot', () => {
 });
 
 // ---- T7.3: the transport error band (design isla-ov-error) -----------------
-test('transport error band: "Sin conexión con el motor", red ring, NO invented action', () => {
+test('transport error band: short title "Sin conexión" (the chip keeps "Sin motor"), red ring, NO invented action', () => {
   const band = O.connectionBandView(O.connectionView({ unavailable: false, connections: 0 }));
   assert.ok(band, 'the down connection carries the band');
-  assert.equal(band.title, 'Sin conexión con el motor');
+  // Human report: the old title («Sin conexión con el motor», 25 chars) was too long for the band.
+  // It must stay short and must not repeat the chip word «Sin motor» that sits beside it.
+  assert.equal(band.title, 'Sin conexión');
+  assert.ok(band.title.length <= 14, 'short enough for the band');
+  assert.notEqual(band.title, O.connectionView({ unavailable: false, connections: 0 }).word, 'the band and the chip do not repeat each other');
   assert.equal(band.tone, 'red', 'the band wears the red ring (#notices[data-tone=red])');
   assert.equal(band.grouped, false);
   assert.equal(band.action, null, 'the facade has no retry verb for a Pi-session transport; a dead button would lie');
