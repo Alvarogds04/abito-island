@@ -63,17 +63,20 @@
     const connections = typeof s.connections === 'number' ? s.connections : 0;
     if (s.unavailable === true) {
       return { kind: 'unavailable', tone: 'red', icon: 'triangle', word: 'Avisos caídos',
-        aria: 'Avisos locales no disponibles',
-        detail: 'El canal local de avisos no pudo iniciarse. No se hizo ninguna conexión con Pi.' };
+        aria: 'Avisos locales no disponibles: el canal local de avisos no pudo iniciarse; no se hizo ninguna conexión con Pi.',
+        detail: 'Sin avisos locales.' };
     }
     if (connections > 0) {
+      // T7.3 design diet (isla-ov-normal): the overview shows the short idle
+      // line; the honest caveat rides aria, where the full sentence stays
+      // reachable (coordinator condition: short VISIBLE, honest REACHABLE).
       return { kind: 'connected', tone: 'go', icon: 'plug', word: '',
-        aria: 'Conexión local activa · identidad declarada como Pi',
-        detail: 'La conexión está activa. Esto no confirma que Pi esté trabajando ni que una tarea haya terminado.' };
+        aria: 'Conexión local activa · identidad declarada como Pi. La conexión está activa; esto no confirma que Pi esté trabajando ni que una tarea haya terminado.',
+        detail: 'Pi espera tu próxima tarea.' };
     }
     return { kind: 'down', tone: 'faint', icon: 'plug-off', word: 'Sin Pi',
-      aria: 'Sin Pi: no hay una sesión conectada',
-      detail: 'Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.' };
+      aria: 'Sin Pi: no hay una sesión conectada. Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.',
+      detail: 'Conectá una sesión de Pi.' };
   }
 
   // ---- notice pill (Sileo) ---------------------------------------------------
@@ -188,8 +191,8 @@
     const bridge = snapshot && snapshot.bridgeStatus && snapshot.bridgeStatus.state;
     if (bridge !== 'unhealthy' && bridge !== 'stopped') return null;
     return { kind: 'down', tone: 'red', icon: 'triangle', word: 'Sin puente',
-      aria: 'Sin puente: el puente de aprobación no responde; no se puede decidir hasta que vuelva',
-      detail: 'El puente que lleva tu decisión al backend no responde. Las decisiones quedan sin enviar.' };
+      aria: 'Sin puente: el puente de aprobación no responde; no se puede decidir hasta que vuelva. Las decisiones quedan sin enviar.',
+      detail: 'Las decisiones quedan sin enviar.' };
   }
 
   // ---- R6 error face from the HOST: time-boxed, never a permanent mask ------
@@ -233,8 +236,9 @@
     taken: ['Atajo ocupado', 'triangle', 'red', 'está en uso por otra aplicación; elegí otra combinación'],
     unsupported: ['Atajo sin soporte', 'triangle', 'red', 'no se pudo registrar: no hay un servidor X11 accesible'],
     invalid: ['Atajo inválido', 'triangle', 'red', 'no es una combinación válida: necesita Ctrl, Alt o Súper'],
-    // portal route (#305b): the OS asks the human ONCE; a decline is visible and the X11 fallback takes over
-    permission_denied: ['Atajo sin permiso', 'triangle', 'red', 'no se activó porque rechazaste el permiso del sistema; usamos el atajo limitado de X11'],
+    // portal route (#305b): the OS asks the human ONCE; a decline is visible and the X11 fallback takes over.
+    // T7.3 design diet: the long disclaimer sentence is gone; the meaning stays short and honest.
+    permission_denied: ['Atajo sin permiso', 'triangle', 'red', 'rechazaste el permiso del sistema; queda el atajo limitado de X11'],
   });
   // U3a: the unsupported reason above blames X11, and on Windows that is a lie (there
   // is no X server to blame). Only that one tuple changes per backend; everything else

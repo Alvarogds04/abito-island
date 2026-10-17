@@ -129,21 +129,29 @@ test('no Pi -> unplugged icon + "Sin Pi" (the duplicate sentence is gone)', () =
   const v = O.connectionView({ unavailable: false, connections: 0 });
   assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin Pi', 'faint']);
   assert.doesNotMatch(JSON.stringify(v), /Sin conexión con Pi/);
-  assert.match(v.detail, /conectás/);
-  assert.doesNotMatch(v.detail, /conectas/);
+  // T7.3 design diet: the visible detail is one short line; the long honest
+  // sentence stays reachable in aria (was a two-sentence visible disclaimer).
+  assert.equal(v.detail, 'Conectá una sesión de Pi.');
+  assert.match(v.aria, /solo si conectás/);
+  assert.doesNotMatch(v.aria, /conectas/);
 });
 
 test('connected -> plug, go, no word; the "declared identity" caveat lives in aria/detail', () => {
   const v = O.connectionView({ unavailable: false, connections: 1 });
   assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['connected', 'plug', '', 'go']);
   assert.match(v.aria, /identidad declarada como Pi/);
-  assert.match(v.detail, /no confirma/i);
+  // T7.3 design diet (isla-ov-normal): the idle overview line replaces the
+  // visible disclaimer; the honest caveat stays in aria.
+  assert.equal(v.detail, 'Pi espera tu próxima tarea.');
+  assert.match(v.aria, /no confirma/i);
 });
 
 test('channel down -> red triangle + "Avisos caídos"', () => {
   const v = O.connectionView({ unavailable: true, connections: 0 });
   assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['unavailable', 'triangle', 'Avisos caídos', 'red']);
-  assert.match(v.detail, /no pudo iniciarse/);
+  // T7.3 design diet: one short visible line; the cause stays in aria.
+  assert.equal(v.detail, 'Sin avisos locales.');
+  assert.match(v.aria, /no pudo iniciarse/);
 });
 
 test('connection view tolerates a missing snapshot', () => {
@@ -817,6 +825,9 @@ test('#305b hotkey feedback: the OS permission dialog is explained (accept once)
   const denied = O.hotkeyView(v('permission_denied'));
   assert.deepEqual([denied.word, denied.icon, denied.tone], ['Atajo sin permiso', 'triangle', 'red']);
   assert.match(denied.aria, /rechazaste|rechazó|no diste/i);
+  // T7.3 design diet: the long disclaimer sentence is gone; the meaning stays
+  // short and honest (the decline fact + the X11 fallback, one clause each).
+  assert.doesNotMatch(denied.aria, /no se activó porque/);
   // the portal route working = silence (never «limitado»); the X11 fallback on Wayland = limited
   assert.equal(O.hotkeyView(v('active', { backend: 'portal', limited: false })), null);
   assert.equal(O.hotkeyView(v('active', { backend: 'x11', limited: true })).word, 'Atajo limitado');
