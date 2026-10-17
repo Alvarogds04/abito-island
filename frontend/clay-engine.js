@@ -133,7 +133,7 @@ const AbitoClay = (() => {
     const knead = Array.from({ length: 2 * (DIM - 3) }, (_, i) => ({ j: 3 + (i % (DIM - 3)), f: rand(.11, .3), p: rand(0, TAU) }));
     const start = STATES[opts.state] ? opts.state : 'idle';
     const S = {
-      t: 0, state: start, from: start, x: Float64Array.from(STATES[start].v), morph: 1,
+      t: 0, state: start, from: start, x: Float64Array.from(STATES[start].v), morph: 1, knead: STATES[start].knead, ghost: null,
       eye: { ...STATES[start].eye }, lift: STATES[start].lift, lean: STATES[start].lean, shakeX: 0, nodY: 0, tiltB: 0,
       reaction: null, env: 0, envT: 0, nextSyl: 0, voice: 0, voiceT: 0, nextVoice: 0,
       gaze: { x: 0, y: 0 }, gazeT: { x: 0, y: 0 }, nextGaze: 1, blink: null, nextBlink: 1.6, gestureT0: 0,
@@ -146,7 +146,13 @@ const AbitoClay = (() => {
       return motes;
     }
     const reactionP = () => S.reaction ? (S.t - S.reaction.t0) / emoteDef(S.reaction.name).dur : 0;
-    function cancelReaction() { if (!S.reaction) return false; S.reaction = null; if (motes) motes.forEach(m => m.setAttribute('opacity', 0)); return true; }
+    // A cancelled emote (state change, drag, pause...) fades its offsets out over FADE_S instead of
+    // vanishing in one frame: lift/lean/eye offsets of up to ~4 px would otherwise pop. A reaction
+    // that ran to its end has envelope 0 already and needs no ghost.
+    const FADE_S = .25, fxOf = (name, p) => { const em = emoteDef(name); return em.fx(envelope(em, p), p); };
+    const scaleFx = (fx, w) => ({ lift: fx.lift * w, lean: fx.lean * w, eye: Object.fromEntries(Object.entries(fx.eye).map(([k, v]) => [k, v * w])) });
+    const addFx = (a, b) => { const eye = { ...a.eye }; for (const k in b.eye) eye[k] = (eye[k] || 0) + b.eye[k]; return { lift: a.lift + b.lift, lean: a.lean + b.lean, eye }; };
+    function cancelReaction() { if (!S.reaction) return false; const p = reactionP(); if (p < 1) S.ghost = { name: S.reaction.name, p, w: 1 }; S.reaction = null; if (motes) motes.forEach(m => m.setAttribute('opacity', 0)); return true; }
 
     function tick(dt) {
       S.t += dt;
@@ -163,13 +169,15 @@ const AbitoClay = (() => {
       if (S.state === 'sleeping') nod = .65 * Math.sin(t * 1.8);
       if (S.state === 'dizzy') { shake = 2.4 * Math.sin(g * 9) * Math.exp(-g / 3.3); tiltB = .025 * Math.sin(g * 7); }
       if (S.reaction && reactionP() >= 1) cancelReaction();
+      if (S.ghost) { S.ghost.w -= dt / FADE_S; if (S.ghost.w <= 0) S.ghost = null; }
       S.shakeX = approach(S.shakeX, shake, 14, dt); S.nodY = approach(S.nodY, nod, 14, dt); S.tiltB = approach(S.tiltB, tiltB, 6, dt);
       if (S.state === 'speak') { if (t >= S.nextSyl) { S.envT = rng() < .16 ? 0 : rand(.35, 1); S.nextSyl = t + rand(.12, .22); } } else S.envT = 0;
-      S.env = approach(S.env, S.envT, 14, dt);
+      S.env = approach(S.env, S.envT, S.state === 'speak' ? 14 : 6, dt); // syllables stay snappy; closing the mouth after speech eases off
       if (S.state === 'listen') { if (t >= S.nextVoice) { S.voiceT = rng() < .25 ? .1 : rand(.4, 1); S.nextVoice = t + rand(.25, .55); } } else S.voiceT = 0;
       S.voice = approach(S.voice, S.voiceT, 5, dt);
       for (let j = 1; j < DIM; j++) S.x[j] = approach(S.x[j], st.v[j], 1.7, dt);
       S.morph = approach(S.morph, 1, 1.7, dt);
+      S.knead = approach(S.knead, st.knead, 1.7, dt); // same rate as the pose blend: no pop on a state change
       S.lift = approach(S.lift, st.lift, 2.2, dt); S.lean = approach(S.lean, st.lean, 2.2, dt);
       for (const k in st.eye) S.eye[k] = approach(S.eye[k], st.eye[k], 3.2, dt);
       if (t >= S.nextGaze) {
@@ -195,7 +203,7 @@ const AbitoClay = (() => {
     }
     function compose() {
       const st = STATES[S.state], t = S.t, c = Float64Array.from(S.x);
-      for (const n of knead) c[n.j] += st.knead * .55 * Math.sin(TAU * n.f * t + n.p) / Math.sqrt(Math.ceil(n.j / 2));
+      for (const n of knead) c[n.j] += S.knead * .55 * Math.sin(TAU * n.f * t + n.p) / Math.sqrt(Math.ceil(n.j / 2));
       c[ci(2, 0)] += .06 * S.env + .012 * S.nodY + .015 * S.voice;
       c[ci(1, 1)] += .035 * S.env;
       c[ci(2, 1)] += .006 * S.shakeX + S.tiltB;
@@ -204,7 +212,8 @@ const AbitoClay = (() => {
       area *= .5 * TAU / N;
       const scale = R0 * Math.sqrt(Math.PI / area) * (1 + .012 * Math.sin(TAU * t / 4.2));
       const rp = S.reaction ? reactionP() : 0, rem = S.reaction && emoteDef(S.reaction.name);
-      const rf = rem ? rem.fx(envelope(rem, rp), rp) : null;
+      let rf = rem ? rem.fx(envelope(rem, rp), rp) : null;
+      if (S.ghost) { const gf = scaleFx(fxOf(S.ghost.name, S.ghost.p), smooth(S.ghost.w)); rf = rf ? addFx(rf, gf) : gf; }
       const ox = CX + S.shakeX + S.lean + (rf ? rf.lean : 0), oy = CY + S.lift + S.nodY + (rf ? rf.lift : 0);
       const pts = new Array(N);
       for (let i = 0; i < N; i++) pts[i] = [ox + scale * r[i] * CS[i][1][0], oy + scale * r[i] * CS[i][1][1]];
@@ -246,7 +255,7 @@ const AbitoClay = (() => {
     function staticPose(state) {
       if (state && STATES[state]) S.state = state;
       const st = STATES[S.state];
-      S.x = Float64Array.from(st.v); S.eye = { ...st.eye }; S.lift = st.lift; S.lean = st.lean; S.morph = 1;
+      S.x = Float64Array.from(st.v); S.eye = { ...st.eye }; S.lift = st.lift; S.lean = st.lean; S.morph = 1; S.knead = st.knead; S.ghost = null;
       S.env = S.state === 'speak' ? .5 : 0; S.voice = S.state === 'listen' ? .5 : 0; S.shakeX = 0; S.nodY = 0; S.tiltB = S.state === 'error' ? .01 : 0; S.blink = null;
       S.gaze = S.state === 'think' ? { x: .7, y: -.85 } : S.state === 'reject' ? { x: -.6, y: .25 } : S.state === 'error' ? { x: -.6, y: .2 } : S.state === 'listen' ? { x: .2, y: -.05 } : { x: 0, y: 0 };
       cancelReaction(); const t0 = S.t; S.t = 0; render(); S.t = t0;
