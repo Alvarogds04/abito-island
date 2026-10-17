@@ -1698,58 +1698,100 @@ html[data-motion="reduce"] #island-countdown::before { transition: none; }
 .srole-colors .sdot.sm .sdot-label { display: none; }
 .srole-colors .srole-color-word { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-muted); }
 
-/* ---- #435: the Blobs visual customizer (page «3 Blobs»). Scoped to the Blobs tab via
-   body.dataset.screen, so every other Ajustes tab keeps its look. Type steps follow the
-   T6.1 scale (12 caption / 13 label / 14 body), controls 32 visual inside 44 hit areas
-   (the .sbtn/.sfield base already provide the invisible hit ring), gaps 8/20. Blob
-   colours come ONLY from the closed --dot-* palette: a renderer can paint nothing else. */
-#settings-body[data-screen="pills"] .pills-layout { display: grid; grid-template-columns: minmax(0, 1fr) 252px; gap: var(--space-20); align-items: start; margin-top: var(--space-8); }
+/* ---- #442: Blobs = agents (page «3 Blobs», DESIGN-NOTES §4). Scoped to the Blobs tab via
+   body.dataset.screen. Measures from the design: content = list + 16 gap + editor 308, principal card
+   80, tile 124x150, strip tiles with a 24 character, swatches are 28 px characters, editor head 72.
+   Every blob is the clay character (SVG from the shared engine): its colour is tinted HERE from the
+   closed --dot-* palette over the engine's own skin gradient, exactly as the island does, so the
+   engine file stays untouched. Reduced motion is Abito's OWN html[data-motion="reduce"] (#304).
+   APPEND-ONLY region BEFORE the #410 compact slice (a test slices style.css from that marker). */
+#settings-body[data-screen="pills"] .pills-layout { display: grid; grid-template-columns: minmax(0, 1fr) 308px; gap: var(--space-16); align-items: start; margin-top: var(--space-8); }
+#settings-body[data-screen="pills"] .blob-clay { display: block; flex: none; width: 56px; height: 56px; overflow: visible; }
+#settings-body[data-screen="pills"] .blob-clay[data-color="green"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-green-1); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="green"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-green-2); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="green"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-green-3); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="blue"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-blue-1); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="blue"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-blue-2); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="blue"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-blue-3); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="mint"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-mint-1); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="mint"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-mint-2); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="mint"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-mint-3); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="orange"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-orange-1); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="orange"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-orange-2); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="orange"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-orange-3); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="purple"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-purple-1); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="purple"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-purple-2); }
+#settings-body[data-screen="pills"] .blob-clay[data-color="purple"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-purple-3); }
+
+/* The PRINCIPAL card: Abito, always on the island. */
+#settings-body[data-screen="pills"] .blob-principal { display: flex; align-items: center; gap: var(--space-16); min-height: 80px; padding: var(--space-12) var(--space-16); border: 1px solid var(--line-soft); border-radius: 14px; background: var(--card-bg); color: var(--island-ink); text-align: left; cursor: pointer; }
+#settings-body[data-screen="pills"] .blob-principal:hover { border-color: var(--line); }
+#settings-body[data-screen="pills"] .blob-principal[aria-pressed="true"] { border-color: transparent; box-shadow: 0 0 0 2px var(--island-live); }
+#settings-body[data-screen="pills"] .blob-principal-text { display: flex; flex-direction: column; gap: var(--space-8); min-width: 0; }
+#settings-body[data-screen="pills"] .blob-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#settings-body[data-screen="pills"] .blob-chips .chip, #settings-body[data-screen="pills"] .blob-tile .chip { min-height: 24px; padding: 0 8px; border-radius: 12px; background: var(--fill); font: 400 var(--fs-caption)/1 var(--font-ui); color: var(--island-muted); }
+#settings-body[data-screen="pills"] .blob-chips .chip[data-tone="go"], #settings-body[data-screen="pills"] .blob-tile .chip[data-tone="go"] { color: var(--island-ink); }
+#settings-body[data-screen="pills"] .blob-name { font: 600 var(--fs-body)/1.2 var(--font-ui); color: var(--island-ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-body[data-screen="pills"] .blob-principal .ico { margin-left: auto; color: var(--sun); flex: none; }
+
+/* Agent tiles 124 x 150, the «Nuevo agente» slot, the 2px live ring on the selection, the lifted drag state. */
+#settings-body[data-screen="pills"] .pills-grid { display: grid; grid-template-columns: repeat(3, 124px); gap: var(--space-8); }
+#settings-body[data-screen="pills"] .blob-tile, #settings-body[data-screen="pills"] .blob-tile-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 124px; min-height: 150px; padding: var(--space-8) 10px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--card-bg); color: var(--island-ink); cursor: pointer; }
+#settings-body[data-screen="pills"] .blob-tile:hover { border-color: var(--line); }
+#settings-body[data-screen="pills"] .blob-tile[aria-pressed="true"], #settings-body[data-screen="pills"] .blob-tile-new[aria-pressed="true"] { border-color: transparent; box-shadow: 0 0 0 2px var(--island-live); }
+#settings-body[data-screen="pills"] .blob-tile .blob-name { font-size: var(--fs-label); }
+#settings-body[data-screen="pills"] .blob-role { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-muted); }
+#settings-body[data-screen="pills"] .blob-tile-new { border-style: dashed; color: var(--island-muted); }
+#settings-body[data-screen="pills"] .blob-tile[data-dragging] { transform: translateY(-2px) scale(1.04); box-shadow: 0 6px 16px rgba(0,0,0,.35); border-color: var(--line); z-index: 1; }
+#settings-body[data-screen="pills"] .blob-tile { transition: transform 120ms cubic-bezier(.25,.9,.35,1.03), box-shadow 120ms cubic-bezier(.25,.9,.35,1.03); }
+html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-tile { transition: none; }
+html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-tile[data-dragging] { transform: none; }
+#blob-count[data-tone="sun"] { color: var(--sun); }
+#settings-body[data-screen="pills"] .blob-hint { font: 400 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-muted); }
+
+/* «Guardados» (kept beyond three) and «Guardados de antes» (stored before the merge): one small row each. */
+#settings-body[data-screen="pills"] .blob-stored, #settings-body[data-screen="pills"] .blob-saved { display: flex; flex-direction: column; gap: var(--space-8); }
+#settings-body[data-screen="pills"] .blob-stored-row, #settings-body[data-screen="pills"] .blob-saved-row { display: flex; align-items: center; gap: var(--space-12); min-height: 40px; }
+#settings-body[data-screen="pills"] .blob-stored-row .blob-clay, #settings-body[data-screen="pills"] .blob-saved-row .blob-clay { width: 28px; height: 28px; }
+#settings-body[data-screen="pills"] .blob-stored-row .blob-name, #settings-body[data-screen="pills"] .blob-saved-row .blob-name { flex: 1; min-width: 0; font-size: var(--fs-label); }
+
+/* «Así se ve en la isla»: principal + agents, 92 x 56 tiles on the island background. */
+#settings-body[data-screen="pills"] .pill-strip { display: flex; gap: var(--space-8); padding: var(--space-12); border-radius: 22px; background: #000; border: 1px solid var(--line-soft); overflow: hidden; }
+#settings-body[data-screen="pills"] .blob-strip-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 92px; height: 56px; border-radius: 12px; background: var(--card-bg); }
+#settings-body[data-screen="pills"] .blob-strip-item .blob-clay { width: 24px; height: 24px; }
+#settings-body[data-screen="pills"] .blob-strip-item .blob-name { font: 400 var(--fs-caption)/1 var(--font-ui); }
+
+/* The editor panel (308): header with the clay 72 + «Animado como Abito» + Reposo|Trabaja, fields, swatches, toggle, actions. */
+#settings-body[data-screen="pills"] .pills-editor { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-16); border: 1px solid var(--line-soft); border-radius: var(--radius-2xl); background: var(--card-bg); }
+#settings-body[data-screen="pills"] .blob-editor-danger { box-shadow: 0 0 0 2px var(--red-11); border-color: transparent; align-items: center; text-align: center; }
+#settings-body[data-screen="pills"] .blob-editor-head { display: flex; align-items: center; gap: var(--space-12); }
+#settings-body[data-screen="pills"] .blob-editor-head .blob-clay { width: 72px; height: 72px; }
+#settings-body[data-screen="pills"] .blob-editor-title { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+#settings-body[data-screen="pills"] .blob-editor-title .chip { min-height: 24px; padding: 0 8px; border-radius: 12px; background: var(--fill); font: 400 var(--fs-caption)/1 var(--font-ui); color: var(--island-ink); }
+#settings-body[data-screen="pills"] .blob-clay-preview { width: 64px; height: 64px; align-self: center; }
+#settings-body[data-screen="pills"] .blob-editor-danger .blob-clay { width: 72px; height: 72px; }
+#settings-body[data-screen="pills"] .blob-field { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+#settings-body[data-screen="pills"] .blob-field .chip { min-height: 24px; padding: 0 8px; border-radius: 12px; background: var(--fill); font: 400 var(--fs-caption)/1 var(--font-ui); color: var(--island-muted); }
+#settings-body[data-screen="pills"] .pills-editor textarea.sfield { min-height: 64px; resize: vertical; font-family: var(--font-ui); }
+#settings-body[data-screen="pills"] .swatch-row { display: flex; gap: var(--space-8); flex-wrap: wrap; }
+#settings-body[data-screen="pills"] .swatch { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+#settings-body[data-screen="pills"] .swatch .blob-clay { width: 28px; height: 28px; }
+#settings-body[data-screen="pills"] .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--island-ink); }
+#settings-body[data-screen="pills"] .blob-toggle { display: flex; align-items: center; justify-content: space-between; min-height: 32px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--island-ink); cursor: pointer; }
+#settings-body[data-screen="pills"] .blob-switch { position: relative; width: 40px; height: 24px; border-radius: 12px; background: var(--fill-hover); transition: background 120ms; }
+#settings-body[data-screen="pills"] .blob-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--island-ink); transition: transform 120ms; }
+#settings-body[data-screen="pills"] .blob-toggle[aria-checked="true"] .blob-switch { background: var(--dot-green-2); }
+#settings-body[data-screen="pills"] .blob-toggle[aria-checked="true"] .blob-switch::after { transform: translateX(16px); }
+#settings-body[data-screen="pills"] .blob-toggle:disabled { opacity: .5; cursor: default; }
+html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-toggle .blob-switch, html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-toggle .blob-switch::after { transition: none; }
+html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-toggle { transition: none; }
 #settings-body[data-screen="pills"] .pills-main { display: flex; flex-direction: column; gap: var(--space-8); min-width: 0; }
 #settings-body[data-screen="pills"] .psection-label { font: 600 var(--fs-caption)/1.2 var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--island-muted); margin-top: var(--space-8); }
 #settings-body[data-screen="pills"] .psection-label:first-child { margin-top: 0; }
-
-/* The live blob: one three-stop gradient per closed palette colour; no colour reads neutral. */
-#settings-body[data-screen="pills"] .blob-visual { width: 40px; height: 40px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, var(--fill-hover), var(--line) 55%, var(--island-muted)); }
-#settings-body[data-screen="pills"] .blob-visual[data-color="green"] { background: radial-gradient(circle at 35% 30%, var(--dot-green-1), var(--dot-green-2) 55%, var(--dot-green-3)); }
-#settings-body[data-screen="pills"] .blob-visual[data-color="blue"] { background: radial-gradient(circle at 35% 30%, var(--dot-blue-1), var(--dot-blue-2) 55%, var(--dot-blue-3)); }
-#settings-body[data-screen="pills"] .blob-visual[data-color="mint"] { background: radial-gradient(circle at 35% 30%, var(--dot-mint-1), var(--dot-mint-2) 55%, var(--dot-mint-3)); }
-#settings-body[data-screen="pills"] .blob-visual[data-color="orange"] { background: radial-gradient(circle at 35% 30%, var(--dot-orange-1), var(--dot-orange-2) 55%, var(--dot-orange-3)); }
-#settings-body[data-screen="pills"] .blob-visual[data-color="purple"] { background: radial-gradient(circle at 35% 30%, var(--dot-purple-1), var(--dot-purple-2) 55%, var(--dot-purple-3)); }
-
-/* The PRINCIPAL card: the main pill, always on the island, with the only disclaimer chip. */
-#settings-body[data-screen="pills"] .pill-principal { display: flex; align-items: center; gap: var(--space-12); min-height: 56px; padding: var(--space-8) var(--space-16); border: 1px solid var(--line-soft); border-radius: var(--radius-2xl); background: var(--card-bg); color: var(--island-ink); font: 600 var(--fs-body)/1.2 var(--font-ui); cursor: pointer; text-align: left; }
-#settings-body[data-screen="pills"] .pill-principal:hover { border-color: var(--line); }
-#settings-body[data-screen="pills"] .pill-principal .pill-name { flex: none; }
-#settings-body[data-screen="pills"] .pill-principal .chip { font-size: var(--fs-caption); color: var(--island-muted); cursor: help; }
-#settings-body[data-screen="pills"] .pill-principal .ico { margin-left: auto; color: var(--sun); flex: none; }
-
-/* Declared tiles: live blob + name, a 2px live ring on the selection, a lifted state while dragging. */
 #settings-body[data-screen="pills"] .pills-declared-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); }
 #settings-body[data-screen="pills"] .pills-declared-head .psection-label { margin-top: 0; }
 #settings-body[data-screen="pills"] .pill-count { font: 600 var(--fs-caption)/1 var(--font-ui); color: var(--island-muted); padding: 4px 10px; border-radius: 10px; background: var(--surface); }
-#settings-body[data-screen="pills"] .pills-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-8); }
-#settings-body[data-screen="pills"] .pill-tile, #settings-body[data-screen="pills"] .pill-tile-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-8); min-height: 96px; padding: var(--space-8); border: 1px solid var(--line-soft); border-radius: 14px; background: var(--card-bg); color: var(--island-ink); font: 500 var(--fs-label)/1.2 var(--font-ui); cursor: pointer; }
-#settings-body[data-screen="pills"] .pill-tile:hover { border-color: var(--line); }
-#settings-body[data-screen="pills"] .pill-tile[aria-pressed="true"] { border-color: transparent; box-shadow: 0 0 0 2px var(--island-live); }
-#settings-body[data-screen="pills"] .pill-tile .pill-name, #settings-body[data-screen="pills"] .pill-tile-new .pill-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#settings-body[data-screen="pills"] .pill-tile-new { border-style: dashed; color: var(--island-muted); }
 #settings-body[data-screen="pills"] .pill-plus { font: 400 20px/1 var(--font-ui); }
-#settings-body[data-screen="pills"] .pill-tile[data-dragging] { transform: translateY(-2px) scale(1.04); box-shadow: 0 6px 16px rgba(0,0,0,.35); border-color: var(--line); z-index: 1; }
-#settings-body[data-screen="pills"] .pill-tile { transition: transform 120ms cubic-bezier(.25,.9,.35,1.03), box-shadow 120ms cubic-bezier(.25,.9,.35,1.03); }
-/* #304: reduced motion is Abito's OWN html[data-motion="reduce"] state, never the
-   system media query — the settings window publishes the same override (motionOverride). */
-html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile { transition: none; }
-html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-dragging] { transform: none; }
-
-/* «Así se ve en la isla»: the island order with the island's own four-tile cap. */
-#settings-body[data-screen="pills"] .pill-strip { display: flex; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-2xl); background: var(--surface); border: 1px solid var(--line-soft); overflow: hidden; }
-#settings-body[data-screen="pills"] .pill-strip-item { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; padding: var(--space-8); border-radius: 10px; background: var(--card-bg); font: 500 var(--fs-caption)/1.2 var(--font-ui); color: var(--island-ink); }
-#settings-body[data-screen="pills"] .pill-strip-item .blob-visual { width: 24px; height: 24px; }
-#settings-body[data-screen="pills"] .pill-strip-item .pill-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#settings-body[data-screen="pills"] .pill-strip-item:nth-child(n+5) { display: none; }
-
-/* §4.1 Mode A — the «Nuevo» chooser: segmented control, search, category chips,
-   the offered list with markers, and the one-line hint. */
 #settings-body[data-screen="pills"] .segmented { display: flex; gap: 2px; min-height: 32px; padding: 2px; border-radius: 10px; background: var(--fill); }
 #settings-body[data-screen="pills"] .segmented .seg { flex: 1; min-height: 0; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--island-muted); font: 400 var(--fs-label)/1.2 var(--font-ui); cursor: pointer; }
 #settings-body[data-screen="pills"] .segmented .seg[aria-pressed="true"] { background: var(--surface); color: var(--island-ink); font-weight: 600; }
@@ -1768,30 +1810,16 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #settings-body[data-screen="pills"] .pill-catalog-empty { padding: 12px 8px; color: var(--island-muted); font-size: var(--fs-label); text-align: center; }
 #settings-body[data-screen="pills"] .pill-catalog-note { font-size: var(--fs-caption); color: var(--island-muted); }
 #settings-body[data-screen="pills"] .pill-catalog-search { flex: none; width: 100%; min-width: 0; }
-
-/* The editor panel: large preview, read-only name, the closed swatch row, order arrows, «Principal», delete. */
-#settings-body[data-screen="pills"] .pills-editor { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-16); border: 1px solid var(--line-soft); border-radius: var(--radius-2xl); background: var(--card-bg); }
-#settings-body[data-screen="pills"] .blob-preview { width: 96px; height: 96px; align-self: center; margin-bottom: var(--space-8); }
-#settings-body[data-screen="pills"] .blob-preview:not([data-color]) { background: transparent; box-shadow: inset 0 0 0 2px var(--line); }
 #settings-body[data-screen="pills"] .pills-editor .srow-title { font-size: var(--fs-caption); color: var(--island-muted); }
 #settings-body[data-screen="pills"] .pills-editor .sfield { flex: none; width: 100%; min-width: 0; }
-#settings-body[data-screen="pills"] .swatch-row { display: flex; gap: var(--space-8); flex-wrap: wrap; }
-#settings-body[data-screen="pills"] .swatch { width: 36px; height: 36px; padding: 4px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
-#settings-body[data-screen="pills"] .swatch::before { content: ""; display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--dot-green-2); }
-#settings-body[data-screen="pills"] .swatch[data-color="green"]::before { background: var(--dot-green-2); }
-#settings-body[data-screen="pills"] .swatch[data-color="blue"]::before { background: var(--dot-blue-2); }
-#settings-body[data-screen="pills"] .swatch[data-color="mint"]::before { background: var(--dot-mint-2); }
-#settings-body[data-screen="pills"] .swatch[data-color="orange"]::before { background: var(--dot-orange-2); }
-#settings-body[data-screen="pills"] .swatch[data-color="purple"]::before { background: var(--dot-purple-2); }
-#settings-body[data-screen="pills"] .swatch[aria-checked="true"]::before { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--island-ink); }
 #settings-body[data-screen="pills"] .editor-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-8); }
 #settings-body[data-screen="pills"] .editor-actions .sbtn { padding: 0 12px; }
 #settings-body[data-screen="pills"] .pill-editor-question { font: 600 var(--fs-body)/1.3 var(--font-ui); overflow-wrap: anywhere; }
 #settings-body[data-screen="pills"] .pill-editor-detail { font-size: var(--fs-caption); color: var(--island-muted); }
 #settings-body[data-screen="pills"] .sbtn.danger::after { border-color: var(--red-11); }
 #settings-body[data-screen="pills"] .sbtn.danger { color: var(--red-11); }
-/* §4.1: the own window uses the same panel at 272 wide. */
-#settings[data-rail="true"] #settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr) 272px; }
+/* the own window uses the same panel */
+#settings[data-rail="true"] #settings-body[data-screen="pills"] .pills-layout { grid-template-columns: minmax(0, 1fr) 308px; }
 
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below

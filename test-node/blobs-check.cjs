@@ -257,3 +257,40 @@ test('S11 the screen speaks agent/blob, never pill, and keeps the one chip discl
   const b = boot(TWO());
   for (const w of words(b.host).split(/\s+/)) assert.doesNotMatch(w, /pill/i, w);
 });
+
+// ---- style: the Blobs block (design §4 measures), tint by CSS, reduced motion by html[data-motion] ----
+const fs = require('node:fs');
+const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+const blobsCss = () => css.slice(css.indexOf('/* ---- #442: Blobs = agents'), css.indexOf('/* ---- #410: Conexiones compacta'));
+
+test('S12 the Blobs block exists BEFORE the #410 marker and paints every clay in the five closed-palette colours', () => {
+  const at = css.indexOf('/* ---- #442: Blobs = agents');
+  assert.ok(at > 0 && at < css.indexOf('/* ---- #410: Conexiones compacta'), 'block sits before the #410 compact slice');
+  const block = blobsCss();
+  for (const c of ['green', 'blue', 'mint', 'orange', 'purple']) {
+    for (const n of [1, 2, 3]) {
+      assert.match(block, new RegExp(`\\.blob-clay\\[data-color="${c}"\\] radialGradient\\[id\\$="skin"\\] stop:nth-child\\(${n}\\) \\{ stop-color: var\\(--dot-${c}-${n}\\); \\}`), `${c} stop ${n}`);
+    }
+  }
+  assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b(?![^{]*\{)/i, 'no raw colour outside declarations');
+});
+
+test('S13 design measures: list 404 + editor 308, tile 124x150, principal 80 high, swatch 28, editor head 72', () => {
+  const block = blobsCss();
+  assert.match(block, /\.pills-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\) 308px/);
+  assert.match(block, /\.blob-tile-new \{[^}]*width: 124px; min-height: 150px/, 'tile and the empty slot share the 124x150 rule');
+  assert.match(block, /\.blob-principal \{[^}]*min-height: 80px/);
+  assert.match(block, /\.swatch \{[^}]*width: 28px; height: 28px/);
+  assert.match(block, /\.blob-editor-head \.blob-clay \{[^}]*width: 72px; height: 72px/);
+  assert.match(block, /\.blob-strip-item \.blob-clay \{[^}]*width: 24px; height: 24px/);
+  assert.match(block, /\[aria-pressed="true"\][^{]*\{[^}]*box-shadow: 0 0 0 2px var\(--island-live\)/, 'selected tile = 2px live ring');
+  assert.match(block, /\.blob-count\[data-tone="sun"\]|#blob-count\[data-tone="sun"\]/, 'the counter turns sun at 3/3');
+});
+
+test('S14 reduced motion is html[data-motion="reduce"], never the system media query; no old CSS-dot rules remain', () => {
+  const block = blobsCss();
+  assert.match(block, /html\[data-motion="reduce"\][^{]*\.blob-tile[^{]*\{[^}]*transition: none/);
+  assert.match(block, /html\[data-motion="reduce"\][^{]*\.blob-toggle[^{]*\{[^}]*transition: none/);
+  assert.doesNotMatch(css, /@media[^{]*prefers-reduced-motion/);
+  assert.doesNotMatch(css, /\.blob-visual|\.pill-principal|\.pill-tile\b|\.pill-strip-item/, 'the dot-blob and old tile rules are gone');
+});
