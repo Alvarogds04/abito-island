@@ -647,8 +647,16 @@
     const v = V.daemonRestartView(daemonBusy);
     const sec = el('section', 'ssec'); sec.id = 'daemon-restart';
     sec.append(sectionTitle(v.title));
-    const row = el('div', 'srow');
-    row.append(el('span', 'srow-title', 'Motor'));
+    // T7.2 design (ajustes-ventana-conexiones-*.png): one card row — «Motor local» over the
+    // «Último estado conocido» sub, the LAST KNOWN state as a chip (honest: it is what the page
+    // last heard, not a live probe), then the design's «Reiniciar» button.
+    const row = el('div', 'srow sdaemon-row');
+    const titles = el('span', 'srow-titles');
+    titles.append(el('span', 'srow-title', v.rowTitle));
+    titles.append(el('span', 'srow-sub', v.rowSub));
+    row.append(titles);
+    const conn = V.connectionView(agentState);
+    if (conn) row.append(chipNode({ tone: conn.tone, icon: conn.icon, word: conn.word, aria: conn.aria }));
     const actions = el('span', 'srow-actions');
     actions.append(wordBtn(v.action.label, () => restartDaemon(), { icon: 'refresh', disabled: v.action.disabled, aria: v.action.aria }));
     row.append(actions);
@@ -708,7 +716,7 @@
     search.setAttribute('aria-label', 'Buscar proveedor'); search.autocomplete = 'off'; search.maxLength = 80; search.value = filter;
     search.addEventListener('input', () => { filter = search.value; render(); });
     body.append(search);
-    const sec = el('section', 'ssec'); sec.id = 'provider-list'; sec.append(sectionTitle('Proveedores de IA'));
+    const sec = el('section', 'ssec'); sec.id = 'provider-list'; sec.append(sectionTitle('Proveedores'));
     const rows = V.providerRows(st, { filter, flow: loginTarget });
     const list = el('ul', 'srows sconn'); list.setAttribute('aria-label', 'Proveedores');
     for (const r of rows) {

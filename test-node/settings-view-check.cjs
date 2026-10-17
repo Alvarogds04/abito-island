@@ -1244,7 +1244,12 @@ test('T6.1 visible-layer contract: hover, selected, primary and aria-invalid pai
 // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
 test('#390 GD027: the restart control is one closed neutral label with honest outcomes', () => {
   const idle = S.daemonRestartView();
-  assert.equal(idle.action.label, 'Reiniciar motor');
+  // T7.2 design (ajustes-ventana-conexiones-*.png): the Motor group is «Motor local» with the
+  // «Último estado conocido» sub line; the button word is the design's own «Reiniciar». Was: 'Reiniciar motor'.
+  assert.equal(idle.title, 'Motor');
+  assert.equal(idle.rowTitle, 'Motor local');
+  assert.equal(idle.rowSub, 'Último estado conocido');
+  assert.equal(idle.action.label, 'Reiniciar');
   assert.equal(idle.action.disabled, false);
   assert.ok(idle.title.length > 0, 'the section names itself');
   assert.ok(!('hint' in idle), 'the design gives the Motor row a sub line, not a hint paragraph');

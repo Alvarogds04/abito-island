@@ -67,9 +67,14 @@
   // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
   // Closed shape and OUR words only: the engine never writes this panel (and #305's
   // `portal_rejected` wording belongs to that worker — nothing here ever renders it).
+  // T7.2 design (ajustes-ventana-conexiones-*.png): the Motor group is one card row —
+  // «Motor local» with the «Último estado conocido» sub (the honest read: the chip shows the last
+  // known state) — and the design's own «Reiniciar» button word.
   const DAEMON_RESTART = Object.freeze({
-    title: 'Motor del agente',
-    label: 'Reiniciar motor',
+    title: 'Motor',
+    rowTitle: 'Motor local',
+    rowSub: 'Último estado conocido',
+    label: 'Reiniciar',
     busyLabel: 'Reiniciando…',
     ok: 'Motor reiniciado.',
     refused: 'Hay un motor ajeno en uso; no lo puedo reiniciar desde acá.',
@@ -80,6 +85,8 @@
   function daemonRestartView(busy) {
     return {
       title: DAEMON_RESTART.title,
+      rowTitle: DAEMON_RESTART.rowTitle,
+      rowSub: DAEMON_RESTART.rowSub,
       action: { label: busy === true ? DAEMON_RESTART.busyLabel : DAEMON_RESTART.label, disabled: busy === true,
         aria: 'Reiniciar el motor del agente' },
     };
