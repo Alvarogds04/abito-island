@@ -414,6 +414,7 @@
     const provider = providerOf(state, providerId);
     return !!provider && (provider.configured === true || !!accountOfProvider(state, providerId));
   }
+  const UNPROVEN_SUB = 'Guardado · sin probar';
   function modelsTabView(state, chosen) {
     // No engine (or not yet answered) is a wait or a problem in the same words as Conexiones.
     const cv = connectionView(state);
@@ -423,7 +424,12 @@
     const models = Array.isArray(state.models) ? state.models : [];
     const groups = ((state.providers) || []).map(p => {
       const name = String(p.name || p.id);
-      if (!isProviderConnected(state, p.id)) {
+      // T7.2 (Q2): a provider whose ONLY account is a locally saved key (accounts frame:
+      // local===true + configured, no engine account, provider not configured) lists its models
+      // but is saved, never proven: «Guardado · sin probar». No new wire field.
+      const savedLocal = ((state.accounts) || []).some(a => a && a.provider === p.id && a.local === true && a.configured === true);
+      const onlyLocal = savedLocal && p.configured !== true && !accountOfProvider(state, p.id);
+      if (!isProviderConnected(state, p.id) && !onlyLocal) {
         return { id: p.id, name, connected: false, hint: `Conectá ${name} en Conexiones para ver sus modelos.` };
       }
       const list = Array.isArray(store[p.id]) ? store[p.id].filter(x => typeof x === 'string') : [];
@@ -434,6 +440,7 @@
         // invented — an absent/zero context and a false reasoning draw no chip.
         models: models.filter(m => m && m.provider === p.id && typeof m.id === 'string')
           .map(m => ({ id: m.id, name: String(m.name || m.id), chosen: list.includes(m.id),
+            sub: onlyLocal ? UNPROVEN_SUB : '',
             reasoning: m.reasoning === true,
             contextWindow: Number.isFinite(m.contextWindow) && m.contextWindow > 0 ? m.contextWindow : null })),
       };

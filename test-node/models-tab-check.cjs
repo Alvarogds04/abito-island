@@ -228,7 +228,9 @@ async function main() {
     assert.match(css, /\.models-local-label/, 'the «Locales» group label above the local picker');
   });
 
-  const rowTitle = row => { const t = row.children.find(n => n.className === 'model-title'); return t ? text(t) : ''; };
+  const rowTitles = row => row.children.find(n => n.className === 'model-titles');
+  const rowTitle = row => { const w = rowTitles(row); const t = w && w.children.find(n => n.className === 'model-title'); return t ? text(t) : ''; };
+  const rowSub = row => { const w = rowTitles(row); const t = w && w.children.find(n => n.className === 'model-sub'); return t ? text(t) : ''; };
   const rowProvider = row => { const c = row.children.find(n => n.className === 'chip models-prov-chip'); return c ? text(c) : ''; };
   const rowCaps = row => { const c = row.children.find(n => n.className === 'model-chips'); return c ? text(c) : ''; };
 
@@ -270,6 +272,18 @@ async function main() {
     await page.settle();
     assert.deepEqual(page.invocations[at].payload,
       { action: 'set_chosen_models', provider: 'anthropic', models: ['claude-sonnet-4-5'] });
+  });
+
+  await check('T7.2 «Guardado · sin probar» sub only for a provider whose only account is a locally saved key', async () => {
+    const view = clone(AGENT_VIEW);
+    view.providers[0].configured = false;
+    view.accounts = [{ accountId: 'l1', provider: 'anthropic', local: true, configured: true }];
+    const page = await loadPage({ agentView: view });
+    await page.openModelsTab();
+    assert.deepEqual(page.rows().map(rowSub), ['Guardado · sin probar', 'Guardado · sin probar']);
+    const bare = await loadPage();
+    await bare.openModelsTab();
+    assert.deepEqual(bare.rows().map(rowSub), ['', ''], 'an engine-configured provider stays bare');
   });
 
   await check('T7.2 the section re-renders from the streams: agent:state and prefs:state, no engine text, no secrets', async () => {

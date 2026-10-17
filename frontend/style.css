@@ -600,7 +600,9 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 .models-prov-title { margin: 2px 0 4px; color: var(--island-muted); font: 600 var(--fs-caption)/1.3 var(--font-ui); text-transform: uppercase; letter-spacing: .04em; }
 .models-prov-models { margin: 0 0 4px; padding: 0; list-style: none; }
 .models-prov-model { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 0 0 2px; }
-.models-prov-model .model-title { flex: 1; max-width: none; }
+.models-prov-model .model-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.models-prov-model .model-title { max-width: none; }
+.model-sub { color: var(--island-muted); font: 400 var(--fs-caption)/1.2 var(--font-ui); }
 .models-prov-chip { flex: none; min-height: 24px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
 .models-local-label { margin: 10px 0 4px; color: var(--island-muted); font: 600 var(--fs-caption)/1.3 var(--font-ui); text-transform: uppercase; letter-spacing: .04em; }
 

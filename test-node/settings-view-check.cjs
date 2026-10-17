@@ -1042,6 +1042,32 @@ test('#414 modelsTabView: one group per engine provider, connected ones with the
   assert.ok(!JSON.stringify(v).includes('"x"'), 'a model of an unknown provider never leaks in');
 });
 
+test('T7.2 modelsTabView: «Guardado · sin probar» only where the provider\'s ONLY account is a locally saved key', () => {
+  const state = {
+    connection: 'connected',
+    providers: [
+      { id: 'anthropic', name: 'Anthropic', methods: ['api_key'], configured: false },
+      { id: 'openai', name: 'OpenAI', methods: ['oauth', 'api_key'], configured: true },
+      { id: 'both', name: 'Both', methods: ['api_key'], configured: false },
+    ],
+    accounts: [
+      { accountId: 'l1', provider: 'anthropic', local: true, configured: true },
+      { accountId: 'a1', provider: 'openai', configured: true },
+      { accountId: 'l2', provider: 'both', local: true, configured: true },
+      { accountId: 'a2', provider: 'both', configured: true },
+    ],
+    models: [
+      { provider: 'anthropic', id: 'c1', name: 'C1' }, { provider: 'openai', id: 'g1', name: 'G1' }, { provider: 'both', id: 'b1', name: 'B1' },
+    ],
+  };
+  const v = S.modelsTabView(state, {});
+  const by = id => v.groups.find(g => g.id === id);
+  assert.equal(by('anthropic').connected, true, 'a saved key lists its models');
+  assert.equal(by('anthropic').models[0].sub, 'Guardado · sin probar');
+  assert.equal(by('openai').models[0].sub, '', 'an engine account stays bare');
+  assert.equal(by('both').models[0].sub, '', 'a local key next to an engine account is not the ONLY account');
+});
+
 test('#414 modelsTabView: the chosen map arrives only from typed prefs and never marks unknown models', () => {
   const state = { connection: 'connected', providers: [{ id: 'p', name: 'P', methods: ['api_key'], configured: true }], models: [{ provider: 'p', id: 'm1', name: 'M1' }] };
   const v = S.modelsTabView(state, { p: ['other', 'm1'] });

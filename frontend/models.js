@@ -110,7 +110,10 @@
         if (m.chosen) putIcon(b, 'check');
         b.addEventListener('click', () => toggleModel(g.id, m.id));
         li.append(b);
-        li.append(el('span', 'model-title', m.name));
+        const titles = el('span', 'model-titles');
+        titles.append(el('span', 'model-title', m.name));
+        if (m.sub) titles.append(el('span', 'model-sub', m.sub));
+        li.append(titles);
         const prov = chipNode({ icon: '', text: g.name, label: `${m.name} de ${g.name}` });
         prov.className = 'chip models-prov-chip';
         li.append(prov);
