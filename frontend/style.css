@@ -1835,6 +1835,12 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .pill-tile[data-d
 #card-wait[hidden] { display: none; }
 #card-head { padding-right: 56px; } /* only «i» is pinned to the corner now; the fold moved to the action row */
 
+/* ---- T7.3 drag-over card (design isla-chat-drag): one card replaces the body while a file is dragged over. ---- */
+#chat-drop { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 2px solid var(--island-live); border-radius: 16px; background: var(--card-bg); text-align: center; pointer-events: none; }
+#chat-drop[hidden] { display: none; }
+#chat-drop strong { font: 600 var(--fs-label)/1.2 var(--font-ui); color: var(--island-ink); }
+#chat-drop span { font-size: var(--fs-caption); color: var(--island-muted); }
+
 /* ---- #410: Conexiones compacta (TaskView #410, S1-S3). Denser ONLY inside the Conexiones tab:
    settings.js publishes the open sub-tab on the tabpanel (body.dataset.screen) and every rule below
    is scoped to it, so the other Ajustes tabs keep their look. Type steps ONE V1 token down per role

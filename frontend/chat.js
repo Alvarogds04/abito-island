@@ -507,9 +507,28 @@
   fileInput.setAttribute('aria-hidden', 'true');
   form.append(attachStrip, pickButton, fileInput); // flex `order` places them
 
+  // T7.3 (design isla-chat-atterr): a refused file is shown as a display-only error chip + ONE
+  // reason line. It is NOT an attachment: no id, never sent, never counted, cleared by the next
+  // successful attach, a removal or a send.
+  let attachError = null; // { name, reason }
+  function errorChip() {
+    const chip = document.createElement('div');
+    chip.className = 'composer-attachment composer-attachment-error';
+    chip.setAttribute('role', 'status');
+    const warn = iconNode('triangle');
+    if (warn) chip.append(warn);
+    const name = document.createElement('span');
+    name.className = 'composer-attachment-name';
+    name.textContent = attachError.name;
+    chip.append(name);
+    const reason = document.createElement('p');
+    reason.className = 'composer-attachment-reason';
+    reason.textContent = attachError.reason;
+    return [chip, reason];
+  }
   function renderAttachments() {
     attachStrip.replaceChildren();
-    attachStrip.hidden = attachments.length === 0;
+    attachStrip.hidden = attachments.length === 0 && !attachError;
     for (const a of attachments) {
       const chip = document.createElement('span');
       chip.className = 'composer-attachment';
@@ -528,15 +547,24 @@
       if (x) remove.append(x);
       remove.addEventListener('click', () => {
         attachments = attachments.filter(other => other.id !== a.id);
+        attachError = null;
         renderAttachments();
       });
       chip.append(name, size, remove);
       attachStrip.append(chip);
     }
+    if (attachError) attachStrip.append(...errorChip());
+  }
+  function refuse(name, error) {
+    const reason = (error && error.message) || 'No se pudo adjuntar el archivo.';
+    attachError = { name: String(name || '').slice(0, 80) || 'archivo', reason };
+    renderAttachments();
+    setLive(reason);
   }
 
   function addAttachment(att) {
     if (!att || typeof att.id !== 'string' || typeof att.name !== 'string') return;
+    attachError = null;
     if (attachments.some(other => other.id === att.id)) return;
     attachments.push({
       id: att.id,
@@ -554,7 +582,7 @@
     try {
       addAttachment(await call('chat_attach', { path }));
     } catch (error) {
-      setLive((error && error.message) || 'No se pudo adjuntar el archivo.');
+      refuse(path.split(/[\\/]/).pop(), error);
     }
   }
 
@@ -569,7 +597,7 @@
       body.set(bytes, header.length);
       addAttachment(await invoke('chat_attach_data', body));
     } catch (error) {
-      setLive((error && error.message) || 'No se pudo adjuntar el archivo.');
+      refuse(file.name, error);
     }
   }
 
@@ -612,7 +640,7 @@
         inFlight = false;
         pendingId = null;
         if (input.value === text) { input.value = ''; autosize(); } // accepted: the draft became a turn
-        if (attachments.length) { attachments = []; renderAttachments(); } // the files went with the turn
+        if (attachments.length || attachError) { attachments = []; attachError = null; renderAttachments(); } // the files went with the turn
         renderControls();
         action({ action: 'view' }).then(apply, () => {});
       },
@@ -685,6 +713,12 @@
       if (!Array.isArray(paths)) return;
       for (const path of paths) attachPath(path);
     }).catch(() => {});
+    // T7.3 (design isla-chat-drag): the drag-over card only while the chat view is open.
+    const drop = $('chat-drop');
+    const showDrop = on => { if (drop) drop.hidden = !on || capsule.dataset.view !== 'chat'; };
+    listen('tauri://drag-enter', () => showDrop(true)).catch(() => {});
+    listen('tauri://drag-leave', () => showDrop(false)).catch(() => {});
+    listen('tauri://drag-drop', () => showDrop(false)).catch(() => {});
     listen('specialists:state', event => applySpecialists(event && event.payload)).catch(() => {});
     listen('models:state', event => {
       const next = event && event.payload;
