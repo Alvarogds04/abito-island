@@ -253,6 +253,32 @@ test('wiring: the default green keeps the engine untouched; the four choices tin
   }
 });
 
+// Human request after preview 11 («no pon unos verdes neon»): the greens read washed-out. The two green
+// families (the default green and mint) are neon: very saturated and bright, so they stay vivid on the black island.
+function hsl(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  return { s: sat, l };
+}
+test('neon greens: the green and mint tokens are vivid, and the default green is painted by CSS over the engine', () => {
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  const tok = name => { const m = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`)); assert.ok(m, name); return m[1]; };
+  for (const fam of ['green', 'mint']) {
+    for (const n of [1, 2, 3]) {
+      const h = hsl(tok(`dot-${fam}-${n}`));
+      assert.ok(h.s >= 0.85, `--dot-${fam}-${n} saturation ${h.s.toFixed(2)} must be neon (>= 0.85)`);
+      if (n === 2) assert.ok(h.l >= 0.4 && h.l <= 0.75, `--dot-${fam}-2 (the body tone) lightness ${h.l.toFixed(2)} stays vivid, not pastel`);
+    }
+  }
+  // the default green has no data-dot-color attribute, so it needs its own base rule (lower specificity than the
+  // four attribute tints, so those still win): the engine file is not touched
+  for (const n of [1, 2, 3]) {
+    assert.match(css, new RegExp(`#island #clay radialGradient\\[id\\$="skin"\\] stop:nth-child\\(${n}\\) \\{ stop-color: var\\(--dot-green-${n}\\); \\}`), `default green stop ${n}`);
+  }
+  assert.ok(fs.readFileSync(path.join(frontend, 'clay-engine.js'), 'utf8').includes('#acdd96'), 'the engine itself is untouched');
+});
+
 test('wiring: the panel offers the palette and writes through the existing preferences command', () => {
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   const view = fs.readFileSync(path.join(frontend, 'settings-view.js'), 'utf8');

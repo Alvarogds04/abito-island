@@ -17,9 +17,9 @@
      status colours above (what is happening): they never carry a state, and the default green
      needs no override selector — it is the frozen engine's own paint, reproduced below only
      so the Ajustes swatch can show it. */
-  --dot-green-1: #acdd96;  --dot-green-2: #8fcb78;  --dot-green-3: #78b562;
+  --dot-green-1: #d8ff7a;  --dot-green-2: #8dff2b;  --dot-green-3: #3fe00f;  /* neon lime: vivid on the black island */
   --dot-blue-1: #bcd7ff;   --dot-blue-2: #8ab4f8;  --dot-blue-3: #5b86d9;
-  --dot-mint-1: #b6efdc;   --dot-mint-2: #7fd8bb;  --dot-mint-3: #4bb394;
+  --dot-mint-1: #b4ffe3;   --dot-mint-2: #2dffac;  --dot-mint-3: #00d482;  /* neon mint */
   --dot-orange-1: #ffd9a8; --dot-orange-2: #ffab5e; --dot-orange-3: #d97f2a;
   --dot-purple-1: #dcc8ff; --dot-purple-2: #b18cf0; --dot-purple-3: #8560c8;
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -111,8 +111,12 @@ body.probe-capture-bg { background: #d8c9a3; }
    engine's own SKIN gradient — a presentation attribute always loses to CSS — so the engine's bytes,
    the R6 geometry, the poses and the transparent island are untouched. The selector is scoped to
    `[id$="skin"]` on purpose: the engine's other gradient is the drop shadow, whose own paint this
-   feature must not touch. There is deliberately NO rule for the default green: without a
-   data-dot-color attribute the engine paints exactly what it always painted, byte for byte. */
+   feature must not touch. The default green has no data-dot-color attribute, so it gets this base rule
+   (same three stops, now the neon --dot-green-*); the four attribute tints below are MORE specific and win.
+   The engine file itself is not edited: its bytes stay pinned by hash. */
+#island #clay radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-green-1); }
+#island #clay radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-green-2); }
+#island #clay radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-green-3); }
 #island[data-dot-color="blue"] #clay radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--dot-blue-1); }
 #island[data-dot-color="blue"] #clay radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--dot-blue-2); }
 #island[data-dot-color="blue"] #clay radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--dot-blue-3); }
