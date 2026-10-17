@@ -623,6 +623,33 @@ impl WindowFacts for CachedWindowFacts {
 fn sync_host_visible(win: &WebviewWindow) {
     // Main thread only: the live getter is inline here, never blocking.
     HOST_VISIBLE.store(LiveWindowFacts(win).is_visible(), Ordering::SeqCst);
+    sync_scale(win);
+}
+
+/// #431: cached main-window scale factor (f64 bits; starts at 1.0, the
+/// getter's own fallback). Off-main readers such as `chathost::chat_view`
+/// read THIS, never the blocking `scale_factor()` getter, which posts to the
+/// event loop and waits with no timeout (same hazard as R2).
+static SCALE_BITS: AtomicU64 = AtomicU64::new(0x3FF0_0000_0000_0000);
+
+/// Store a scale reading; a non-finite or non-positive value never replaces
+/// a good one.
+fn store_scale(scale: f64) {
+    if scale.is_finite() && scale > 0.0 {
+        SCALE_BITS.store(scale.to_bits(), Ordering::SeqCst);
+    }
+}
+
+/// The cached scale factor: safe from any thread, never blocks.
+pub(crate) fn cached_scale() -> f64 {
+    f64::from_bits(SCALE_BITS.load(Ordering::SeqCst))
+}
+
+/// Main-thread only: read the live getter once and refresh the scale cache.
+fn sync_scale(win: &WebviewWindow) {
+    if let Ok(scale) = win.scale_factor() {
+        store_scale(scale);
+    }
 }
 
 /// Pure core of `host_ctx`: the window facts arrive through the seam so a
@@ -1913,6 +1940,11 @@ fn main() {
                 }
             }
             if window.label() == "main" {
+                // #431: window events run on the main thread, so the live
+                // scale getter is inline here; keep the off-main cache fresh.
+                if let tauri::WindowEvent::ScaleFactorChanged { scale_factor, .. } = event {
+                    store_scale(*scale_factor);
+                }
                 if let tauri::WindowEvent::Resized(size) = event {
                     #[cfg(any(debug_assertions, feature = "probe"))]
                     probe::mark(format!("tao Resized {}x{}", size.width, size.height));
@@ -1963,6 +1995,7 @@ fn main() {
             settingshost::start(&handle);
             let wa = workarea::current(&win);
             let scale = win.scale_factor().unwrap_or(1.0);
+            store_scale(scale); // #431: seed the off-main scale cache
             let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
             // Origin: the position the human last dragged the island to, when it
             // still fits the current work area; otherwise the M1a top-centre default.
@@ -2196,6 +2229,33 @@ mod host_ctx_tests {
             "a lock holder must never call the blocking getter"
         );
         worker.join().expect("cached worker thread");
+    }
+
+    /// #431: `chathost::chat_view` runs off the main thread (from `chat_action`
+    /// while lane locks are taken), so it must read the CACHED scale, never the
+    /// blocking `scale_factor()` getter. Source guard plus cache semantics.
+    #[test]
+    fn chat_view_reads_the_cached_scale_never_the_blocking_getter() {
+        let src = include_str!("chathost.rs");
+        let body = &src[src.find("pub fn chat_view").expect("chat_view exists")..];
+        let body = &body[..body.find("\n}\n").expect("chat_view ends")];
+        assert!(!body.contains("scale_factor()"), "chat_view must not call the blocking getter");
+        assert!(body.contains("cached_scale()"), "chat_view reads the main-thread scale cache");
+    }
+
+    #[test]
+    fn the_cached_scale_defaults_to_one_and_tracks_finite_positive_updates() {
+        store_scale(1.0);
+        assert_eq!(cached_scale(), 1.0);
+        store_scale(2.0);
+        assert_eq!(cached_scale(), 2.0);
+        // a nonsensical reading never replaces a good one
+        store_scale(f64::NAN);
+        assert_eq!(cached_scale(), 2.0);
+        store_scale(0.0);
+        assert_eq!(cached_scale(), 2.0);
+        store_scale(1.0);
+        assert_eq!(cached_scale(), 1.0);
     }
 
     /// The cached visible fact tracks every show/hide: it starts `true` (the

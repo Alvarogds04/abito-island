@@ -69,7 +69,9 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     v["view"] = json!(if chat_open { "chat" } else { "overview" });
     // #309: the column's height follows the work area, so Rust computes it from the current one
     let area = *state.work_area.lock().expect("work area lock");
-    let scale = main_window(app).scale_factor().unwrap_or(1.0);
+    // #431: off-main caller (chat_action, lane locks taken): read the
+    // main-thread scale cache, never the blocking window scale getter.
+    let scale = crate::cached_scale();
     let settings_open = state.core.lock().expect("core lock").settings;
     let (cw, ch) = if settings_open {
         geometry::settings_visible(area.w, area.h, scale)
