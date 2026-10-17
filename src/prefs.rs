@@ -33,6 +33,20 @@ const CUSTOM_BLOBS: &str = "custom_blobs";
 pub const MAX_ISLAND_AGENTS: usize = 3;
 const ISLAND_AGENTS: &str = "island_agents";
 
+/// #442 T7.4: the principal's «Qué hace». Same bounds as a specialist's instructions
+/// (1..=2000 chars, `\n`/`\t` allowed, every other control refused). DECLARATIVE ONLY: like
+/// the specialists' instructions of #375 nothing applies it yet. Absent = none; an empty
+/// command clears it and no empty key is ever written.
+pub const MAX_ABITO_INSTRUCTIONS_CHARS: usize = 2000;
+const ABITO_INSTRUCTIONS: &str = "abito_instructions";
+
+fn clean_instructions(text: &str) -> Result<Option<String>, CommandError> {
+    if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err(CommandError); }
+    let t = text.trim();
+    if t.chars().count() > MAX_ABITO_INSTRUCTIONS_CHARS { return Err(CommandError); }
+    Ok((!t.is_empty()).then(|| t.to_owned()))
+}
+
 fn valid_agent_id(id: &str) -> bool {
     let b = id.as_bytes();
     !b.is_empty() && b.len() <= 32
@@ -249,6 +263,8 @@ pub settings_window: Option<bool>,
     /// #442 T7.4: ordered ids (at most three) of the specialists on the island. `None` means
     /// the default and is never written, so an untouched file keeps its bytes.
     pub island_agents: Option<Vec<String>>,
+    /// #442 T7.4: the principal's declarative «Qué hace». `None` is the default, never written.
+    pub abito_instructions: Option<String>,
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -448,6 +464,13 @@ impl Prefs {
             None => Value::Null,
         }
     }
+    /// #442 T7.4: the WebView projection of the principal's «Qué hace»; absent is null.
+    pub fn abito_instructions_view(&self) -> Value {
+        match &self.abito_instructions {
+            Some(text) => json!(text),
+            None => Value::Null,
+        }
+    }
     /// The effective mode: an absent or unreadable field is `system`.
     pub fn theme(&self) -> Theme { self.theme.unwrap_or_default() }
 
@@ -496,6 +519,8 @@ impl Prefs {
             settings_window: v.get("settings_window").and_then(Value::as_bool),
             settings_window_size: settings_window_size_from(v.get(SETTINGS_WINDOW_SIZE)),
             island_agents: island_agents_from(v.get(ISLAND_AGENTS)),
+            abito_instructions: v.get(ABITO_INSTRUCTIONS).and_then(Value::as_str)
+                .and_then(|text| clean_instructions(text).ok()).flatten(),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -555,6 +580,9 @@ impl Prefs {
         }
         if let Some(ids) = &self.island_agents {
             v[ISLAND_AGENTS] = json!(ids);
+        }
+        if let Some(text) = &self.abito_instructions {
+            v[ABITO_INSTRUCTIONS] = json!(text);
         }
         v.to_string()
     }
@@ -630,6 +658,8 @@ pub enum Command {
     /// #442 T7.4: a deleted specialist leaves the island order. Rust-internal (the specialists
     /// host sends it after a delete): deliberately NOT produced by [`parse_command`].
     PruneIslandAgent(String),
+    /// #442 T7.4: the principal's «Qué hace»; an empty (or blank) text clears it.
+    SetAbitoInstructions(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -804,6 +834,12 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             let order = ordered_strings(map.get("order"))?;
             if !valid_island_order(&order) { return Err(CommandError); }
             Ok(Command::SetIslandAgents(order))
+        }
+        // #442 T7.4: exactly action + text (a string; the bounds gate runs here and in apply).
+        Some("set_abito_instructions") if map.len() == 2 => {
+            let text = map.get("text").and_then(Value::as_str).ok_or(CommandError)?;
+            clean_instructions(text)?;
+            Ok(Command::SetAbitoInstructions(text.to_owned()))
         }
         _ => Err(CommandError),
     }
@@ -986,6 +1022,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             if !valid_island_order(order) { return Err(CommandError); }
             next.island_agents = Some(order.clone());
         }
+        Command::SetAbitoInstructions(text) => next.abito_instructions = clean_instructions(text)?,
         Command::PruneIslandAgent(id) => {
             if let Some(ids) = next.island_agents.as_mut() { ids.retain(|x| x != id); }
         }

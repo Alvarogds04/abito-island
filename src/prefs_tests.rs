@@ -1152,11 +1152,12 @@ mod chosen_models {
             settings_window: None,
             settings_window_size: Some((960, 640)),
             island_agents: Some(vec!["esp-a1".into(), "esp-b2".into()]),
+            abito_instructions: Some("Ordena mis notas.".into()),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size", "island_agents"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size", "island_agents", "abito_instructions"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
@@ -1875,4 +1876,65 @@ fn island_agents_projection_is_null_when_absent_and_the_stored_order_otherwise()
     assert_eq!(Prefs::default().island_agents_view(), Value::Null);
     let p = Prefs { island_agents: Some(vec!["esp-a".into()]), ..Prefs::default() };
     assert_eq!(p.island_agents_view(), json!(["esp-a"]));
+}
+
+// ---- #442 T7.4: abito_instructions — the principal's «Qué hace» (declarative, not applied yet) -----------
+
+fn instructions(text: &str) -> Command {
+    parse_command(&json!({"action":"set_abito_instructions","text":text})).unwrap()
+}
+
+#[test]
+fn abito_instructions_is_absent_by_default_and_an_untouched_file_keeps_its_bytes() {
+    assert_eq!(Prefs::default().abito_instructions, None);
+    let p = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#));
+    assert_eq!(p.abito_instructions, None);
+    assert!(!p.to_text().contains("abito_instructions"));
+    assert_eq!(Prefs::default().abito_instructions_view(), Value::Null);
+}
+
+#[test]
+fn set_abito_instructions_is_an_exact_closed_command_with_the_specialist_text_bounds() {
+    assert!(parse_command(&json!({"action":"set_abito_instructions","text":"Ordena mis notas.\nSin prisa.\tgracias"})).is_ok(), "line breaks and tabs are normal text");
+    assert!(parse_command(&json!({"action":"set_abito_instructions","text":""})).is_ok(), "empty clears");
+    assert!(parse_command(&json!({"action":"set_abito_instructions","text":"x".repeat(2000)})).is_ok());
+    for bad in [
+        json!({"action":"set_abito_instructions"}),
+        json!({"action":"set_abito_instructions","text":7}),
+        json!({"action":"set_abito_instructions","text":null}),
+        json!({"action":"set_abito_instructions","text":"x".repeat(2001)}),
+        json!({"action":"set_abito_instructions","text":"a\u{0007}b"}),
+        json!({"action":"set_abito_instructions","text":"a\u{0085}b"}),
+        json!({"action":"set_abito_instructions","text":"a\u{007f}b"}),
+        json!({"action":"set_abito_instructions","text":"ok","extra":1}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}");
+    }
+}
+
+#[test]
+fn set_abito_instructions_stores_trimmed_text_round_trips_and_clears_by_removing_the_key() {
+    let start = Prefs { sound: true, ..Prefs::default() };
+    let next = update(&start, &instructions("  Ordena mis notas.  "), |_| true).unwrap();
+    assert_eq!(next.abito_instructions.as_deref(), Some("Ordena mis notas."));
+    assert_eq!(Prefs::from_text(Some(&next.to_text())), next);
+    assert_eq!(next.abito_instructions_view(), json!("Ordena mis notas."));
+    let cleared = update(&next, &instructions("   "), |_| true).unwrap();
+    assert_eq!(cleared.abito_instructions, None);
+    assert!(!cleared.to_text().contains("abito_instructions"), "no empty key is ever written");
+    // the same text skips the disk, a failed write installs nothing, direct callers hit the same gate
+    assert_eq!(update(&next, &instructions("Ordena mis notas."), |_| panic!("idempotent")).unwrap(), next);
+    assert_eq!(update(&next, &instructions("otra"), |_| false), Err(CommandError));
+    assert_eq!(apply(&next, &Command::SetAbitoInstructions("x".repeat(2001))), Err(CommandError));
+    assert_eq!(apply(&next, &Command::SetAbitoInstructions("a\u{0007}".into())), Err(CommandError));
+}
+
+#[test]
+fn hostile_stored_abito_instructions_read_as_absent() {
+    for raw in [r#"{"v":1,"abito_instructions":7}"#, r#"{"v":1,"abito_instructions":null}"#, r#"{"v":1,"abito_instructions":"   "}"#,
+                r#"{"v":1,"abito_instructions":"a\u0007b"}"#] {
+        assert_eq!(Prefs::from_text(Some(raw)).abito_instructions, None, "{raw}");
+    }
+    let long = format!(r#"{{"v":1,"abito_instructions":"{}"}}"#, "x".repeat(2001));
+    assert_eq!(Prefs::from_text(Some(&long)).abito_instructions, None);
 }

@@ -95,6 +95,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "autoCloseSeconds": p.auto_close_seconds(), "openOnHover": p.open_on_hover(),
         "customBlobs": p.custom_blobs_view(),
         "islandAgents": p.island_agents_view(),
+        "abitoInstructions": p.abito_instructions_view(),
         "monitor": p.monitor,
         "settingsWindow": p.settings_window_on()})
 }
