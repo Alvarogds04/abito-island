@@ -28,6 +28,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     set textContent(text) { this._text = String(text); this.children = []; }
     get textContent() { return this._text + this.children.map(x => x.textContent).join(''); }
     append(...items) { for (const item of items) { const n = typeof item === 'string' ? Object.assign(new Element('#text'), { textContent: item }) : item; this.children.push(n); n.parentNode = this; } }
+    appendChild(item) { this.append(item); return item; }
     replaceChildren(...items) { this.textContent = ''; this.append(...items); }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
@@ -50,7 +51,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
   }
   const get = id => nodes.get(id) || root.querySelector(`#${id}`);
   doc = { activeElement: null, body: root, documentElement: new Element(), getElementById: get,
-    createElement: tag => new Element(tag), importNode: node => node, createElementNS: (_ns, tag) => new Element(tag),
+    createElement: tag => Object.assign(new Element(tag), { ownerDocument: doc }), importNode: node => node, createElementNS: (_ns, tag) => Object.assign(new Element(tag), { ownerDocument: doc }),
     addEventListener(type, fn) { (events[type] ||= []).push(fn); },
     dispatchEvent(event) { for (const fn of events[event.type] || []) fn(event); }, querySelectorAll: () => [] };
   const backend = { specs: { v: 1, active: null, persisted: true, load_error: false, specialists: specs.map(x => ({ space: null, spaces: [], permissions: ['read'], model: null, ...x })) },
@@ -108,16 +109,17 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     } },
     event: { listen(name, fn) { (native[name] ||= []).push(fn); return Promise.resolve(() => {}); } },
   } };
-  const ctx = vm.createContext({ window, self: window, document: doc, navigator: { userAgent: 'Linux' },
+  const ctx = vm.createContext({ matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => 0 }, cancelAnimationFrame() {}, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
     DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } },
-    crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => fn(), setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
+    crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => { if (fn.name !== 'frame') fn(0); return 1; }, setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     Event: class { constructor(type) { this.type = type; } }, console });
   const load = file => vm.runInContext(read(file), ctx, { filename: file });
-  for (const file of ['pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js', 'specialists-view.js']) load(file);
+  for (const file of ['clay-engine.js', 'pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js', 'specialists-view.js']) load(file);
+  vm.runInContext(`const testedClays = []; const realCreate = AbitoClay.create; AbitoClay.create = (...args) => { const instance = realCreate(...args); testedClays.push(instance); return instance; };`, ctx);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
+  return { clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
 }
 
 test('S3/S4 actual shipped overview starts with main+four default choices and named states', async () => {
@@ -778,4 +780,15 @@ test('#442 an identical state push neither rebuilds the Blobs screen nor restart
   b.click('settings-tab-general'); await flush();
   b.click('settings-tab-pills'); await flush();
   assert.ok(b.get('blob-agent-grid'));
+});
+
+
+test('#442 settings uses the lexical clay engine and destroys all characters when closed', async () => {
+  const b = await settingsBoot({ specs: SPECS });
+  assert.ok(b.clayStatus().length > 0, 'the engine is lexical AbitoClay, not window.AbitoClay');
+  let destroyed = 0;
+  const instances = b.clayStatus();
+  for (const instance of instances) { const destroy = instance.destroy; instance.destroy = () => { destroyed++; destroy(); }; }
+  b.click('settings-close'); await flush();
+  assert.equal(destroyed, instances.length, 'all mounted real characters stop on close');
 });

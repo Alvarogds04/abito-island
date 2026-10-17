@@ -288,6 +288,11 @@
     $('settings-close').focus();
   }
   function close(byKeyboard) {
+    // Stop every mounted character, including in the dedicated Settings window.
+    if (blobsMounted && window.AbitoPillSettings) {
+      window.AbitoPillSettings.dispose(blobsHost);
+      blobsMounted = false;
+    }
     // #366 F093: in the own window the panel close IS the window close: the ONE closed
     // command asks Rust (the island's size and focus are never this window's business).
     if (WINDOW_MODE) {
@@ -1100,7 +1105,7 @@
         const section = group('pills', 'Blobs', '');
         section.append(blobsHost);
         pills.render(blobsHost, { prefs, store: ownerState().store, listing: ownerState().listing }, { saving: pillSaving, error: pillError, putIcon,
-          makeClay: (svg, opts) => (window.AbitoClay ? window.AbitoClay.create(svg, opts) : null),
+          makeClay: (svg, opts) => (typeof AbitoClay !== 'undefined' ? AbitoClay.create(svg, opts) : null),
           onIntent: runIntent });
       } else if (blobsMounted) pills.dispose(blobsHost);
       blobsMounted = screen === 'pills';
