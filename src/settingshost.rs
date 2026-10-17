@@ -647,26 +647,30 @@ mod settings_view_tests {
             r#"{"v":1,"active":null,"specialists":[{"id":"esp-known","name":"Notes","instructions":"Sort notes","model":null}]}"#));
         assert_eq!(specialists.items.len(), 1);
         let current = Prefs::default();
-        let mut disk_bytes = current.to_text().into_bytes();
-        let before = disk_bytes.clone();
+        let before = b"{\n  \"v\": 1, \"sound\": false\n}\n".to_vec();
+        let path = std::env::temp_dir().join(format!("abito-membership-{}-{}.json", std::process::id(), super::now_ms()));
+        std::fs::write(&path, &before).unwrap();
         let mut writes = 0;
         let mut dispatch = |payload: Value| -> Result<Prefs, BridgeError> {
             let command = prefs::parse_command(&payload).map_err(|_| err("invalid_schema"))?;
             check_island_membership(&command, &specialists)?;
             prefs::update(&current, &command, |next| {
                 writes += 1;
-                disk_bytes = next.to_text().into_bytes();
-                true
+                std::fs::write(&path, next.to_text()).is_ok()
             }).map_err(|_| err("save_failed"))
         };
         assert!(dispatch(json!({"action":"set_island_agents","order":["esp-missing"]})).is_err());
         assert!(dispatch(json!({"action":"set_island_agents","order":["esp-known","esp-missing"]})).is_err());
         drop(dispatch);
         assert_eq!(writes, 0);
-        assert_eq!(disk_bytes, before, "refused input never reaches the persistence callback");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "refusal preserves actual file bytes including whitespace");
         let command = prefs::parse_command(&json!({"action":"set_island_agents","order":["esp-known"]})).unwrap();
         assert!(check_island_membership(&command, &specialists).is_ok());
-        assert_eq!(prefs::apply(&current, &command).unwrap().island_agents, Some(vec!["esp-known".into()]));
+        let saved = prefs::update(&current, &command, |next| std::fs::write(&path, next.to_text()).is_ok()).unwrap();
+        assert_eq!(saved.island_agents, Some(vec!["esp-known".into()]));
+        let persisted = Prefs::from_text(Some(&std::fs::read_to_string(&path).unwrap()));
+        assert_eq!(persisted.island_agents, saved.island_agents);
+        std::fs::remove_file(path).unwrap();
         assert!(check_island_membership(&Command::SetIslandAgents(vec![]), &specialists).is_ok());
     }
 
