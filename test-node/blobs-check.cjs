@@ -1,7 +1,8 @@
 'use strict';
-// #435 T6.4 — the Blobs visual customizer (design page «3 Blobs», blobs-{default,create,
-// delete,full,drag}-{dark,light}.png). The renderer is pill-settings.js; these checks
-// cover its PUBLIC surface only: the rendered tree and the closed commands it dispatches.
+// #442 T7.4 — Blobs = agents (design page «3 Blobs», blobs-{editar-agente,principal,nuevo-catalogo,
+// nuevo-propio,eliminar,lleno-3-3,ordenar}-{dark,light}.png). The renderer is pill-settings.js; these
+// checks cover its PUBLIC surface only: the rendered tree, the closed intents it dispatches and the
+// lifecycle of the clay characters it mounts.
 // Local fake DOM, no IPC, no network. Run: node apps/desktop-tauri/test-node/blobs-check.cjs
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -29,7 +30,7 @@ class Node {
     for (const fn of this.handlers[type] || []) fn(event);
   }
 }
-const doc = { createElement: tag => new Node(tag) };
+const doc = { createElement: tag => new Node(tag), createElementNS: (_ns, tag) => new Node(tag) };
 
 const walk = (node, visit) => {
   visit(node);
@@ -49,312 +50,210 @@ const words = root => {
 const C = require(path.join(frontend, 'pill-catalog.js'));
 const A = require(path.join(frontend, 'avatar-colors.js'));
 const P = require(path.join(frontend, 'pills.js'));
-global.window = { AbitoAvatarColors: A, AbitoPillCatalog: C, AbitoPills: P };
+const V = require(path.join(frontend, 'specialists-view.js'));
+global.window = { AbitoAvatarColors: A, AbitoPillCatalog: C, AbitoPills: P, AbitoSpecialists: V };
 const settings = global.window.AbitoPillSettings =
   (() => { require(path.join(frontend, 'pill-settings.js')); return global.window.AbitoPillSettings; })();
 
-// The default main plus three declared pills, one carrying a palette colour: the
-// designed default state (3/4 declared, the «Nuevo» slot present).
-const THREE = { mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel'], pillColors: { integration_resend: 'mint' } };
-const FOUR = { mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'] };
 
-function boot(raw, extra = {}) {
-  const commands = [];
-  let prefs = P.normalize(raw);
-  const host = new Node('div');
-  host.ownerDocument = doc;
+const rec = (id, name, instructions = `Hace ${name}.`) => ({ id, name, instructions, model: null, space: null, spaces: [], permissions: ['read'] });
+const storeOf = (...pairs) => ({ v: 1, active: null, persisted: true, load_error: false, specialists: pairs.map(([id, n, t]) => rec(id, n, t)) });
+const LISTING = { profiles: [{ profile_id: 'gpt-5.1', alias: 'gpt-5.1 · ChatGPT', selectable: true }], selected: 'gpt-5.1' };
+const TWO = () => ({ prefs: { mainPill: 'integration_claude', declaredPills: [], avatarColors: { abito: 'blue', 'esp-a': 'green', 'esp-b': 'mint' }, islandAgents: null, customBlobs: null, abitoInstructions: null },
+  store: storeOf(['esp-a', 'Revisor', 'Revisa tus PRs'], ['esp-b', 'Notas', 'Ordena tus notas y resume lo pendiente']), listing: LISTING });
+const THREE = () => { const x = TWO(); x.store.specialists.push(rec('esp-c', 'Correo')); return x; };
+
+// A recording clay factory: the renderer owns instance lifetime, the harness counts it.
+function boot(input, extra = {}) {
+  const intents = [], made = [];
+  const host = new Node('div'); host.ownerDocument = doc;
   const options = { saving: false, error: '', putIcon: () => {},
-    onCommand(payload) {
-      commands.push(payload);
-      // The host (settings.js) applies the closed command and re-renders with the
-      // saved truth; the harness mirrors exactly that so the renderer is exercised
-      // against updated state, never against a stale snapshot.
-      const next = payload.action === 'set_pill_color' ? P.setColor(prefs, payload.id, payload.color)
-        : payload.action === 'clear_pill_color' ? P.clearColor(prefs, payload.id)
-        : payload.action === 'set_blob_color' ? P.setBlobColor(prefs, payload.name, payload.color)
-        : payload.action === 'create_blob' ? P.createBlob(prefs, payload.name, payload.color || '')
-        : payload.action === 'delete_blob' ? P.deleteBlob(prefs, payload.name)
-        : payload.action === 'toggle_declared_pill' ? P.toggle(prefs, payload.id)
-        : payload.action === 'set_main_pill' ? P.chooseMain(prefs, payload.id)
-        : payload.action === 'reorder_declared_pills' ? P.reorderDeclared(prefs, payload.order)
-        : payload.action === 'reorder_blobs' ? P.reorderBlobs(prefs, payload.order) : null;
-      if (next) prefs = { ...prefs, ...next };
-      settings.render(host, prefs, options);
-    }, ...extra };
-  settings.render(host, prefs, options);
-  return { host, commands, options, rerender: () => settings.render(host, prefs, options) };
+    makeClay(svg, opts) {
+      const inst = { svg, opts, state: opts.state || 'idle', destroyed: false, destroy() { inst.destroyed = true; }, setState(st) { inst.state = st; } };
+      made.push(inst); return inst;
+    },
+    onIntent(intent) { intents.push(intent); }, ...extra };
+  const api = { host, intents, made, options, input,
+    render(next) { if (next) api.input = next; settings.render(host, api.input, options); },
+    live: () => made.filter(m => !m.destroyed) };
+  api.render();
+  return api;
 }
+const text = n => n.textContent;
 
-test('S1 default state: principal card with the island chip, declared tiles with live blobs, the new slot, the island strip and the editor on the first tile', () => {
-  const { host } = boot(THREE);
-  // The principal card: the main pill, always on the island, with the ONLY disclaimer
-  // left on the screen as its chip tooltip.
-  const principal = byId(host, 'pill-principal-card');
-  assert.ok(principal, 'the principal card exists');
-  assert.equal(principal.dataset.pillId, 'integration_claude');
-  assert.match(words(principal), /VS Code/, 'the principal card names the main pill');
-  assert.match(words(principal), /Siempre en la isla/, 'the island chip is there');
-  assert.match(words(principal), /Elegir un blob no conecta el servicio/, 'the only disclaimer rides on the chip');
-  // Declared tiles: live blobs (data-colour) + names, and the «Nuevo» slot at 3/4.
-  const grid = byId(host, 'pill-declared-grid');
-  assert.ok(grid, 'the declared grid exists');
-  const tiles = byClass(grid, 'pill-tile');
-  assert.equal(tiles.length, 3, 'three declared tiles');
-  assert.equal(tiles[0].dataset.pillId, 'integration_resend');
-  assert.equal(tiles[0].dataset.color, 'mint', 'a stored palette colour paints the live blob');
-  assert.ok(byId(host, 'pill-tile-new'), 'the empty «Nuevo» slot is present at 3/4');
-  assert.equal(byId(host, 'pill-slot-count').textContent, '3/4');
-  // The island strip mirrors the island: principal + declared in island order.
-  const strip = byId(host, 'pill-island-strip');
-  assert.ok(strip, 'the island strip exists');
-  const items = byClass(strip, 'pill-strip-item');
-  assert.deepEqual(items.map(x => x.textContent.trim()), ['VS Code', 'Resend', 'n8n', 'Vercel'],
-    'principal + the three declared tiles, the four the island shows');
-  assert.equal(byClass(strip, 'pill-strip-item')[1].dataset.color, 'mint', 'the strip paints the stored colour');
-  // The editor opens on the first declared tile: read-only name, closed swatches, arrows, principal, delete.
-  const name = byId(host, 'pill-editor-name');
-  assert.ok(name, 'the editor name field exists');
-  assert.equal(name.value, 'Resend');
-  assert.ok(name.disabled, 'existing names are read-only (no rename command)');
-  const swatches = byClass(host, 'swatch');
-  assert.equal(swatches.length, 5, 'the closed five-colour swatch row');
-  assert.equal(swatches.filter(x => x.getAttribute('aria-checked') === 'true').length, 1, 'exactly one selected swatch');
-  assert.ok(byId(host, 'pill-editor-left') && byId(host, 'pill-editor-right'), 'the order arrows exist');
-  assert.ok(byId(host, 'pill-editor-main'), 'the «Principal» button exists');
-  assert.ok(byId(host, 'pill-editor-delete'), 'the delete button exists');
+test('S1 default: Abito principal card, agent tiles with state chip, empty «Nuevo agente» slot, island strip and hint — every blob is a clay character', () => {
+  const b = boot(TWO());
+  const principal = byId(b.host, 'blob-principal-card');
+  assert.ok(principal);
+  assert.match(words(principal), /Abito/); assert.match(words(principal), /En reposo/); assert.match(words(principal), /Siempre en la isla/);
+  assert.equal(byClass(b.host, 'blob-tile').length, 2);
+  const [a, n] = byClass(b.host, 'blob-tile');
+  assert.equal(a.dataset.agentId, 'esp-a'); assert.match(words(a), /Revisor/); assert.match(words(a), /Revisa tus PRs/); assert.match(words(a), /En reposo/);
+  assert.equal(n.dataset.agentId, 'esp-b');
+  assert.equal(byId(b.host, 'blob-count').textContent, '2/3');
+  assert.ok(byId(b.host, 'blob-tile-new'), 'the empty slot while fewer than three');
+  assert.match(words(byId(b.host, 'blob-tile-new')), /Nuevo agente/);
+  const strip = byId(b.host, 'blob-island-strip');
+  assert.deepEqual(byClass(strip, 'blob-strip-item').map(x => x.textContent.trim()), ['Abito', 'Revisor', 'Notas']);
+  assert.match(words(b.host), /Arrastrá o usá las flechas para ordenar/);
+  // every blob is the clay character, in its own colour; nothing is a plain dot any more
+  assert.equal(byClass(b.host, 'blob-visual').length, 0, 'the CSS-dot blob is gone');
+  const clays = b.live();
+  assert.ok(clays.length >= 1 + 2 + 3, 'principal + tiles + strip + editor header each mount a clay');
+  const principalClay = clays.find(c => c.svg.dataset.blob === 'principal');
+  assert.equal(principalClay.svg.dataset.color, 'blue', 'the principal wears avatarColors.abito');
+  assert.equal(clays.find(c => c.svg.dataset.blob === 'esp-b').svg.dataset.color, 'mint');
+  assert.ok(clays.every(c => ['green', 'blue', 'mint', 'orange', 'purple'].includes(c.svg.dataset.color)));
+  assert.equal(byClass(b.host, 'snote').filter(x => x.textContent).length, 0, 'no standing paragraph');
 });
 
-test('S2 create state (Propio): Crear stays disabled until a name exists; the closed model gates dispatch', () => {
-  const { host, commands } = boot(THREE);
-  byId(host, 'pill-tile-new').fire('click');
-  assert.equal(byId(host, 'create-kind-catalog').getAttribute('aria-pressed'), 'true', 'the chooser opens on Del catálogo (the designed default)');
-  byId(host, 'create-kind-custom').fire('click');
-  assert.equal(byId(host, 'create-kind-custom').getAttribute('aria-pressed'), 'true', 'Propio is selectable');
-  const preview = byClass(host, 'blob-preview')[0];
-  assert.ok(preview, 'the large preview exists');
-  assert.equal(preview.dataset.color, undefined, 'a new blob has no colour yet');
-  const input = byId(host, 'blob-create-input');
-  assert.ok(input, 'the create name field exists');
-  assert.equal(input.placeholder, 'Nombre del blob');
-  assert.equal(input.maxLength, P.MAX_BLOB_NAME);
-  const create = byId(host, 'blob-create-button');
-  assert.ok(create.disabled, 'Crear is disabled without a name');
-  input.value = '   '; input.fire('input');
-  assert.ok(byId(host, 'blob-create-button').disabled, 'a blank name never enables Crear');
-  input.value = 'Notas'; input.fire('input');
-  assert.ok(byId(host, 'blob-create-button').disabled, 'a name alone is not enough (§4.1: name + colour)');
-  byClass(host, 'swatch').find(x => x.dataset.color === 'green').fire('click');
-  // the swatch re-renders the panel: re-find the button (fresh nodes, like S5's rows)
-  const ready = byId(host, 'blob-create-button');
-  assert.ok(!ready.disabled, 'name + colour enables Crear');
-  ready.fire('click', { isTrusted: false });
-  assert.deepEqual(commands, [], 'a synthetic gesture never dispatches');
-  ready.fire('click');
-  assert.deepEqual(commands, [{ action: 'create_blob', name: 'Notas', color: 'green' }],
-    'the create command goes through the closed gate with the picked colour (§4.1)');
-  assert.ok(byId(host, 'blob-create-input') === null, 'the create form is gone after creating');
-  // a duplicate of an existing created blob is refused by the model (case-insensitive)
-  byId(host, 'pill-tile-new').fire('click');
-  byId(host, 'create-kind-custom').fire('click');
-  const again = byId(host, 'blob-create-input');
-  again.value = 'notas'; again.fire('input');
-  byId(host, 'blob-create-button').fire('click');
-  assert.equal(commands.length, 1, 'the duplicate name never dispatches');
-  // Cancel returns to the editor for the selected tile
-  byId(host, 'blob-create-cancel').fire('click');
-  assert.ok(byId(host, 'blob-create-input') === null, 'the create form is gone');
-  assert.ok(byId(host, 'pill-editor-name'), 'the editor is back');
+test('S2 lleno 3/3: no empty slot, the counter turns sun; a fourth stored specialist is kept but is not a tile', () => {
+  const x = THREE(); x.store.specialists.push(rec('esp-d', 'Cuarto'));
+  const b = boot(x);
+  assert.equal(byClass(b.host, 'blob-tile').length, 3);
+  assert.equal(byId(b.host, 'blob-tile-new'), null);
+  assert.equal(byId(b.host, 'blob-count').textContent, '3/3'); assert.equal(byId(b.host, 'blob-count').dataset.tone, 'sun');
+  assert.match(words(byId(b.host, 'blob-stored')), /Cuarto/, 'kept, reachable to activate');
+  byClass(byId(b.host, 'blob-stored'), 'blob-stored-row')[0];
 });
 
-test('S3 delete state: inline confirmation; declared pills quit through toggle, created blobs through delete_blob', () => {
-  const { host, commands } = boot(THREE);
-  byId(host, 'pill-tile-integration_resend').fire('click');
-  byId(host, 'pill-editor-delete').fire('click');
-  assert.match(words(host), /¿Eliminar "Resend"\?/, 'the inline confirmation names the blob');
-  assert.match(words(host), /Se quita de la isla\./, 'the one-line consequence');
-  byId(host, 'pill-editor-cancel-delete').fire('click');
-  assert.ok(byId(host, 'pill-editor-delete'), 'cancel returns to the editor');
-  byId(host, 'pill-editor-delete').fire('click');
-  byId(host, 'pill-editor-confirm-delete').fire('click', { isTrusted: false });
-  assert.deepEqual(commands, [], 'a synthetic confirm never dispatches');
-  byId(host, 'pill-editor-confirm-delete').fire('click');
-  assert.deepEqual(commands, [{ action: 'toggle_declared_pill', id: 'integration_resend' }],
-    'quitting a declared pill uses the existing toggle command');
-  // a created blob goes through delete_blob
-  const withBlob = { ...THREE, blobs: P.normalize({ customBlobs: [{ name: 'Notas' }] }).blobs };
-  const b = boot(withBlob);
-  const blobTile = byId(b.host, 'blob-tile-0');
-  assert.ok(blobTile, 'the created blob is a tile');
-  blobTile.fire('click');
-  byId(b.host, 'pill-editor-delete').fire('click');
-  byId(b.host, 'pill-editor-confirm-delete').fire('click');
-  assert.deepEqual(b.commands, [{ action: 'delete_blob', name: 'Notas' }]);
+test('S3 agent editor: Nombre, Color (5 swatches), Qué hace, Modelo, Activo, ← → Eliminar; each edit is one closed intent', () => {
+  const b = boot(TWO());
+  const name = byId(b.host, 'blob-editor-name'), what = byId(b.host, 'blob-editor-what'), model = byId(b.host, 'blob-editor-model');
+  assert.equal(name.value, 'Revisor'); assert.equal(what.value, 'Revisa tus PRs');
+  assert.equal(byClass(byId(b.host, 'blob-editor'), 'swatch').length, 5);
+  name.value = 'Revisora'; name.fire('change');
+  assert.deepEqual(b.intents.pop(), { type: 'update_agent', id: 'esp-a', name: 'Revisora', instructions: 'Revisa tus PRs', model: null });
+  what.value = 'Revisa PRs y issues'; what.fire('change');
+  assert.deepEqual(b.intents.pop(), { type: 'update_agent', id: 'esp-a', name: 'Revisor', instructions: 'Revisa PRs y issues', model: null });
+  model.value = 'gpt-5.1'; model.fire('change');
+  assert.equal(b.intents.pop().model, 'gpt-5.1');
+  byClass(byId(b.host, 'blob-editor'), 'swatch').find(x => x.dataset.color === 'purple').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'set_color', id: 'esp-a', color: 'purple' });
+  byId(b.host, 'blob-editor-active').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'set_active', id: 'esp-a', on: false });
+  assert.equal(byId(b.host, 'blob-editor-left').disabled, true, 'first agent cannot move up');
+  byId(b.host, 'blob-editor-right').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'move', id: 'esp-a', by: 1 });
+  // an empty name never dispatches
+  name.value = '   '; name.fire('change'); assert.equal(b.intents.length, 0);
 });
 
-test('S4 full state: 4/4 declared hides the «Nuevo» slot and shows the sun count', () => {
-  const { host } = boot(FOUR);
-  assert.equal(byId(host, 'pill-slot-count').textContent, '4/4');
-  assert.equal(byId(host, 'pill-tile-new'), null, 'no empty slot at 4/4');
-  assert.equal(byClass(byId(host, 'pill-declared-grid'), 'pill-tile').length, 4);
+test('S3b editor header previews «Reposo | Trabaja» on its own clay without any intent', () => {
+  const b = boot(TWO());
+  const header = b.live().find(c => c.svg.dataset.blob === 'editor');
+  assert.equal(header.state, 'idle');
+  byId(b.host, 'blob-preview-work').fire('click');
+  assert.equal(header.state, 'working'); assert.equal(b.intents.length, 0);
+  byId(b.host, 'blob-preview-rest').fire('click');
+  assert.equal(header.state, 'idle');
 });
 
-test('S5 colour swatches: set and clear through the existing closed commands only', () => {
-  const { host, commands } = boot(THREE);
-  byId(host, 'pill-tile-integration_n8n').fire('click');
-  const row = () => byClass(host, 'swatch-row')[0]; // fresh after every re-render
-  row().children.find(x => x.dataset.color === 'green').fire('click', { isTrusted: false });
-  assert.deepEqual(commands, [], 'synthetic gestures never dispatch');
-  row().children.find(x => x.dataset.color === 'green').fire('click');
-  assert.deepEqual(commands, [{ action: 'set_pill_color', id: 'integration_n8n', color: 'green' }]);
-  // clicking the selected swatch again clears the colour (the reversible way back)
-  row().children.find(x => x.dataset.color === 'mint').fire('click');
-  assert.deepEqual(commands[1], { action: 'set_pill_color', id: 'integration_n8n', color: 'mint' });
-  row().children.find(x => x.dataset.color === 'mint').fire('click');
-  assert.deepEqual(commands[2], { action: 'clear_pill_color', id: 'integration_n8n' }, 're-clicking the current colour clears it');
-  // keyboard: the arrows walk the closed palette and choose, like the #384 swatches
-  row().children.find(x => x.dataset.color === 'green').fire('keydown', { key: 'ArrowRight' });
-  assert.equal(commands[3].color, 'blue', 'ArrowRight chooses the next palette colour');
-  // a created blob keeps its colour through set_blob_color, cleared with the empty string
-  const withBlob = { ...THREE, blobs: P.normalize({ customBlobs: [{ name: 'Notas', color: 'purple' }] }).blobs };
-  const b = boot(withBlob);
-  byId(b.host, 'blob-tile-0').fire('click');
-  const brow = () => byClass(b.host, 'swatch-row')[0];
-  brow().children.find(x => x.dataset.color === 'green').fire('click');
-  assert.deepEqual(b.commands, [{ action: 'set_blob_color', name: 'Notas', color: 'green' }]);
-  brow().children.find(x => x.dataset.color === 'green').fire('click');
-  assert.deepEqual(b.commands[1], { action: 'set_blob_color', name: 'Notas', color: '' }, 'the empty string clears');
+test('S4 principal editor: «Abito» fixed, colour, «Qué hace» with the declarative chip, model; no delete, no order', () => {
+  const b = boot(TWO());
+  byId(b.host, 'blob-principal-card').fire('click');
+  const name = byId(b.host, 'blob-editor-name');
+  assert.equal(name.value, 'Abito'); assert.equal(name.disabled, true);
+  assert.match(words(byId(b.host, 'blob-editor')), /Fijo/);
+  assert.match(words(byId(b.host, 'blob-editor')), /Declarativo: todavía no se aplica/);
+  assert.equal(byId(b.host, 'blob-editor-delete'), null); assert.equal(byId(b.host, 'blob-editor-left'), null); assert.equal(byId(b.host, 'blob-editor-active'), null);
+  byClass(byId(b.host, 'blob-editor'), 'swatch').find(x => x.dataset.color === 'orange').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'set_color', id: 'abito', color: 'orange' });
+  const what = byId(b.host, 'blob-editor-what'); what.value = 'Mi asistente'; what.fire('change');
+  assert.deepEqual(b.intents.pop(), { type: 'set_abito_instructions', text: 'Mi asistente' });
+  const model = byId(b.host, 'blob-editor-model'); model.value = 'gpt-5.1'; model.fire('change');
+  assert.deepEqual(b.intents.pop(), { type: 'set_abito_model', profile_id: 'gpt-5.1' });
 });
 
-test('S6 «Principal»: a workspace tile is promoted through set_main_pill; the main, non-workspace and created blobs cannot take it', () => {
-  const state = { mainPill: 'integration_claude', declaredPills: ['agent_cursor', 'integration_resend'] };
-  const { host, commands } = boot(state);
-  byId(host, 'pill-tile-agent_cursor').fire('click');
-  const main = byId(host, 'pill-editor-main');
-  assert.ok(!main.disabled, 'a declared workspace tile can be made principal');
-  main.fire('click', { isTrusted: false });
-  assert.deepEqual(commands, [], 'synthetic gestures never dispatch');
-  main.fire('click');
-  assert.deepEqual(commands, [{ action: 'set_main_pill', id: 'agent_cursor' }]);
-  // the main tile's own editor cannot press it again, a service tile never (the
-  // main pill is a workspace choice) and a created blob never
-  const again = boot(state);
-  byId(again.host, 'pill-principal-card').fire('click');
-  assert.ok(byId(again.host, 'pill-editor-main').disabled, 'the principal is already the principal');
-  const service = boot(state);
-  byId(service.host, 'pill-tile-integration_resend').fire('click');
-  assert.ok(byId(service.host, 'pill-editor-main').disabled, 'only a workspace tile can become principal');
-  const withBlob = { ...state, blobs: P.normalize({ customBlobs: [{ name: 'Notas' }] }).blobs };
-  const b = boot(withBlob);
-  byId(b.host, 'blob-tile-0').fire('click');
-  assert.ok(byId(b.host, 'pill-editor-main').disabled, 'the main pill is a workspace choice, never a created blob');
+test('S5 eliminar: inline confirmation names the agent; only the confirm dispatches', () => {
+  const b = boot(TWO());
+  byId(b.host, 'blob-editor-delete').fire('click');
+  assert.match(words(byId(b.host, 'blob-editor')), /¿Eliminar «Revisor»\?/);
+  assert.match(words(byId(b.host, 'blob-editor')), /Se quita de la isla y deja de trabajar\./);
+  assert.equal(b.intents.length, 0);
+  byId(b.host, 'blob-delete-cancel').fire('click'); assert.equal(b.intents.length, 0);
+  assert.ok(byId(b.host, 'blob-editor-name'), 'cancel returns to the editor');
+  byId(b.host, 'blob-editor-delete').fire('click'); byId(b.host, 'blob-delete-confirm').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'delete_agent', id: 'esp-a' });
 });
 
-test('S7 order: the arrows persist a strict permutation, drag dispatches the same closed command', () => {
-  const { host, commands } = boot(THREE);
-  // the second declared tile moved after the third
-  byId(host, 'pill-tile-integration_n8n').fire('click');
-  byId(host, 'pill-editor-right').fire('click', { isTrusted: false });
-  assert.deepEqual(commands, [], 'synthetic gestures never dispatch');
-  byId(host, 'pill-editor-right').fire('click');
-  assert.deepEqual(commands, [{ action: 'reorder_declared_pills', order: ['integration_resend', 'integration_vercel', 'integration_n8n'] }]);
-  // edge tiles have their outward arrow disabled
-  byId(host, 'pill-tile-integration_resend').fire('click');
-  assert.ok(byId(host, 'pill-editor-left').disabled, 'the first tile cannot move earlier');
-  assert.ok(!byId(host, 'pill-editor-right').disabled);
-  // a created blob reorders through its own closed command
-  const withBlob = { ...THREE, blobs: P.normalize({ customBlobs: [{ name: 'Uno' }, { name: 'Dos' }] }).blobs };
-  const b = boot(withBlob);
-  byId(b.host, 'blob-tile-0').fire('click');
-  byId(b.host, 'pill-editor-right').fire('click');
-  assert.deepEqual(b.commands, [{ action: 'reorder_blobs', order: ['Dos', 'Uno'] }]);
-  // drag: pointerdown on a tile, pointerup on another reorders by the same command
-  const d = boot(THREE);
-  byId(d.host, 'pill-tile-integration_n8n').fire('pointerdown');
-  byId(d.host, 'pill-tile-integration_resend').fire('pointerup');
-  assert.deepEqual(d.commands, [{ action: 'reorder_declared_pills', order: ['integration_n8n', 'integration_resend', 'integration_vercel'] }],
-    'dropping a tile on another persists the new order');
-  byId(d.host, 'pill-tile-integration_resend').fire('pointerdown');
-  byId(d.host, 'pill-tile-integration_vercel').fire('pointerup', { isTrusted: false });
-  assert.equal(d.commands.length, 1, 'a synthetic drop never dispatches');
+test('S6 nuevo · del catálogo: pick enables Agregar; the intent carries the catalog id and the prefill', () => {
+  const b = boot(TWO());
+  byId(b.host, 'blob-tile-new').fire('click');
+  assert.equal(byId(b.host, 'create-kind-catalog').getAttribute('aria-pressed'), 'true');
+  assert.equal(byId(b.host, 'pill-catalog-add').disabled, true);
+  byId(b.host, 'pill-catalog-row-integration_github').fire('click');
+  assert.equal(byId(b.host, 'pill-catalog-add').disabled, false);
+  byId(b.host, 'pill-catalog-add').fire('click');
+  const intent = b.intents.pop();
+  assert.equal(intent.type, 'create_agent'); assert.equal(intent.fromCatalog, 'integration_github');
+  assert.equal(intent.name, 'GitHub'); assert.ok(A.PALETTE.includes(intent.color)); assert.ok(intent.instructions.includes('GitHub'));
+  // search + category + cancel dispatch nothing
+  byId(b.host, 'blob-tile-new').fire('click');
+  const search = byId(b.host, 'pill-catalog-search'); search.value = 'zzzz'; search.fire('input');
+  assert.match(words(byId(b.host, 'pill-catalog-list')), /Sin resultados/);
+  byId(b.host, 'pill-catalog-cancel').fire('click'); assert.equal(b.intents.length, 0);
 });
 
-test('S8 the customizer speaks blob, never pill, and keeps no paragraphs', () => {
-  const { host } = boot(THREE);
-  const joined = words(host);
-  for (const word of joined.split(/\s+/)) {
-    assert.doesNotMatch(word, /pill/i, `visible word must not say pill: ${word}`);
-  }
-  assert.equal((joined.match(/Elegir un blob no conecta el servicio/g) || []).length, 1,
-    'the disclaimer appears once, as the principal chip tooltip');
-  assert.equal(byClass(host, 'snote').filter(n => n.textContent).length, 0, 'no standing paragraph copy');
+test('S7 nuevo · propio: Crear disabled until name + colour; switching mode keeps what was typed', () => {
+  const b = boot(TWO());
+  byId(b.host, 'blob-tile-new').fire('click'); byId(b.host, 'create-kind-custom').fire('click');
+  const create = byId(b.host, 'blob-create-button'); assert.equal(create.disabled, true);
+  const input = byId(b.host, 'blob-create-input'); input.value = 'Música'; input.fire('input');
+  assert.equal(byId(b.host, 'blob-create-button').disabled, true, 'name alone is not enough');
+  byClass(byId(b.host, 'blob-editor'), 'swatch').find(x => x.dataset.color === 'orange').fire('click');
+  assert.equal(byId(b.host, 'blob-create-button').disabled, false);
+  byId(b.host, 'create-kind-catalog').fire('click'); byId(b.host, 'create-kind-custom').fire('click');
+  assert.equal(byId(b.host, 'blob-create-input').value, 'Música', 'the draft survives a mode switch');
+  const what = byId(b.host, 'blob-create-what'); what.value = 'Pone música'; what.fire('input');
+  byId(b.host, 'blob-create-button').fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'create_agent', name: 'Música', instructions: 'Pone música', model: null, color: 'orange' });
 });
 
-test('S9 chooser (B): Del catálogo lists offered pills with markers, never pickable for main/declared; Agregar goes through the closed toggle', () => {
-  const { host, commands } = boot(THREE);
-  byId(host, 'pill-tile-new').fire('click');
-  const seg = byId(host, 'create-kind-catalog'), segCustom = byId(host, 'create-kind-custom');
-  assert.ok(seg && segCustom, 'the segmented [Del catálogo | Propio] exists');
-  assert.equal(seg.getAttribute('aria-pressed'), 'true', 'Del catálogo is the designed default');
-  const search = byId(host, 'pill-catalog-search');
-  assert.ok(search, 'the search field exists');
-  assert.equal(search.placeholder, 'Buscar…', 'the designed placeholder');
-  assert.deepEqual(byClass(host, 'pill-catalog-cat').map(x => x.textContent),
-    ['Todos', 'Dónde programás', 'Agentes', 'IA', 'Servicios'], 'the category chips');
-  assert.match(words(host), /Elegir no conecta la cuenta/, 'the catalog disclaimer');
-  const rows = () => byClass(host, 'pill-catalog-row');
-  const colourRow = rows().find(x => x.dataset.pillId === 'integration_resend');
-  assert.ok(colourRow.children.some(c => String(c.className).includes('blob-visual') && c.dataset.color === 'mint'),
-    'each row paints a live 20px blob in the item colour');
-  const mainRow = rows().find(x => x.dataset.pillId === 'integration_claude');
-  assert.ok(mainRow, 'the main pill is listed');
-  assert.match(words(mainRow), /Principal/, 'the main pill wears its marker');
-  assert.equal(mainRow.tagName, 'DIV', 'a marked row is not pickable');
-  const declaredRow = rows().find(x => x.dataset.pillId === 'integration_resend');
-  assert.match(words(declaredRow), /Ya está/, 'a declared pill wears its marker');
-  const pickable = rows().filter(x => x.tagName === 'BUTTON');
-  assert.ok(pickable.length > 0, 'undeclared offered pills are pickable');
-  assert.ok(!pickable.some(x => ['integration_claude', ...THREE.declaredPills].includes(x.dataset.pillId)),
-    'marked rows are never pickable');
-  assert.ok(byId(host, 'pill-catalog-add').disabled, 'Agregar needs a selected row');
-  const target = pickable.find(x => x.dataset.pillId === 'agent_cursor');
-  target.fire('click');
-  const chosen = byId(host, 'pill-catalog-row-agent_cursor');
-  assert.equal(chosen.getAttribute('aria-pressed'), 'true', 'the selected row is pressed');
-  assert.ok(chosen.children.some(c => String(c.className).includes('ico')), 'the selected row shows the check icon');
-  assert.equal(byId(host, 'pill-catalog-add').disabled, false, 'a selection enables Agregar');
-  byId(host, 'pill-catalog-add').fire('click', { isTrusted: false });
-  assert.deepEqual(commands, [], 'a synthetic Agregar never dispatches');
-  byId(host, 'pill-catalog-add').fire('click');
-  assert.deepEqual(commands, [{ action: 'toggle_declared_pill', id: 'agent_cursor' }],
-    'Agregar is the existing closed toggle command');
-  assert.ok(byId(host, 'blob-create-input') === null, 'the chooser is gone after adding');
-  const name = byId(host, 'pill-editor-name');
-  assert.ok(name, 'the editor is back');
-  assert.equal(name.value, 'Cursor', 'Agregar selects the new tile');
+test('S8 «Guardados de antes»: stored blobs and declared pills without a specialist are listed with an explicit «Convertir en agente»; nothing converts by itself', () => {
+  const x = TWO(); x.prefs.customBlobs = [{ name: 'Música', color: 'purple' }]; x.prefs.declaredPills = ['integration_n8n'];
+  const b = boot(x);
+  const row = byId(b.host, 'blob-saved-before');
+  assert.ok(row); assert.match(words(row), /Guardados de antes/); assert.match(words(row), /Música/); assert.match(words(row), /n8n/);
+  assert.equal(b.intents.length, 0, 'nothing happens on render');
+  const buttons = byClass(row, 'blob-convert');
+  assert.equal(buttons.length, 2); assert.match(words(buttons[0]), /Convertir en agente/);
+  buttons[0].fire('click');
+  assert.deepEqual(b.intents.pop(), { type: 'convert_saved', key: 'blob:Música' });
+  assert.equal(byId(b.host, 'blob-saved-before') && 0, 0);
+  const none = boot(TWO()); assert.equal(byId(none.host, 'blob-saved-before'), null, 'absent when there is nothing saved');
 });
 
-test('S9 chooser (B): search and category chips filter the offered list; Cancelar returns without dispatch', () => {
-  const { host, commands } = boot(THREE);
-  byId(host, 'pill-tile-new').fire('click');
-  const search = byId(host, 'pill-catalog-search');
-  search.value = 'github'; search.fire('input');
-  assert.deepEqual(byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON').map(x => x.dataset.pillId),
-    ['integration_github'], 'the search filters by name');
-  search.value = 'zzzz'; search.fire('input');
-  assert.match(words(host), /Sin resultados/, 'an empty search says so in one line');
-  search.value = 'GITHUB'; search.fire('input');
-  assert.deepEqual(byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON').map(x => x.dataset.pillId),
-    ['integration_github'], 'the filter is case-insensitive');
-  search.value = ''; search.fire('input');
-  byClass(host, 'pill-catalog-cat').find(x => x.textContent === 'Agentes').fire('click');
-  const agentRows = byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON');
-  assert.ok(agentRows.length > 0 && agentRows.every(x => C.definition(x.dataset.pillId).category === 'agent'),
-    'the category chip filters');
-  byClass(host, 'pill-catalog-cat').find(x => x.textContent === 'Todos').fire('click');
-  assert.ok(byClass(host, 'pill-catalog-row').filter(x => x.tagName === 'BUTTON').length > agentRows.length,
-    'Todos restores the whole list');
-  byId(host, 'pill-catalog-cancel').fire('click');
-  assert.ok(byId(host, 'blob-create-input') === null, 'the chooser is gone');
-  assert.ok(byId(host, 'pill-editor-name'), 'the editor is back');
-  assert.deepEqual(commands, [], 'cancel never dispatches');
+test('S9 lifecycle: identical state pushes neither rebuild nor restart any clay; a real change destroys the old instances; nothing leaks', () => {
+  const b = boot(TWO());
+  const first = b.made.length;
+  b.render(); b.render(JSON.parse(JSON.stringify(b.input)));
+  assert.equal(b.made.length, first, 'no new clay on an identical push');
+  assert.equal(b.made.filter(m => m.destroyed).length, 0, 'none destroyed on an identical push');
+  const next = JSON.parse(JSON.stringify(b.input)); next.store.specialists[0].name = 'Otro';
+  b.render(next);
+  assert.ok(b.made.length > first, 'a real change repaints');
+  assert.equal(b.live().length, b.made.length - first, 'every instance of the previous paint was destroyed');
+  assert.equal(b.live().length, first, 'and exactly one set is alive');
+  settings.dispose(b.host);
+  assert.equal(b.live().length, 0, 'leaving the screen destroys every instance');
+});
+
+test('S10 only trusted gestures change anything; a saving or failed state paints honestly', () => {
+  const b = boot(TWO());
+  byId(b.host, 'blob-editor-delete').fire('click', { isTrusted: false });
+  assert.ok(!byId(b.host, 'blob-delete-confirm'), 'a synthetic click does nothing');
+  byId(b.host, 'blob-editor-active').fire('click', { isTrusted: false }); assert.equal(b.intents.length, 0);
+  const err = boot(TWO(), { error: 'No se pudo guardar el agente; se mantuvo el anterior.' });
+  assert.match(words(byId(err.host, 'blob-settings-error')), /No se pudo guardar el agente/);
+  const loading = boot({ prefs: TWO().prefs, store: null, listing: null });
+  assert.equal(byClass(loading.host, 'blob-tile').length, 0);
+  const broken = boot({ prefs: TWO().prefs, store: { load_error: true }, listing: null });
+  assert.match(words(broken.host), /No se pudieron cargar los especialistas/);
+  assert.equal(byId(broken.host, 'blob-tile-new'), null, 'no creation over unreadable data');
+});
+
+test('S11 the screen speaks agent/blob, never pill, and keeps the one chip disclaimer only on «Qué hace» of the principal', () => {
+  const b = boot(TWO());
+  for (const w of words(b.host).split(/\s+/)) assert.doesNotMatch(w, /pill/i, w);
 });

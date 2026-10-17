@@ -98,7 +98,8 @@
   }
 
   // ---- IPC -------------------------------------------------------------------------------------------
-  function apply(next) { if (next && typeof next === 'object') { store = next; renderSection(); renderChip(); notifyIdentities(); } }
+  const notifyChanged = () => document.dispatchEvent(new Event('abito:specialists-changed'));
+  function apply(next) { if (next && typeof next === 'object') { store = next; renderSection(); renderChip(); notifyIdentities(); notifyChanged(); } }
   // select / delete: no form involved.
   function send(payload, okSay, focusId) {
     if (busy || store?.load_error === true) return;
@@ -131,12 +132,12 @@
     });
   }
   function refreshModels() {
-    call('models_action', { action: 'list' }).then(next => { listing = next; renderSection(); }, () => {});
+    call('models_action', { action: 'list' }).then(next => { listing = next; renderSection(); notifyChanged(); }, () => {});
   }
   if (listen) {
     listen('specialists:state', e => apply(e && e.payload)).catch(() => {});
     listen('prefs:state', e => applyPrefs(e && e.payload)).catch(() => {});
-    listen('models:state', e => { if (e && e.payload) { listing = e.payload; renderSection(); } }).catch(() => {});
+    listen('models:state', e => { if (e && e.payload) { listing = e.payload; renderSection(); notifyChanged(); } }).catch(() => {});
   }
   call('specialists_action', { action: 'view' }).then(apply, () => apply({ load_error: true }));
   call('prefs_action', { action: 'view' }).then(applyPrefs, () => {});
@@ -362,6 +363,12 @@
   }
 
   // The section is rendered by the settings panel inside Ajustes (#327: no new screen, no new icon).
-  window.AbitoSpecialistsPanel = Object.freeze({ renderSection, renderChip, identityView });
+  // #442 T7.4: the Blobs screen (Ajustes) reads the ONE store/listing cache from here and sends its
+  // closed commands through here: Settings never loads a second role cache.
+  const act = payload => call('specialists_action', payload).then(next => { apply(next); return next; });
+  const selectModel = profileId => call('models_action', { action: 'select', profile_id: profileId })
+    .then(next => { if (next && typeof next === 'object') { listing = next; notifyChanged(); } return next; });
+  window.AbitoSpecialistsPanel = Object.freeze({ renderSection, renderChip, identityView,
+    state: () => ({ store, listing }), act, selectModel });
   notifyIdentities();
 })();

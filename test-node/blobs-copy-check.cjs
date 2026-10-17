@@ -28,7 +28,7 @@ class Node {
   getAttribute(key) { return this.attrs[key] ?? null; }
   addEventListener(kind, fn) { (this.handlers[kind] ||= []).push(fn); }
 }
-const doc = { createElement: tag => new Node(tag) };
+const doc = { createElement: tag => new Node(tag), createElementNS: (_ns, tag) => new Node(tag) };
 
 const walk = (node, visit) => {
   visit(node);
@@ -55,18 +55,15 @@ const settings = global.window.AbitoPillSettings =
   (() => { require(path.join(frontend, 'pill-settings.js')); return global.window.AbitoPillSettings; })();
 const view = require(path.join(frontend, 'settings-view.js'));
 
-test('S1 the settings pills section speaks blob, never pill, with the single chip disclaimer (#435)', () => {
+test('S1 the Blobs screen speaks blob/agent, never pill (#442: agents; the chip disclaimer moved to the principal «Qué hace»)', () => {
   assert.ok(settings.render, 'render entry point');
   const host = new Node('div');
   host.ownerDocument = doc;
-  settings.render(host, {}, { saving: false, error: '' });
+  global.window.AbitoSpecialists = require(path.join(frontend, 'specialists-view.js'));
+  settings.render(host, { prefs: {}, store: { v: 1, active: null, persisted: true, load_error: false, specialists: [] }, listing: null }, { saving: false, error: '' });
   const { texts, arias } = words(host);
   const joined = [...texts, ...arias].join('\n');
-  // #435: the «Blob principal» select and the standing note paragraphs are GONE
-  // (design page «3 Blobs»); the only disclaimer left is the principal chip tooltip.
   assert.match(joined, /Siempre en la isla/, 'the principal chip is there');
-  assert.equal((joined.match(/Elegir un blob no conecta el servicio/g) || []).length, 1,
-    'the disclaimer appears once, as the principal chip tooltip');
   assert.equal((joined.match(/pill/gi) || []).length, 0, 'no visible word says pill');
   for (const word of joined.split(/\s+/)) {
     assert.doesNotMatch(word, /pill/i, `visible word must not say pill: ${word}`);

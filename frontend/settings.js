@@ -67,6 +67,7 @@
     if (secret) secret.value = '';
     accountForm = null; accountError = ''; accountGeneration += 1;
   }
+  const SV = window.AbitoSpecialists, AbitoPills = window.AbitoPills;
   let prefs = { sound: false };
   let pillSaving = false;
   let pillError = '';
@@ -1091,60 +1092,111 @@
         notice.id = 'specialist-colors-status'; notice.setAttribute('role', 'status'); color.append(notice);
       }
     }
-    const pills = window.AbitoPillSettings, model = window.AbitoPills;
-    if (pills && model) {
-      // #435: the design leaves no standing paragraph on the Blobs screen — the only
-      // disclaimer is the principal chip tooltip the renderer owns.
-      const section = group('pills', 'Blobs', '');
-      pills.render(section, prefs, { saving: pillSaving, error: pillError, putIcon,
-        onCommand(payload) {
-          if (pillSaving || !isOpen() || screen !== 'pills') return;
-          const current = model.normalize(prefs);
-          const next = payload.action === 'set_main_pill' ? model.chooseMain(current, payload.id)
-            : payload.action === 'toggle_declared_pill' ? model.toggle(current, payload.id)
-            : payload.action === 'set_pill_color' ? model.setColor(current, payload.id, payload.color)
-            : payload.action === 'clear_pill_color' ? model.clearColor(current, payload.id)
-            : payload.action === 'create_blob' ? model.createBlob(current, payload.name, payload.color || '')
-            : payload.action === 'delete_blob' ? model.deleteBlob(current, payload.name)
-            : payload.action === 'set_blob_color' ? model.setBlobColor(current, payload.name, payload.color)
-            : payload.action === 'reorder_declared_pills' ? model.reorderDeclared(current, payload.order)
-            : payload.action === 'reorder_blobs' ? model.reorderBlobs(current, payload.order) : null;
-          if (!next || (payload.action === 'set_main_pill' && payload.id === current.mainPill)) return;
-          pillSaving = true; pillError = ''; render();
-          // D4: the principal blob's colour feeds the island CHARACTER through the
-          // existing typed pref (avatarColors['abito'] via set_avatar_color) — no new
-          // wire field. A promotion carries the promoted blob's palette colour; a
-          // recolour of the principal itself carries the new swatch. A colourless
-          // promotion changes nothing about the character.
-          const characterColor = payload.action === 'set_main_pill' ? model.colorOf(current, payload.id)
-            : payload.action === 'set_pill_color' && payload.id === current.mainPill ? payload.color : '';
-          call('prefs_action', payload).then(saved => {
-            if (!characterColor) {
-              pillSaving = false; prefs = saved; render();
-              say(payload.action === 'create_blob' ? 'Blob creado. Elegir no conecta el servicio.'
-                : payload.action === 'delete_blob' ? 'Blob eliminado.'
-                : payload.action === 'set_pill_color' || payload.action === 'set_blob_color' ? 'Color de blob guardado.'
-                : payload.action === 'clear_pill_color' ? 'Color de blob quitado.'
-                : 'Blob guardado. Elegir no conecta el servicio.');
-              return;
-            }
-            call('prefs_action', { action: 'set_avatar_color', identity: 'abito', color: characterColor }).then(avatarSaved => {
-              pillSaving = false; prefs = avatarSaved; render();
-              say(payload.action === 'set_pill_color' ? 'Color de blob guardado.' : 'Blob guardado. Elegir no conecta el servicio.');
-            }, () => {
-              pillSaving = false; prefs = saved; render();
-              say('Blob guardado; no se pudo actualizar el color del personaje.');
-            });
-          }, () => {
-            pillSaving = false;
-            pillError = payload.action === 'create_blob'
-              ? 'No se pudo crear el blob; se mantuvo la lista anterior.'
-              : 'No se pudo guardar el blob; se mantuvo la elección anterior.';
-            render(); say(pillError);
-          });
-        },
-      });
+    // #442 T7.4: Blobs = agents. Only the open tab paints (a detached paint would mount clay
+    // characters nobody can see); the host node is persistent so an identical state push is a no-op.
+    const pills = window.AbitoPillSettings;
+    if (pills) {
+      if (screen === 'pills') {
+        const section = group('pills', 'Blobs', '');
+        section.append(blobsHost);
+        pills.render(blobsHost, { prefs, store: ownerState().store, listing: ownerState().listing }, { saving: pillSaving, error: pillError, putIcon,
+          makeClay: (svg, opts) => (window.AbitoClay ? window.AbitoClay.create(svg, opts) : null),
+          onIntent: runIntent });
+      } else if (blobsMounted) pills.dispose(blobsHost);
+      blobsMounted = screen === 'pills';
     }
+  }
+
+  // ---- #442 T7.4: the closed intents of the Blobs screen, mapped onto the EXISTING closed commands ----
+  // An agent is a specialist record (`specialists_action`) + its avatar colour (`prefs_action
+  // set_avatar_color`) + its place on the island (`prefs_action set_island_agents`, at most three).
+  // Steps run in order and stop at the first refusal: nothing is reported saved that was not.
+  const blobsHost = el('div', 'blobs-host');
+  let blobsMounted = false;
+  // The store and the model listing have ONE owner (specialists.js): this screen reads them from
+  // there and sends its commands through there, so Settings never loads a second role cache.
+  const owner = () => window.AbitoSpecialistsPanel || null;
+  const ownerState = () => (owner() ? owner().state() : { store: null, listing: null });
+  const applyPrefs = next => { if (next && typeof next === 'object') prefs = next; };
+  document.addEventListener('abito:specialists-changed', () => { if (isOpen() && screen === 'pills') render(); });
+  const specRecord = id => ((ownerState().store && ownerState().store.specialists) || []).find(r => r && r.id === id) || null;
+  const shownIds = () => SV.agentsView(ownerState().store, prefs, AVATAR).agents.map(a => a.id);
+  const storedIds = () => ((ownerState().store && ownerState().store.specialists) || []).map(r => r.id);
+  const specCall = payload => (owner() ? owner().act(payload) : Promise.reject(new Error('no specialists')));
+  const prefsCall = payload => call('prefs_action', payload).then(applyPrefs);
+  const setIsland = order => prefsCall({ action: 'set_island_agents', order });
+  const joinIsland = id => (shownIds().length < SV.MAX_ISLAND ? setIsland([...shownIds(), id]) : Promise.resolve());
+  function createAgent(draft) {
+    const id = SV.randomId();
+    if (!SV.validId(id) || SV.idTaken(ownerState().store, id)) return Promise.reject(new Error('id'));
+    const steps = [];
+    // The catalog declaration keeps today's gates: a refused or already-declared pill is simply not toggled
+    // (toggling a declared one would REMOVE it), and the agent is created either way.
+    if (draft.fromCatalog && AbitoPills) {
+      const cur = AbitoPills.normalize(prefs);
+      if (!cur.declaredPills.includes(draft.fromCatalog) && AbitoPills.toggle(cur, draft.fromCatalog)) {
+        steps.push(() => prefsCall({ action: 'toggle_declared_pill', id: draft.fromCatalog }));
+      }
+    }
+    steps.push(() => specCall({ action: 'create', id, name: draft.name, instructions: draft.instructions, model: draft.model || null }));
+    if (draft.color) steps.push(() => prefsCall({ action: 'set_avatar_color', identity: id, color: draft.color }));
+    steps.push(() => joinIsland(id));
+    return steps.reduce((p, step) => p.then(step), Promise.resolve());
+  }
+  function intentPlan(i) {
+    if (!i || typeof i !== 'object') return null;
+    switch (i.type) {
+      case 'update_agent': {
+        const r = specRecord(i.id); if (!r) return null;
+        return () => specCall({ action: 'update', id: i.id, name: i.name, instructions: i.instructions, model: i.model || null,
+          space: r.space, spaces: r.spaces || [], permissions: r.permissions });
+      }
+      case 'set_color': return () => prefsCall({ action: 'set_avatar_color', identity: i.id, color: i.color });
+      case 'set_active': {
+        const next = SV.islandOrderAfter(shownIds(), storedIds(), { toggle: i.id }); if (!next) return null;
+        return () => setIsland(next);
+      }
+      case 'move': {
+        const next = SV.islandOrderAfter(shownIds(), storedIds(), { move: i.id, by: i.by }); if (!next) return null;
+        return () => setIsland(next);
+      }
+      case 'reorder': {
+        const cur = shownIds();
+        if (!Array.isArray(i.order) || i.order.length !== cur.length || !i.order.every(id => cur.includes(id))) return null;
+        return () => setIsland(i.order);
+      }
+      case 'delete_agent': {
+        const r = specRecord(i.id); if (!r) return null;
+        // An agent that came from the catalog also leaves the declared list (same gates, same toggle),
+        // otherwise it would come back as a «Guardado de antes». The remove/re-add path stays intact.
+        const C = window.AbitoPillCatalog, cur = AbitoPills && AbitoPills.normalize(prefs);
+        const def = C && cur ? cur.declaredPills.map(C.definition).find(d => d && d.name.toLowerCase() === r.name.toLowerCase()) : null;
+        return () => specCall({ action: 'delete', id: i.id }).then(() => (def && AbitoPills.toggle(AbitoPills.normalize(prefs), def.id)
+          ? prefsCall({ action: 'toggle_declared_pill', id: def.id }) : undefined));
+      }
+      case 'create_agent': return () => createAgent(i);
+      case 'convert_saved': {
+        const item = SV.savedBefore(ownerState().store, prefs, window.AbitoPillCatalog, AVATAR).find(x => x.key === i.key); if (!item) return null;
+        return () => createAgent({ name: item.name, instructions: item.instructions, model: null, color: item.color });
+      }
+      case 'set_abito_instructions': return () => prefsCall({ action: 'set_abito_instructions', text: String(i.text) });
+      case 'set_abito_model': return owner() ? () => owner().selectModel(i.profile_id) : null;
+      default: return null;
+    }
+  }
+  function runIntent(i) {
+    if (pillSaving || !isOpen() || screen !== 'pills') return;
+    const plan = intentPlan(i);
+    if (!plan) return;
+    pillSaving = true; pillError = ''; render();
+    plan().then(() => {
+      pillSaving = false; render();
+      say(i.type === 'create_agent' || i.type === 'convert_saved' ? 'Agente creado.' : i.type === 'delete_agent' ? 'Agente eliminado.' : 'Agente guardado.');
+    }, () => {
+      pillSaving = false;
+      pillError = i.type === 'create_agent' || i.type === 'convert_saved' ? 'No se pudo crear el agente; se mantuvo la lista anterior.' : 'No se pudo guardar el agente; se mantuvo el anterior.';
+      render(); say(pillError);
+    });
   }
 
   // #366 F094 — the quick panel: right-click on an Ajustes gear opens a small popover INSIDE the
