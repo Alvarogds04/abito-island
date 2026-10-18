@@ -115,24 +115,29 @@
   // session row that appeared (or a one-time notice that the list is bounded / unavailable). `memory`
   // is the caller's object; the result is the task shape Ticker.sync reads, plus whether to show it.
   const LOG_CAP = 20; // Coucou caps steps at 20 too (core/state.ts)
-  const newMemory = () => ({ log: [], seq: 0, prev: new Set(), error: false, bounded: false });
+  const newMemory = () => ({ log: [], seq: 0, prev: new Set(), error: false, bounded: false, focus: null });
   function feed(memory, view) {
     if (!view || view.state !== 'ready') {
       if (!memory.error) { memory.error = true; memory.log.push(errorText()); memory.seq++; }
     } else {
       memory.error = false;
       const texts = view.rows.map(r => r.text);
-      for (const text of texts) if (!memory.prev.has(text)) { memory.log.push(text); memory.seq++; }
+      for (const row of view.rows) if (!memory.prev.has(row.text)) { memory.log.push(row.text); memory.seq++; memory.focus = row; }
+      if (memory.focus && !texts.includes(memory.focus.text)) memory.focus = view.rows[view.rows.length - 1] || null; // the focused session ended
       memory.prev = new Set(texts);
       if (view.truncated && !memory.bounded) { memory.log.push(boundedText(view)); memory.seq++; }
       memory.bounded = view.truncated;
       if (!texts.length && !memory.error) { // nothing running: forget the history, show nothing
-        memory.log = []; memory.seq = 0; memory.bounded = false;
-        return { active: false, task: null };
+        memory.log = []; memory.seq = 0; memory.bounded = false; memory.focus = null;
+        return { active: false, task: null, who: null };
       }
     }
     if (memory.log.length > LOG_CAP) memory.log = memory.log.slice(-LOG_CAP);
-    return { active: true, task: { steps: memory.log.slice(), stepSeq: memory.seq - 1, finalLine: null } };
+    const steps = memory.log.slice();
+    // Coucou's who-row: the focused session's project, what kind of agent it is, and «n/N» steps when there is more than one.
+    const f = memory.focus;
+    const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: steps.length > 1 ? `${steps.length}/${steps.length}` : '' } : null;
+    return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
   }
 
   return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed };
@@ -151,6 +156,12 @@ function mount(V) {
   const overview = document.getElementById('overview-view');
   const leftCard = overview && overview.querySelector('.card-left');
   if (!leftCard) return;
+  // Coucou's who-row (dot + name + tool + n/N) over the ticker, and its «Nothing running right now» card when idle.
+  const mkEl = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
+  const who = mkEl('div', 'who'); who.hidden = true;
+  const whoName = mkEl('span', 'name'), whoTool = mkEl('span', 'tool'), whoCount = mkEl('span', 'count');
+  who.append(mkEl('span', 'who-dot'), whoName, whoTool, whoCount);
+  leftCard.append(who);
   let ticker = null, raf = 0;
   const memory = V.newMemory();
   const frame = now => { raf = 0; if (ticker) { ticker.tick(now); if (ticker.animating && !document.hidden) raf = requestAnimationFrame(frame); } };
@@ -163,8 +174,10 @@ function mount(V) {
     : null;
   function show(view) {
     if (!ticker) return;
-    const { active, task } = V.feed(memory, view);
+    const { active, task, who: w } = V.feed(memory, view);
     ticker.el.hidden = !active;
+    who.hidden = !active || !w;
+    if (w) { whoName.textContent = w.name; whoTool.textContent = w.tool; whoCount.textContent = w.count; whoCount.hidden = !w.count; }
     if (active) overview.dataset.ticker = 'on'; else delete overview.dataset.ticker;
     ticker.sync(task);
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);

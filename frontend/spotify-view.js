@@ -35,7 +35,8 @@
     if (!title) {
       return { kind: 'idle', title: 'Nada en reproducción', artist: '', playing: false, controls: true, aria: 'Spotify: nada en reproducción' };
     }
-    const artist = clean(track.artist);
+    const album = clean(track.album);
+    const artist = clean(track.artist) + (clean(track.artist) && album ? ' · ' + album : '');
     const playing = state.playing === true;
     return { kind: 'track', title, artist, playing, controls: true, aria: `Spotify: ${title}${artist ? ', ' + artist : ''}. ${playing ? 'Reproduciendo' : 'En pausa'}` };
   }
@@ -130,7 +131,11 @@ function mount(api) {
   const title = mk('span', 'np-title'), artist = mk('div', 'np-sub');
   const row = mk('div', 'np-title-row'); row.append(mk('span', 'np-dot'), title);
   const text = mk('div', 'np-text'); text.append(row, artist);
-  const head = mk('div', 'np-head'); head.append(text);
+  const art = mk('div', 'np-art'); art.setAttribute('aria-hidden', 'true');
+  const noteSvg = doc.createElementNS(NS, 'svg'); noteSvg.setAttribute('viewBox', '0 0 24 24'); noteSvg.setAttribute('width', '15'); noteSvg.setAttribute('height', '15');
+  const notePath = doc.createElementNS(NS, 'path'); notePath.setAttribute('d', 'M12.2 3.6h1.7c.3 2.3 1.8 3.5 4.2 4.6l-.6 1.6c-1.4-.5-2.7-1.2-3.6-2.1v9.5a3.3 3.3 0 1 1-1.7-2.88V3.6z'); notePath.setAttribute('fill', 'currentColor');
+  noteSvg.append(notePath); art.append(noteSvg);
+  const head = mk('div', 'np-head'); head.append(art, text);
   const buttons = {};
   const bar = mk('div', 'np-buttons');
   for (const [action, name] of Object.entries(api.CONTROLS)) {

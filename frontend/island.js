@@ -202,12 +202,22 @@
     clayEl.style.left = lerp(lerp(w / 2, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
     // Coucou companion follows the live composer, not a demo success pose.
     clayEl.style.top = lerp(overviewTop, CHAT.h - 76, q.x) + 'px';
+    // Coucou's badge sits on the character's top-left (core/layout.ts botPosition: centre - (20, 21)); 16px circle.
+    const badge = $('clay-badge');
+    if (badge) {
+      const kind = noticeLane && noticeLane.view === 'notices' ? 'finished' : cardShown ? 'approval' : questionShown ? 'question' : '';
+      badge.hidden = !kind || p < 1;
+      if (badge.dataset.kind !== kind) badge.dataset.kind = kind;
+      badge.style.left = (ov.clayX - 28) + 'px';
+      badge.style.top = (ov.cy - 29) + 'px';
+    }
     if (capsule.dataset.edge !== edge) capsule.dataset.edge = edge;
     const view = q.target === 1 ? 'chat' : noticeLane && noticeLane.view === 'notices' ? 'notices' : 'overview';
     if (capsule.dataset.view !== view) capsule.dataset.view = view;
     const home = $('home-tab');
-    if (home && home.getAttribute('aria-pressed') !== (q.target === 0 && !noticeLane ? 'true' : 'false'))
-      home.setAttribute('aria-pressed', q.target === 0 && !noticeLane ? 'true' : 'false');
+    // Coucou: the home tab is lit only on the overview itself, not behind an approval or a question card
+    const homeOn = q.target === 0 && !noticeLane && !cardShown && !questionShown ? 'true' : 'false';
+    if (home && home.getAttribute('aria-pressed') !== homeOn) home.setAttribute('aria-pressed', homeOn);
     const chatTab = $('open-chat');
     if (chatTab && chatTab.getAttribute('aria-pressed') !== (q.target === 1 ? 'true' : 'false'))
       chatTab.setAttribute('aria-pressed', q.target === 1 ? 'true' : 'false');
@@ -571,7 +581,7 @@
     noticeText.replaceChildren(noticeTitle, noticeSub);
     $('notice-open').replaceChildren($('notice-ring'), noticeText);
     noticePill.replaceChildren($('notice-open'), noticeAction, noticeDismiss);
-    noticesEl.replaceChildren(noticeChips, noticePill, noticeDetail, noticeList);
+    noticesEl.replaceChildren(noticeChips, noticePill, noticeDetail, noticeList, ...($('notice-card') ? [$('notice-card')] : []));
   }
   // #266: incoming-event reveal (Sileo-style). The pure gates in notify-view.js
   // decide WHICH snapshots are events (boot replays and churn are not); the pure
@@ -675,6 +685,9 @@
     // reveal the remaining notice now, not wait for a second snapshot.
     const list = O.noticeListView(notices, Date.now());
     if (!list || list.count < 2) noticeListOpen = false;
+    // S10 (L22): Coucou's overview has no connection strip. A healthy connection with nothing to say draws nothing here;
+    // a problem (no engine, bridge down, hotkey) or a notice keeps its honest strip.
+    noticesEl.dataset.calm = (!first && conn.tone === 'go' && !bridge && !view) ? 'true' : 'false';
     noticesEl.dataset.grouped = view && view.grouped ? 'true' : 'false';
     noticesEl.dataset.list = noticeListOpen ? 'open' : 'closed';
     if (capsule.dataset.noticeList !== noticesEl.dataset.list) capsule.dataset.noticeList = noticesEl.dataset.list;
@@ -705,9 +718,44 @@
     noticeDetail.textContent = first ? `${first.title}. ${first.detail || ''}`.trim() : (bridge ? `${conn.detail} ${bridge.detail}` : conn.detail);
     noticeInfo.setAttribute('aria-label', O.infoLabel(first ? 'Ver detalle del aviso' : 'Ver detalle de la conexión', first ? view.aria : conn.aria));
     noticeDismiss.hidden = !first;
+    paintNoticeCard(first);
+    syncCalm();
     noticesEl.hidden = false;
     paintCardConn(conn, bridge);
   }
+  // The strip is calm (drawn as nothing) only when the connection is healthy, there is no notice and the hotkey chip is quiet too.
+  function syncCalm() {
+    const calm = !!noticesEl && noticesEl.dataset.calm === 'true' && !!$('hotkey') && $('hotkey').hidden;
+    capsule.dataset.noticesCalm = calm ? 'true' : 'false';
+  }
+  // S10 (L22): Coucou's finished card for the confirmed-notice lane. «OK» is the same dismissal as the band's ×.
+  const noticeCard = $('notice-card'), noticeCardOk = $('notice-card-ok');
+  function paintNoticeCard(first) {
+    if (!noticeCard) return;
+    const v = first && O.finishedCardView ? O.finishedCardView(first) : null;
+    noticeCard.hidden = !v;
+    if (!v) return;
+    $('notice-card-name').textContent = v.name;
+    $('notice-card-verb').textContent = v.verb;
+    const msg = $('notice-card-message'); msg.textContent = v.message; msg.title = v.message;
+    const t = $('notice-card-terminal'); t.disabled = !v.terminal.available;
+  }
+  // «Abrir terminal» = the closed host verb `focus_host {target:'terminal'}` (focushost.rs): no command, path or window id
+  // ever leaves the page; a refusal is the host's public Spanish reason, shown on the button and announced politely.
+  const noticeCardTerminal = $('notice-card-terminal');
+  if (noticeCardTerminal) noticeCardTerminal.addEventListener('click', event => {
+    if (event.isTrusted !== true || !invoke) return;
+    noticeCardTerminal.disabled = true;
+    invoke('focus_host', { payload: { target: 'terminal' } }).then(() => { noticeCardTerminal.title = ''; }, error => {
+      const reason = typeof error === 'string' ? error : (error && typeof error.message === 'string' ? error.message : 'No se pudo abrir la terminal.');
+      noticeCardTerminal.title = reason;
+      const live = $('notice-live'); if (live) live.textContent = reason;
+    }).finally(() => { noticeCardTerminal.disabled = false; });
+  });
+  if (noticeCardOk) noticeCardOk.addEventListener('click', event => { if (event.isTrusted === true && noticeDismiss && !noticeDismiss.hidden) noticeDismiss.click(); });
+  // «Preguntar» is the chat tab (Coucou: Ask Claude → prompt view).
+  const askButton = $('overview-ask');
+  if (askButton) askButton.addEventListener('click', event => { if (event.isTrusted === true) { const t = $('open-chat'); if (t) t.click(); } });
   // §3: the card hides the notices strip, so a missing Pi / downed channel
   // stays visible beside it (icon + word; nothing when healthy).
   function paintCardConn(conn, bridge) {
@@ -740,6 +788,7 @@
     const chip = $('hotkey');
     const h = O && O.hotkeyView(view);
     chip.hidden = !h;
+    syncCalm();
     if (!h) return;
     chip.dataset.tone = h.tone;
     chip.setAttribute('aria-label', h.aria);
@@ -961,7 +1010,7 @@
     status.dataset.kind = view.kind;
     status.setAttribute('aria-label', view.aria);
     putIcon($('card-status-icon'), view.icon ? iconNode(icon(view.icon)) : dotNode());
-    $('card-status-word').textContent = view.word;
+    $('card-status-word').textContent = view.kind === 'pending' ? 'necesita permiso' : view.word; // Coucou: «<name> needs permission»
     capsule.dataset.card = view.kind;
     capsule.dataset.cardTone = view.tone;
     const detail = $('card-reason');
@@ -1017,6 +1066,18 @@
   const denyButton = $('deny');
   if (allowButton) allowButton.addEventListener('click', event => { void decideCard('allow', event); });
   if (denyButton) denyButton.addEventListener('click', event => { void decideCard('deny', event); });
+  // S10 (L22): the key hints on Coucou's buttons are real — Y allows, N denies (Coucou island/hooks.ts). Same gate as a click:
+  // trusted event only, and decideCard still refuses unless the card is pending, visible and not in flight.
+  document.addEventListener('keydown', event => {
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    const t = event.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+    const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+    if (key !== 'y' && key !== 'n') return;
+    const permission = $('permission');
+    if (!permission || permission.hidden || permission.inert) return;
+    void decideCard(key === 'y' ? 'allow' : 'deny', event);
+  });
 
   // F014 (#338): fold the waiting card down to the compact island WITHOUT
   // deciding it (upstream `foldApproval`, windows/src/island/island.ts:144-154
@@ -1024,8 +1085,8 @@
   // the host's own collapse verb and never touches the decision lane: the host
   // keeps the card, the request keeps waiting (the compact sun flag carries
   // it), and reopening the island shows the same card again.
-  const foldButton = $('card-fold');
-  if (foldButton) foldButton.addEventListener('click', event => {
+  // S10 (L22): Coucou's question card carries the same fold chevron; it is the same host collapse, nothing is answered.
+  for (const foldButton of [$('card-fold'), $('question-fold')].filter(Boolean)) foldButton.addEventListener('click', event => {
     if (event.isTrusted !== true || !window.desktop || !current || current.state !== 'expanded') return;
     focusAfterPhase = 'island-toggle'; // folding moves focus with the view, like Escape
     window.desktop.close().then(snap => {

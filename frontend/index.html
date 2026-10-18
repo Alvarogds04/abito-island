@@ -41,6 +41,8 @@
        timer or host call by itself. -->
   <script defer src="island-interaction.js"></script>
   <script defer src="island.js"></script>
+  <!-- S10: Coucou header icons + the "+" and mute controls (loaded after island.js). -->
+  <script defer src="island-header.js"></script>
   <!-- U1: pure chat view helpers + the chat surface (same island). -->
   <script defer src="chat-markdown.js"></script>
   <script defer src="chat-view.js"></script>
@@ -77,6 +79,8 @@
            overview from compact; in the overview it closes it. -->
       <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
+      <!-- S10 (L22): Coucou's state badge on the character («!» approval, «?» question, ✓ finished); decoration only. -->
+      <span id="clay-badge" aria-hidden="true" hidden><i></i></span>
       <!-- #419: visual auto-close countdown — pure decoration (aria-hidden,
            hidden by default). The interaction adapter renders the published
            countdown fraction into it; it never drives the close. -->
@@ -87,14 +91,26 @@
       <!-- U1: the overview's primary control. Opens the chat view of THIS
            island (no other window). Enter in the overview does the same. -->
       <header id="island-header" class="hdr" aria-label="Vistas de Abito">
+        <!-- S10 (L22): Coucou's header in every expanded state: home / chat / + on the left, gear / mute on the right.
+             Icons are drawn by island-header.js from the vendored Coucou icon paths (MIT). -->
         <div class="tabs" role="group" aria-label="Vistas">
-          <button id="home-tab" class="tab on" type="button" aria-label="Vista general" aria-pressed="true"><span class="ico"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.25 7.1 8 2.5l5.75 4.6M4 6.1v7h8v-7M6.5 13.1V9h3v4.1"/></svg></span></button>
-          <button id="open-chat" class="tab" type="button" aria-label="Conversar con Abito" aria-describedby="open-chat-hint" aria-pressed="false"><span class="ico" data-icon="bubble"></span></button>
+          <button id="home-tab" class="tab on" type="button" aria-label="Vista general" aria-pressed="true"><span class="ico" data-cc-icon="house"></span></button>
+          <button id="open-chat" class="tab" type="button" aria-label="Conversar con Abito" aria-describedby="open-chat-hint" aria-pressed="false"><span class="ico" data-cc-icon="bubble"></span></button>
+          <button id="open-new" class="tab" type="button" aria-label="Nueva conversación" aria-pressed="false"><span class="ico" data-cc-icon="plus"></span></button>
         </div>
-        <button id="open-settings" class="hdr-action" type="button" aria-label="Ajustes"><span class="ico" data-icon="gear"></span></button>
+        <div class="header-actions">
+          <button id="open-settings" class="hdr-action" type="button" aria-label="Ajustes"><span class="ico" data-cc-icon="gear"></span></button>
+          <button id="toggle-sound" class="hdr-action" type="button" aria-label="Silenciar" aria-pressed="false"><span class="ico" data-cc-icon="speakerOn"></span></button>
+        </div>
       </header>
       <section id="overview-view" aria-label="Vista general">
         <div class="card card-left">
+          <!-- S10 (L22): Coucou's empty card («Nothing running right now.» + [Ask]); shown while no session runs (island.css). -->
+          <div id="overview-empty" class="stack-empty">
+            <div class="title">Nada en ejecución ahora mismo.</div>
+            <div class="sub">Soltá un archivo o preguntame lo que quieras.</div>
+            <button id="overview-ask" class="btn primary" type="button"><span>Preguntar</span></button>
+          </div>
           <div class="agentline"><strong>Abito</strong><span id="overview-status" class="source"></span></div>
           <p id="overview-detail" class="overview-detail"></p>
           <div class="pill-summary">
@@ -126,6 +142,12 @@
           <button id="notice-dismiss" class="icon-btn" type="button" aria-label="Descartar aviso"><span class="ico" data-icon="cross"></span></button>
         </div>
         <p id="notice-detail" hidden></p>
+        <!-- S10 (L22): Coucou's finished card, shown only in the confirmed-notice lane (island.js fills it). -->
+        <div id="notice-card" hidden>
+          <div class="who-row"><span class="dot" aria-hidden="true"></span><strong id="notice-card-name"></strong><span id="notice-card-verb"></span></div>
+          <div id="notice-card-message" class="title one-line"></div>
+          <div class="actions"><button id="notice-card-terminal" class="btn primary" type="button"><span>Abrir terminal</span></button><button id="notice-card-ok" class="btn secondary" type="button"><span>OK</span></button></div>
+        </div>
       </div>
       <!-- Q1: notices are announced once to screen readers (polite). -->
       <p id="notice-live" class="sr-only" role="status" aria-live="polite"></p>
@@ -135,7 +157,7 @@
            /execute. An untrusted or stale click can never approve. -->
       <div id="permission" class="card full wash" hidden aria-label="Decisión pendiente">
         <div id="card-head">
-          <span id="card-status" class="chip" role="img"><span class="ico" id="card-status-icon"></span><span class="word" id="card-status-word"></span></span>
+          <span id="card-status" class="chip" role="img"><span class="ico" id="card-status-icon"></span><strong id="card-agent">Abito</strong><span class="word" id="card-status-word"></span></span>
           <span id="card-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="expiry"></time></span>
           <span id="card-conn" class="chip" role="img" hidden><span class="ico" id="card-conn-icon"></span><span class="word" id="card-conn-word"></span></span>
           <span id="card-bridge" class="chip" role="img" hidden><span class="ico" id="card-bridge-icon"></span><span class="word" id="card-bridge-word"></span></span>
@@ -144,14 +166,14 @@
         <p id="operation"></p>
         <p id="card-reason" role="status" hidden></p>
         <div id="card-actions">
-          <button id="allow" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="check"></span><span class="btn-word">Permitir</span></button>
-          <button id="deny" type="button" disabled aria-describedby="card-reason"><span class="ico" data-icon="cross"></span><span class="btn-word">Rechazar</span></button>
+          <button id="allow" type="button" disabled aria-describedby="card-reason" aria-keyshortcuts="Y"><span class="ico" data-icon="check"></span><span class="btn-word">Permitir</span><span class="kbd" aria-hidden="true">Y</span></button>
+          <button id="deny" type="button" disabled aria-describedby="card-reason" aria-keyshortcuts="N"><span class="ico" data-icon="cross"></span><span class="btn-word">Rechazar</span><span class="kbd" aria-hidden="true">N</span></button>
           <!-- T7.3: the fold sits in the action row (isla-approval). -->
           <!-- F014 (#338): fold the waiting card down to the compact island
                WITHOUT deciding it (upstream `foldApproval`, windows
                /src/island/island.ts:144-154): the host keeps the card, the
                request keeps waiting, reopening shows it again. -->
-          <button id="card-fold" class="icon-btn" type="button" aria-label="Plegar la tarjeta y dejar la solicitud esperando"><span class="ico" data-icon="arrow-right"></span></button>
+          <button id="card-fold" class="icon-btn" type="button" aria-label="Plegar la tarjeta y dejar la solicitud esperando"><span class="ico" data-cc-icon="chevronUp"></span></button>
           <span id="card-wait">Espera tu respuesta</span>
         </div>
       </div>
@@ -162,13 +184,14 @@
            All text is written with textContent. -->
       <div id="question" class="card full wash" inert aria-label="Pi pregunta">
         <div id="question-head">
-          <span id="question-asker" class="chip"></span>
+          <span id="question-asker" class="chip"><span class="dot" aria-hidden="true"></span><strong id="question-asker-name"></strong><span id="question-asker-verb">pregunta</span></span>
           <span id="question-expiry" class="chip" role="img"><span class="ico" data-icon="clock"></span><time class="word" id="question-expiry-word"></time></span>
           <span id="question-state" class="chip" role="img" hidden><span class="ico" id="question-state-icon"></span><span class="word" id="question-state-word"></span></span>
           <p id="question-body"></p>
           <button id="question-skip" type="button"><span class="ico" data-icon="cross"></span><span class="btn-word">Omitir</span></button>
         </div>
         <div id="question-options" role="group" aria-label="Opciones de respuesta"></div>
+        <button id="question-fold" class="icon-btn" type="button" aria-label="Plegar la pregunta y dejarla esperando"><span class="ico" data-cc-icon="chevronUp"></span></button>
         <form id="question-freeform" hidden novalidate>
           <label for="question-text" class="sr-only">Tu respuesta</label>
           <textarea id="question-text" rows="1" maxlength="2000" spellcheck="true" placeholder="Escribí…" aria-describedby="question-word"></textarea>

@@ -82,7 +82,7 @@ test('island icon buttons never override the absolute placement of #card-info/#n
   assert.equal(decls('#capsule .icon-btn').position, undefined, 'a (1,1,0) position rule would beat the (1,0,0) absolute rules');
   assert.equal(decls('.icon-btn').position, 'relative', 'the ::after ring anchors on the base class (0,1,0), which ids still override');
   assert.equal(decls('#card-info').position, 'absolute', 'the info button keeps its corner placement');
-  assert.equal(decls('#card-fold').position, 'relative', 'T7.3: the fold sits in the action row (isla-approval)');
+  assert.equal(decls('#permission #card-fold, #question #question-fold, #permission #card-info').position, 'absolute', 'S10: the fold chevron is anchored to the card corner, like Coucou');
 });
 test('chat top bar: visible title «Abito» before the gear/back buttons (design isla-chat-*)', () => {
   const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
@@ -107,10 +107,12 @@ test('chat body top row: «+» and history left-aligned, then the label «Conver
   assert.match(fs.readFileSync(path.join(dir, 'chat.js'), 'utf8'), /chat-history-label[\s\S]{0,200}turns\.length/, 'the label shows only while the conversation has no turns');
   assert.ok(require(path.join(dir, 'icons.js')).NAMES.includes('plus'));
 });
-test('chat model chip is a 24px chip on the caption step (design chip 24/12)', () => {
+test('chat model chip keeps its 24px chip and wears Coucou\'s model-btn tokens (500 10.5px, rgba .06 fill, r999) (S10 L22)', () => {
   const c = decls('#chat-model-btn');
   assert.equal(c['min-height'], '24px');
-  assert.match(c.font || '', /var\(--fs-caption\)/);
+  assert.equal(c.font, '500 10.5px var(--font)');
+  assert.equal(c.background, 'rgba(255, 255, 255, 0.06)');
+  assert.equal(c['border-radius'], 'var(--radius-full)');
 });
 console.log(`island-controls-check: ${failed ? failed + ' FAILED' : 'all passed'}`);
 if (failed) process.exitCode = 1;

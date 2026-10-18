@@ -586,15 +586,13 @@ const specificity = sel => {
   return [ids + sum[0], attrs + sum[1]];
 };
 const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
-test('style: the rules that HIDE the gear are at least as specific as the rule that shows it', () => {
+test('style (S10 L22): the gear is shown in the overview and NO rule hides it for a card or a pending question (Coucou shows its header everywhere)', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const rules = [...css.matchAll(/(^|\n)([^{}\n][^{}]*#open-settings[^{}]*)\{([^}]*)\}/g)].map(m => ({ sel: m[2].trim(), body: m[3] }));
-  const shows = rules.filter(r => /visibility:\s*visible/.test(r.body));
-  const hides = rules.filter(r => /visibility:\s*hidden/.test(r.body) && /\[data-(card|question)/.test(r.sel));
-  assert.ok(shows.length >= 1 && hides.length >= 1);
-  for (const h of hides) for (const sh of shows) {
-    for (const part of h.sel.split(',').map(x => x.trim())) assert.ok(cmp(specificity(part), specificity(sh.sel)) >= 0, `«${part}» would lose to «${sh.sel}»`);
-  }
+  assert.ok(rules.some(r => /visibility:\s*visible/.test(r.body)), 'the shown rule exists');
+  assert.equal(rules.filter(r => /visibility:\s*hidden/.test(r.body) && /\[data-(card|question)/.test(r.sel)).length, 0, 'no card/question hide rule');
+  const header = css.match(/#capsule\[data-phase="expanded"\] #island-header \{[^}]*\}/);
+  assert.ok(header && /visibility:\s*visible/.test(header[0]), 'the header itself is visible whenever the island is expanded');
 });
 
 test('focus: closing the panel by keyboard lands on the chat-header gear, which stays visible in the CHAT view (#408; #open-settings is overview-only)', () => {

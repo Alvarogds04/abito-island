@@ -26,7 +26,8 @@
     if (KNOWN_AGENTS[slug]) return KNOWN_AGENTS[slug];
     return slug.replace(/(^|[-_])([a-z0-9])/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase());
   }
-  const askedBy = n => `${agentLabel(n && AGENT_SLUG.test(n.agent) ? n.agent : 'pi')} pregunta`;
+  const askerName = n => agentLabel(n && AGENT_SLUG.test(n.agent) ? n.agent : 'pi');
+  const askedBy = n => `${askerName(n)} pregunta`;
   function fromPending(p) {
     if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !UUID_V4.test(p.id)) return null;
     const kind = p.kind === 'approval' ? 'approval' : p.kind === 'question' ? 'question' : null;
@@ -223,6 +224,6 @@
   // The host's byte budget is authoritative: no answer yet, or «not allowed», means no send.
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
-  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

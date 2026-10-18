@@ -52,7 +52,9 @@ html[data-theme="light"] {
   width: 44px; height: 44px; min-width: 44px; flex: 0 0 44px;
   margin: 0 -5px; border-radius: 0; background: transparent; color: var(--dim-2);
 }
-#island-header .hdr-action { margin: 0 1px 0 0; }
+/* .header-actions: gap 14, padding-right 16; the glyph is 14 wide, the hit area 44 (margin -15 each side) */
+.header-actions { margin-left: auto; display: flex; align-items: center; gap: 14px; padding-right: 16px; }
+#island-header .hdr-action { margin: 0 -15px; }
 #island-header .tab::after, #island-header .hdr-action::after {
   content: ""; position: absolute; inset: 11px 7px; z-index: -1;
   border-radius: 11px; background: transparent;
@@ -146,6 +148,7 @@ html[data-theme="light"] {
   padding: 4px 16px 4px 116px; gap: 5px; justify-content: center; overflow: hidden;
   background: var(--card); border: 1px solid var(--hairline); border-radius: 20px;
 }
+#permission, #question { position: absolute; }
 #permission { --wash: rgba(245, 165, 36, 0.42); }
 #question { --wash: rgba(34, 211, 238, 0.38); }
 #permission::before, #question::before { background: radial-gradient(280px 280px at 50% 130%, var(--wash) 0%, rgba(0, 0, 0, 0) 70%); }
@@ -164,7 +167,7 @@ html[data-theme="light"] {
 /* .title 600 15px, two lines; .code 12px mono in a rounded well */
 #question-body { grid-area: body; font: 600 15px/1.25 var(--font); color: var(--ink); max-height: 38px; -webkit-line-clamp: 2; }
 #permission #operation {
-  align-self: flex-start; max-width: 100%; margin: 0; padding: 5px 10px; border-radius: 10px;
+  align-self: stretch; max-width: 100%; margin: 0; padding: 5px 10px; border-radius: 10px;
   font: 400 12px var(--mono); color: #e8e9ec; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.06);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text;
 }
@@ -197,7 +200,7 @@ html[data-theme="light"] {
    .np-card padding 10px 12px 0 108px). It takes the left card's text column while a track is on,
    in place of the ticker line and the blob summary. No artwork / progress / volume (see spotify-view.js). ── */
 
-.spotify-card { left: 108px; right: 12px; top: 14px; bottom: auto; height: auto; display: block; }
+.spotify-card { left: 108px; right: 310px; top: 14px; bottom: auto; height: auto; display: block; }
 .spotify-card[hidden] { display: none; }
 #overview-view[data-spotify="on"] .overview-detail, #overview-view[data-spotify="on"] .pill-summary, #overview-view[data-spotify="on"] .agentline, #overview-view[data-spotify="on"] #minibots { display: none; }
 .np-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -261,3 +264,152 @@ html[data-theme="light"] {
 @keyframes shimmer { from { background-position: 130% 0; } to { background-position: -130% 0; } }
 html[data-motion="reduce"] .shimmer { animation: none; }
 #overview-view[data-spotify="on"] .card-left > .ticker { display: none; }
+
+/* ── Approval and question as Coucou's stack (views.ts buildApproval / buildQuestion) ──
+   who-row: white dot 8px + bold name + dim label; the command in .code; Deny [N] / Allow [Y]; the fold chevron
+   top-right; the question has plain pill options and a quiet link instead of «Answer in terminal». Abito keeps
+   the expiry, the connection chips and the «Espera tu respuesta» caption for assistive tech and error states. */
+
+#card-head .dot, #question-asker .dot { width: 8px; height: 8px; margin: 0; border-radius: 50%; background: #fff; flex: 0 0 8px; }
+#card-head { flex-wrap: nowrap; }
+#card-status { gap: 7px; }
+#card-agent, #question-asker-name { font: 600 12px var(--font); color: var(--ink); }
+#question-asker-verb { font: 400 12px var(--font); color: var(--dim-2); }
+#question-asker { gap: 7px; }
+/* expiry and the helper caption are not in Coucou's card: they stay readable by assistive tech */
+#card-expiry:not([data-tone="red"]), #card-wait, #question-expiry {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+#card-status .ico:empty { display: none; }
+/* buttons: label + .kbd (10.5px, 4px radius, border .4, opacity .55) */
+#card-actions { flex-direction: row; justify-content: flex-start; }
+#deny { order: 1; } #allow { order: 2; } #card-wait { order: 4; } #card-fold { order: 3; }
+#allow .kbd, #deny .kbd { font: 400 10.5px var(--font); padding: 0 4px; border-radius: 4px; opacity: 0.55; }
+#allow .kbd { border: 1px solid rgba(0, 0, 0, 0.4); }
+#deny .kbd { border: 1px solid rgba(255, 255, 255, 0.4); }
+#allow { color: var(--primary-ink); }
+#deny { color: var(--ink-2); }
+/* fold chevron: .icon-btn.fold, 16px round, top 8 right 10 of the card (anchored to the card, not the action row) */
+#permission #card-fold, #question #question-fold, #permission #card-info { position: absolute; margin: 0; min-width: 44px; min-height: 44px; }
+#permission #card-fold, #question #question-fold { top: -6px; right: -4px; }
+#permission #card-info { top: -6px; right: 26px; }
+#question #question-fold { grid-column: auto; grid-row: auto; }
+#permission #card-fold .ico svg, #question #question-fold .ico svg { width: 8px; height: 8px; }
+#capsule #question .icon-btn::after { inset: 14px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.07); }
+#question .icon-btn { color: var(--dim-4); }
+
+/* question: grid [who][title][options + quiet link] */
+#question { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto; align-content: center; row-gap: 5px; column-gap: 8px; }
+#question-head { display: contents; }
+#question-asker { grid-column: 1 / -1; grid-row: 1; display: inline-flex; align-items: center; }
+#question-state { grid-column: 1 / -1; grid-row: 1; }
+#question-body { grid-column: 1 / -1; grid-row: 2; }
+#question-options { grid-column: 1; grid-row: 3; display: flex; flex-wrap: wrap; gap: 6px; }
+#question-skip { grid-column: 2; grid-row: 3; justify-self: start; align-self: center; position: relative; top: auto; right: auto; margin: 0; padding: 0 8px; font: 500 11px var(--font); color: var(--dim-2); min-height: 44px; }
+#question-freeform { grid-column: 1 / -1; grid-row: 4; }
+.q-key { display: none; }
+.q-option { color: var(--ink-2); }
+/* the fold chevron is positioned against the card, so the action row must not be a containing block */
+#permission #card-actions { position: static; }
+
+/* ── Notices lane = Coucou's finished card: who-row, bold message, [Open terminal][OK], green wash ──
+   (views.ts buildFinished; style.css .who-row .title.one-line .actions .btn). The overview's own notice band
+   (#notice-pill) keeps serving the non-lane overview until slice 4. */
+
+#notice-card { display: none; }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notice-card:not([hidden]) {
+  display: flex; flex-direction: column; justify-content: center; gap: 5px; height: 100%;
+}
+#capsule[data-notice-view="notices"] #notice-row, #capsule[data-notice-view="notices"] #notice-pill,
+#capsule[data-notice-view="notices"] #notice-detail, #capsule[data-notice-view="notices"] #notice-list { display: none; }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices { --wash: rgba(52, 211, 153, 0.5); }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(280px 280px at 50% 130%, var(--wash) 0%, rgba(0, 0, 0, 0) 70%);
+}
+#notice-card > * { position: relative; z-index: 1; }
+#notice-card .who-row { display: flex; align-items: center; gap: 7px; font: 400 12px var(--font); color: var(--dim-2); }
+#notice-card .who-row .dot { width: 8px; height: 8px; margin: 0; background: #fff; flex: 0 0 8px; }
+#notice-card .who-row strong { font: 600 12px var(--font); color: var(--ink); }
+#notice-card .title { font: 600 15px var(--font); color: var(--ink); }
+#notice-card .title.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#notice-card .actions { display: flex; gap: 8px; }
+/* .btn 500 12.5px pill, 30px visual in a 44px hit */
+#notice-card .btn { position: relative; z-index: 0; min-height: 44px; margin: -7px 0; padding: 0 13px; border: 0; border-radius: 0; background: transparent; font: 500 12.5px var(--font); cursor: pointer; }
+#notice-card .btn::after { content: ""; position: absolute; inset: 7px 0; z-index: -1; border-radius: 999px; }
+#notice-card .btn.primary { color: #0b0c0e; }
+#notice-card .btn.primary::after { background: var(--ink); }
+#notice-card .btn.secondary { color: var(--ink-2); }
+#notice-card .btn.secondary::after { background: rgba(255, 255, 255, 0.09); }
+#notice-card .btn.secondary:hover::after { background: rgba(255, 255, 255, 0.15); }
+#notice-card .btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Overview left card as Coucou's: who-row + ticker with sessions, the empty card without ──
+   (views.ts buildOverview / buildEmpty; style.css .who .ticker .title .sub .btn). Abito's static status lines stay in
+   the DOM for assistive tech and tests, but are not drawn: Coucou's card has no «Abito · Conexión local» line. */
+
+.agentline, .overview-detail, .pill-summary {
+  clip-path: inset(50%); pointer-events: none;
+}
+.card-left > .who {
+  position: absolute; top: 10px; left: 108px; right: 36px; display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.card-left > .who[hidden] { display: none; }
+.who .who-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; flex: 0 0 7px; }
+.who .name { font: 600 12px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .tool { font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; }
+.who .count { font: 400 11px var(--font); color: var(--dim-3); margin-left: auto; flex: 0 0 auto; }
+.who .count[hidden] { display: none; }
+/* the empty card: .stack padding 0 18px 0 118px, row, title 600 15 / sub 400 13 dim, [Ask] primary */
+#overview-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: row; align-items: center; gap: 16px; padding: 0 18px 0 118px;
+}
+#overview-empty .title { font: 600 15px var(--font); color: var(--ink); }
+#overview-empty .sub { font: 400 13px var(--font); color: var(--dim); margin-top: 5px; }
+#overview-empty > .btn { margin-left: auto; position: relative; z-index: 0; min-height: 44px; margin-top: 0; margin-bottom: 0; padding: 0 13px; border: 0; border-radius: 0; background: transparent; color: #0b0c0e; font: 500 12.5px var(--font); cursor: pointer; }
+#overview-empty > .btn::after { content: ""; position: absolute; inset: 7px 0; z-index: -1; border-radius: 999px; background: var(--ink); }
+#overview-view[data-ticker="on"] #overview-empty, #overview-view[data-spotify="on"] #overview-empty { display: none; }
+/* connection strip: nothing healthy to say → nothing drawn, and the right card takes its whole height */
+#capsule[data-notices-calm="true"] #notices { display: none; }
+#capsule[data-notices-calm="true"] #pill-choices { top: 0; }
+
+/* Spotify: the 36px art tile (Coucou .np-art). No artwork is ever fetched (CSP img-src 'self'), so the tile stays the empty slot with its note. */
+.np-art { position: relative; flex: 0 0 36px; width: 36px; height: 36px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35); display: grid; place-items: center; overflow: hidden; color: #1db954; }
+.np-art::after { content: ""; position: absolute; inset: 0; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); pointer-events: none; }
+#overview-view[data-spotify="on"] .card-left > .who { display: none; }
+
+/* ── The character's state badge (views.ts pill-badge, layout.ts): 16px dark ring, 12px coloured disc, 6px glyph ── */
+#clay-badge { position: absolute; z-index: 5; width: 16px; height: 16px; border-radius: 50%; background: #0b0c0e; display: grid; place-items: center; pointer-events: none; }
+#clay-badge[hidden] { display: none; }
+#clay-badge i { width: 12px; height: 12px; border-radius: 50%; display: grid; place-items: center; color: #000; font: 700 9px/1 var(--font); font-style: normal; }
+#clay-badge[data-kind="approval"] { box-shadow: 0 0 4px rgba(245, 165, 36, 0.6); }
+#clay-badge[data-kind="approval"] i { background: #f5a524; }
+#clay-badge[data-kind="approval"] i::before { content: "!"; }
+#clay-badge[data-kind="question"] { box-shadow: 0 0 4px rgba(34, 211, 238, 0.6); }
+#clay-badge[data-kind="question"] i { background: #22d3ee; }
+#clay-badge[data-kind="question"] i::before { content: "?"; }
+#clay-badge[data-kind="finished"] { box-shadow: 0 0 4px rgba(34, 197, 94, 0.6); }
+#clay-badge[data-kind="finished"] i { background: #22c55e; }
+#clay-badge[data-kind="finished"] i::before { content: "✓"; }
+
+/* ── The chat on Coucou's visual tokens (L22): the chat stays Abito's (chat*.js untouched, its own column geometry and
+   controls); only the look is Coucou's — style.css "Chat (prompt view)" and "Provider and model switcher" @434d6a2b:
+   .bubble, .reply, .chat-bar, .chat-input, .send-btn, .model-btn, .model-name. ── */
+
+#chat-log li.user { padding: 6px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.13); color: var(--ink-2); font: 400 12.5px var(--font); }
+#chat-log li.assistant { color: #b0b5be; font: 400 12.5px var(--font); }
+#chat-log li.note, #chat-log li.error { font: 600 12px/1.2 var(--font); }
+#chat-log li.empty { color: var(--dim-2); }
+#chat-log li.empty .empty-greeting { font: 600 13px/1.35 var(--font); color: var(--ink); }
+#chat-input {
+  border: 0; border-radius: 12px; background: rgba(255, 255, 255, 0.07); color: var(--ink); font: 400 13px/1.35 var(--font);
+}
+#chat-input::placeholder { color: var(--dim-3); }
+/* the send button: Coucou's white disc with dark glyph (it was Abito's lime) */
+#chat-send { background: var(--ink) !important; border-color: var(--ink) !important; color: #0b0c0e !important; }
+#chat-model-btn { padding: 4px 10px; border: 0; background: rgba(255, 255, 255, 0.06); color: #7b8089; font: 500 10.5px var(--font); }
+#chat-model-btn:hover:not(:disabled), #chat-model-btn[aria-expanded="true"] { background: rgba(255, 255, 255, 0.1); color: #7b8089; }
+#chat-title { font: 600 13px var(--font); }
+#chat-history-label { font: 400 11px var(--font); color: var(--dim-2); }
+
+/* the question card is taller in Coucou (window 640x200): 148 high under the header */

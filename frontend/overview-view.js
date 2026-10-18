@@ -320,5 +320,19 @@
   // healthy connection needs nothing there.
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
-  return { expiryLabel, expiryAria, cardView, connectionView, connectionBandView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  // S10 (L22): Coucou's finished card (views.ts buildFinished): who-row «<name> <verb>», the final message in bold,
+  // [Open terminal][OK]. The host notice carries title («Pi terminó su turno») and detail (the message); the
+  // name is what precedes «terminó» and the verb is the rest. Anything else keeps the whole title as the name.
+  // «Abrir terminal» is Abito's existing closed `focus_host` (target terminal): island.js wires it, the host answers
+  // with a public Spanish reason when there is nothing to focus.
+  function finishedCardView(notice) {
+    const clean = v => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim() : '');
+    const title = clean(notice && notice.title);
+    if (!title) return null;
+    const m = /^(.+?)\s+(termin[oó].*)$/i.exec(title);
+    const name = m ? m[1] : title, verb = m ? m[2].replace(/\s+su turno$/i, '') : '';
+    const detail = clean(notice && notice.detail);
+    return { name, verb, message: detail || title, terminal: { label: 'Abrir terminal', available: true, target: 'terminal', hint: '' }, ok: { label: 'OK' } };
+  }
+  return { finishedCardView, expiryLabel, expiryAria, cardView, connectionView, connectionBandView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

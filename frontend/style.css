@@ -592,7 +592,6 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 }
 #capsule[data-question="pending"]:not([data-card]) #notices, #capsule[data-question="outcome"]:not([data-card]) #notices { opacity: 0; visibility: hidden; }
 
-#capsule[data-question="pending"]:not([data-card]) #open-chat, #capsule[data-question="expired"]:not([data-card]) #open-chat { opacity: 0; visibility: hidden; }
 /* One 44px row: [asker] [expiry/state] question text ............ [Omitir]; the
    options (up to two rows of 44px) fit under it inside the 160px island. */
 #question-head { align-items: center; }
@@ -636,9 +635,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
   opacity: 1; visibility: visible; transform: none;
   transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay), transform var(--dur-view-in) var(--spring) var(--dur-view-delay), visibility 0s;
 }
-/* these must out-rank the «shown in the overview» rule above (2 attributes), or they never apply */
-#capsule[data-phase="expanded"][data-view="overview"][data-question="pending"]:not([data-card]) #open-settings,
-#capsule[data-phase="expanded"][data-view="overview"][data-card] #open-settings { opacity: 0; visibility: hidden; }
+/* S10 (L22): the gear and the chat tab stay in the header on every card state, as in Coucou. */
 #open-settings:hover { background: var(--fill-hover); }
 #settings {
   position: absolute; left: 12px; right: 12px; top: 58px; bottom: 12px; z-index: 3; /* below the chat header, which stays visible */ display: flex; flex-direction: column; gap: 4px;
@@ -804,10 +801,7 @@ body { color: var(--ink); -webkit-font-smoothing: antialiased; }
 #island-header .ico svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 #island-header button::after { position: absolute; top: 50%; left: 0; width: 44px; height: 44px; content: ""; transform: translateY(-50%); }
 #island-header button:active { scale: .96; }
-/* Do not put a second header over native-height question/approval controls. */
-#capsule[data-card] #island-header,
-#capsule[data-question="pending"]:not([data-notice-view="notices"]) #island-header,
-#capsule[data-question="expired"]:not([data-notice-view="notices"]) #island-header { opacity: 0; visibility: hidden; pointer-events: none; }
+/* S10 (L22): Coucou shows its header in every expanded state, cards included (island.css lays it out). */
 
 #overview-view { position: absolute; opacity: 0; visibility: hidden; pointer-events: none; }
 #capsule[data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-question="pending"]):not([data-question="expired"]):not([data-question="outcome"]) #overview-view { opacity: 1; visibility: visible; }

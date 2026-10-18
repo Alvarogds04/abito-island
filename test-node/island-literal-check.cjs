@@ -115,7 +115,7 @@ test('notices: 44px band on the right card; a confirmed notice takes the whole 6
 
 test('Spotify card: Coucou np-card (dot 6, title 600 12, sub 400 11, play 20 circle ink, icons 16x18) in the left card column', () => {
   const c = decls('.spotify-card');
-  assert.equal(c.left, '108px'); assert.equal(c.top, '14px');
+  assert.equal(c.left, '108px'); assert.equal(c.right, '310px', 'stays inside the 322px left card'); assert.equal(c.top, '14px');
   assert.equal(decls('.np-title').font, '600 12px var(--font)'); assert.equal(decls('.np-sub').font, '400 11px var(--font)');
   assert.equal(decls('.np-dot').width, '6px');
   const p = decls('.np-play'); assert.equal(p.width, '20px'); assert.equal(p['border-radius'], '50%'); assert.equal(p.background, 'var(--ink)');
