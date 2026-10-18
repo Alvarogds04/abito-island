@@ -19,7 +19,14 @@
       case 'prefs_action': return st.prefs;
       case 'hotkey_action': return { enabled: true, combo: 'Ctrl+Alt+A', status: 'active', default: 'Ctrl+Alt+A' };
       case 'spotify_action': return { ok: true, state: st.spotify };
-      case 'agent_action': if (p.action === 'sessions_list') { window.__vcPolled = (window.__vcPolled || 0) + 1; return { sessions: st.sessions }; } return { connection: 'connected', accounts: [], providers: [] };
+      case 'agent_action': if (p.action === 'sessions_list') { window.__vcPolled = (window.__vcPolled || 0) + 1; return { sessions: st.sessions }; } return { connection: 'connected', accounts: [], providers: [], agents: [
+        // Same agents and states as mock-coucou.js (hooks_status / agent_hooks_list): Claude Code and Codex installed.
+        { id: 'claude-code', state: 'connected', backup: true, reviewable: true },
+        { id: 'codex', state: 'connected', backup: true },
+      ] };
+      case 'plan_action': return p.action === 'claude'
+        ? { available: true, updatedAt: Date.now(), fiveHour: { usedPct: 42, resetsAt: Date.now() + 3600e3 }, sevenDay: { usedPct: 61, resetsAt: Date.now() + 86400e3 } }
+        : { available: true, rateLimits: { primary: { usedPercent: 7, resetsAt: Math.floor(Date.now() / 1000) + 3600, windowDurationMins: 300 }, secondary: { usedPercent: 33, resetsAt: Math.floor(Date.now() / 1000) + 86400, windowDurationMins: 10080 } } };
       case 'specialists_action': return { specialists: [], roles: [], active: null };
       case 'settings_window_action': return { ok: true };
       case 'secret_action': return { present: false };
