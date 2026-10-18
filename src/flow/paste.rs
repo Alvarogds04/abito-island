@@ -60,7 +60,18 @@ mod tests {
         std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" > {}\ncat > {}\n", args.display(), out.display())).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(copy_with(script.to_str().unwrap(), "secreto dictado"), Outcome::Copied);
+        // A freshly written script exec'd at once can fail with ETXTBSY while a parallel test's
+        // fork still holds our just-closed write descriptor (until that child execs). The window
+        // is transient, so retry a few times; a real failure still fails after the last attempt.
+        let mut outcome = Outcome::Failed;
+        for _ in 0..20 {
+            outcome = copy_with(script.to_str().unwrap(), "secreto dictado");
+            if outcome == Outcome::Copied {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(outcome, Outcome::Copied);
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "secreto dictado");
         assert!(!std::fs::read_to_string(&args).unwrap().contains("secreto"));
         let _ = std::fs::remove_dir_all(dir);
