@@ -11,7 +11,7 @@ const R6_PREFIX = '40625d7f';
 const IDENTIFIER = 'com.abitog.AbitoTauri';
 const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop', 'abito-desktop-preview'];
 const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'character-minibots.js', 'character-motion.js', 'chat-cards.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'diff-model.js', 'diff-views.js', 'event-views.js', 'file-open.js', 'icons.js', 'index.html', 'integrations-calendar.js', 'integrations-deployments.js', 'integrations-email.js', 'integrations-finance.js', 'integrations-github.js', 'integrations-mail.js', 'integrations-n8n.js',
-  'integrations-notion.js', 'integrations-payments.js', 'integrations-view.js', 'island-header.js', 'island-plan.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'spotify-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js', 'views-f017-f019.md'];
+  'integrations-notion.js', 'integrations-payments.js', 'integrations-view.js', 'island-header.js', 'island-github.js', 'island-plan.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'spotify-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js', 'views-f017-f019.md'];
 // Every embedded vendor source, generated module and license is a closed input.
 FRONTEND_FILES.push(
   'vendor/coucou/LICENSE', 'vendor/coucou/bridge-abito.js', 'vendor/coucou/package.json',
@@ -33,6 +33,8 @@ FRONTEND_FILES.push(
   'vendor/coucou/views/diff.js', 'vendor/coucou/views/diff.ts',
   'vendor/coucou/core/anim.js', 'vendor/coucou/core/anim.ts',
   'vendor/coucou/core/diff.js', 'vendor/coucou/core/diff.ts',
+  'vendor/coucou/core/github.js', 'vendor/coucou/core/github.ts',
+  'vendor/coucou/views/github.js', 'vendor/coucou/views/github.ts',
   'vendor/coucou/core/plan.js', 'vendor/coucou/core/plan.ts',
   'vendor/coucou/views/usage.js', 'vendor/coucou/views/usage.ts',
   'settings.html', 'settings-app.js',

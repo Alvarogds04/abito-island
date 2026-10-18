@@ -39,6 +39,29 @@ const messages = {
   "in {m} min": "en {m} min",
   "{n} available": "{n} disponibles",
   " · until {date}": " · hasta {date}",
+  // S10 (L30): GitHub card (views/github.ts, core/github.ts)
+  Overview: "Resumen",
+  "Total stars": "Estrellas",
+  Repositories: "Repositorios",
+  "My PRs": "Mis PRs",
+  "To review": "Por revisar",
+  "Default branch CI": "CI de la rama principal",
+  Activity: "Actividad",
+  "Nothing here": "Nada por aquí",
+  "Loading…": "Cargando…",
+  Draft: "Borrador",
+  failing: "fallando",
+  running: "en curso",
+  passing: "pasando",
+  "all green": "todo en verde",
+  "no repos": "sin repos",
+  unknown: "desconocido",
+  "No contributions": "Sin contribuciones",
+  "{total} past year": "{total} el último año",
+  "{count} contribution": "{count} contribución",
+  "{count} contributions": "{count} contribuciones",
+  "{count} repo": "{count} repo",
+  "{count} repos": "{count} repos",
   "Unavailable features": "No disponible en Abito todavía: carpeta de sonidos; recarga y contador de sonidos; inicio automático; idioma; resumen."
 };
 function interpolate(text, vars) {
@@ -47,6 +70,9 @@ function interpolate(text, vars) {
 function t(key, vars) {
   if (!Object.prototype.hasOwnProperty.call(messages, key)) throw new Error(`Traducción de Abito no disponible: ${key}`);
   return interpolate(messages[key], vars);
+}
+function tn(one, other, count, vars) {
+  return t(count === 1 ? one : other, { ...vars, count });
 }
 function language() {
   return "es";
@@ -82,5 +108,6 @@ export {
   onLanguageChange,
   t,
   tl,
+  tn,
   weekdayShort
 };
