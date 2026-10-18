@@ -293,6 +293,9 @@ pub settings_window: Option<bool>,
     pub island_agents: Option<Vec<String>>,
     /// #442 T7.4: the principal's declarative «Qué hace». `None` is the default, never written.
     pub abito_instructions: Option<String>,
+    /// S10 (L30): whether the Claude plan-usage pill shows in the island header (Coucou's `showPlanInNotch`).
+    /// `None` means the default (off) and is never written, so an untouched file keeps its bytes.
+    pub show_plan_in_notch: Option<bool>,
 }
 
 impl Default for Prefs {
@@ -317,6 +320,7 @@ impl Default for Prefs {
             settings_window_size: None,
             island_agents: None,
             abito_instructions: None,
+            show_plan_in_notch: None,
         }
     }
 }
@@ -538,6 +542,9 @@ impl Prefs {
     /// #336: the effective hover policy — absent means off.
     pub fn open_on_hover(&self) -> bool { self.open_on_hover.unwrap_or(false) }
 
+    /// S10 (L30): the effective plan-pill policy — absent means off.
+    pub fn show_plan_in_notch(&self) -> bool { self.show_plan_in_notch.unwrap_or(false) }
+
     /// #366 F093: the effective Ajustes placement — absent means in-island (#408).
     pub fn settings_window_on(&self) -> bool { self.settings_window.unwrap_or(false) }
 
@@ -575,6 +582,7 @@ impl Prefs {
             island_agents: island_agents_from(v.get(ISLAND_AGENTS)),
             abito_instructions: v.get(ABITO_INSTRUCTIONS).and_then(Value::as_str)
                 .and_then(|text| clean_instructions(text).ok()).flatten(),
+            show_plan_in_notch: v.get("show_plan_in_notch").and_then(Value::as_bool),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -637,6 +645,9 @@ impl Prefs {
         }
         if let Some(text) = &self.abito_instructions {
             v[ABITO_INSTRUCTIONS] = json!(text);
+        }
+        if let Some(on) = self.show_plan_in_notch {
+            v["show_plan_in_notch"] = json!(on);
         }
         v.to_string()
     }
@@ -701,6 +712,8 @@ pub enum Command {
     /// #366 F093: whether Ajustes opens in its own window (opt-in). `false`
     /// stores the default (in-island) as no key at all.
     SetSettingsWindow(bool),
+    /// S10 (L30): show or hide the Claude plan-usage pill in the island header. `false` stores no key.
+    SetShowPlanInNotch(bool),
     /// T6.2: the remembered inner size of the own Ajustes window (logical px).
     /// Deliberately NOT produced by [`parse_command`]: the WebView can read
     /// neither the size nor the fact that one is stored — the size comes from
@@ -882,6 +895,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
         Some("set_settings_window") if map.len() == 2 => {
             let on = map.get("settings_window").and_then(Value::as_bool).ok_or(CommandError)?;
             Ok(Command::SetSettingsWindow(on))
+        }
+        // S10 (L30): exactly action + show_plan_in_notch (a bool); no coercion.
+        Some("set_show_plan_in_notch") if map.len() == 2 => {
+            let on = map.get("show_plan_in_notch").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(Command::SetShowPlanInNotch(on))
         }
         // #442 T7.4: exactly action + order (≤3 unique well-shaped ids).
         Some("set_island_agents") if map.len() == 2 => {
@@ -1066,6 +1084,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         // #366 F093: `false` is the default, so it stores no key at all (an
         // untouched file keeps its bytes) — the same rule as every optional field.
         Command::SetSettingsWindow(on) => next.settings_window = on.then_some(true),
+        Command::SetShowPlanInNotch(on) => next.show_plan_in_notch = on.then_some(true),
         // T6.2: the value gate ran nowhere else — apply is the ONLY boundary for
         // this Rust-side command, so the bounds check runs here for every caller.
         Command::SetSettingsWindowSize(w, h) => {
