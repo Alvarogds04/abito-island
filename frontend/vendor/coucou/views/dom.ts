@@ -1,4 +1,5 @@
 // Source: reference/coucou windows/src/views/dom.ts @434d6a2b — Copyright (c) 2026 Louis Raillé, MIT
+// Adapted for Abito: style attribute applied via CSSOM (strict style-src CSP)
 // Minimal DOM helpers — no framework, as specified.
 
 import { Msg, onLanguageChange } from "../i18n/i18n.js";
@@ -90,8 +91,26 @@ export function h<K extends keyof HTMLElementTagNameMap>(
     else if (k === "text") el.textContent = String(v);
     else if (k.startsWith("on") && typeof v === "function") {
       el.addEventListener(k.slice(2).toLowerCase(), v as EventListener);
-    } else if (k === "style") el.setAttribute("style", String(v));
-    else el.setAttribute(k, v === true ? "" : String(v));
+    } else if (k === "style" && typeof v === "string") {
+      let start = 0, depth = 0, quote = "", escaped = false;
+      for (let i = 0; i <= v.length; i++) {
+        const c = v[i] ?? ";";
+        if (escaped) { escaped = false; continue; }
+        if (c === "\\") { escaped = true; continue; }
+        if (quote) { if (c === quote) quote = ""; continue; }
+        if (c === '"' || c === "'") { quote = c; continue; }
+        if (c === "(") depth++;
+        if (c === ")") depth--;
+        if (c !== ";" || depth !== 0) continue;
+        const declaration = v.slice(start, i), colon = declaration.indexOf(":");
+        start = i + 1;
+        if (colon < 1) continue;
+        const name = declaration.slice(0, colon).trim();
+        const value = declaration.slice(colon + 1).trim();
+        if (!/^(-{0,2}[a-zA-Z_][\w-]*)$/.test(name) || !value) continue;
+        try { el.style.setProperty(name, value); } catch { /* Invalid declarations are ignored. */ }
+      }
+    } else el.setAttribute(k, v === true ? "" : String(v));
   }
   for (const c of children) {
     if (c == null || c === false) continue;

@@ -17,8 +17,8 @@ class Target {
   count() { return [...this.listeners.values()].reduce((n, s) => n + s.size, 0); }
 }
 class Element extends Target {
-  constructor(tag) { super(); this.tagName = tag; this.children = []; this.attrs = {}; this.style = {}; this.nodeType = 1; this.offsetWidth = 180; }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
+  constructor(tag) { super(); this.tagName = tag; this.children = []; this.attrs = {}; this.styleCalls = []; this.style = { setProperty: (k, v) => { this.styleCalls.push([k, v]); this.style[k] = v; } }; this.nodeType = 1; this.offsetWidth = 180; }
+  setAttribute(k, v) { if (k === 'style') throw new Error("CSP style-src 'self': style attribute forbidden"); this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k] ?? null; }
   append(...nodes) { for (const n of nodes) { n.parent = this; this.children.push(n); } }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter(n => n !== this); this.parent = null; }
@@ -41,13 +41,24 @@ function hashTree() {
   walk(vendor); return hash.digest('hex');
 }
 (async () => {
-  // Missing compiled module is the intended RED, before any build side effect.
+  const { h } = await load('views/dom.js');
+  const styled = h('div', { style: 'background:#F4505E;--x:1' });
+  assert.deepEqual(styled.styleCalls, [['background', '#F4505E'], ['--x', '1']]);
+  assert.equal(styled.getAttribute('style'), null);
+  const complex = h('div', { style: '; background:url("data:image/svg+xml;a:b"); --label:"a;b:c";width:calc(1px + var(--x, 2px)); ;bad;:empty' });
+  assert.deepEqual(complex.styleCalls, [['background', 'url("data:image/svg+xml;a:b")'], ['--label', '"a;b:c"'], ['width', 'calc(1px + var(--x, 2px))']]);
+  for (const style of ['bad', 'width:', 'background:url(unclosed', '--x:"unclosed', 'not a property:1']) assert.deepEqual(h('div', { style }).styleCalls, []);
+  assert.deepEqual(h('div', { style: String.raw`--label:'a\';b';background:url(data:image/svg+xml;a:b);--x:1` }).styleCalls, [['--label', String.raw`'a\';b'`], ['background', 'url(data:image/svg+xml;a:b)'], ['--x', '1']]);
+  const createElement = document.createElement;
+  document.createElement = tag => { const el = createElement(tag); el.style.setProperty = () => { throw new Error('invalid CSS'); }; return el; };
+  try { assert.doesNotThrow(() => h('div', { style: 'background:invalid' })); } finally { document.createElement = createElement; }
   const { colorDot } = await load('settings/colors.js');
   const { statusDot, renderDiff } = await load('settings/parts.js');
   const { PILL_PALETTE, parsePillColors } = await load('core/pill-colors.js');
   const { createColorBridge } = await load('bridge-abito.js');
   let colors = {}, picks = 0;
   const dot = colorDot({ id: 'agent_amp', name: 'Agente', color: '#F5F6F8' }, 'width:8px', () => colors, next => { colors = next; picks++; });
+  assert.deepEqual(dot.styleCalls, [['background', '#F5F6F8'], ['width', '8px']]);
   document.body.append(dot);
   assert.equal(dot.getAttribute('role'), 'button');
   assert.equal(dot.getAttribute('tabindex'), '0');
@@ -55,6 +66,7 @@ function hashTree() {
   dot.fire('click');
   assert.equal(palette().getAttribute('role'), 'group');
   assert.equal(palette().children.length, PILL_PALETTE.length);
+  assert.deepEqual(palette().children[1].styleCalls, [['background', '#F4505E']]);
   assert.equal(document.activeElement.getAttribute('aria-pressed'), '');
   assert.equal(palette().style.left, '132px');
   palette().children[1].fire('click');
@@ -74,8 +86,8 @@ function hashTree() {
   assert.equal(document.body.children.filter(n => n.className === 'palette').length, 1);
   document.fire('keydown', { key: 'Escape' });
   assert.equal(document.count(), 0); assert.equal(window.count(), 0);
-  assert.equal(statusDot(true).getAttribute('style'), 'background:#22c55e');
-  assert.equal(statusDot(false).getAttribute('style'), 'background:#f4505e');
+  assert.deepEqual(statusDot(true).styleCalls, [['background', '#22c55e']]);
+  assert.deepEqual(statusDot(false).styleCalls, [['background', '#f4505e']]);
   const diff = renderDiff('+nuevo\n-viejo\n<img src=x>');
   assert.deepEqual(diff.children.map(n => n.className), ['add', 'del', 'ctx']);
   assert.equal(diff.children[2].textContent, '<img src=x>');
