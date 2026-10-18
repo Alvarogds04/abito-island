@@ -533,3 +533,44 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #recap-card .btn:disabled { opacity: 0.4; cursor: default; }
 /* it replaces the overview cards while it is open */
 #capsule[data-recap="on"] #overview-view, #capsule[data-recap="on"] #notices { visibility: hidden; pointer-events: none; }
+
+/* ── The dictation pill (pill/pill.css @434d6a2b): a see-through capsule, black once open, centred in the expanded header ── */
+
+.dpill { position: absolute; left: 50%; top: 0; transform: translateX(-50%); height: 34px; display: flex; align-items: center; gap: 8px; z-index: 6; }
+.dpill[hidden] { display: none; }
+#island-header .dpill { pointer-events: auto; }
+.dcapsule {
+  position: relative; flex: 0 0 auto; border-radius: 999px; overflow: hidden; background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1.2px rgba(255, 255, 255, 0.42);
+  transition: width 0.36s cubic-bezier(0.34, 1.36, 0.64, 1), height 0.36s cubic-bezier(0.34, 1.36, 0.64, 1), background 0.2s, box-shadow 0.2s;
+}
+.dcapsule.open { background: rgba(0, 0, 0, 0.94); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 4px 10px rgba(0, 0, 0, 0.35); }
+.dcapsule.handsfree { box-shadow: inset 0 0 0 1.5px rgba(249, 115, 22, 0.85), 0 4px 10px rgba(0, 0, 0, 0.35); }
+.dcontent { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9px; opacity: 0; transform: scale(0.5); transition: opacity 0.1s ease-in, transform 0.1s ease-in; }
+.dcapsule.open .dcontent { opacity: 1; transform: scale(1); transition: opacity 0.2s ease-out 0.07s, transform 0.2s ease-out 0.07s; }
+.dclay { width: 22px; height: 22px; flex: 0 0 22px; position: relative; display: block; }
+.dclay-svg { width: 22px; height: 22px; display: block; overflow: visible; }
+.dpill .pbtn { position: relative; width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 50%; background: transparent; color: #e8e9ec; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.12s; }
+.dpill .pbtn::after { content: ""; position: absolute; inset: -8px; } /* 44px hit around the 28px button (22px for the small ones: -11 below) */
+.dpill .pbtn:hover { background: rgba(255, 255, 255, 0.14); }
+.dpill .pbtn.small { width: 22px; height: 22px; flex-basis: 22px; background: rgba(255, 255, 255, 0.16); }
+.dpill .pbtn.small::after { inset: -11px; }
+.dpill .pbtn.filled { background: #fff; color: #000; }
+.dpill .pbtn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dpill .pbtn.small svg { width: 11px; height: 11px; stroke-width: 2.6; }
+.dpill .bars { display: flex; align-items: center; gap: 3.2px; height: 22px; }
+.dpill .bars i { width: 3.4px; height: 3.4px; border-radius: 2px; background: rgba(255, 255, 255, 0.94); }
+.dmessage { font: 500 12px var(--font); color: #e8e9ec; white-space: nowrap; }
+.dbubble { flex: 0 0 auto; background: rgba(0, 0, 0, 0.94); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); border-radius: 16px; padding: 7px 8px 7px 12px; display: flex; align-items: center; gap: 8px; font: 500 12px var(--font); max-width: 300px; animation: dpop 0.2s ease-out; }
+.dbubble .dicon { width: 18px; height: 18px; flex: 0 0 18px; color: #f5a524; }
+.dbubble .dicon svg, .dbubble .dclose svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dbubble .dicon svg { width: 18px; height: 18px; }
+.dbubble .dtext { line-height: 1.35; flex: 1 1 auto; white-space: normal; }
+.dbubble .dclose { position: relative; border: 0; width: 22px; height: 22px; border-radius: 50%; background: rgba(255, 255, 255, 0.12); color: #c7cad0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.dbubble .dclose::after { content: ""; position: absolute; inset: -11px; }
+.dbubble .dclose svg { width: 10px; height: 10px; stroke-width: 2.6; }
+@keyframes dpop { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html[data-motion="reduce"] .dbubble { transition: none; animation: none; }
+/* the folded dot wears a ring while a dictation is live: orange for hands-free, white while it listens or thinks */
+#capsule[data-phase="compact"][data-dictation] #island { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
+#capsule[data-phase="compact"][data-dictation="locked"] #island { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.9); }

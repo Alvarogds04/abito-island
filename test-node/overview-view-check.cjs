@@ -620,7 +620,8 @@ test('§9.2 motion table in CSS: view enter spring after 160ms delay, exit 160ms
   // exit: the hidden state of every view uses the 160ms ease-in (and keeps visibility until it ends)
   assert.equal((css.match(/transition: opacity var\(--dur-view-out\) var\(--ease-in\), transform var\(--dur-view-out\) var\(--ease-in\), visibility 0s linear var\(--dur-view-out\)/g) || []).length >= 4, true);
   // nothing animates width/height/left/top in these transitions
-  for (const m of css.matchAll(/transition:([^;]*);/g)) assert.doesNotMatch(m[1], /\b(width|height|left|top|right|bottom|margin|padding)\b/, m[1]);
+  // (S10: the dictation pill's own capsule grows in width/height like Coucou's pill; it is a 34px element inside the header, not a view)
+  for (const m of css.replace(/\.dcapsule \{[^}]*\}/, '').matchAll(/transition:([^;]*);/g)) assert.doesNotMatch(m[1], /\b(width|height|left|top|right|bottom|margin|padding)\b/, m[1]);
   assert.match(css, /#clay \{[^}]*scale\(var\(--hover, 1\)\)[^}]*transition: transform var\(--dur-state\)/);
   assert.match(css, /:where\(button, textarea\) \{[^}]*outline: 2px solid transparent[^}]*var\(--dur-focus\)/);
   assert.match(css, /#models-list \.choose\[aria-pressed="true"\] \.ico \{ animation: control-pop var\(--dur-control\) var\(--spring\)/);
