@@ -88,6 +88,34 @@ impl<T> Engine<T> {
     }
 }
 
+/// What the caller must do after a decision taken under the host lock.
+pub enum Plan<T> {
+    Keep,
+    /// Build the running resources OUTSIDE the lock, then `install` them.
+    Start,
+    /// Drop this OUTSIDE the lock: stopping joins the engine thread, which may be mid-transcription.
+    Stop(T),
+}
+impl<T> Engine<T> {
+    /// Decides only; never starts or stops anything itself, so it is safe under a mutex.
+    /// `starting` is true while another caller is already building the resources.
+    pub fn plan(&mut self, enabled: bool, starting: bool) -> Plan<T> {
+        if !enabled {
+            return self.running.take().map_or(Plan::Keep, Plan::Stop);
+        }
+        if self.running.is_none() && !starting { Plan::Start } else { Plan::Keep }
+    }
+    /// Stores freshly built resources if they are still wanted; otherwise gives them back to be dropped.
+    pub fn install(&mut self, running: T, still_wanted: bool) -> Option<T> {
+        if still_wanted && self.running.is_none() {
+            self.running = Some(running);
+            None
+        } else {
+            Some(running)
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "dictation_cmd_tests.rs"]
 mod tests;
