@@ -208,7 +208,7 @@
   }
 
   // ---- general --------------------------------------------------------------------------------------------
-  const soundDefault = () => false; // the island contract is silence until the human opts in
+  const soundDefault = () => true; // sound is ON by default (human decision); the stored preference, if any, wins
 
   // ---- #380: the theme, a closed shape the panel can render -------------------------------------------------
   // Exactly three choices. The saved mode is the truth; anything the host cannot persist

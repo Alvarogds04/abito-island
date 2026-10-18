@@ -215,8 +215,8 @@ test('connectors: honest «no disponible» when the daemon has no connectorsComm
 });
 
 // ---- general --------------------------------------------------------------------------------------------------------
-test('general: sound switch is persisted (default OFF), motion is «respect the system» (default animate), hotkey shows its backend state', () => {
-  assert.equal(S.soundDefault(), false);
+test('general: sound switch is persisted (default ON), motion is «respect the system» (default animate), hotkey shows its backend state', () => {
+  assert.equal(S.soundDefault(), true, 'sound is on by default (human decision); only a stored explicit off silences it');
   const g = S.generalView({ sound: false, motionOverride: true, hotkey: { combo: 'Ctrl+Alt+A', enabled: true, status: 'active', limited: false, backend: 'portal', portal_note: null } });
   assert.equal(g.sound.on, false);
   assert.equal(g.motion.respectSystem, false, 'motionOverride true = animate (do NOT honor the system)');

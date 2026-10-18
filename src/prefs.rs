@@ -1,5 +1,5 @@
 //! Non-secret island preferences, stored as v1. Missing or invalid fields use
-//! their own defaults: sound OFF, no display name, no color overrides, no remembered
+//! their own defaults: sound ON, no display name, no color overrides, no remembered
 //! island position and the system theme (#380). Names are explicit input,
 //! never obtained from accounts, the OS, or another profile.
 use serde_json::{json, Value};
@@ -212,8 +212,9 @@ const PROVIDERS: [&str; 4] = ["claude-code", "codex", "opencode", "pi"];
 /// Keys that must never travel from a preferences file into a plain object's prototype.
 const RESERVED: [&str; 3] = ["__proto__", "prototype", "constructor"];
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Prefs {
+    /// Sound is ON by default (human decision): only a stored, explicit `"sound": false` silences it.
     pub sound: bool,
     /// Optional v1 gain; absence retains the engine default without rewriting old files.
     pub gain: Option<f64>,
@@ -265,6 +266,32 @@ pub settings_window: Option<bool>,
     pub island_agents: Option<Vec<String>>,
     /// #442 T7.4: the principal's declarative «Qué hace». `None` is the default, never written.
     pub abito_instructions: Option<String>,
+}
+
+impl Default for Prefs {
+    /// Every field keeps the value `#[derive(Default)]` gave it (absent / empty) except `sound`, which starts ON.
+    fn default() -> Self {
+        Prefs {
+            sound: true,
+            gain: None,
+            display_name: None,
+            avatar_colors: BTreeMap::new(),
+            position: None,
+            main_pill: None,
+            declared_pills: None,
+            pill_colors: BTreeMap::new(),
+            theme: None,
+            chosen_models: None,
+            auto_close_seconds: None,
+            open_on_hover: None,
+            custom_blobs: None,
+            monitor: None,
+            settings_window: None,
+            settings_window_size: None,
+            island_agents: None,
+            abito_instructions: None,
+        }
+    }
 }
 
 fn validated_name(value: &str) -> Result<Option<String>, CommandError> {
@@ -494,7 +521,7 @@ impl Prefs {
             return Prefs::default();
         }
         let mut prefs = Prefs {
-            sound: v.get("sound").and_then(Value::as_bool).unwrap_or(false),
+            sound: v.get("sound").and_then(Value::as_bool).unwrap_or(true),
             gain: v.get("gain").and_then(Value::as_f64).filter(|n| valid_gain(*n)),
             avatar_colors: colors_from(v.get(AVATAR_COLORS)),
             display_name: v.get("display_name").and_then(Value::as_str)

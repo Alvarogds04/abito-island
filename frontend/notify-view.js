@@ -12,7 +12,7 @@
 })(typeof self !== 'undefined' ? self : this, () => {
   const MAX_OPTIONS = 4; // QP/1 wire cap
   const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-  const SOUND_ENABLED_DEFAULT = false; // the island contract is silence until the human opts in
+  const SOUND_ENABLED_DEFAULT = true; // sound is ON by default (human decision); the stored preference, if any, wins
 
   // ---- model -----------------------------------------------------------------
   // `pending` is the host's PendingQuestionView (display text only: never a

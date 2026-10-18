@@ -6,7 +6,8 @@
    Rules it keeps (docs/desktop-sound-catalog.md §2, odd/tasks/island-sounds.md):
    - A cue follows a TRANSITION, never a state. The first sight of anything is a baseline, not an event, so old
      turns, a model that is already down and a notice that was already there at start-up make no sound.
-   - Silence is the default and the failure mode: the engine plays nothing until applyPrefs({v:1,sound:true}) AND
+   - Sound is ON by default (the human's stored preference, if any, wins; Rust sends it in `prefs_action view`), but
+     SILENCE is the engine's failure mode: it plays nothing until applyPrefs({v:1,sound:true}) AND
      ready(). If a cue is dropped for one of those two reasons the page logs engine.state() ONCE, so a forgotten
      condition is visible instead of silently muting everything.
    - It never listens to the character's pose and never to «Enviada»/«Sin confirmar»: those do not sound.

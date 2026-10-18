@@ -113,8 +113,8 @@ test('sound cues follow the catalog: attention on a NEW pending question, expire
     assert.equal(N.soundFor(snap(pending()), snap(null, { notice: silent, deliveries: [{ id: ID, expires_at: 1, state: 'sent' }] })), null, `${silent} is silent`);
   }
   assert.equal(N.soundFor(snap(null, { notice: 'sent' }), snap(null, { notice: 'ack_lost' })), null);
-  // the cue is only an id: playing it is a separate, human-enabled, default-OFF switch
-  assert.equal(N.SOUND_ENABLED_DEFAULT, false);
+  // the cue is only an id: playing it is a separate switch, ON by default and the human can turn it off
+  assert.equal(N.SOUND_ENABLED_DEFAULT, true);
 });
 
 test('rate limit: at most one cue per 250 ms and the same cue once per 2 s; bursts are dropped, not queued', () => {

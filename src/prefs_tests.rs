@@ -2,15 +2,18 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn sound_is_off_unless_the_human_turned_it_on_and_it_fails_closed() {
-    assert!(!Prefs::default().sound, "silence is the island contract");
-    for bad in [None, Some(""), Some("not json"), Some("{}"), Some("[]"), Some("null"), Some(r#"{"v":2,"sound":true}"#), Some(r#"{"sound":true}"#),
-                Some(r#"{"v":1,"sound":"yes"}"#), Some(r#"{"v":1,"sound":1}"#), Some(r#"{"v":1}"#)] {
-        assert_eq!(Prefs::from_text(bad), Prefs::default(), "{bad:?} must read as sound OFF");
+fn sound_is_on_by_default_and_only_an_explicit_off_silences_it() {
+    // Human request: sound is active by default. A file that says nothing usable about it reads as the
+    // default (on); only a stored, explicit `"sound": false` is honoured as the human's choice.
+    assert!(Prefs::default().sound, "sound is on until the human turns it off");
+    for unreadable in [None, Some(""), Some("not json"), Some("{}"), Some("[]"), Some("null"), Some(r#"{"v":2,"sound":false}"#), Some(r#"{"sound":false}"#),
+                Some(r#"{"v":1,"sound":"no"}"#), Some(r#"{"v":1,"sound":0}"#), Some(r#"{"v":1}"#)] {
+        assert_eq!(Prefs::from_text(unreadable), Prefs::default(), "{unreadable:?} must read as the default (sound on)");
     }
     assert!(Prefs::from_text(Some(r#"{"v":1,"sound":true}"#)).sound);
-    assert!(!Prefs::from_text(Some(r#"{"v":1,"sound":false}"#)).sound);
+    assert!(!Prefs::from_text(Some(r#"{"v":1,"sound":false}"#)).sound, "an explicit off is the human's choice and is kept");
 }
+
 
 #[test]
 fn prefs_round_trip_as_one_line() {
@@ -97,9 +100,11 @@ fn name_sound_clear_reload_and_failed_save_are_independent() {
 #[test]
 fn concurrent_name_sound_transactions_preserve_both_and_publish_in_commit_order() {
     use std::sync::{Barrier, Mutex};
-    let current = Mutex::new(Prefs::default());
+    // Sound is ON by default now, so `sound_on` would be a no-op: start from an explicit OFF to keep testing the transition.
+    let off = Prefs { sound: false, ..Prefs::default() };
+    let current = Mutex::new(off.clone());
     let serial = Mutex::new(());
-    let disk = Mutex::new(Prefs::default().to_text());
+    let disk = Mutex::new(off.to_text());
     let writes = Mutex::new(Vec::new());
     let events = Mutex::new(Vec::new());
     let start = Barrier::new(3);
@@ -139,7 +144,7 @@ fn concurrent_name_sound_transactions_preserve_both_and_publish_in_commit_order(
 #[test]
 fn concurrent_failed_name_save_does_not_erase_sound_or_publish_requested_name() {
     use std::sync::{Barrier, Mutex};
-    let original = Prefs { display_name: Some("Ana".into()), ..Prefs::default() };
+    let original = Prefs { display_name: Some("Ana".into()), sound: false, ..Prefs::default() }; // explicit OFF: `sound_on` must still be a real transition
     let current = Mutex::new(original.clone());
     let serial = Mutex::new(());
     let disk = Mutex::new(original.to_text());
@@ -190,7 +195,7 @@ fn command_set_is_closed_and_exact() {
 fn integration_name_sound_color_reload_and_clear_preserve_independent_fields() {
     use std::sync::Mutex;
     let serial = Mutex::new(());
-    let current = Mutex::new(Prefs::default());
+    let current = Mutex::new(Prefs { sound: false, ..Prefs::default() }); // explicit OFF: index 1 (`sound_on`) must flip it
     let disk = Mutex::new(None::<String>);
     let events = Mutex::new(Vec::new());
     for (index, payload) in [
@@ -226,8 +231,9 @@ fn integration_concurrent_three_fields_and_failed_color_preserve_commit_snapshot
     use std::sync::{Barrier, Mutex};
     for fail_color in [false, true] {
         let serial = Mutex::new(());
-        let current = Mutex::new(Prefs::default());
-        let disk = Mutex::new(Prefs::default().to_text());
+        let off = Prefs { sound: false, ..Prefs::default() }; // explicit OFF so `sound_on` is a real transition
+        let current = Mutex::new(off.clone());
+        let disk = Mutex::new(off.to_text());
         let writes = Mutex::new(Vec::new());
         let events = Mutex::new(Vec::new());
         let attempts = Mutex::new(0);
@@ -309,15 +315,18 @@ fn colors(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 const KEY: &str = "avatar_colors";
 
 #[test]
-fn sound_is_off_unless_the_human_turned_it_on_and_it_fails_closed() {
-    assert!(!Prefs::default().sound, "silence is the island contract");
-    for bad in [None, Some(""), Some("not json"), Some("{}"), Some("[]"), Some("null"), Some(r#"{"v":2,"sound":true}"#), Some(r#"{"sound":true}"#),
-                Some(r#"{"v":1,"sound":"yes"}"#), Some(r#"{"v":1,"sound":1}"#), Some(r#"{"v":1}"#)] {
-        assert_eq!(Prefs::from_text(bad), Prefs::default(), "{bad:?} must read as sound OFF");
+fn sound_is_on_by_default_and_only_an_explicit_off_silences_it() {
+    // Human request: sound is active by default. A file that says nothing usable about it reads as the
+    // default (on); only a stored, explicit `"sound": false` is honoured as the human's choice.
+    assert!(Prefs::default().sound, "sound is on until the human turns it off");
+    for unreadable in [None, Some(""), Some("not json"), Some("{}"), Some("[]"), Some("null"), Some(r#"{"v":2,"sound":false}"#), Some(r#"{"sound":false}"#),
+                Some(r#"{"v":1,"sound":"no"}"#), Some(r#"{"v":1,"sound":0}"#), Some(r#"{"v":1}"#)] {
+        assert_eq!(Prefs::from_text(unreadable), Prefs::default(), "{unreadable:?} must read as the default (sound on)");
     }
     assert!(Prefs::from_text(Some(r#"{"v":1,"sound":true}"#)).sound);
-    assert!(!Prefs::from_text(Some(r#"{"v":1,"sound":false}"#)).sound);
+    assert!(!Prefs::from_text(Some(r#"{"v":1,"sound":false}"#)).sound, "an explicit off is the human's choice and is kept");
 }
+
 
 #[test]
 fn prefs_round_trip_as_one_line() {
@@ -1335,7 +1344,7 @@ fn blobs_default_to_absent_and_an_untouched_file_keeps_its_bytes() {
 /// closed #346 palette or nothing.
 #[test]
 fn create_blob_accepts_the_human_examples_and_round_trips() {
-    let current = Prefs::default();
+    let current = Prefs { sound: false, ..Prefs::default() }; // a non-default sound value, to prove it survives beside the new blobs
     let github = parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"green"})).unwrap();
     let step1 = update(&current, &github, |_| true).unwrap();
     let reviewer = parse_command(&json!({"action":"create_blob","name":"Abito Reviewer"})).unwrap();

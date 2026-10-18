@@ -532,7 +532,7 @@ mod settings_view_tests {
         // the established projection shapes are untouched by the new field
         let view = view_prefs(&prefs);
         assert_eq!(view["theme"], json!("system"));
-        assert_eq!(view["sound"], json!(false));
+        assert_eq!(view["sound"], json!(true), "sound is on by default: a file with no `sound` key projects the default");
         assert_eq!(view["chosenModels"], json!(null));
     }
 
@@ -633,7 +633,7 @@ mod settings_view_tests {
         // the established projection shapes are untouched
         assert_eq!(view["pillColors"], json!({}));
         assert_eq!(view["theme"], json!("system"));
-        assert_eq!(view["sound"], json!(false));
+        assert_eq!(view["sound"], json!(true), "sound is on by default: a file with no `sound` key projects the default");
     }
     #[test]
     fn island_membership_dispatch_refuses_unknown_ids_before_persistence() {
