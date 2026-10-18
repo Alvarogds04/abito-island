@@ -414,3 +414,44 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 
 /* the question card is taller in Coucou (window 640x200): 148 high under the header */
 #question { height: 148px; }
+
+/* ── Plan usage: the pills in the header and the card behind them (style.css "Plan usage" @434d6a2b) ──
+   Nothing applies until a pill is turned on in Ajustes. */
+
+.plan-pills { display: none; align-items: center; gap: 5px; margin-right: -6px; }
+.plan-pills.on { display: flex; }
+.header-actions.both-plans { gap: 10px; padding-right: 8px; }
+.header-actions.both-plans .plan-pills { margin-right: -5px; }
+.header-actions .plan-pill {
+  --plan: #6b7079; position: relative; display: flex; align-items: center; gap: 4px; padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--plan) 14%, transparent); border-radius: 999px; background: var(--card-flat);
+  color: var(--dim-3); font: 600 10px var(--font); line-height: 12px; white-space: nowrap; cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+/* 44px hit area around the 20px pill */
+.header-actions .plan-pill::after { content: ""; position: absolute; inset: -12px -2px; }
+.header-actions .plan-pill:hover, .header-actions .plan-pill.active {
+  background: color-mix(in srgb, var(--plan) 18%, transparent); border-color: color-mix(in srgb, var(--plan) 55%, transparent);
+  color: color-mix(in srgb, var(--plan) 70%, white);
+}
+.plan-pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+.card-left > .plan-card { position: absolute; inset: 0; z-index: 1; padding-top: 10px; }
+.card-left > .plan-card[hidden] { display: none; }
+.plan-head { display: flex; align-items: center; gap: 6px; padding: 0 36px 0 108px; white-space: nowrap; }
+.plan-head > * { flex: 0 0 auto; }
+.plan-title { font: 600 12px var(--font); color: var(--ink); }
+.plan-head > .plan-sub { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 11px var(--font); color: var(--dim-2); }
+.plan-rows { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px 0 108px; }
+.plan-row { display: flex; align-items: center; gap: 5px; font: 400 11px var(--font); white-space: nowrap; }
+.plan-label { flex: 0 0 40px; color: var(--dim-3); }
+.plan-bar { flex: 0 0 50px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.plan-fill { display: block; height: 100%; border-radius: 2px; }
+.plan-pct { flex: 0 0 30px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: #c5c8cd; }
+.plan-reset-icon { display: inline-flex; color: var(--dim-3); }
+.plan-reset { font-size: 10px; color: var(--dim-3); }
+.plan-none { color: var(--dim-3); }
+.plan-credits { font-weight: 600; color: #c5c8cd; }
+/* the plan card stands in for the left card's content */
+#overview-view[data-plan="on"] .card-left > .who, #overview-view[data-plan="on"] .card-left > .ticker,
+#overview-view[data-plan="on"] #overview-empty, #overview-view[data-plan="on"] .spotify-card,
+#overview-view[data-plan="on"] #minibots { display: none; }
