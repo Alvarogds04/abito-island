@@ -40,6 +40,7 @@ mod secretshost;
 mod soundshost;
 mod recaphost;
 mod planhost;
+mod dictationhost;
 mod settingshost;
 mod settingswindow;
 mod spotifyhost;
@@ -1949,6 +1950,7 @@ fn main() {
             soundshost::sound_action,
             recaphost::recap_action,
             planhost::plan_action,
+            dictationhost::dictation_action,
             settingshost::settings_view,
             settingshost::daemon_action,
             settingswindow::settings_window_action,
@@ -2030,6 +2032,7 @@ fn main() {
             // geometry decision, so the prefs host starts here (it only reads
             // prefs.json/accounts.json; it has no window dependency).
             settingshost::start(&handle);
+            dictationhost::start(&handle);
             let wa = workarea::current(&win);
             let scale = win.scale_factor().unwrap_or(1.0);
             store_scale(scale); // #431: seed the off-main scale cache

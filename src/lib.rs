@@ -37,6 +37,7 @@ pub mod fakebridge;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakemodel;
 pub mod flow;
+pub mod dictation_cmd;
 pub mod geometry;
 #[cfg(target_os = "linux")]
 pub mod handoff;
