@@ -58,10 +58,25 @@ gtk = "=0.18.2"
 # #467 key store: Secret Service (GNOME Keyring, KWallet) over D-Bus. NEW packages
 # (keyring + dbus-secret-service + libdbus-sys + crypto-rust deps), same features as Coucou.
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+# Dictation (#467): speech to text on this computer. sherpa-onnx (Apache-2.0)
+# with NVIDIA's Parakeet, linked statically (onnxruntime included). The models
+# are downloaded only on the user's explicit click. Build needs
+# SHERPA_ONNX_LIB_DIR (or network) for the prebuilt static libs.
+sherpa-onnx = { version = "1.13.8", default-features = false, features = ["static"] }
+# Model download over HTTPS (only on the user's click). reqwest 0.12, not the
+# 0.13 Tauri already pulls: 0.13's rustls needs aws-lc-rs + rustls-platform-verifier,
+# which are not available offline; 0.12's rustls-tls is ring + webpki-roots.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = { version = "0.3", default-features = false }
+tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+# Dictation (#467): the microphone. Apache-2.0. PulseAudio (or PipeWire's
+# PulseAudio server) for the device list on Linux.
+cpal = { version = "0.18", features = ["pulseaudio"] }
 
 [target.'cfg(windows)'.dependencies]
 # #467 key store: Windows Credential Manager.
 keyring = { version = "3", features = ["windows-native"] }
+cpal = "0.18"
 # U3a: the Win32 global-hotkey bindings (RegisterHotKey + message pump). Not
 # libc (it exposes none of these), not raw FFI (~80 lines of hand-written ABI
 # nothing but the VM could verify): windows-sys 0.61.2 is ALREADY in Cargo.lock

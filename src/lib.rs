@@ -33,6 +33,7 @@ pub mod daemonhost;
 pub mod fakebridge;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakemodel;
+pub mod flow;
 pub mod geometry;
 #[cfg(target_os = "linux")]
 pub mod handoff;
@@ -54,6 +55,7 @@ pub mod questioncmd;
 pub mod requests;
 pub mod renderenv;
 pub mod retry;
+pub mod speech;
 pub mod transport_view;
 pub mod uploads;
 // The real receiver is Linux-only (UDS + SO_PEERCRED). Windows named pipes

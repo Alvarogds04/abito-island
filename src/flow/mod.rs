@@ -1,0 +1,339 @@
+//! Dictation: hold a key, speak, let go, and the words wait on the clipboard.
+//!
+//! Adapted from Coucou src-tauri/src/flow/mod.rs @434d6a2b,
+//! Copyright (c) 2026 Louis Raillé, MIT. Differences by design:
+//! - OFF until the user turns it on; nothing here starts a model download;
+//! - the key comes from the desktop's GlobalShortcuts portal (`portal.rs`),
+//!   never from a global keyboard listener;
+//! - no window or pill in this module: it reports through a `Notify` callback;
+//! - the optional clean-up (`cleanup.rs`) runs only with `prefs.cleanup` on AND a
+//!   provider supplied by the host through `Backend::cleanup_provider`.
+//!
+//! One thread owns the dictation. Key events go through `KeyLogic`; the
+//! microphone opens on the first press; on release the words go to the local
+//! model, then the dictionary and snippets, then the clipboard. The thread
+//! sleeps on its channel while nothing happens.
+
+pub mod cleanup;
+pub mod logic;
+pub mod paste;
+pub mod portal;
+pub mod store;
+pub mod text;
+
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use crate::speech::audio;
+use logic::{Action, KeyLogic};
+use store::Store;
+
+/// What reaches the dictation thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyEvent {
+    Down,
+    Up,
+    /// Another key while the dictation key is held: a shortcut.
+    Other,
+    Escape,
+    /// The pill's microphone: hands-free straight away.
+    HandsFree,
+    /// The pill's ✓: paste now.
+    Finish,
+    /// The pill's ✕.
+    Cancel,
+    Quit,
+}
+
+/// What the pill (or any UI) shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    Idle,
+    Listening,
+    Locked,
+    Thinking,
+    /// The words are on the clipboard: press Ctrl+V.
+    Copied,
+    Failed,
+}
+
+/// Something the user has to be told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Note {
+    /// The voice model is not downloaded: the user must ask for it in Settings.
+    NeedModel,
+    NoMicrophone,
+    ClipboardRefused,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Update {
+    Phase(Phase),
+    Bands([f32; audio::BAND_COUNT]),
+    Note(Note),
+}
+
+pub type Notify = Arc<dyn Fn(Update) + Send + Sync>;
+
+/// A microphone take in progress.
+pub trait Recording: Send {
+    /// Stops and returns (16 kHz samples, loudest sample).
+    fn finish(self: Box<Self>) -> (Vec<f32>, f32);
+    fn levels(&self) -> [f32; audio::BAND_COUNT];
+}
+
+/// Everything the thread needs from the machine; fakes in the tests.
+pub trait Backend: Send + Sync + 'static {
+    fn model_ready(&self) -> bool;
+    fn record(&self, mic: &str) -> Result<Box<dyn Recording>, String>;
+    fn transcribe(&self, samples: &[f32]) -> Option<String>;
+    fn deliver(&self, text: &str) -> paste::Outcome;
+    /// The host's language-model link for the optional clean-up. None by default.
+    fn cleanup_provider(&self) -> Option<&dyn cleanup::CleanupProvider> {
+        None
+    }
+}
+
+/// The real machine: cpal microphone, Parakeet, `wl-copy`.
+pub struct System;
+
+struct MicTake {
+    capture: audio::Capture,
+    take: Arc<Mutex<audio::Take>>,
+}
+
+impl Recording for MicTake {
+    fn finish(mut self: Box<Self>) -> (Vec<f32>, f32) {
+        self.capture.stop();
+        let mut t = self.take.lock().unwrap_or_else(|e| e.into_inner());
+        (std::mem::take(&mut t.samples), t.peak)
+    }
+    fn levels(&self) -> [f32; audio::BAND_COUNT] {
+        self.take.lock().unwrap_or_else(|e| e.into_inner()).meter.levels
+    }
+}
+
+/// Ten minutes at most: a dictation left open by mistake stops growing.
+const MAX_SAMPLES: usize = 16_000 * 600;
+
+impl Backend for System {
+    fn model_ready(&self) -> bool {
+        crate::speech::is_ready()
+    }
+    fn record(&self, mic: &str) -> Result<Box<dyn Recording>, String> {
+        let take = Arc::new(Mutex::new(audio::Take::default()));
+        let sink = take.clone();
+        let source = audio::Source::Mic(if mic.is_empty() { None } else { Some(mic.to_string()) });
+        let capture = audio::Capture::start(source, move |samples| {
+            let mut t = sink.lock().unwrap_or_else(|e| e.into_inner());
+            if t.samples.len() < MAX_SAMPLES {
+                t.samples.extend_from_slice(samples);
+            }
+            t.peak = samples.iter().fold(t.peak, |m, &s| m.max(s.abs()));
+            t.meter.feed(samples);
+        })?;
+        Ok(Box::new(MicTake { capture, take }))
+    }
+    fn transcribe(&self, samples: &[f32]) -> Option<String> {
+        crate::speech::transcribe(samples)
+    }
+    fn deliver(&self, text: &str) -> paste::Outcome {
+        paste::copy(text)
+    }
+}
+
+/// A running dictation. Dropping it (or `stop`) ends the thread.
+pub struct Dictation {
+    tx: Sender<(KeyEvent, Instant)>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Dictation {
+    pub fn start(store: Arc<Mutex<Store>>, backend: impl Backend, notify: Notify) -> Dictation {
+        let (tx, rx) = mpsc::channel();
+        let thread = std::thread::Builder::new().name("abito-dictation".into()).spawn(move || run(store, backend, notify, rx)).ok();
+        Dictation { tx, thread }
+    }
+
+    pub fn sender(&self) -> Sender<(KeyEvent, Instant)> {
+        self.tx.clone()
+    }
+
+    pub fn send(&self, event: KeyEvent) {
+        let _ = self.tx.send((event, Instant::now()));
+    }
+
+    pub fn stop(&mut self) {
+        let _ = self.tx.send((KeyEvent::Quit, Instant::now()));
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for Dictation {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+struct Listening {
+    rec: Box<dyn Recording>,
+    started: Instant,
+}
+
+fn run<B: Backend>(store: Arc<Mutex<Store>>, backend: B, notify: Notify, rx: mpsc::Receiver<(KeyEvent, Instant)>) {
+    let backend = Arc::new(backend);
+    let epoch = Instant::now();
+    let secs = |at: Instant| at.saturating_duration_since(epoch).as_secs_f64();
+    let mut logic = KeyLogic::default();
+    let mut listening: Option<Listening> = None;
+    let begin = |listening: &mut Option<Listening>, logic: &mut KeyLogic| {
+        *listening = begin(&*backend, &store, &notify);
+        if listening.is_none() {
+            logic.reset();
+        }
+    };
+    loop {
+        let active = listening.is_some() || logic.is_active();
+        let received = if active {
+            match rx.recv_timeout(Duration::from_millis(33)) {
+                Ok(m) => Some(m),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match rx.recv() {
+                Ok(m) => Some(m),
+                Err(_) => break,
+            }
+        };
+        let action = match received {
+            Some((KeyEvent::Quit, _)) => break,
+            Some((KeyEvent::Down, at)) => logic.key_down(secs(at)),
+            Some((KeyEvent::Up, at)) => logic.key_up(secs(at)),
+            Some((KeyEvent::Other, _)) => logic.other_key(),
+            Some((KeyEvent::Escape, _)) => logic.escape(),
+            Some((KeyEvent::HandsFree, _)) => {
+                if !logic.is_active() {
+                    logic.lock();
+                    if listening.is_none() {
+                        begin(&mut listening, &mut logic);
+                    }
+                    if listening.is_some() {
+                        notify(Update::Phase(Phase::Locked));
+                    }
+                }
+                Action::None
+            }
+            Some((KeyEvent::Finish, _)) => {
+                if logic.is_active() || listening.is_some() {
+                    logic.reset();
+                    Action::Finish
+                } else {
+                    Action::None
+                }
+            }
+            Some((KeyEvent::Cancel, _)) => {
+                logic.reset();
+                Action::Cancel
+            }
+            None => logic.tick(secs(Instant::now())),
+        };
+        match action {
+            Action::None => {}
+            Action::Start => begin(&mut listening, &mut logic),
+            Action::Restart => {
+                drop(listening.take());
+                begin(&mut listening, &mut logic);
+            }
+            Action::Lock => notify(Update::Phase(Phase::Locked)),
+            Action::Cancel => {
+                drop(listening.take());
+                notify(Update::Phase(Phase::Idle));
+            }
+            Action::Finish => match listening.take() {
+                Some(l) => finish(&backend, &store, &notify, l),
+                None => notify(Update::Phase(Phase::Idle)),
+            },
+        }
+        if let Some(l) = &listening {
+            notify(Update::Bands(l.rec.levels()));
+        }
+    }
+    drop(listening);
+    notify(Update::Phase(Phase::Idle));
+}
+
+/// Opens the microphone, unless the model is missing (never downloads it).
+fn begin(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify) -> Option<Listening> {
+    if !backend.model_ready() {
+        notify(Update::Note(Note::NeedModel));
+        return None;
+    }
+    let mic = store.lock().unwrap_or_else(|e| e.into_inner()).prefs.mic.clone();
+    match backend.record(&mic) {
+        Ok(rec) => {
+            notify(Update::Phase(Phase::Listening));
+            Some(Listening { rec, started: Instant::now() })
+        }
+        Err(err) => {
+            eprintln!("abito dictation: microphone: {err}");
+            notify(Update::Phase(Phase::Failed));
+            notify(Update::Note(Note::NoMicrophone));
+            None
+        }
+    }
+}
+
+/// Stops listening and turns what was said into clipboard text on a worker
+/// thread, so the key works again at once.
+fn finish<B: Backend>(backend: &Arc<B>, store: &Arc<Mutex<Store>>, notify: &Notify, l: Listening) {
+    let seconds = l.started.elapsed().as_secs_f64();
+    let (samples, peak) = l.rec.finish();
+    // Too short or silent: nothing to send to the model.
+    if samples.len() < 16_000 / 4 || peak < 0.004 {
+        notify(Update::Phase(Phase::Idle));
+        return;
+    }
+    notify(Update::Phase(Phase::Thinking));
+    let (backend, store, notify) = (backend.clone(), store.clone(), notify.clone());
+    let worker = std::thread::Builder::new().name("abito-dictation-job".into()).spawn(move || process(&*backend, &store, &notify, &samples, seconds));
+    if worker.is_err() {
+        eprintln!("abito dictation: could not start the worker");
+    }
+}
+
+pub fn process(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify, samples: &[f32], seconds: f64) {
+    let raw = backend.transcribe(samples).unwrap_or_default().trim().to_string();
+    if raw.is_empty() {
+        notify(Update::Phase(Phase::Idle));
+        return;
+    }
+    let (prepared, style, enabled, words) = {
+        let st = store.lock().unwrap_or_else(|e| e.into_inner());
+        (st.prepare(&raw), st.style_for(None), st.prefs.cleanup, st.words.words.clone())
+    };
+    let mut written = prepared.text.clone();
+    let cleaned = cleanup::clean(backend.cleanup_provider(), enabled, &prepared.text, style, None, &words);
+    // A clean-up that lost a snippet mark is dropped: the words stay as heard.
+    if text::keeps_marks(&cleaned, &prepared.snippets) {
+        written = cleaned;
+    }
+    let final_text = text::finish(&written, &prepared.snippets);
+    match backend.deliver(&final_text) {
+        paste::Outcome::Failed => {
+            notify(Update::Phase(Phase::Failed));
+            notify(Update::Note(Note::ClipboardRefused));
+        }
+        outcome => {
+            store.lock().unwrap_or_else(|e| e.into_inner()).record(&final_text, None, seconds, store::today(), store::now_ms());
+            notify(Update::Phase(if outcome == paste::Outcome::Copied { Phase::Copied } else { Phase::Idle }));
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
