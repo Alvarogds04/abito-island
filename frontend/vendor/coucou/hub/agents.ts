@@ -25,6 +25,7 @@ export async function renderAgentSettings({ invoke, V, listen, timers }: any) {
   root.style.setProperty('display', 'contents');
   s.message.className = 'abito-settings-feedback notice err';
   let state: any = null, reviewing = false, busy = false;
+  const plans: Record<string, any> = {};
   // Never replace a reviewed hash with an unseen backend update. A changed plan is rejected by the host.
   function reviewChange(body: HTMLElement, r: any, install: boolean, redraw: () => void) {
     if (busy || !r || (install && (!r.primary?.command?.plan_hash || !r.summary || !r.reviewable))) return;
@@ -93,21 +94,26 @@ export async function renderAgentSettings({ invoke, V, listen, timers }: any) {
     if (!list.children.length) list.append(hint(t('Abito could not list the agents.')));
     unavailable.append(catalogue);
     const planBody = flex(12);
-    const sw = () => { const n = trusted(toggle(false, () => {})); (n as HTMLButtonElement).disabled = true; n.title = UNAVAILABLE; return n; };
+    // plan_action decides the state: the Claude relay counts as installed once its numbers are readable.
+    const claudeUp = plans.claude?.available === true, codexUp = plans.codex?.available === true;
+    const sw = (reason: string) => { const n = trusted(toggle(false, () => {})); (n as HTMLButtonElement).disabled = true; n.title = reason; return n; };
+    const NO_PREF = `${UNAVAILABLE} — mostrar el plan en la isla necesita una preferencia de Abito que aún no existe.`;
     planBody.append(
       hint(t("Shows your Claude plan usage (5-hour and weekly limits) in the island's header. Abito adds a status line relay in ~/.claude/settings.json. If you already have a status line, it keeps working as before. Pro and Max plans only.")),
       hint(t('The numbers come from the Claude Code command-line tool. The Claude desktop app does not report them, so the gauge stays empty if you only use the desktop app.')),
-      row(t('Show in notch'), sw()),
-      row(t('Relay'), statusDot(false), hint(t('not installed')), button('Install relay…', () => {}, 'primary', true)),
+      row(t('Show in notch'), sw(claudeUp ? NO_PREF : 'Claude: sin datos de plan (plan_action no disponible)')),
+      row(t('Relay'), statusDot(claudeUp), hint(t(claudeUp ? 'installed' : 'not installed')),
+        claudeUp ? null : button('Install relay…', () => {}, 'primary', true)),
       hint(t("Shows your Codex plan usage (weekly limit and free resets left) in the island's header. Abito asks the Codex CLI (codex app-server) when the pill shows; nothing is installed. Codex must be signed in with ChatGPT.")),
-      row(t('Show Codex plan in the notch'), sw()),
-      hint(`${UNAVAILABLE} — necesita el backend de uso del plan conectado a esta ventana.`));
+      row(t('Show Codex plan in the notch'), sw(codexUp ? NO_PREF : 'Codex: sin datos de plan (plan_action no disponible)')),
+      hint(NO_PREF));
     root.append(agentBlock('claude-code','Claude Code',true,true),
       section(t('Agents'), hint(t("Show other coding agents in the island. Abito adds its entries to each agent's own config: you see the exact change and where the backup goes before anything is written, and uninstalling removes only what Abito added.")), list, ...(catalogue.children.length ? [unavailable] : [])),
       section(t('Plan usage'), planBody), s.message);
   }
   const apply = (next: any) => { state = { ...state, ...next }; paint(); };
   paint(); watch('agent:state', apply);
+  for (const action of ['claude', 'codex']) work(() => call('plan_action', { action }), (r: any) => { plans[action] = r; paint(); });
   for (const action of ['view','agents_list','hooks_preview']) work(() => call('agent_action', { action }), apply);
   return s.finish();
 }

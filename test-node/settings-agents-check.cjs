@@ -15,10 +15,16 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const hash = 'a'.repeat(64);
   let state = { connection:'connected', agents:[{id:'claude-code',state:'not_connected',plan_hash:hash,summary:'Add managed hooks',reviewable:true},{id:'codex',state:'connected',backup:true}], providers:[],accounts:[],models:null };
   let ui, secretFailure = false;
+  const soon = Date.now() + 3600e3;
+  let planReply = {
+    claude: { available: true, updatedAt: Date.now(), fiveHour: { usedPct: 42, resetsAt: soon }, sevenDay: { usedPct: 61, resetsAt: soon } },
+    codex: { available: true, rateLimits: { primary: { usedPercent: 7, resetsAt: Math.floor(soon / 1000), windowDurationMins: 300 }, secondary: { usedPercent: 33, resetsAt: Math.floor(soon / 1000), windowDurationMins: 10080 } } },
+  };
   const invoke = async (cmd,{payload:p}) => {
     if (cmd === 'secret_action' && p.action === 'set') assert.equal(all(ui).find(e => e.attrs.id === `chat-key-${p.key}`).value, '', 'clear masked key BEFORE IPC');
     calls.push([cmd,p]);
     if (cmd === 'secret_action') { if (secretFailure) throw new Error('fixture-secret-error'); return {present:p.action === 'set'}; }
+    if (cmd === 'plan_action') return planReply[p.action];
     if (cmd === 'prefs_action') return {chosenModels:{}};
     if (cmd === 'models_action') return {profiles:[]};
     return structuredClone(state);
@@ -41,7 +47,11 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   assert.equal(ui.children[0].children[1].children[4].className,'row');
   const plan=ui.children[2];
   assert(all(plan).filter(e=>e.tagName==='button').every(e=>e.disabled));
-  assert(text(plan).includes('No disponible todavía'));
+  assert.deepEqual(calls.filter(([c])=>c==='plan_action').map(([,p])=>p),[{action:'claude'},{action:'codex'}], 'exactly the two closed plan reads, no other payload');
+  assert(!/\d+ %/.test(text(plan)), 'numbers belong to the island usage view, not to settings');
+  assert(text(plan).includes('installed') || text(plan).includes('instalado'), 'relay row follows plan_action (claude available)');
+  const planSwitches=all(plan).filter(e=>e.tagName==='button'&&String(e.className).includes('switch'));
+  assert.equal(planSwitches.length,2);assert(planSwitches.every(e=>e.disabled&&e.title.includes('preferencia')), 'no Abito pref yet: disabled with the reason');
   calls.length=0;
   const claude=ui.children[0];
   button(claude,'Instalar hooks…').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
@@ -60,6 +70,11 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   state.agents[0]={id:'claude-code',state:'not_connected',reviewable:true};
   ui=await renderAgentSettings(opts);await ui.settled();
   assert.equal(button(ui.children[0],'Instalar hooks…').disabled,true,'no hash never authorizes a write');
+  ui.dispose();
+  planReply = { claude: { available: false }, codex: { available: false } };
+  ui=await renderAgentSettings(opts);await ui.settled();
+  assert(text(ui.children[2]).includes('not installed')||text(ui.children[2]).includes('no instalado'), 'available=false: relay not installed');
+  assert(all(ui.children[2]).filter(e=>e.tagName==='button'&&String(e.className).includes('switch')).every(e=>e.disabled&&e.title.includes('sin datos')), 'available=false disables with the reason');
   ui.dispose();
   state.agents=[];state.hooks=[];
   ui=await renderAgentSettings(opts);await ui.settled();

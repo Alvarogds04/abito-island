@@ -15,10 +15,11 @@ import { inactivePages, renderUnavailable } from './vendor/coucou/hub/pages.js';
 import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
-const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action']);
+const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action']);
 const invoke = (command, args) => {
   if (!allowed.has(command) || !rawInvoke) return Promise.reject(new Error('No disponible'));
   if (command === 'daemon_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'restart')) return Promise.reject(new Error('No disponible'));
+  if (command === 'plan_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || !['claude', 'codex'].includes(args.payload.action))) return Promise.reject(new Error('No disponible'));
   return rawInvoke(command, args);
 };
 const root = document.getElementById('hub');

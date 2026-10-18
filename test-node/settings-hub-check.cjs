@@ -72,7 +72,8 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const css of ['settings/settings.css', 'hub/hub.css']) assert(html.includes(`vendor/coucou/${css}`));
   const entry = fs.readFileSync(path.join(root, 'frontend/settings-app.js'), 'utf8');
   assert(entry.includes("import { renderAgentSettings }")); assert(entry.includes("import { renderChatSettings }"));
-  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action']", 'slice 3 does not expand IPC allow-list');
+  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action']", 'plan_action (already reachable from the settings label in Rust) is the only addition after slice 3; payloads are pinned to claude|codex');
+  assert(entry.includes("['claude', 'codex'].includes(args.payload.action)"), 'plan_action payload guard');
   for (const file of ['agents.ts','chat.ts']) {
     const source = fs.readFileSync(path.join(base,file),'utf8');
     assert(!/innerHTML|setAttribute\(['"]style|console\.|localStorage|sessionStorage/.test(source), file);
