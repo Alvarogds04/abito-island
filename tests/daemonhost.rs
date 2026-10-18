@@ -2,6 +2,11 @@
 use abito_island::daemonhost::{discover, Host};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 
+// A concurrent fork can inherit a script's writable fd until exec, even with
+// CLOEXEC, making another test's script spawn fail with ETXTBSY. Serialize all
+// script creation and process spawning in this harness (including helper tests).
+static PROCESS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct TestDir(std::path::PathBuf);
 impl TestDir {
     fn new() -> std::io::Result<Self> {
@@ -20,6 +25,7 @@ fn executable(path: &Path, text: &str) {
 
 #[test]
 fn discovery_orders_session_path_before_canonical_fallbacks() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let root = TestDir::new().unwrap();
     let home = root.path().join("home");
     let bin = root.path().join("bin");
@@ -73,6 +79,7 @@ fn named_runtime_failure_is_in_existing_no_daemon_state_channel() {
 
 #[test]
 fn normal_drop_terminates_and_reaps_owned_host() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let root = TestDir::new().unwrap();
     let script = root.path().join("host.sh");
     executable(&script, "#!/bin/sh\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n");
@@ -87,6 +94,7 @@ fn normal_drop_terminates_and_reaps_owned_host() {
 // (Characterization of existing APIs: passes before AND after the slice-B sources — a pin, not a RED.)
 #[test]
 fn stop_then_start_yields_a_fresh_reaped_child() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let root = TestDir::new().unwrap();
     let bin = root.path().join("bin");
     let home = root.path().join("home");
@@ -115,6 +123,7 @@ fn stop_then_start_yields_a_fresh_reaped_child() {
 // A separate process is essential: SIGKILL must bypass destructors exactly as an app crash does.
 #[test]
 fn crash_helper() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let Some(dir) = std::env::var_os("ISLAND_HOST_TEST_HELPER") else { return };
     let dir = std::path::PathBuf::from(dir);
     if std::env::var_os("ISLAND_HOST_TEST_RESTART").is_some() {
@@ -192,6 +201,7 @@ fn crash_helper() {
 
 #[test]
 fn killed_app_cannot_leave_a_live_host() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let root = TestDir::new().unwrap();
     executable(&root.path().join("host.sh"), "#!/bin/sh\nexec sleep 120\n");
     let mut app = Command::new(std::env::current_exe().unwrap()).args(["--exact", "crash_helper", "--nocapture"])
@@ -213,6 +223,7 @@ fn killed_app_cannot_leave_a_live_host() {
 
 #[test]
 fn missing_process_group_cannot_hang_app_exit() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let root = TestDir::new().unwrap();
     let mut app = Command::new(std::env::current_exe().unwrap()).args(["--exact", "crash_helper", "--nocapture"])
         .env("ISLAND_HOST_TEST_HELPER", root.path()).env("ISLAND_HOST_TEST_DROP", "1")
@@ -232,6 +243,7 @@ fn missing_process_group_cannot_hang_app_exit() {
 
 #[test]
 fn host_failure_does_not_exit_its_app_or_restart_host() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let mut cmd = Command::new("/bin/sh"); cmd.args(["-c", "exit 17"]);
     let mut host = Host::spawn_command(cmd).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -245,6 +257,7 @@ fn host_failure_does_not_exit_its_app_or_restart_host() {
 // visible through the slot. Explicit bound, no unbounded waits.
 #[test]
 fn early_child_exit_is_reaped_at_runtime_and_reported() {
+    let _guard = PROCESS_TEST_LOCK.lock().unwrap();
     let root = TestDir::new().unwrap();
     let script = root.path().join("host.sh");
     executable(&script, "#!/bin/sh\nexit 17\n");
