@@ -5,9 +5,9 @@
    host verbs and decides when they show:
      - Claude pill: only when the human turned `showPlanInNotch` on (Ajustes → Agentes). Its numbers come from `plan_action`
        {action:'claude'} (the status-line channel file); `available:false` → no numbers, never a guess.
-     - Codex pill: only when the prefs view carries `showCodexPlanInNotch: true`. The host has no such pref yet, so the pill
-       stays off; the wiring (`plan_action {action:'codex'}`, asked at most once a minute and only while the pill is on
-       screen) is ready for it. Asking Codex spawns the user's own `codex app-server`: never without an explicit opt-in.
+     - Codex pill: only when the prefs view carries `showCodexPlanInNotch: true` (the human's explicit opt-in). Its numbers come
+       from `plan_action {action:'codex'}`, asked at most once a minute and only while the pill is on screen: asking Codex
+       spawns the user's own `codex app-server`, so nothing is ever asked while the pref is off.
    Pure view-model first (Node-testable), then the browser-only mount at the tail (house pattern). */
 (function (root, factory) {
   const api = factory();

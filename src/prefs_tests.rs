@@ -1231,11 +1231,12 @@ mod chosen_models {
             island_agents: Some(vec!["esp-a1".into(), "esp-b2".into()]),
             abito_instructions: Some("Ordena mis notas.".into()),
             show_plan_in_notch: Some(true),
+            show_codex_plan_in_notch: Some(true),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
         assert_eq!(re, full);
-        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size", "island_agents", "abito_instructions", "show_plan_in_notch"] {
+        for key in ["sound", "gain", "display_name", "avatar_colors", "position", "main_pill", "declared_pills", "pill_colors", "theme", "chosen_models", "auto_close_seconds", "open_on_hover", "custom_blobs", "monitor", "settings_window_size", "island_agents", "abito_instructions", "show_plan_in_notch", "show_codex_plan_in_notch"] {
             assert!(serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().contains_key(key), "{key} survived");
         }
     }
@@ -2078,4 +2079,54 @@ fn the_prefs_view_projects_show_plan_in_notch() {
     let p = Prefs::from_text(Some(r#"{"v":1,"show_plan_in_notch":true}"#));
     assert!(p.show_plan_in_notch());
     assert!(!Prefs::default().show_plan_in_notch());
+}
+
+// ---- S10 (L30): `showCodexPlanInNotch`, the explicit opt-in to `codex app-server` -------------------
+
+#[test]
+fn show_codex_plan_in_notch_is_an_exact_closed_two_key_command() {
+    assert_eq!(parse_command(&json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":true})), Ok(Command::SetShowCodexPlanInNotch(true)));
+    assert_eq!(parse_command(&json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":false})), Ok(Command::SetShowCodexPlanInNotch(false)));
+    for bad in [
+        json!({"action":"set_show_codex_plan_in_notch"}),
+        json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":"true"}),
+        json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":1}),
+        json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":null}),
+        json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":true,"x":1}),
+        json!({"action":"set_show_codex_plan_in_notch","show_plan_in_notch":true}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad} must be refused");
+    }
+}
+
+#[test]
+fn show_codex_plan_in_notch_is_independent_persists_and_false_drops_the_key() {
+    let on = parse_command(&json!({"action":"set_show_codex_plan_in_notch","show_codex_plan_in_notch":true})).unwrap();
+    let next = update(&Prefs::default(), &on, |_| true).unwrap();
+    assert!(next.show_codex_plan_in_notch() && !next.show_plan_in_notch(), "the two pills are independent");
+    let value = serde_json::from_str::<Value>(&next.to_text()).unwrap();
+    assert_eq!(value["show_codex_plan_in_notch"], json!(true));
+    assert!(value.get("show_plan_in_notch").is_none());
+    let reread = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(reread, next); assert_eq!(reread.to_text(), next.to_text());
+    assert!(update(&Prefs::default(), &on, |_| false).is_err());
+    let off = update(&next, &Command::SetShowCodexPlanInNotch(false), |_| true).unwrap();
+    assert_eq!(off.show_codex_plan_in_notch, None);
+    assert!(!off.to_text().contains("show_codex_plan_in_notch"), "the default writes no key");
+    // turning the Claude pill on leaves the Codex opt-in exactly as it was
+    let both = update(&next, &Command::SetShowPlanInNotch(true), |_| true).unwrap();
+    assert!(both.show_codex_plan_in_notch() && both.show_plan_in_notch());
+}
+
+#[test]
+fn an_old_prefs_file_never_opts_into_codex_and_a_hostile_value_is_dropped() {
+    let old = r#"{"v":1,"sound":false,"display_name":"Ana","show_plan_in_notch":true}"#;
+    let loaded = Prefs::from_text(Some(old));
+    assert!(!loaded.show_codex_plan_in_notch() && loaded.show_plan_in_notch());
+    assert!(!loaded.to_text().contains("show_codex_plan_in_notch"), "an old file does not grow the new key");
+    for hostile in [r#""yes""#, "1", "null", "[]", r#"{"a":1}"#] {
+        let text = format!(r#"{{"v":1,"show_codex_plan_in_notch":{hostile}}}"#);
+        assert!(!Prefs::from_text(Some(&text)).show_codex_plan_in_notch(), "{hostile}");
+    }
+    assert!(Prefs::from_text(Some(r#"{"v":1,"show_codex_plan_in_notch":true}"#)).show_codex_plan_in_notch());
 }
