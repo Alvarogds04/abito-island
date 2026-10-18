@@ -22,6 +22,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
     renderAgentSettings: fake('agent-settings'), renderChatSettings: fake('chat-settings'),
     renderIntegrations: fake('integrations'), renderShortcuts: fake('shortcuts'),
     setInvoke() {}, dictationPage: fake('dictation'), flowSettingsPage: fake('flowsettings'),
+    dictionaryPage: fake('dictionary'), snippetsPage: fake('snippets'), stylesPage: fake('styles'), insightsPage: fake('insights'),
     renderGeneral: fake('general'), card: x => x, row: () => new Element('div'),
     startHub: async (_root, opts) => { config = opts; }, Set, Promise };
   vm.runInNewContext(source+'\nglobalThis.closedInvoke = invoke;',context);
@@ -34,7 +35,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   for (const id of ids) {
     const container = new Element('div');
     invoked.length = 0;
-    if (id === 'dictation' || id === 'flowsettings') {
+    if (['dictation','flowsettings','dictionary','snippets','styles','insights'].includes(id)) {
       assert(!inactivePages[id], 'wired FLOW routes are no longer inactive');
       await config.flowPages[id](container, {});
       assert.deepEqual(invoked, [[id, undefined]]);

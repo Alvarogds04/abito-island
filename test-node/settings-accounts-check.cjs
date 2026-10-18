@@ -125,7 +125,7 @@ if (require.main === module) (async () => {
   const fs = require('node:fs'), vm = require('node:vm');
   const entry = fs.readFileSync(path.resolve(__dirname,'../frontend/settings-app.js'),'utf8');
   const forwarded=[];
-  const context={window:{__TAURI__:{core:{invoke:async(c,a)=>{forwarded.push([c,a]);}}}},document:{getElementById:()=>new Element('div')},startHub:async()=>{},inactivePages:{},renderUnavailable(){},renderAccounts(){},renderModels(){},renderPills(){},renderAppearance(){},setInvoke(){},dictationPage(){},flowSettingsPage(){}};
+  const context={window:{__TAURI__:{core:{invoke:async(c,a)=>{forwarded.push([c,a]);}}}},document:{getElementById:()=>new Element('div')},startHub:async()=>{},inactivePages:{},renderUnavailable(){},renderAccounts(){},renderModels(){},renderPills(){},renderAppearance(){},setInvoke(){},dictationPage(){},flowSettingsPage(){},dictionaryPage(){},snippetsPage(){},stylesPage(){},insightsPage(){}};
   vm.runInNewContext(entry.replace(/^import .*;\n/gm,'')+'\nglobalThis.closedInvoke=invoke;',context);
   await context.closedInvoke('daemon_action',{payload:{action:'restart'}});assert.equal(forwarded.length,1);
   for(const args of [{payload:{action:'status'}},{payload:{action:'restart',extra:true}},{payload:{action:'restart'},extra:true},{}]) await assert.rejects(context.closedInvoke('daemon_action',args),/No disponible/);

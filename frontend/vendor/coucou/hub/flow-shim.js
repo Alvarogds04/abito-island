@@ -6,6 +6,11 @@ function setInvoke(fn) {
   hasStatus = false;
 }
 const call = (payload) => invoke ? invoke("dictation_action", { payload }) : Promise.reject(new Error("No disponible todavía"));
+async function mutation(payload) {
+  const reply = await call(payload);
+  if (reply?.ok !== true) throw new Error("No se pudo completar");
+  return reply;
+}
 const FlowBridge = Object.freeze({
   status: async () => {
     try {
@@ -29,6 +34,17 @@ const FlowBridge = Object.freeze({
       defaultStyle: p.defaultStyle
     } });
   },
+  history: () => call({ action: "history" }),
+  deleteEntry: (id) => mutation({ action: "delete_entry", id }),
+  clear: (everything) => mutation({ action: "clear_history", everything }),
+  stats: () => call({ action: "stats" }),
+  words: () => call({ action: "words" }),
+  setWords: (words) => mutation({ action: "set_words", words }),
+  snippets: () => call({ action: "snippets" }),
+  setSnippets: (snippets) => mutation({ action: "set_snippets", snippets }),
+  styles: () => call({ action: "styles" }),
+  setStyles: (styles) => mutation({ action: "set_styles", styles }),
+  runningApps: async () => [],
   download: () => call({ action: "download_model" }),
   removeModels: () => call({ action: "remove_model" })
 });

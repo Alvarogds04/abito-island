@@ -20,6 +20,8 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   setInvoke(async (cmd, {payload:p}) => {
     calls.push([cmd, structuredClone(p)]);
     if (p.action === 'status') return structuredClone(state);
+    if (p.action === 'history') return [];
+    if (p.action === 'stats') return {all:{words:0,wordsPerMinute:0},streak:0};
     if (p.action === 'set_prefs') { if (rejectWrite) throw Error('test write failure'); state.prefs = {...state.prefs,...p.prefs}; return p.prefs; }
     state.models.parakeet = {state:p.action === 'remove_model' ? 'missing' : 'downloading',fraction:0}; return structuredClone(state.models);
   });
@@ -66,7 +68,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   leave();assert.equal(events.get('dictation:models').size,6,'page listener disposed, shell listeners remain');
   const home=new Element('div');status=structuredClone(state);status.prefs.enabled=false;await dictationPage(home,ctx);
   assert(all(home).some(e=>e.className==='hub-columns')); assert.equal(all(home).filter(e=>e.tagName==='b'&&e.textContent==='0').length,3);
-  assert(text(home).includes('Tus dictados aparecerán aquí'));assert(text(home).includes('No disponible todavía'));assert(text(home).includes('612'));
+  assert(text(home).includes('Tus dictados aparecerán aquí'));assert(text(home).includes('612'));
   calls.length=0;for(const e of all(home).filter(e=>e.disabled))e.fire('click');await new Promise(r=>setImmediate(r));assert.deepEqual(calls,[]);
   const setupToggle=all(home).find(e=>e.className==='hub-row'&&all(e).some(n=>n.textContent==='Activar el dictado')).children.at(-1);
   setupToggle.fire('click',false); await new Promise(r=>setImmediate(r));assert.deepEqual(calls,[]);

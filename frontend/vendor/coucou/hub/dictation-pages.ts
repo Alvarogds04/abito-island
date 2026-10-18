@@ -1,11 +1,12 @@
 // Adapted from Coucou src/hub/pages/{dictation,flowsettings}.ts @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
-// Abito: portal-owned keys, seven closed preferences, unavailable history/notes. Styles use CSSOM through h().
+// Abito: portal-owned keys, seven closed preferences, local history; no copy backend or history event.
 import { h, clear } from '../views/dom.js';
 import { t } from './i18n-es.js';
 import { onEvent } from './bridge-shim.js';
+import { dataLife } from './data-pages.js';
 import { FlowBridge, type Edge, type ModelsStatus } from './flow-shim.js';
 import type { HubContext } from './shell.js';
-import { button, card, divider, keyKeycap, keycap, label, number, row, segmented, select, toggle, icon } from './ui.js';
+import { button, card, divider, keyKeycap, keycap, label, number, row, segmented, select, toggle, icon, iconButton, shortCount } from './ui.js';
 import { trusted } from './runtime.js';
 import { emptyState, glowCard } from './hero.js';
 const unavailable = <T extends HTMLElement>(el: T): T => { (el as any).disabled = true; el.title = 'No disponible todavía'; return el; };
@@ -15,6 +16,7 @@ function mount(page: HTMLElement, ctx: HubContext) {
   const message = h('div', {class:'hub-note', role:'status'});
   const life = {
     alive: () => alive,
+    dispose: () => { alive = false; for (const off of cleanups.splice(0)) off(); },
     watch: async (fn: (m: ModelsStatus) => void) => {
       const off = await onEvent<ModelsStatus>('dictation:models', m => { if (alive) fn(m); });
       if (alive) cleanups.push(off); else off();
@@ -25,7 +27,7 @@ function mount(page: HTMLElement, ctx: HubContext) {
       catch { if (alive) message.textContent = 'No se pudo completar. No se anuncia ningún cambio como guardado.'; }
     },
   };
-  ctx.onLeave = () => { alive = false; for (const off of cleanups.splice(0)) off(); };
+  ctx.onLeave = life.dispose;
   queueMicrotask(() => { if (alive) page.append(message); });
   return life;
 }
@@ -124,9 +126,19 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext) {
   // ── Privacy ──
   page.append(label(t("Privacy")));
   const keep: [string, string][] = [["0", t("Don't keep")], ["7", t("7 days")], ["30", t("30 days")], ["365", t("1 year")], ["-1", t("Forever")]];
-  const confirmRow = h("div", { class: "hub-row" },
-    unavailable(button(t("Erase the history"), () => {}, "", true)),
-    unavailable(button(t("Erase everything"), () => {}, "", true)));
+  const confirmRow = h('div', {class:'hub-row'});
+  const erase = () => {
+    clear(confirmRow);
+    confirmRow.append(trusted(button(t('Erase the history'), () => void life.work(() => FlowBridge.clear(false)), '', true)),
+      trusted(button(t('Erase everything'), () => {
+        if (!life.alive()) return;
+        clear(confirmRow);
+        confirmRow.append(h('span', {class:'hub-note',style:'flex:1',text:t('Erase the history and the statistics?')}),
+          trusted(button(t('Erase everything'), () => void life.work(async () => { await FlowBridge.clear(true); if (life.alive()) erase(); }), 'danger', true)),
+          trusted(button(t('Cancel'), () => { if (life.alive()) erase(); }, '', true)));
+      }, '', true)));
+  };
+  erase();
   page.append(card(
     row(t("Keep the history"), null, trusted(select(keep, String(prefs.keepDays), (v) => save((p) => (p.keepDays = Number(v)))))),
     divider(),
@@ -150,14 +162,36 @@ export async function dictationPage(page: HTMLElement, ctx: HubContext) {
       row(t('Parakeet, on your computer'), t('The most accurate, offline, 25 languages. Downloaded once (about {0} MB).', {0:number(status.models.downloadMb)}), modelsControl(ctx, life, () => ctx.navigate('dictation'))));
     page.append(glowCard('#FB923C', body));
   }
-  const search = unavailable(h('input', {class:'hub-input',placeholder:t('Search dictations'),type:'search'}));
-  const list = h('div', {style:'display:flex;flex-direction:column;gap:10px'},
-    emptyState(status.prefs.keepDays === 0 ? t('The history is off. Turn it on in Settings → Privacy.') : t('Your dictations will show here. Hold {0} in any app and speak.', {0:key})),
-    h('div', {class:'hub-note',text:'No disponible todavía'}));
+  // No flow-history event exists in Abito: these snapshots refresh only when opening the page.
+  const data = dataLife(page, {...ctx, set onLeave(fn) { ctx.onLeave = () => {life.dispose(); fn?.();}; }});
+  const snapshots = await data.load(() => Promise.all([FlowBridge.history(),FlowBridge.stats()]));
+  if (!life.alive() || !snapshots) return;
+  let [entries, stats] = snapshots, query = '';
+  const search = data.live(h('input', {class:'hub-input',placeholder:t('Search dictations'),type:'search'})) as HTMLInputElement;
+  const list = h('div', {style:'display:flex;flex-direction:column;gap:10px'});
+  const dayKey = (ms: number) => {const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;};
+  const dayTitle = (ms: number) => dayKey(ms) === dayKey(Date.now()) ? t('Today') : dayKey(ms) === dayKey(Date.now()-86400000) ? t('Yesterday') : new Date(ms).toLocaleDateString(document.documentElement.lang || undefined,{weekday:'long',day:'numeric',month:'long'});
+  const draw = () => {
+    clear(list);
+    if (status.prefs.keepDays === 0) {list.append(emptyState(t('The history is off. Turn it on in Settings → Privacy.'))); return;}
+    const shown = query ? entries.filter(e => e.text.toLowerCase().includes(query)) : entries;
+    if (!shown.length) {list.append(emptyState(query ? t('No dictation matches.') : t('Your dictations will show here. Hold {0} in any app and speak.',{0:key}))); return;}
+    let group: HTMLElement, groupDay = '';
+    for (const e of shown.slice(0,300)) {
+      const d = dayKey(e.date);
+      if (d !== groupDay) {groupDay = d; list.append(h('div', {class:'hub-day',text:dayTitle(e.date)})); group = h('div', {class:'hub-entries'}); list.append(group);}
+      const when = h('div', {class:'when'}, h('span', {text:new Date(e.date).toLocaleTimeString(document.documentElement.lang || undefined,{hour:'2-digit',minute:'2-digit'})}));
+      if (e.app) when.append(h('span', {class:'hub-tag',text:e.app,title:e.app}));
+      group!.append(h('div', {class:'hub-entry'},when,h('div', {class:'words',text:e.text}),h('div', {class:'tools'},
+        unavailable(iconButton('copy',t('Copy'), () => {})),
+        data.live(iconButton('trash',t('Delete'), () => data.change(() => {entries = entries.filter(x => x.id !== e.id);}, () => FlowBridge.deleteEntry(e.id), async () => {entries = await FlowBridge.history();}, draw))))));
+    }
+  };
+  search.addEventListener('input', () => {query = search.value.trim().toLowerCase(); draw();}); draw();
   const left = h('div', {style:'display:flex;flex-direction:column;gap:10px;min-width:0'}, h('div', {class:'hub-history-head'}, label(t('History')), search), list);
-  const big = (text: string) => h('div', {class:'hub-big-number'}, h('b', {text:number(0)}), h('span', {text:t(text)}));
+  const big = (value: string, text: string) => h('div', {class:'hub-big-number'}, h('b', {text:value}), h('span', {text:t(text)}));
   const check = icon('check'); check.style.setProperty('width','15px'); check.style.setProperty('height','15px'); check.style.setProperty('fill','none'); check.style.setProperty('stroke','currentColor'); check.style.setProperty('stroke-width','2.2');
-  const numbers = card(big('words dictated'), big('words/min'), big('days in a row'), divider(), h('div', {class:'hub-ok'}, check, h('span', {text:t('Unlimited and free')})));
+  const numbers = card(big(shortCount(stats.all.words), 'words dictated'), big(number(stats.all.wordsPerMinute), 'words/min'), big(number(stats.streak), 'days in a row'), divider(), h('div', {class:'hub-ok'}, check, h('span', {text:t('Unlimited and free')})));
   const promo = glowCard('#FB923C', h('div', {style:'font:700 15px var(--font)',text:t('The Notetaker')}),
     h('div', {class:'hub-note',style:'color:#b7bbc2',text:t('Your calls transcribed person by person, with a summary and the to-dos. No bot in the meeting.')}),
     unavailable(h('button', {class:'hub-link',text:t('Open the Notetaker →')})));

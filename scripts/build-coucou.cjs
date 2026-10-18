@@ -5,13 +5,15 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '../frontend/vendor/coucou');
 const compiler = process.env.ESBUILD_BINARY_PATH || '/home/alvaro/.pi/agent/npm/node_modules/@esbuild/linux-x64/bin/esbuild';
-const inputs = ['settings/colors', 'settings/parts', 'settings/toggle', 'settings/general', 'core/pill-colors', 'views/dom', 'i18n/i18n', 'core/pills', 'core/shortcuts', 'core/providers', 'core/state', 'views/icons', 'core/anim', 'core/diff', 'views/ticker', 'views/diff', 'hub/ui', 'hub/shell', 'hub/hero', 'hub/flow-shim', 'hub/bridge-shim', 'hub/i18n-es', 'hub/general', 'hub/runtime', 'hub/accounts', 'hub/personalization', 'hub/pages', 'hub/notch', 'hub/agents', 'hub/chat', 'hub/integrations', 'hub/shortcuts', 'hub/recap', 'core/plan', 'views/usage', 'core/github', 'views/github', 'hub/dictation-pages'];
+const inputs = ['settings/colors', 'settings/parts', 'settings/toggle', 'settings/general', 'core/pill-colors', 'views/dom', 'i18n/i18n', 'core/pills', 'core/shortcuts', 'core/providers', 'core/state', 'views/icons', 'core/anim', 'core/diff', 'views/ticker', 'views/diff', 'hub/ui', 'hub/shell', 'hub/hero', 'hub/flow-shim', 'hub/bridge-shim', 'hub/i18n-es', 'hub/general', 'hub/runtime', 'hub/accounts', 'hub/personalization', 'hub/pages', 'hub/notch', 'hub/agents', 'hub/chat', 'hub/integrations', 'hub/shortcuts', 'hub/recap', 'core/plan', 'views/usage', 'core/github', 'views/github', 'hub/dictation-pages', 'hub/data-pages'];
 if (!fs.existsSync(compiler)) throw new Error('Falta esbuild local: indicar ESBUILD_BINARY_PATH; no se instalará nada.');
 const version = execFileSync(compiler, ['--version'], { encoding: 'utf8' }).trim();
 if (version !== '0.28.2') throw new Error(`esbuild ${version}: se requiere 0.28.2 para salida reproducible`);
-for (const file of inputs) {
+// Scoped writer builds must not rewrite another workstream's generated files.
+const selected = process.argv.includes('--hub-only') ? inputs.filter(file => file.startsWith('hub/')) : inputs;
+for (const file of selected) {
   const source = fs.readFileSync(path.join(root, `${file}.ts`), 'utf8');
   const banner = source.split('\n')[0];
   execFileSync(compiler, [`${file}.ts`, '--format=esm', '--target=es2021', '--charset=utf8', '--legal-comments=inline', `--banner:js=${banner}`, `--outfile=${file}.js`, '--log-level=error'], { cwd: root, stdio: 'inherit' });
 }
-console.log(`Built ${inputs.length} MIT/Abito modules with esbuild ${version} (offline)`);
+console.log(`Built ${selected.length} MIT/Abito modules with esbuild ${version} (offline)`);
