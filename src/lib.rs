@@ -45,6 +45,8 @@ pub mod identity;
 pub mod localmodel;
 pub mod models;
 pub mod nativedialog;
+pub mod codex_plan;
+pub mod plan_cmd;
 pub mod prefs;
 pub mod protocol;
 pub mod recap;

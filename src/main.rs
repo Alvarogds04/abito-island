@@ -36,6 +36,7 @@ mod trayhost;
 mod secretshost;
 mod soundshost;
 mod recaphost;
+mod planhost;
 mod settingshost;
 mod settingswindow;
 mod spotifyhost;
@@ -1942,6 +1943,7 @@ fn main() {
             secretshost::secret_action,
             soundshost::sound_action,
             recaphost::recap_action,
+            planhost::plan_action,
             settingshost::settings_view,
             settingshost::daemon_action,
             settingswindow::settings_window_action,
