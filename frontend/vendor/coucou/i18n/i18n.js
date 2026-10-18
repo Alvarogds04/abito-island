@@ -21,11 +21,69 @@ const messages = {
   "Open in VS Code": "Abrir en VS Code",
   "Diff too large": "Diff demasiado grande",
   "No changes": "Sin cambios",
+  // S10 (L30): plan usage (views/usage.ts, core/plan.ts)
+  "Claude plan": "Plan de Claude",
+  "Codex plan": "Plan de Codex",
+  "Claude plan usage": "Uso del plan de Claude",
+  "Codex plan usage": "Uso del plan de Codex",
+  "Waiting for a response from Claude Code": "Esperando una respuesta de Claude Code",
+  "Asking Codex…": "Consultando a Codex…",
+  "just now": "ahora mismo",
+  "{n} min ago": "hace {n} min",
+  "{n} h ago": "hace {n} h",
+  "5 hours": "5 horas",
+  Week: "Semana",
+  Resets: "Reinicios",
+  "Resetting…": "Reiniciando…",
+  "in {h} h {m}": "en {h} h {m}",
+  "in {m} min": "en {m} min",
+  "{n} available": "{n} disponibles",
+  " · until {date}": " · hasta {date}",
+  // S10 (L30): GitHub card (views/github.ts, core/github.ts)
+  Overview: "Resumen",
+  "Total stars": "Estrellas",
+  Repositories: "Repositorios",
+  "My PRs": "Mis PRs",
+  "To review": "Por revisar",
+  "Default branch CI": "CI de la rama principal",
+  Activity: "Actividad",
+  "Nothing here": "Nada por aquí",
+  "Loading…": "Cargando…",
+  Draft: "Borrador",
+  failing: "fallando",
+  running: "en curso",
+  passing: "pasando",
+  "all green": "todo en verde",
+  "no repos": "sin repos",
+  unknown: "desconocido",
+  "No contributions": "Sin contribuciones",
+  "{total} past year": "{total} el último año",
+  "{count} contribution": "{count} contribución",
+  "{count} contributions": "{count} contribuciones",
+  "{count} repo": "{count} repo",
+  "{count} repos": "{count} repos",
   "Unavailable features": "No disponible en Abito todavía: carpeta de sonidos; recarga y contador de sonidos; inicio automático; idioma; resumen."
 };
-function t(key) {
+function interpolate(text, vars) {
+  return vars ? text.replace(/\{(\w+)\}/g, (whole, name) => name in vars ? String(vars[name]) : whole) : text;
+}
+function t(key, vars) {
   if (!Object.prototype.hasOwnProperty.call(messages, key)) throw new Error(`Traducción de Abito no disponible: ${key}`);
-  return messages[key];
+  return interpolate(messages[key], vars);
+}
+function tn(one, other, count, vars) {
+  return t(count === 1 ? one : other, { ...vars, count });
+}
+function language() {
+  return "es";
+}
+const ES_WEEKDAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const ES_MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+function weekdayShort(day) {
+  return ES_WEEKDAYS[day] ?? "";
+}
+function dayMonth(month, day) {
+  return `${day} ${ES_MONTHS[month] ?? ""}`;
 }
 class Msg {
   constructor(key) {
@@ -45,7 +103,11 @@ function onLanguageChange(_listener) {
 export {
   Msg,
   N_,
+  dayMonth,
+  language,
   onLanguageChange,
   t,
-  tl
+  tl,
+  tn,
+  weekdayShort
 };

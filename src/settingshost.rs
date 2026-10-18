@@ -124,6 +124,8 @@ fn view_prefs(p: &Prefs) -> Value {
         "islandAgents": p.island_agents_view(),
         "abitoInstructions": p.abito_instructions_view(),
         "monitor": p.monitor,
+        "showPlanInNotch": p.show_plan_in_notch(),
+        "showCodexPlanInNotch": p.show_codex_plan_in_notch(),
         "settingsWindow": true})
 }
 
