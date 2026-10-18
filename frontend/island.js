@@ -49,10 +49,13 @@
   // (geometry::DOT_DIAMETER); the character fills it. Drag, snap and edge memory
   // are Rust's and only ever see the native rectangle.
   const COMPACT = { w: 32, h: 32, r: 16, gap: 6, clay: 26, drop: 1 };
-  // UI.1: R6 is 128px at the left of the plain overview and 72px while the
-  // approval card is shown (only scale/position; the engine is frozen).
-  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 10, clayX: 82 }; // drop 10: the drawn blob (not the box) is centred in the 140px card
-  const OVERVIEW_CARD = { clay: 80, clayX: 62 };
+  // S10 (L19): Coucou's own bot placement (core/layout.ts VIEW_LAYOUTS): overview botX 68 / diameter 58,
+  // approval, question, error and finished botX 62 / diameter 56, centred on the 84pt card row
+  // (cy 101 from the island top). The box is diameter * 128/112 because the engine draws ~112 of 128
+  // viewBox units; only scale/position change, the engine is frozen. `cy` is the visible blob centre.
+  const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 66, clayX: 68, cy: 101 };
+  const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 101 };
+  const BLOB_DROP = 10 / 140; // the drawn blob sits this fraction of the box below the box centre (measured, was drop 10 at box 140)
   // The engine draws its body ~112 viewBox units wide inside its 200x160
   // canvas (measured from the captures), so a box of 128px shows a ~70px
   // character. In the overview the SVG viewBox is tightened (attribute only,
@@ -176,7 +179,6 @@
     // the confirmed finished-notice lane (pane starts at x=108) uses the small R6 too, or the 128px blob covers the pane
     const ov = (noticeLane && noticeLane.view === 'notices') ? OVERVIEW_CARD : ovBase;
     const cs = lerp(COMPACT.clay, ov.clay, p);
-    const drop = lerp(COMPACT.drop, OVERVIEW.drop, p);
     island.style.width = w + 'px';
     island.style.height = h + 'px';
     island.style.borderRadius = r + 'px';
@@ -192,7 +194,7 @@
     // R6 is only scaled and positioned (never redrawn): centred in the
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
-    const overviewTop = lerp(COMPACT.h, OVERVIEW.h, p) / 2 - drop - cs / 2;
+    const overviewTop = lerp(COMPACT.h / 2 - COMPACT.drop, ov.cy - cs * BLOB_DROP, p) - cs / 2;
     const z = 1; // tight framing in the dot, the overview AND the chat (the dot's character fills the disc, #302)
     clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
