@@ -27,7 +27,10 @@ pub mod chatlane;
 pub mod conversations;
 pub mod core;
 pub mod desktop;
+pub mod files;
 pub mod focushost;
+pub mod github;
+pub mod githubcmd;
 pub mod daemonhost;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakebridge;
@@ -45,6 +48,7 @@ pub mod http;
 pub mod identity;
 pub mod localmodel;
 pub mod models;
+pub mod monitors;
 pub mod nativedialog;
 pub mod prefs;
 pub mod protocol;
