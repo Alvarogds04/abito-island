@@ -1407,7 +1407,7 @@ test('T6.3 General screen source contract: slider, segmented auto-close, groups,
   assert.match(src, /'Perfil'/);
   assert.match(src, /'Isla'/);
   assert.match(src, /'Sonido y atajo'/);
-  assert.doesNotMatch(src, /'Abrir Ajustes en ventana'/, '#444 L12 supersedes D9');
+  assert.doesNotMatch(src, /'Abrir Ajustes en ventana'/, '#455 S8: placement is no longer optional');
   assert.match(src, /'Atajo global'/);
   // copy diet: the explanatory paragraphs of the General screen are gone
   assert.doesNotMatch(src, /Dónde se abre Ajustes/);
@@ -1440,14 +1440,15 @@ test('F093 the settings window view models the General toggle from the projectio
   assert.deepEqual(S.settingsWindowView('junk'), { on: false });
 });
 
-test('#444 L12 removes the standalone window route and controls without changing close lifecycle', () => {
+test('#455 S8 replaces island settings with the standalone window and preserves gates', () => {
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
-  assert.match(src, /const WINDOW_MODE = false/);
+  assert.match(src, /if \(!WINDOW_MODE\) return openSettingsWindow\(\)/);
   assert.doesNotMatch(src, /openWindowOrInIsland|set_settings_window|settings-window-open|sw-settings-window/);
-  assert.doesNotMatch(src, /dataset\.window = 'settings'/);
+  assert.match(src, /dataset\.window = 'settings'/);
   const native = fs.readFileSync(path.join(frontend, '../src/settingswindow.rs'), 'utf8');
-  assert.doesNotMatch(native, /WebviewWindowBuilder|fn open_window/);
-  assert.match(native, /crate::open_settings_in_island\(&app, &state\)/);
+  assert.match(native, /WebviewWindowBuilder|fn open_window/);
+  assert.doesNotMatch(native, /crate::open_settings_in_island\(&app, &state\)/);
+  assert.doesNotMatch(native, /if !opens_own_window/);
   const main = fs.readFileSync(path.join(frontend, '../src/main.rs'), 'utf8');
   const route = main.slice(main.indexOf('fn open_settings_in_island('), main.indexOf('fn open_chat_and_type('));
   assert.ok(route.indexOf('Action::Expand') < route.indexOf('abito:settings-select'), 'native entry expands/reveals before opening Settings');

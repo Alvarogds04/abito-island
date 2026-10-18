@@ -124,7 +124,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "islandAgents": p.island_agents_view(),
         "abitoInstructions": p.abito_instructions_view(),
         "monitor": p.monitor,
-        "settingsWindow": false})
+        "settingsWindow": true})
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.
@@ -132,8 +132,14 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()
 }
 
-// Legacy settings_window and settings_window_size remain stored for compatibility.
-// Neither participates in opening Settings after #444 L12.
+/// #366 F093: the effective Ajustes placement, read by the settings window host
+/// (the field is private to this module; the projection and this accessor are
+/// the only readers outside `prefs.rs`).
+pub fn settings_window_on(host: &SettingsHost) -> bool {
+    crate::settingswindow::opens_own_window(Some(
+        host.prefs.lock().expect("prefs lock").settings_window_on(),
+    ))
+}
 
 /// T6.2: the remembered inner size of the own Ajustes window (logical px), read
 /// when the window opens. Read-only: the WebView never receives it — the size is
@@ -714,29 +720,26 @@ mod settings_view_tests {
         assert_eq!(view["chosenModels"], json!(null));
     }
 
-    /// #444 L12: the effective projection is always in-island; legacy data is retained.
+    /// #455: effective placement is always the window, without migrating stored keys.
     #[test]
     fn f093_the_webview_projection_carries_the_settings_window_choice() {
         use abito_island::prefs::Prefs;
         let defaults = view_prefs(&Prefs::default());
         assert_eq!(
             defaults["settingsWindow"],
-            json!(false),
-            "absent reads as the in-island default"
+            json!(true),
+            "#455: window replaces the island"
         );
         let saved = Prefs::from_text(Some(r#"{"v":1,"settings_window":true}"#));
-        assert_eq!(
-            view_prefs(&saved)["settingsWindow"],
-            json!(false),
-            "L12: legacy true stays stored but placement is in-island"
-        );
-        assert!(saved.settings_window_on(), "no data migration");
+        assert_eq!(view_prefs(&saved)["settingsWindow"], json!(true));
         let hostile = Prefs::from_text(Some(r#"{"v":1,"settings_window":"yes"}"#));
         assert_eq!(
             view_prefs(&hostile)["settingsWindow"],
-            json!(false),
-            "a dropped value reads as the default"
+            json!(true),
+            "legacy values cannot restore island settings"
         );
+        let disabled = Prefs::from_text(Some(r#"{"v":1,"settings_window":false}"#));
+        assert_eq!(view_prefs(&disabled)["settingsWindow"], json!(true));
         // the established projection shapes are untouched
         assert_eq!(defaults["autoCloseSeconds"], json!(15));
         assert_eq!(defaults["theme"], json!("system"));

@@ -181,31 +181,32 @@ async function page(legacy) {
     // keyboard button activation is driven separately with trusted CDP input.
     await p.evaluate(`document.dispatchEvent(new CustomEvent('abito:settings-select',{detail:'open'}))`);
     await p.settled();
-    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), 'true', `legacy ${legacy}: public native entry stays in island`);
-    await p.evaluate(`document.dispatchEvent(new CustomEvent('abito:settings-select',{detail:'general'}))`);
+    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), undefined, 'native entry never mounts island settings');
+    assert.equal(await p.evaluate(`calls.filter(c => c.cmd === 'settings_window_action').length`), 1, 'native entry asks for window even with legacy false');
     assert.equal(await p.evaluate(`Boolean(document.querySelector('#settings-window-open, #sw-settings-window'))`), false, 'no placement controls');
-    await p.click('#settings-close');
     await p.evaluate(`__islandSetView('chat',400,640)`); await p.settled();
     await p.click('#open-screen-settings');
-    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), 'true', `legacy ${legacy}: chat gear stays in island`);
-    await p.click('#settings-close'); await p.settled();
+    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), undefined, 'chat gear never opens island settings');
+    assert.equal(await p.evaluate(`calls.filter(c => c.cmd === 'settings_window_action').length`), 2);
     await p.evaluate(`document.querySelector('#open-screen-settings').focus()`);
     assert.equal(await p.evaluate(`document.activeElement.id`), 'open-screen-settings', 'gear accepts keyboard focus');
     // CDP needs Enter's character as well as keyDown to run native button
     // activation (matching a real key press, not a raw-key-only event).
     await p.command('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r',unmodifiedText:'\r'});
     await p.command('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), 'true', `legacy ${legacy}: trusted keyboard gear stays in island`);
+    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), undefined, 'keyboard gear opens only window');
+    assert.equal(await p.evaluate(`calls.filter(c => c.cmd === 'settings_window_action').length`), 3);
     await p.command('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await p.command('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     assert.equal(await p.evaluate(`document.activeElement.id`), 'open-screen-settings', 'Escape restores gear focus');
     await p.evaluate(`__islandSetView('overview',640,160)`); await p.settled();
     await p.click('#open-settings');
-    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), 'true', `legacy ${legacy}: overview gear stays in island`);
-    assert.deepEqual(await p.evaluate(`calls.filter(c => c.cmd === 'settings_window_action' || c.p?.action === 'set_settings_window')`), []);
+    assert.equal(await p.evaluate(`document.querySelector('#settings').dataset.open`), undefined, 'overview gear opens only window');
+    assert.equal(await p.evaluate(`calls.filter(c => c.cmd === 'settings_window_action').length`), 4);
+    assert.deepEqual(await p.evaluate(`calls.filter(c => c.cmd === 'settings_view' || c.p?.action === 'set_settings_window')`), []);
     assert.equal(await p.evaluate(`prefs.settingsWindow`), legacy, 'stored preference remains untouched');
     assert.deepEqual(await p.evaluate(`errors`), [], 'real scripts load without browser errors');
-    console.log(`island-only-settings-check: legacy ${legacy}, keyboard + both gears + no controls + unchanged stored data PASS`);
+    console.log(`island-only-settings-check: legacy ${legacy}, keyboard + both gears route to window only + unchanged stored data PASS`);
     await p.close();
   }
   // The ordinary Node sweep must also exercise notice layout and the native

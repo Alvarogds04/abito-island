@@ -41,8 +41,17 @@
   const agent = payload => call('agent_action', payload);
 
   const openers = [$('open-screen-settings')].filter(Boolean); // the chat header gear: the ONE entry (#408)
-  // #444 L12: Settings always belongs to the island. Legacy placement stays stored, inert.
-  const WINDOW_MODE = false;
+  // #366 F093: the SAME page runs inside the Rust-created settings window. There the panel
+  // fills the window (body[data-window="settings"] CSS) and the island's size is not this
+  // page's business. The label is the exact one the sender gate admits (narrow approval).
+  const WINDOW_MODE = V.isSettingsWindow(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata
+    && window.__TAURI_INTERNALS__.metadata.currentWindow && window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  // Adapted from Coucou windows/src/hub/shell.ts and windows/src/settings/main.ts.
+  // Copyright (c) 2026 Louis Raillé, MIT. Abito keeps its own icons, copy and character.
+  if (WINDOW_MODE) {
+    document.body.dataset.window = 'settings';
+    document.body.append(panel); // the settings window has no island ancestor or clipping
+  }
   const moreGroup = $('connections-more'); // FAKE services cards; render() wipes the body, so it is re-appended per render
   const tabsHost = $('settings-tabs');
   const live = $('settings-live');
@@ -226,8 +235,8 @@
   // #408: at the Settings size (wide) the tabs are a vertical rail; in the 400 column a wrapping row.
   const RAIL_MIN_W = 600;
   function syncRail() {
-    const wide = typeof panel.clientWidth === 'number' && panel.clientWidth >= RAIL_MIN_W;
-    panel.dataset.rail = wide ? 'true' : 'false';
+    const wide = WINDOW_MODE || (typeof panel.clientWidth === 'number' && panel.clientWidth >= RAIL_MIN_W);
+    panel.dataset.rail = WINDOW_MODE ? 'window' : (wide ? 'true' : 'false');
     if (tabsHost) tabsHost.setAttribute('aria-orientation', wide ? 'vertical' : 'horizontal');
   }
   window.addEventListener('resize', syncRail);
@@ -237,7 +246,7 @@
     screen = id;
     if (id !== 'accounts') { filter = ''; discardAccountForm(); }
     const def = V.tabById(id);
-    $('settings-title').textContent = 'Ajustes';
+    $('settings-title').textContent = WINDOW_MODE ? def.title : 'Ajustes';
     $('settings-hint').textContent = def.hint;
     $('settings-hint').hidden = !def.hint;
     panel.setAttribute('aria-label', `Ajustes: ${def.title}`);
@@ -250,6 +259,8 @@
     // #410: the open sub-tab is a PUBLIC DOM attribute of the tabpanel. The compact Conexiones rules
     // (#410 block in style.css) are scoped to it, so every other Ajustes tab keeps its own look.
     body.dataset.screen = id;
+    body.setAttribute('aria-labelledby', `settings-tab-${id}`);
+    body.scrollTop = 0;
     document.dispatchEvent(new CustomEvent('abito:settings-tab', { detail: id }));
     if (id === 'accounts') { agent({ action: 'connectors_list' }).catch(() => {}); askAgents(); }
     render();
@@ -274,6 +285,7 @@
   // leaves the chat size, which still works (scrolling), so it is never fatal.
   function askSize(openNow) { call('settings_view', { open: openNow }).catch(() => {}); }
   function open(id) {
+    if (!WINDOW_MODE) return openSettingsWindow();
     clearTimeout(connectTimer);
     if (agentState === null) connectTimer = setTimeout(() => { if (agentState === null) { agentState = { connection: 'no_daemon' }; if (isOpen()) render(); } }, V.CONNECT_WAIT_MS);
     panel.inert = false; panel.dataset.open = 'true'; capsule.dataset.settings = 'open';
@@ -316,27 +328,30 @@
   }
   const isOpen = () => panel.dataset.open === 'true';
 
-  // the chat-header gear toggles Ajustes; the gear of the overview opens the chat view first
-  for (const b of openers) b.addEventListener('click', e => {
-    if (e.isTrusted !== true) return;
-    if (isOpen()) close(e.detail === 0);
-    else open(screen);
+  // #455 S8: one route, regardless of legacy placement. Failure never mounts island settings.
+  function openSettingsWindow() {
+    return call('settings_window_action', { action: 'open' }).then(result => {
+      if (!result || result.open !== true) throw new Error('window unavailable');
+    }).catch(() => {
+      const feedback = $('chat-live') || live;
+      feedback.textContent = 'No se pudo abrir Ajustes. Probá de nuevo.';
+    });
+  }
+  for (const b of [...openers, $('open-settings')].filter(Boolean)) b.addEventListener('click', e => {
+    if (e.isTrusted === true) openSettingsWindow();
   });
   const gear = $('open-settings');
-  if (gear) gear.addEventListener('click', e => {
-    if (e.isTrusted !== true) return;
-    pendingOpen = screen;
-    call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; });
-  });
   document.addEventListener('island:view', e => {
     if (e.detail === 'chat' && pendingOpen) { const id = pendingOpen; pendingOpen = false; open(id); }
     else if (e.detail !== 'chat' && isOpen()) close(false);
   });
   $('settings-close').addEventListener('click', e => { if (e.isTrusted === true) close(e.detail === 0); });
+
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
-    if (e.detail === 'open') { pendingOpen = screen; call('chat_action', { action: 'open' }).catch(() => { pendingOpen = false; }); }
+    if (!WINDOW_MODE) { openSettingsWindow(); return; }
+    if (e.detail === 'open') open(screen);
     else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
     // the old accounts:<method> deep links still land on Conexiones; the method choice now lives in each row
     else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { if (isOpen()) showScreen('accounts'); else open('accounts'); }
@@ -366,7 +381,8 @@
     call('hotkey_action', { action: 'view' }).then(h => { hotkey = h; render(); }, () => {});
     if (window.desktop) window.desktop.snapshot().then(s => { motionOverride = s.motionOverride !== false; render(); }, () => {});
   }
-  // Fetch saved preferences at startup; legacy placement never participates in routing.
+  // #366 F093: the gear consults the placement pref even before the panel was ever
+  // opened, so the typed choice survives a page reload: one honest view fetch at startup.
   if (!WINDOW_MODE) call('prefs_action', { action: 'view' }).then(p => { prefs = p; }, () => {});
   function applyAgent(next) {
     if (next && typeof next === 'object') {
@@ -1031,6 +1047,7 @@
         p => { prefs = p; render(); say(island.openOnHover ? 'La isla ya no se abre al pasar el mouse.' : 'La isla se abre al pasar el mouse.'); },
         () => say('No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'));
     }));
+
     paintAuto();
     const motion = group('appearance', 'Movimiento', '');
     motion.append(toggleRow('sw-motion', 'Animación reducida', g.motion.respectSystem, () => {
@@ -1255,7 +1272,7 @@
         () => { issue.textContent = 'No se pudo guardar. La interacción sigue sin cambios; probá de nuevo.'; });
     });
     form.append(label, input, issue, save); quick.append(form); paint();
-    quick.append(wordBtn('Todos los ajustes', () => { closeQuick(); open(screen); }));
+    quick.append(wordBtn('Todos los ajustes', () => { closeQuick(); openSettingsWindow(); }));
   }
   function openQuick() {
     if (WINDOW_MODE) return;

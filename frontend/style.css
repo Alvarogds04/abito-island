@@ -1421,6 +1421,29 @@ body[data-window="settings"] #models {
   border-radius: 0; opacity: 1; visibility: visible; transform: none;
 }
 
+/* Adapted from Coucou windows/src/hub/shell.ts: sidebar + page only.
+   Copyright (c) 2026 Louis Raillé, MIT. Colors and icons remain Abito's. */
+body:not([data-window="settings"]) #settings { display: none !important; }
+body[data-window="settings"] #capsule { display: none !important; }
+body[data-window="settings"] #settings {
+  display: grid; grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr); gap: 0;
+  width: 100%; height: 100%; padding: 0; background: var(--card-bg);
+}
+body[data-window="settings"] #settings-tabs {
+  grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column;
+  flex-wrap: nowrap; align-items: stretch; width: auto; padding: 20px 10px;
+  border-right: 1px solid var(--line-soft); overflow-y: auto;
+}
+body[data-window="settings"] #settings-tabs .stab { flex: none; width: 100%; justify-content: flex-start; }
+body[data-window="settings"] #settings-bar { grid-column: 2; padding: 16px 24px 8px; }
+body[data-window="settings"] #settings-hint { grid-column: 2; margin: 0; padding: 0 24px; }
+body[data-window="settings"] #settings-body,
+body[data-window="settings"] #settings #models {
+  grid-column: 2; grid-row: 3; position: static; min-width: 0; min-height: 0;
+  overflow-y: auto; padding: 16px 24px; width: auto;
+}
+
 /* #366 F094 — the quick panel popover inside the island (scoped to its own id). */
 #settings-quick { position: absolute; z-index: 6; top: 48px; right: 12px; width: 260px; max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 16px; background: var(--card-bg); color: var(--island-muted); box-shadow: 0 6px 24px rgba(0,0,0,.35); }
 /* ---- #423: the notice title keeps a readable width in the 228px overview band. Measured in Chromium:

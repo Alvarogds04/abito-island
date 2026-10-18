@@ -123,7 +123,7 @@ test('Host DTO fixture extracts complete legacy and multiline typed projections 
   assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
     pillColors: {}, chosenModels: null,
     mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system',
-    autoCloseSeconds: 15, openOnHover: false, settingsWindow: false, customBlobs: null, islandAgents: null, abitoInstructions: null, monitor: null });
+    autoCloseSeconds: 15, openOnHover: false, settingsWindow: true, customBlobs: null, islandAgents: null, abitoInstructions: null, monitor: null });
   const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
   assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });
   const quoted = 'complete ) with "quoted" text';

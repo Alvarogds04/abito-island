@@ -14,7 +14,7 @@ const clone = value => {
 };
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-function boot({ prefs = {}, failView = false, deferView = false, store = null, specs = [], extraPrefs = {} } = {}) {
+function boot({ prefs = {}, failView = false, deferView = false, store = null, specs = [], extraPrefs = {}, settingsLabel = 'settings' } = {}) {
   const nodes = new Map(), events = {}, native = {}, calls = [], observers = [], frames = new Map();
   let frameAt = 0, nextFrame = 1;
   let doc;
@@ -120,12 +120,15 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => { const id = nextFrame++; if (fn.name === 'frame') frames.set(id, fn); else fn(frameAt); return id; }, setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     Event: class { constructor(type) { this.type = type; } }, console });
-  const load = file => vm.runInContext(read(file), ctx, { filename: file });
+  const load = file => {
+    if (file === 'settings.js') window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: settingsLabel } } };
+    return vm.runInContext(read(file), ctx, { filename: file });
+  };
   for (const file of ['clay-engine.js', 'pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js', 'specialists-view.js']) load(file);
   vm.runInContext(`const testedClays = []; const realCreate = AbitoClay.create; AbitoClay.create = (...args) => { const instance = realCreate(...args); testedClays.push(instance); const destroy = instance.destroy; instance.destroy = () => { instance.testDestroyed = true; destroy(); }; return instance; };`, ctx);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { advanceFrames(n = 1) { for (let i = 0; i < n; i++) { frameAt += 17; const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(frameAt); } }, mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); get(id).fire('click', fields); } };
+  return { advanceFrames(n = 1) { for (let i = 0; i < n; i++) { frameAt += 17; const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(frameAt); } }, mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); if (id === 'open-screen-settings') doc.dispatchEvent({ type: 'abito:settings-select', detail: 'open' }); else get(id).fire('click', fields); } };
 }
 
 test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
@@ -215,6 +218,24 @@ async function settingsBoot(options, tab = 'pills') {
 }
 const writes = b => b.calls.filter(x => x.cmd === 'prefs_action' && x.payload.action !== 'view');
 
+test('#455 main gears and native selection request only the window; IPC failure never falls back', async () => {
+  for (const settingsWindow of [false, true]) {
+    const b = boot({ settingsLabel: 'main', extraPrefs: { settingsWindow } });
+    b.load('settings-view.js'); b.load('settings.js'); await flush();
+    b.get('open-settings').fire('click', { isTrusted: false });
+    assert.equal(b.calls.filter(c => c.cmd === 'settings_window_action').length, 0);
+    b.get('open-settings').fire('click');
+    b.get('open-screen-settings').fire('click');
+    b.doc.dispatchEvent({ type: 'abito:settings-select', detail: 'open' });
+    await flush(); // the fixture rejects window IPC: exercise the negative path too
+    assert.equal(b.calls.filter(c => c.cmd === 'settings_window_action').length, 3);
+    assert.equal(b.get('settings').dataset.open, undefined);
+    assert.equal(b.calls.filter(c => c.cmd === 'settings_view').length, 0);
+    assert.match(b.get('chat-live').textContent, /No se pudo abrir Ajustes/);
+    assert.equal(writes(b).length, 0);
+  }
+});
+
 test('S6 actual legacy sound/gain/name/avatar handlers still retain pill choices', async () => {
   const b=await settingsBoot({prefs:{mainPill:'agent_codex',declaredPills:['ai_google']}}, 'general');
   b.click('sw-sound'); await flush(); assert.equal(b.backend.prefs.sound,true);
@@ -286,7 +307,14 @@ test('T6.3 #434 General groups: Perfil / Isla / Sonido y atajo, name in Perfil, 
   const name = b.get('settings-display-name');
   assert.ok(name, 'the display name moved into PERFIL on the General tab');
   assert.equal(name.getAttribute('placeholder'), 'Tu nombre (opcional)');
-  assert.equal(b.get('sw-settings-window'), null, '#444: no standalone placement control');
+  assert.equal(b.get('sw-settings-window'), null, '#455: the window replaces placement choices');
+  assert.equal(b.doc.body.dataset.window, 'settings');
+  assert.equal(b.get('settings-tabs').getAttribute('aria-orientation'), 'vertical');
+  assert.equal(b.get('settings-tab-general').tabIndex, 0);
+  b.get('settings-tab-general').fire('keydown', { key: 'End' });
+  assert.equal(b.doc.activeElement.id, 'settings-tab-appearance');
+  assert.equal(b.get('settings-tab-appearance').tabIndex, 0);
+  b.get('settings-tab-appearance').fire('keydown', { key: 'Home' });
   assert.ok(!text.includes('Abrir Ajustes en ventana'));
   assert.equal(b.get('sw-island-hover').getAttribute('aria-label'), 'Abrir al pasar el mouse');
   // the hint walls are gone; the ONE allowed hint is the limited-shortcut note
@@ -359,17 +387,18 @@ test('#408 Cuentas renders the provider-list section (and tab selection follows 
   assert.ok(!b.get('provider-list'), 'only the selected tab is rendered');
 });
 
-test('#408 opening Ajustes asks Rust for the Settings size (open only, no numbers) and closing gives it back', async () => {
+test('#455 opening and closing the settings window never resizes the island', async () => {
   const b = await settingsBoot({}, 'general');
   const sizes = () => b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload);
-  assert.deepEqual(sizes(), [{ open: true }]);
+  assert.deepEqual(sizes(), []);
   b.click('settings-close'); await flush();
-  assert.deepEqual(sizes(), [{ open: true }, { open: false }]);
+  assert.deepEqual(sizes(), []);
+  assert.deepEqual(b.calls.filter(x => x.cmd === 'settings_window_action').at(-1).payload, { action: 'close' });
   b.click('settings-close'); await flush();
-  assert.equal(sizes().length, 2, 'closing a closed panel asks nothing');
+  assert.equal(sizes().length, 0, 'closing never sizes the island');
 });
 
-test('#408 Escape closes Ajustes and focus returns to the gear that opened it', async () => {
+test('#455 Escape closes the own window without moving island focus', async () => {
   const b = await settingsBoot({}, 'general');
   b.get('settings-close').focus();
   const keydown = b.events.keydown || [];
@@ -377,8 +406,8 @@ test('#408 Escape closes Ajustes and focus returns to the gear that opened it', 
   for (const fn of keydown) fn({ key: 'Escape', isComposing: false, preventDefault() {}, stopPropagation() {} });
   await flush();
   assert.equal(b.get('settings').inert, true, 'panel closed');
-  assert.equal(b.doc.activeElement, b.get('open-screen-settings'), 'focus is back on the gear');
-  assert.deepEqual(b.calls.filter(x => x.cmd === 'settings_view').map(x => x.payload).pop(), { open: false });
+  assert.equal(b.doc.activeElement.id, 'settings-close', 'no island focus manipulation');
+  assert.deepEqual(b.calls.filter(x => x.cmd === 'settings_view'), []);
 });
 
 test('#408 S8 Conexiones holds providers, agents and services together; the old connectors deep link lands there', async () => {

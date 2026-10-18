@@ -55,4 +55,11 @@ test('main window: island.js is not short-circuited (the guard is label-exact)',
   assert.match(src, /const capsule = \$\('capsule'\);/);
 });
 
+test('#455 window mounts settings outside the island without duplicate placement controls', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  assert.match(src, /document\.body\.append\(panel\)/);
+  assert.doesNotMatch(src, /sw-settings-window|settings-window-open/);
+  assert.match(src, /Todos los ajustes.*openSettingsWindow/);
+});
+
 console.log(`settings-window-inert-check: ${passed} passed`);
