@@ -14,7 +14,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const calls = [], events = {};
   const hash = 'a'.repeat(64);
   let state = { connection:'connected', agents:[{id:'claude-code',state:'not_connected',plan_hash:hash,summary:'Add managed hooks',reviewable:true},{id:'codex',state:'connected',backup:true}], providers:[],accounts:[],models:null };
-  let ui, secretFailure = false;
+  let ui, secretFailure = false; const planPrefs = { claude: false, codex: false };
   const soon = Date.now() + 3600e3;
   let planReply = {
     claude: { available: true, updatedAt: Date.now(), fiveHour: { usedPct: 42, resetsAt: soon }, sevenDay: { usedPct: 61, resetsAt: soon } },
@@ -25,6 +25,9 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
     calls.push([cmd,p]);
     if (cmd === 'secret_action') { if (secretFailure) throw new Error('fixture-secret-error'); return {present:p.action === 'set'}; }
     if (cmd === 'plan_action') return planReply[p.action];
+    if (cmd === 'prefs_action' && p.action === 'view') return {chosenModels:{}, showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex};
+    if (cmd === 'prefs_action' && p.action === 'set_show_plan_in_notch') { planPrefs.claude = p.show_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
+    if (cmd === 'prefs_action' && p.action === 'set_show_codex_plan_in_notch') { planPrefs.codex = p.show_codex_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
     if (cmd === 'prefs_action') return {chosenModels:{}};
     if (cmd === 'models_action') return {profiles:[]};
     return structuredClone(state);
@@ -46,12 +49,16 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   assert.equal(ui.children[0].children[1].children[3].className,'notice warn', 'unavailable relay/diff warning precedes the action row');
   assert.equal(ui.children[0].children[1].children[4].className,'row');
   const plan=ui.children[2];
-  assert(all(plan).filter(e=>e.tagName==='button').every(e=>e.disabled));
+  assert(all(plan).filter(e=>e.tagName==='button'&&!String(e.className).includes('switch')).every(e=>e.disabled), 'Install relay stays disabled');
   assert.deepEqual(calls.filter(([c])=>c==='plan_action').map(([,p])=>p),[{action:'claude'},{action:'codex'}], 'exactly the two closed plan reads, no other payload');
   assert(!/\d+ %/.test(text(plan)), 'numbers belong to the island usage view, not to settings');
   assert(text(plan).includes('installed') || text(plan).includes('instalado'), 'relay row follows plan_action (claude available)');
   const planSwitches=all(plan).filter(e=>e.tagName==='button'&&String(e.className).includes('switch'));
-  assert.equal(planSwitches.length,2);assert(planSwitches.every(e=>e.disabled&&e.title.includes('preferencia')), 'no Abito pref yet: disabled with the reason');
+  assert.equal(planSwitches.length,2);assert(planSwitches.every(e=>!e.disabled), 'both plan switches follow their Abito prefs');
+  calls.length=0;planSwitches[0].fire('click',false);await ui.settled();assert.deepEqual(calls,[],'untrusted click sends nothing');
+  planSwitches[0].fire('click');await ui.settled();assert.deepEqual(calls.splice(0),[['prefs_action',{action:'set_show_plan_in_notch',show_plan_in_notch:true}]]);
+  planSwitches[1].fire('click');await ui.settled();assert.deepEqual(calls.splice(0),[['prefs_action',{action:'set_show_codex_plan_in_notch',show_codex_plan_in_notch:true}]]);
+  planSwitches[0].fire('click');await ui.settled();assert.deepEqual(calls.splice(0),[['prefs_action',{action:'set_show_plan_in_notch',show_plan_in_notch:false}]]);
   calls.length=0;
   const claude=ui.children[0];
   button(claude,'Instalar hooks…').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
@@ -74,7 +81,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   planReply = { claude: { available: false }, codex: { available: false } };
   ui=await renderAgentSettings(opts);await ui.settled();
   assert(text(ui.children[2]).includes('not installed')||text(ui.children[2]).includes('no instalado'), 'available=false: relay not installed');
-  assert(all(ui.children[2]).filter(e=>e.tagName==='button'&&String(e.className).includes('switch')).every(e=>e.disabled&&e.title.includes('sin datos')), 'available=false disables with the reason');
+  assert(all(ui.children[2]).filter(e=>e.tagName==='button'&&String(e.className).includes('switch')).every(e=>!e.disabled), 'the plan switches are prefs, independent of the data');
   ui.dispose();
   state.agents=[];state.hooks=[];
   ui=await renderAgentSettings(opts);await ui.settled();

@@ -89,6 +89,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert.deepEqual(guardCalls, [], 'dictation guard rejects extras, malformed preferences and capture actions before IPC');
   assert(entry.includes("command === 'recap_action'"), 'closed recap guard');
   assert(entry.includes("['claude', 'codex'].includes(args.payload.action)"), 'plan_action payload guard');
+  assert(entry.includes('set_show_plan_in_notch') && entry.includes('set_show_codex_plan_in_notch'), 'exact plan-in-notch pref guards');
   for (const file of ['agents.ts','chat.ts','integrations.ts','shortcuts.ts','recap.ts']) {
     const source = fs.readFileSync(path.join(base,file),'utf8');
     assert(!/innerHTML|setAttribute\(['"]style|console\.|localStorage|sessionStorage/.test(source), file);

@@ -31,6 +31,10 @@ const invoke = (command, args) => {
       !((['prefs', 'clear'].includes(p.action) && fields.length === 1) ||
         (p.action === 'set_enabled' && fields.length === 2 && typeof p.enabled === 'boolean'))) return Promise.reject(new Error('No disponible'));
   }
+  if (command === 'prefs_action' && ['set_show_plan_in_notch', 'set_show_codex_plan_in_notch'].includes(args?.payload?.action)) {
+    const p = args.payload, key = p.action === 'set_show_plan_in_notch' ? 'show_plan_in_notch' : 'show_codex_plan_in_notch';
+    if (Object.keys(args).length !== 1 || Object.keys(p).length !== 2 || typeof p[key] !== 'boolean') return Promise.reject(new Error('No disponible'));
+  }
   if (command === 'monitor_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'list')) return Promise.reject(new Error('No disponible'));
   if (command === 'sound_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || !['list', 'reveal', 'reload'].includes(args.payload.action))) return Promise.reject(new Error('No disponible'));
   if (command === 'dictation_action') {
