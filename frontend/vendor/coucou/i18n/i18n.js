@@ -17,6 +17,10 @@ const messages = {
   "0 means never": "0 = nunca",
   "Island lives on": "Pantalla de la isla",
   "Main display": "Pantalla principal",
+  Back: "Volver",
+  "Open in VS Code": "Abrir en VS Code",
+  "Diff too large": "Diff demasiado grande",
+  "No changes": "Sin cambios",
   "Unavailable features": "No disponible en Abito todavía: carpeta de sonidos; recarga y contador de sonidos; inicio automático; idioma; resumen."
 };
 function t(key) {
@@ -31,6 +35,9 @@ class Msg {
     return t(this.key);
   }
 }
+function tl(key) {
+  return new Msg(key);
+}
 function onLanguageChange(_listener) {
   return () => {
   };
@@ -39,5 +46,6 @@ export {
   Msg,
   N_,
   onLanguageChange,
-  t
+  t,
+  tl
 };

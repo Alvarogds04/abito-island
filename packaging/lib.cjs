@@ -28,6 +28,11 @@ FRONTEND_FILES.push(
   'vendor/coucou/settings/toggle.js', 'vendor/coucou/settings/toggle.ts',
   'vendor/coucou/settings/general.js', 'vendor/coucou/settings/general.ts',
   'vendor/coucou/views/dom.js', 'vendor/coucou/views/dom.ts',
+  'vendor/coucou/views/icons.js', 'vendor/coucou/views/icons.ts',
+  'vendor/coucou/views/ticker.js', 'vendor/coucou/views/ticker.ts',
+  'vendor/coucou/views/diff.js', 'vendor/coucou/views/diff.ts',
+  'vendor/coucou/core/anim.js', 'vendor/coucou/core/anim.ts',
+  'vendor/coucou/core/diff.js', 'vendor/coucou/core/diff.ts',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
