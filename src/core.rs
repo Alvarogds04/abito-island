@@ -260,7 +260,17 @@ impl Core {
         // S10 (L24): expanding sticks the island to the top edge, centred; collapsing puts the dot back where it was.
         let rect = if self.expanded {
             match self.compact_home.take() {
-                Some((home, _)) => geometry::clamp_rect(Rect { x: home.x, y: home.y, w: size.0, h: size.1 }, area),
+                Some((home, _)) => {
+                    // the remembered spot may be stale (a display change, a moved panel): it is used only while the whole
+                    // dot still fits the CURRENT work area, else the default top-centre home wins (same rule as restore_position)
+                    let wanted = Rect { x: home.x, y: home.y, w: size.0, h: size.1 };
+                    if geometry::clamp_rect(wanted, area) == wanted {
+                        wanted
+                    } else {
+                        self.edge = Edge::Top;
+                        geometry::initial_position(area, size.0, size.1)
+                    }
+                }
                 None => geometry::anchor_toggle(self.edge, current, size, area),
             }
         } else {
@@ -505,6 +515,27 @@ mod tests {
         io.apply(&collapse);
         assert_eq!(io.outer_position(), (910, 32 + 1048 - LOGICAL_COMPACT.1));
         assert_eq!(io.size(), LOGICAL_COMPACT);
+    }
+
+    #[test]
+    fn a_stale_compact_home_falls_back_to_the_default_top_centre() {
+        // the dot was docked bottom-right, then the work area shrank (a display change): the remembered spot no longer fits
+        let io = FakeIo::compact_top();
+        let mut core = Core::new();
+        core.press(&io, (50.0, 20.0));
+        core.drag(&io, area(), (152.0, 1008.0));
+        core.release(&io, area(), (50.0, 20.0), false);
+        let expand = core.toggle(&io, area());
+        io.apply(&expand);
+        let small = Rect { x: 0, y: 32, w: 800, h: 600 };
+        let collapse = core.toggle(&io, small);
+        assert!(!collapse.is_expand());
+        let r = collapse.rect();
+        assert_eq!((r.w, r.h), LOGICAL_COMPACT);
+        assert_eq!(r.y, small.y, "default home is the top of the CURRENT area");
+        assert_eq!(r.x, small.x + (small.w - LOGICAL_COMPACT.0) / 2, "centred on the CURRENT area");
+        assert_eq!(core.edge, Edge::Top, "the edge memory follows the fallback");
+        // and a home that still fits is kept exactly (see expand_at_bottom_grows_upward_collapse_restores_compact)
     }
 
     #[test]
