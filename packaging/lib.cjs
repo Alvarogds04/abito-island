@@ -23,6 +23,8 @@ FRONTEND_FILES.push(
   'vendor/coucou/i18n/i18n.js', 'vendor/coucou/i18n/i18n.ts',
   'vendor/coucou/settings/colors.js', 'vendor/coucou/settings/colors.ts',
   'vendor/coucou/settings/parts.js', 'vendor/coucou/settings/parts.ts',
+  'vendor/coucou/settings/settings.css',
+  'vendor/coucou/settings/toggle.js', 'vendor/coucou/settings/toggle.ts',
   'vendor/coucou/views/dom.js', 'vendor/coucou/views/dom.ts',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];

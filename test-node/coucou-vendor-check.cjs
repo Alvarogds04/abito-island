@@ -117,7 +117,7 @@ function hashTree() {
   const { colorDot } = await load('settings/colors.js');
   const { statusDot, renderDiff } = await load('settings/parts.js');
   const { PILL_PALETTE, parsePillColors } = await load('core/pill-colors.js');
-  const { createColorBridge } = await load('bridge-abito.js');
+  execFileSync(process.execPath, [path.join(__dirname, 'coucou-bridge-check.cjs')], { stdio: 'inherit' });
   let colors = {}, picks = 0;
   const dot = colorDot({ id: 'agent_amp', name: 'Agente', color: '#F5F6F8' }, 'width:8px', () => colors, next => { colors = next; picks++; });
   assert.deepEqual(dot.styleCalls, [['background', '#F5F6F8'], ['width', '8px']]);
@@ -154,17 +154,6 @@ function hashTree() {
   assert.deepEqual(diff.children.map(n => n.className), ['add', 'del', 'ctx']);
   assert.equal(diff.children[2].textContent, '<img src=x>');
   assert.deepEqual(parsePillColors({ a: 'bad', b: '#abcdef' }), { b: '#ABCDEF' });
-  const bridge = createColorBridge();
-  assert.deepEqual(bridge.colors(), {});
-  assert.throws(() => bridge.pick({ agent_amp: '#F4505E' }), /Abito.*hexadecimal/);
-  assert.throws(() => bridge.pick({}), /Abito.*hexadecimal/);
-  await assert.rejects(bridge.refresh(), /IPC prefs_action no disponible/);
-  const calls = [];
-  await createColorBridge(async (...args) => { calls.push(args); return { pillColors: {} }; }).refresh();
-  assert.deepEqual(calls, [['prefs_action', { payload: { action: 'view' } }]]);
-  await assert.rejects(createColorBridge(async () => ({ pillColors: { agent_amp: 'mint' } })).refresh(), /hexadecimal/);
-  await assert.rejects(createColorBridge(async () => null).refresh(), /inválida/);
-  await assert.rejects(createColorBridge(async () => { throw new Error('save_failed'); }).refresh(), /save_failed/);
   const { t } = await load('i18n/i18n.js');
   assert.throws(() => t('Unknown'), /Traducción/);
   const before = hashTree();
@@ -172,5 +161,5 @@ function hashTree() {
     execFileSync(process.execPath, [path.join(root, 'scripts/build-coucou.cjs')], { stdio: 'inherit' });
     assert.equal(hashTree(), before, 'checked-in output and two builds must match');
   }
-  console.log(`PASS coucou-vendor: palette, keyboard, focus, cleanup, parts, bridge refusal; deterministic SHA256 ${before}`);
+  console.log(`PASS coucou-vendor: palette, keyboard, focus, cleanup, parts, closed bridge; deterministic SHA256 ${before}`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
