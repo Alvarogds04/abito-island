@@ -342,7 +342,7 @@ pub fn toggle_decision(hidden: bool, question_pending: bool) -> ToggleDecision {
 
 // ---- the closed IPC the settings UI (#308) will call ---------------------------------------
 /// `hotkey_action` payload: exactly `{action:"view"}`, `{action:"enable"}`,
-/// `{action:"disable"}`, `{action:"reset"}` or `{action:"set",combo:"<text>"}`.
+/// `{action:"disable"}`, `{action:"reset"}`, `{action:"suspend"}`, `{action:"resume"}` or `{action:"set",combo:"<text>"}`.
 /// Nothing else, no extra keys, no oversize input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -351,6 +351,37 @@ pub enum Command {
     Disable,
     Reset,
     Set(Combo),
+    /// #467: Ajustes is recording a new combination — let go of the grab meanwhile so the
+    /// keys reach the recorder. Config is untouched; `Resume` (or the timeout) takes it back.
+    Suspend,
+    Resume,
+}
+
+/// How long a suspension may last before the shortcut is taken back on its own, so a
+/// recorder that never reports back (window closed, page crashed) cannot leave it off.
+pub const SUSPEND_MAX_MS: u64 = 60_000;
+
+/// Pure bookkeeping of the suspension: a token per suspend, so a timeout armed by an
+/// older suspension can never end a newer one.
+#[derive(Debug, Default)]
+pub struct SuspendGate {
+    token: u64,
+    active: bool,
+}
+
+impl SuspendGate {
+    pub fn is_suspended(&self) -> bool { self.active }
+    pub fn suspend(&mut self) -> u64 {
+        self.token += 1;
+        self.active = true;
+        self.token
+    }
+    /// True when this call ended a suspension.
+    pub fn resume(&mut self) -> bool { std::mem::replace(&mut self.active, false) }
+    /// True when `token` is the live suspension and it just ended.
+    pub fn expire(&mut self, token: u64) -> bool {
+        self.active && self.token == token && self.resume()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,6 +410,8 @@ pub fn parse_command(payload: &serde_json::Value) -> Result<Command, CommandErro
         "enable" => exact(1).map(|_| Command::Enable),
         "disable" => exact(1).map(|_| Command::Disable),
         "reset" => exact(1).map(|_| Command::Reset),
+        "suspend" => exact(1).map(|_| Command::Suspend),
+        "resume" => exact(1).map(|_| Command::Resume),
         "set" => {
             exact(2)?;
             let text = map.get("combo").and_then(serde_json::Value::as_str).ok_or(CommandError::InvalidSchema)?;

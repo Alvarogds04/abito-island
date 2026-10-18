@@ -65,6 +65,8 @@ impl Held {
 pub struct HotkeyHost {
     config: Mutex<HotkeyConfig>,
     grabber: Mutex<Option<Held>>,
+    /// #467: Ajustes is recording a combination (see `hotkey::SuspendGate`).
+    suspend: Mutex<hotkey::SuspendGate>,
 }
 
 fn config_path(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -236,6 +238,8 @@ fn watch_portal(app: AppHandle) {
 fn rebind(app: &AppHandle) {
     let state = app.state::<AppState>();
     let host = &state.hotkey;
+    // A new binding (or startup) ends any suspension: the recorder is done with the keys.
+    host.suspend.lock().expect("hotkey suspend lock").resume();
     if let Some(old) = host.grabber.lock().expect("hotkey grabber lock").take() {
         old.stop();
     }
@@ -243,6 +247,18 @@ fn rebind(app: &AppHandle) {
     if cfg.enabled {
         *host.grabber.lock().expect("hotkey grabber lock") = Some(grab(app, cfg.combo));
     }
+    publish(app);
+}
+
+/// Take the grab back after a suspension, per the stored config (no config change).
+fn regrab(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let cfg = state.hotkey.config.lock().expect("hotkey config lock").clone();
+    let mut slot = state.hotkey.grabber.lock().expect("hotkey grabber lock");
+    if cfg.enabled && slot.is_none() {
+        *slot = Some(grab(app, cfg.combo));
+    }
+    drop(slot);
     publish(app);
 }
 
@@ -279,6 +295,29 @@ pub async fn hotkey_action(app: AppHandle, webview: tauri::Webview, state: State
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
     match command {
         Command::View => {}
+        Command::Suspend => {
+            let token = state.hotkey.suspend.lock().expect("hotkey suspend lock").suspend();
+            let taken = state.hotkey.grabber.lock().expect("hotkey grabber lock").take();
+            if let Some(held) = taken {
+                held.stop();
+            }
+            publish(&app);
+            // Never leave the shortcut off if the recorder does not report back.
+            let handle = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(hotkey::SUSPEND_MAX_MS));
+                let expired = handle.state::<AppState>().hotkey.suspend.lock().expect("hotkey suspend lock").expire(token);
+                if expired {
+                    regrab(&handle);
+                }
+            });
+        }
+        Command::Resume => {
+            let was = state.hotkey.suspend.lock().expect("hotkey suspend lock").resume();
+            if was {
+                regrab(&app);
+            }
+        }
         Command::Enable | Command::Disable | Command::Reset | Command::Set(_) => {
             let next = {
                 let mut cfg = state.hotkey.config.lock().expect("hotkey config lock");
@@ -290,7 +329,7 @@ pub async fn hotkey_action(app: AppHandle, webview: tauri::Webview, state: State
                         cfg.combo = combo;
                         cfg.enabled = true;
                     }
-                    Command::View => {}
+                    Command::View | Command::Suspend | Command::Resume => {}
                 }
                 cfg.clone()
             };

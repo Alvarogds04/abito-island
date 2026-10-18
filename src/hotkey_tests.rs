@@ -390,3 +390,38 @@ fn a_clock_that_goes_backwards_never_blocks_the_hotkey() {
     assert!(gate.accept(50_000));
     assert!(gate.accept(10), "an earlier timestamp is not a duplicate");
 }
+
+#[test]
+fn suspend_and_resume_are_closed_one_key_commands() {
+    use serde_json::json;
+    assert_eq!(parse_command(&json!({"action":"suspend"})), Ok(Command::Suspend));
+    assert_eq!(parse_command(&json!({"action":"resume"})), Ok(Command::Resume));
+    for bad in [json!({"action":"suspend","ms":5}), json!({"action":"resume","combo":"Ctrl+B"}),
+                json!({"action":"Suspend"}), json!({"action":"suspended"})] {
+        assert_eq!(parse_command(&bad), Err(CommandError::InvalidSchema), "{bad}");
+    }
+}
+
+#[test]
+fn a_suspension_ends_once_by_resume_or_by_its_own_timeout_and_never_by_a_stale_one() {
+    let mut gate = SuspendGate::default();
+    assert!(!gate.is_suspended());
+    assert_eq!(gate.resume(), false, "resuming what was never suspended does nothing");
+    let first = gate.suspend();
+    assert!(gate.is_suspended());
+    assert!(gate.resume());
+    assert!(!gate.is_suspended());
+    // a timeout armed by the first suspension must not undo a newer one
+    let second = gate.suspend();
+    assert_ne!(first, second);
+    assert!(!gate.expire(first));
+    assert!(gate.is_suspended());
+    assert!(gate.expire(second));
+    assert!(!gate.is_suspended());
+    assert!(!gate.expire(second), "an expiry is good once");
+    // suspending twice re-arms: only the latest timeout counts
+    let a = gate.suspend();
+    let b = gate.suspend();
+    assert!(!gate.expire(a));
+    assert!(gate.expire(b));
+}

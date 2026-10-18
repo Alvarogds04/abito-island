@@ -160,7 +160,7 @@ pub async fn hotkey_action(
                     config.combo = combo;
                     config.enabled = true;
                 }
-                Command::View => {}
+                Command::View | Command::Suspend | Command::Resume => {}
             }
             config.clone()
         };
