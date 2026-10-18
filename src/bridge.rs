@@ -306,10 +306,17 @@ pub fn sender_ok(label: &str, url: &str) -> Result<(), BridgeError> {
     if label != "main" && label != "settings" {
         return Err(BridgeError::denied("wrong window label"));
     }
-    if !page_url_allowed(url) {
+    if !page_url_allowed(url) && !(label == "settings" && settings_page_url_allowed(url)) {
         return Err(BridgeError::denied("wrong origin"));
     }
     Ok(())
+}
+
+/// The settings window's own page (`settings.html`). Admitted ONLY together
+/// with the exact `settings` label (see `sender_ok`): the main window never
+/// accepts it. Exact string, no prefix, query, fragment or trailing character.
+pub fn settings_page_url_allowed(url: &str) -> bool {
+    url == "tauri://localhost/settings.html"
 }
 
 /// Closed allowlist for the page URL the bridge accepts. Electron compared
@@ -559,6 +566,39 @@ mod tests {
         assert!(sender_ok("main", "tauri://localhost/index.html").is_ok());
         let err = sender_ok("main", "tauri://localhost/other.html").expect_err("main foreign url");
         assert_eq!(err.code, "denied");
+    }
+
+    /// The settings window's own page: admitted for the exact `settings` label
+    /// only, as one exact string; `main` and every other label refuse it.
+    #[test]
+    fn settings_page_is_admitted_only_for_the_settings_label_exact() {
+        assert!(sender_ok("settings", "tauri://localhost/settings.html").is_ok());
+        // the island page keeps working for the settings label until the swap lands
+        assert!(sender_ok("settings", "tauri://localhost/index.html").is_ok());
+        // main never accepts the settings page
+        let err = sender_ok("main", "tauri://localhost/settings.html").expect_err("main");
+        assert_eq!(err.code, "denied");
+        assert!(err.message.contains("origin"));
+        // exact string only
+        for url in [
+            "tauri://localhost/settings.html?q=1",
+            "tauri://localhost/settings.html#frag",
+            "tauri://localhost/settings.html/",
+            "tauri://localhost/settings.htmlx",
+            "tauri://localhost/Settings.html",
+            "tauri://localhost//settings.html",
+            "https://evil.example/settings.html",
+            "file:///app/settings.html",
+        ] {
+            let err = sender_ok("settings", url).expect_err(url);
+            assert!(err.message.contains("origin"), "{url}: {err}");
+        }
+        // any other label is refused on the settings page, by label
+        for label in ["Settings", "settings2", "second", "", "settings "] {
+            assert!(sender_ok(label, "tauri://localhost/settings.html").is_err(), "{label:?}");
+        }
+        // the general allowlist itself is unchanged
+        assert!(!page_url_allowed("tauri://localhost/settings.html"));
     }
 
     #[test]
