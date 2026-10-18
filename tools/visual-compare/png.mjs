@@ -72,3 +72,9 @@ export function sideBySide(a, b, gap = 12) {
   blit(a, 0); blit(b, a.w + gap);
   return { w, h, data: out };
 }
+
+export function crop(img, box) {
+  const out = Buffer.alloc(box.w * box.h * 4);
+  for (let y = 0; y < box.h; y++) img.data.copy(out, y * box.w * 4, ((box.y + y) * img.w + box.x) * 4, ((box.y + y) * img.w + box.x + box.w) * 4);
+  return { w: box.w, h: box.h, data: out };
+}

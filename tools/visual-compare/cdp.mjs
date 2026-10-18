@@ -36,6 +36,8 @@ export async function connect(port = 9222) {
       if (msg.method === 'Runtime.exceptionThrown') logs.push(`exception: ${msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text}`);
     });
     await call('Page.enable'); await call('Runtime.enable');
+    // The browser is shared and long-lived: never reuse JS/CSS from an earlier run (stale results).
+    await call('Network.enable'); await call('Network.setCacheDisabled', { cacheDisabled: true });
     await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: colorScheme }, { name: 'prefers-reduced-motion', value: 'no-preference' }] });
     return {

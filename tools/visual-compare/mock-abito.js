@@ -6,8 +6,8 @@
   const st = {
     snapshot: { state: 'compact', revision: 1, connections: 1, notices: [], card: null, request: null, motionOverride: true, available: true },
     question: { available: true, pending: null, notice: null, revision: 1 },
-    sessions: { type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [] },
-    prefs: { mainPill: 'integration_claude', declaredPills: [] },
+    sessions: { truncated: false, rows: [] },
+    prefs: { sound: true, gain: 0.12, autoCloseSeconds: 15, openOnHover: false, monitor: 'primary', mainPill: 'integration_claude', declaredPills: [], pillColors: {}, avatarColors: {}, theme: 'dark', motionOverride: true },
     spotify: { running: true, track: null, playing: false },
   };
   window.__vcAbito = st;
@@ -19,7 +19,11 @@
       case 'prefs_action': return st.prefs;
       case 'hotkey_action': return { enabled: true, combo: 'Ctrl+Alt+A', status: 'active', default: 'Ctrl+Alt+A' };
       case 'spotify_action': return { ok: true, state: st.spotify };
-      case 'agent_action': return p.action === 'sessions_list' ? st.sessions : { connection: 'connected', accounts: [], providers: [] };
+      case 'agent_action': if (p.action === 'sessions_list') { window.__vcPolled = (window.__vcPolled || 0) + 1; return { sessions: st.sessions }; } return { connection: 'connected', accounts: [], providers: [] };
+      case 'specialists_action': return { specialists: [], roles: [], active: null };
+      case 'settings_window_action': return { ok: true };
+      case 'secret_action': return { present: false };
+      case 'daemon_action': return { ok: true };
       case 'chat_action': return { turns: [], active_turn: null };
       case 'models_action': return { available: false, models: [] };
       case 'record_frontend_evidence': case 'drag_press': case 'drag_move': case 'drag_release': return null;
