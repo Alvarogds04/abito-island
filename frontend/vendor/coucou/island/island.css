@@ -413,3 +413,4 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #chat-history-label { font: 400 11px var(--font); color: var(--dim-2); }
 
 /* the question card is taller in Coucou (window 640x200): 148 high under the header */
+#question { height: 148px; }

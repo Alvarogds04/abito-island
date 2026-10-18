@@ -814,7 +814,7 @@ test('#302 the dot keeps the badge/contour vocabulary: T7.3 design isla-compacta
 test('#302 drag/snap/edge memory are untouched: the native window is still a plain rectangle and nothing in the frontend decides docking', () => {
   assert.doesNotMatch(islandSrc, /snap_to_edge|nearest_vertical_edge|anchor_toggle/);
   assert.match(islandSrc, /send\('drag_press'/); assert.match(islandSrc, /send\('drag_release'/);
-  assert.match(islandSrc, /island\.style\.borderRadius = r \+ 'px'/);
+  assert.match(islandSrc, /island\.style\.borderRadius = `\$\{rTop\}px \$\{rTop\}px \$\{rBottom\}px \$\{rBottom\}px`/, 'S10: square top corners (the notch meets the edge), r14 below');
 });
 
 test('CSS structure: braces balance (no stray «}» swallowing the next rule) and every critical top-level rule exists', () => {

@@ -5,11 +5,15 @@
 //! sizes are converted with [`scaled_size`] at the boundary.
 //!
 //! Contract: compact native window 44x44 (visible round dot, 32 px diameter),
-//! overview native window 672x176 (visible island 640x160 r22), origin at the
-//! top-center of the work area, clamp to the work area, drag release snaps to
-//! the nearest vertical edge keeping the chosen X (only clamped), expanding
-//! while docked at the bottom grows upward (bottom edge anchored) and at the
-//! top grows downward (top edge anchored), X centre stays anchored.
+//! overview native window 672x208 (visible island 640x160, or 640x200 while a
+//! question is pending; r 0 0 14 14), drag release of the COMPACT dot snaps to
+//! the nearest vertical edge keeping the chosen X (only clamped).
+//!
+//! S10 (owner decision L24, "Notch pegado arriba como Coucou"): every EXPANDED view
+//! is a notch stuck to the top edge of the work area and centred on it
+//! ([`pin_top_center`]); free drag and bottom docking apply to the compact dot only.
+//! The 208 px height is Coucou's own idea of room (its window is 720x320): the 640x200
+//! question card (`QUESTION_PICKER_H`) fits without a native resize.
 
 /// Rectangle in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,7 +57,9 @@ pub const DOT_DIAMETER: i32 = 32;
 /// drag / snap / edge memory / centre-anchored growth keep working unchanged:
 /// they only ever see a rectangle.
 pub const LOGICAL_COMPACT: (i32, i32) = (DOT_DIAMETER + 12, DOT_DIAMETER + 12);
-pub const LOGICAL_OVERVIEW: (i32, i32) = (672, 176);
+/// S10: 672x208 = the 640x200 question card of Coucou (`QUESTION_PICKER_H`) plus the 32 px side margins and 8 px
+/// bottom margin; the plain overview (640x160) uses the top of it. Transparent, like every margin.
+pub const LOGICAL_OVERVIEW: (i32, i32) = (672, 208);
 
 /// Visible overview island (approved contract, 640x160 r22). Only used to
 /// derive window margins; the overview itself is frozen.
@@ -102,11 +108,10 @@ pub fn view_sizes(view: View, area_w_phys: i32, area_h_phys: i32, scale: f64) ->
     }
 }
 
-/// Window margins around any visible view (the overview's 672x176 around its 640x160).
-const WINDOW_MARGIN: (i32, i32) = (
-    LOGICAL_OVERVIEW.0 - OVERVIEW_VISIBLE.0,
-    LOGICAL_OVERVIEW.1 - OVERVIEW_VISIBLE.1,
-);
+/// Window margins around the visible chat / Settings column (the 400-wide column in a 432-wide window,
+/// the island stuck to the window's top edge, 16 px of transparent air below). Independent of the
+/// overview window since S10 gave the overview extra room for the 200 px question card.
+const WINDOW_MARGIN: (i32, i32) = (32, 16);
 
 /// Work-area height (PHYSICAL px, as X11 reports it) in logical px; a broken scale reads as 1.0.
 fn logical_area_h(area_h_phys: i32, scale: f64) -> i32 {
@@ -311,6 +316,13 @@ pub fn anchor_toggle(edge: Edge, current: Rect, target: (i32, i32), area: Rect) 
     }
 }
 
+/// S10 (L24): the window of an EXPANDED view — stuck to the top edge of the work area (no gap), centred on it, clamped.
+/// Coucou's notch. Used by every expanded view (overview, chat, Settings, the stage that holds two of them).
+pub fn pin_top_center(size: (i32, i32), area: Rect) -> Rect {
+    let (w, h) = size;
+    Rect { x: clamp_x(area.x + (area.w - w) / 2, w, area), y: area.y, w, h: h.min(area.h) }
+}
+
 /// Click vs drag: movement strictly below the threshold is a short click.
 /// (`NaN` is not below the threshold, so a broken measurement degrades to
 /// "drag" — never to an accidental toggle.)
@@ -336,7 +348,7 @@ mod tests {
     #[test]
     fn scaled_size_applies_scale_factor() {
         assert_eq!(scaled_size(LOGICAL_COMPACT, 1.0), (44, 44));
-        assert_eq!(scaled_size(LOGICAL_OVERVIEW, 1.0), (672, 176));
+        assert_eq!(scaled_size(LOGICAL_OVERVIEW, 1.0), (672, 208));
         assert_eq!(scaled_size(LOGICAL_COMPACT, 2.0), (88, 88));
         assert_eq!(scaled_size(LOGICAL_COMPACT, 1.25), (55, 55));
         assert_eq!(scaled_size((304, 44), 1.25), (380, 55)); // an arbitrary size still scales per axis
@@ -683,7 +695,7 @@ mod tests {
     #[test]
     fn approved_overview_and_compact_are_untouched_by_the_chat_view() {
         assert_eq!(OVERVIEW_VISIBLE, (640, 160));
-        assert_eq!(LOGICAL_OVERVIEW, (672, 176));
+        assert_eq!(LOGICAL_OVERVIEW, (672, 208), "S10: 640x200 question card + margins");
         // #302: the resting state is a ROUND DOT (S10: 32 px, Coucou's pill height) in a 44x44
         // native window (6px transparent margin each side, the same edge gap as the pill).
         assert_eq!(LOGICAL_COMPACT, (44, 44));

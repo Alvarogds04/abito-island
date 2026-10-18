@@ -188,7 +188,7 @@ test('wiring: only trusted events call question_action; no timer, rule or model 
 
 test('R6 shrinks like with a card while a notification is on screen (never covers the options)', () => {
   const island = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
-  assert.match(island, /\(cardShown \|\| questionShown\) \? OVERVIEW_CARD : OVERVIEW/);
+  assert.match(island, /questionShown \? \{ \.\.\.OVERVIEW_CARD, cy: [^}]*\} : cardShown \? OVERVIEW_CARD : OVERVIEW/, 'both a card and a question use the small character; the question centres lower in its 200px island (S10)');
   assert.match(island, /'abito:question'/);
   const notify = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
   assert.match(notify, /show: !!capsule\.dataset\.question/);

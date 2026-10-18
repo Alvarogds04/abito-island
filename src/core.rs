@@ -115,10 +115,10 @@ pub struct ViewPlan {
     pub edge: Edge,
 }
 
-/// The stage rectangle of a transition (see [`ViewPlan::stage`]).
-pub fn stage_rect(edge: Edge, current: Rect, target: (i32, i32), _final: (i32, i32), area: Rect) -> Rect {
-    let stage = geometry::stage_size((current.w, current.h), target);
-    geometry::anchor_toggle(edge, current, stage, area)
+/// The stage rectangle of a transition (see [`ViewPlan::stage`]). S10 (L24): an expanded view is the notch stuck to
+/// the top edge and centred on the work area, so the stage is pinned there too (it only needs the larger size).
+pub fn stage_rect(_edge: Edge, current: Rect, target: (i32, i32), _final: (i32, i32), area: Rect) -> Rect {
+    geometry::pin_top_center(geometry::stage_size((current.w, current.h), target), area)
 }
 
 /// Session state of the island: docked edge, open state, live pointer press.
@@ -133,6 +133,9 @@ pub struct Core {
     /// The chat rectangle before Settings grew it; closing restores it exactly (when it still fits).
     settings_prev: Option<Rect>,
     press: Option<Press>,
+    /// S10 (L24): where the compact dot was (rect + docked edge) when it expanded into the top-edge notch;
+    /// collapsing puts it back there. `None` before the first expansion (then the old anchoring applies).
+    compact_home: Option<(Rect, Edge)>,
     /// #309: the (stage, final) rectangles of the last view plan, while the window has not reached
     /// the final size yet. The host applies a plan asynchronously (a set_size is only a request),
     /// so the getter can still report the PREVIOUS window; planning the next switch from it would
@@ -177,6 +180,9 @@ impl Core {
         let (sx, sy) = screen_at(io, client);
         p.movement += ((sx - p.last.0).powi(2) + (sy - p.last.1).powi(2)).sqrt();
         p.last = (sx, sy);
+        if self.expanded {
+            return None; // S10 (L24): the expanded notch is stuck to the top edge; only the compact dot is dragged
+        }
         let (w, _) = io.size();
         let x = geometry::clamp_x((sx - p.grab.0).round() as i32, w, area);
         let y = (sy - p.grab.1).round() as i32; // vertical is free while dragging
@@ -203,6 +209,15 @@ impl Core {
         let segment = ((sx - press.last.0).powi(2) + (sy - press.last.1).powi(2)).sqrt();
         let movement = press.movement + segment;
         let (w, h) = io.size();
+        if self.expanded {
+            // S10 (L24): no drag, no snap while expanded. A short click still toggles (collapse); anything else is nothing.
+            if cancelled || !geometry::is_click(movement, geometry::CLICK_THRESHOLD_PX) {
+                return ReleaseOutcome::Cancelled;
+            }
+            let (x, y) = io.outer_position();
+            let plan = self.plan_toggle(io, Rect { x, y, w, h }, area);
+            return ReleaseOutcome::Toggle(plan);
+        }
         // The window position is derived from the pointer (it was following it),
         // X clamped only; the snap then pins Y to the nearest vertical edge.
         let chosen = Rect {
@@ -242,7 +257,16 @@ impl Core {
         // F009: the size comes from the one view table, like every other view
         let view = if self.expanded { geometry::View::Compact } else { geometry::View::Overview };
         let size = geometry::scaled_size(geometry::view_sizes(view, area.w, area.h, scale).0, scale);
-        let rect = geometry::anchor_toggle(self.edge, current, size, area);
+        // S10 (L24): expanding sticks the island to the top edge, centred; collapsing puts the dot back where it was.
+        let rect = if self.expanded {
+            match self.compact_home.take() {
+                Some((home, _)) => geometry::clamp_rect(Rect { x: home.x, y: home.y, w: size.0, h: size.1 }, area),
+                None => geometry::anchor_toggle(self.edge, current, size, area),
+            }
+        } else {
+            self.compact_home = Some((current, self.edge));
+            geometry::pin_top_center(size, area)
+        };
         self.expanded = !self.expanded;
         self.in_flight = None;
         // Collapsing always forgets the chat view: the next short click
@@ -250,17 +274,18 @@ impl Core {
         self.chat = false;
         self.settings = false;
         self.settings_prev = None;
+        // the page anchors the island to the TOP while it is expanded and while it shrinks back
         if self.expanded {
             TogglePlan::Expand {
                 size,
                 rect,
-                edge: self.edge,
+                edge: Edge::Top,
             }
         } else {
             TogglePlan::Collapse {
                 size,
                 rect,
-                edge: self.edge,
+                edge: Edge::Top,
             }
         }
     }
@@ -323,8 +348,8 @@ impl Core {
             }
         }
         let stage = stage_rect(self.edge, current, size, size, area);
-        // the final window is centred on the stage: the island does not jump when the stage is dropped
-        let mut rect = geometry::anchor_toggle(self.edge, stage, size, area);
+        // S10 (L24): stage and final window are the same top-edge notch, centred: the island does not jump
+        let mut rect = geometry::pin_top_center(size, area);
         if let Some(prev) = restore {
             if (prev.w, prev.h) == size {
                 let held = geometry::clamp_rect(prev, area);
@@ -341,7 +366,7 @@ impl Core {
             rect,
             stage,
             visible,
-            edge: self.edge,
+            edge: Edge::Top,
         }
     }
 }
@@ -423,13 +448,13 @@ mod tests {
         assert!(plan.is_expand());
         assert_eq!(plan.size(), LOGICAL_OVERVIEW);
         let r = plan.rect();
-        assert_eq!(r.y, 32); // top edge anchored: grows downward
+        assert_eq!(r.y, 32); // S10: stuck to the top edge of the work area
         assert_eq!(r.w, 672);
-        assert_eq!(r.h, 176);
+        assert_eq!(r.h, 208);
         assert!(core.expanded);
         assert_eq!(core.edge, Edge::Top);
-        // the 3px drift is the chosen X, centre-anchored: 811 -> 627
-        assert_eq!(r.x, 811 + (LOGICAL_COMPACT.0 - 672) / 2);
+        // S10 (L24): centred on the work area (1920 wide), not on the dot
+        assert_eq!(r.x, (1920 - 672) / 2);
     }
 
     #[test]
@@ -467,8 +492,8 @@ mod tests {
         assert!(expand.is_expand());
         assert_eq!(expand.size(), LOGICAL_OVERVIEW);
         let r = expand.rect();
-        assert_eq!(r.bottom(), area().bottom(), "bottom edge stays anchored");
-        assert_eq!(r.y, 1080 - 176);
+        assert_eq!(r.y, area().y, "S10 (L24): the expanded notch sticks to the TOP edge even when the dot was docked at the bottom");
+        assert_eq!(r.x, (1920 - 672) / 2, "centred on the work area");
         io.apply(&expand);
 
         let collapse = core.toggle(&io, area());
@@ -640,12 +665,14 @@ mod tests {
         io.pos.set((300, 32));
         core.release(&io, area(), (10.0, 10.0), true);
         let back = core.plan_view(&io, area(), false).unwrap();
+        // S10 (L24): the expanded notch is never dragged, so the stage is the top-edge, work-area-centred window
         assert_eq!(back.stage.y, 32);
-        assert!(back.stage.x <= 300 && back.stage.right() >= 300 + 432, "planned around where the human left it: {:?}", back.stage);
+        assert_eq!((back.stage.w, back.stage.h), (672, 656), "planned from the getter (the press dropped the in-flight memory)");
+        assert_eq!(back.stage.x, (1920 - 672) / 2, "centred on the work area, wherever the stale getter says the window is");
     }
 
     #[test]
-    fn chat_at_the_bottom_grows_upward() {
+    fn chat_after_a_bottom_docked_dot_hangs_from_the_top_edge() {
         let io = FakeIo::compact_top();
         let mut core = Core::new();
         core.press(&io, (50.0, 20.0));
@@ -654,8 +681,9 @@ mod tests {
         let plan = core.toggle(&io, area());
         io.apply(&plan);
         let chat = core.plan_view(&io, area(), true).unwrap();
-        assert_eq!(chat.rect.bottom(), area().bottom());
+        assert_eq!(chat.rect.y, area().y, "S10 (L24): the chat column also hangs from the top edge, whatever edge the dot was docked at");
         assert_eq!(chat.rect.h, 656);
+        assert_eq!(chat.rect.x + chat.rect.w / 2, area().x + area().w / 2, "centred on the work area");
     }
 
     #[test]
