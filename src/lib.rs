@@ -50,6 +50,7 @@ pub mod localmodel;
 pub mod models;
 pub mod monitors;
 pub mod nativedialog;
+pub mod claude_plan;
 pub mod codex_plan;
 pub mod plan_cmd;
 pub mod prefs;
