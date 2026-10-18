@@ -22,6 +22,12 @@
   let store = null;        // `specialists:state` from Rust, or null while it is on its way
   let listing = null;      // the model listing (metadata only: the picker already reads it)
   let busy = false;        // a select/delete is in flight
+  function paintChosenColor(node, color) {
+    const stops = AVATAR?.gradientStops(color);
+    if (!node?.style?.setProperty) return;
+    for (let i = 0; i < 3; i++) node.style.setProperty('--chosen-' + (i + 1), stops?.[i] || '');
+    node.style.setProperty('--identity-color', stops?.[1] || '');
+  }
   const AVATAR = window.AbitoAvatarColors;
   let avatarColors = {};
   const identityView = () => V.identityView(store);
@@ -32,7 +38,7 @@
     renderSection(); renderChip();
   }
   function indicatorColor(node, id) {
-    if (node && AVATAR) node.dataset.color = AVATAR.resolveColor(id, avatarColors);
+    if (node && AVATAR) { node.dataset.color = AVATAR.resolveColor(id, avatarColors); paintChosenColor(node, node.dataset.color); }
   }
   const form = V.makeForm(); // ALL form logic lives in the view-model; this page only paints it
 
@@ -78,10 +84,10 @@
     for (const color of AVATAR.PALETTE) {
       const b = el('button', 'sdot sm');
       b.type = 'button';
-      b.dataset.color = color;
+      b.dataset.color = color; paintChosenColor(b, color);
       b.title = AVATAR.label(color);
       b.setAttribute('aria-label', `${AVATAR.label(color)} para ${name}`);
-      b.setAttribute('aria-pressed', color === current ? 'true' : 'false');
+      b.setAttribute('aria-pressed', AVATAR.normalizeChosenColor(color) === AVATAR.normalizeChosenColor(current) ? 'true' : 'false');
       b.disabled = busy || store?.load_error === true;
       b.append(el('span', 'sdot-swatch'));
       b.addEventListener('click', e => { if (e.isTrusted === true) chooseCardColor(id, color); });
@@ -149,7 +155,7 @@
     if (!chip) return;
     const view = V.roleChip(store);
     const host = $('chat-specialist-word');
-    if (!view) { chip.hidden = true; delete chip.dataset.color; if (host) host.textContent = ''; return; }
+    if (!view) { chip.hidden = true; delete chip.dataset.color; paintChosenColor(chip, ''); if (host) host.textContent = ''; return; }
     indicatorColor(chip, store.active);
     putIcon($('chat-specialist-icon'), 'user');
     chip.hidden = false;

@@ -87,7 +87,7 @@ fn valid_blob_name(name: &str) -> bool {
 }
 
 fn valid_blob_color(color: &Option<String>) -> bool {
-    color.as_deref().is_none_or(|c| COLORS.contains(&c))
+    color.as_deref().is_none_or(|c| normalize_chosen_color(c).is_some())
 }
 
 /// The stored blob entries that survive validation, deduplicated case-insensitively
@@ -102,7 +102,7 @@ fn custom_blobs_from(value: Option<&Value>) -> Vec<CustomBlob> {
             || out.iter().any(|b| b.name.eq_ignore_ascii_case(name)) {
             continue;
         }
-        let color = color.filter(|c| COLORS.contains(c)).map(str::to_owned);
+        let color = color.and_then(normalize_chosen_color);
         out.push(CustomBlob { name: name.to_owned(), color });
     }
     out
@@ -121,9 +121,36 @@ pub fn pill_offered(id: &str) -> bool {
         (id != "integration_spotify" || cfg!(target_os = "linux"))
 }
 
-/// The colours a human may store for an identity (#384). `green` is the principal's DEFAULT,
-/// not a prohibition: Ajustes may keep it or choose another one for any identity.
-pub const COLORS: [&str; 5] = ["green", "blue", "mint", "orange", "purple"];
+/// Closed stored chosen-colour catalog. Defaults remain absent and are painted by CSS.
+pub const COLORS: [&str; 10] = HEX_PALETTE;
+
+/// Coucou core/pill-colors.ts @434d6a2b palette (MIT, Louis Raillé, 2026).
+/// Closed chosen-colour catalog; legacy names exist only as migration inputs.
+pub const HEX_PALETTE: [&str; 10] = [
+    "#F5F6F8", "#F4505E", "#F29B38", "#FACC15", "#4ADE80", "#2DD4BF", "#38BDF8", "#818CF8",
+    "#C084FC", "#E879F9",
+];
+const LEGACY_NAMES: [(&str, &str); 5] = [
+    ("green", "#4ADE80"),
+    ("blue", "#38BDF8"),
+    ("mint", "#2DD4BF"),
+    ("orange", "#F29B38"),
+    ("purple", "#C084FC"),
+];
+
+/// Pure chosen-colour normalization; callers still own identity/type validation.
+/// A legacy name is migrated, never persisted as the chosen colour.
+pub fn normalize_chosen_color(raw: &str) -> Option<String> {
+    if let Some((_, hex)) = LEGACY_NAMES.iter().find(|(name, _)| *name == raw) {
+        return Some((*hex).to_owned());
+    }
+    let digits = raw.strip_prefix('#').unwrap_or(raw);
+    if digits.len() != 6 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let hex = format!("#{}", digits.to_ascii_uppercase());
+    HEX_PALETTE.contains(&hex.as_str()).then_some(hex)
+}
 
 /// The optional colour map. It is absent from a file nobody customised, so an untouched
 /// `prefs.json` keeps exactly the bytes it had before #384.
@@ -432,23 +459,23 @@ fn colors_from(value: Option<&Value>) -> BTreeMap<String, String> {
     let Some(map) = value.and_then(Value::as_object) else { return out };
     for (identity, color) in map {
         let Some(color) = color.as_str() else { continue };
-        if valid_identity(identity) && COLORS.contains(&color) {
-            out.insert(identity.clone(), color.to_string());
+        if valid_identity(identity) && normalize_chosen_color(color).is_some() {
+            out.insert(identity.clone(), normalize_chosen_color(color).unwrap());
         }
     }
     out
 }
 
 /// #346: pill colours are stricter than the avatar map — only a real catalog id with a
-/// palette name survives, so an unknown pill or an off-set colour reads as *no colour*
+/// palette colour survives, so an unknown pill or an off-set colour reads as *no colour*
 /// and never grows the stored catalogue (the `main_pill` reading rule, mirrored).
 fn pill_colors_from(value: Option<&Value>) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let Some(map) = value.and_then(Value::as_object) else { return out };
     for (id, color) in map {
         let Some(color) = color.as_str() else { continue };
-        if PILL_IDS.contains(&id.as_str()) && COLORS.contains(&color) {
-            out.insert(id.clone(), color.to_string());
+        if PILL_IDS.contains(&id.as_str()) && normalize_chosen_color(color).is_some() {
+            out.insert(id.clone(), normalize_chosen_color(color).unwrap());
         }
     }
     out
@@ -566,14 +593,14 @@ impl Prefs {
             v["display_name"] = json!(name);
         }
         if !self.avatar_colors.is_empty() {
-            v[AVATAR_COLORS] = json!(self.avatar_colors);
+            v[AVATAR_COLORS] = json!(colors_from(Some(&json!(self.avatar_colors))));
         }
         if let Some((x, y)) = self.position.filter(|(x, y)| valid_position(*x, *y)) {
             v[POSITION] = json!({"x": x, "y": y});
         }
         if self.main_pill.is_some() { v["main_pill"] = json!(self.main_pill()); }
         if self.declared_pills.is_some() { v["declared_pills"] = json!(self.declared_pills()); }
-        if !self.pill_colors.is_empty() { v["pill_colors"] = json!(self.pill_colors); }
+        if !self.pill_colors.is_empty() { v["pill_colors"] = json!(pill_colors_from(Some(&json!(self.pill_colors)))); }
         if let Some(theme) = self.theme {
             v[THEME] = json!(theme.as_str());
         }
@@ -697,14 +724,14 @@ pub struct CommandError;
 /// set_avatar_color takes exactly action + identity + color; clear_avatar_color
 /// takes exactly action + identity. Pill choices take exactly action + id:
 /// set_main_pill (workspace only), toggle_declared_pill (offered catalog only).
-/// set_pill_color takes exactly action + id + color (a COLORS name, offered catalog only),
+/// set_pill_color takes exactly action + id + color (a palette colour, offered catalog only),
 /// clear_pill_color exactly action + id (same gate).
 /// apply checks main exclusion/capacity under the transaction gate. All writers
 /// apply checks main exclusion/capacity under the transaction gate. set_theme takes exactly
 /// action + theme with one of the three closed modes. All writers retain the other known
 /// typed optional fields; unknown file keys are dropped. #415 WU2: create_blob takes
-/// exactly action + name (+ optional color, a COLORS name), delete_blob exactly
-/// action + name, set_blob_color exactly action + name + color (a COLORS name or "").
+/// exactly action + name (+ optional color, a palette colour), delete_blob exactly
+/// action + name, set_blob_color exactly action + name + color (a palette colour or "").
 /// #435: reorder_declared_pills takes exactly action + order (an array of strings,
 /// a strict permutation of the currently declared ids — checked at apply) and
 /// reorder_blobs takes exactly action + order (a strict permutation of the stored
@@ -730,10 +757,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
         Some("set_avatar_color") if map.len() == 3 => {
             let identity = map.get("identity").and_then(Value::as_str).ok_or(CommandError)?;
             let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
-            if !valid_identity(identity) || !COLORS.contains(&color) {
+            if !valid_identity(identity) || !normalize_chosen_color(color).is_some() {
                 return Err(CommandError);
             }
-            Ok(Command::SetAvatarColor { identity: identity.to_string(), color: color.to_string() })
+            Ok(Command::SetAvatarColor { identity: identity.to_string(), color: normalize_chosen_color(color).unwrap() })
         }
         Some("clear_avatar_color") if map.len() == 2 => {
             let identity = map.get("identity").and_then(Value::as_str).ok_or(CommandError)?;
@@ -755,10 +782,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
         Some("set_pill_color") if map.len() == 3 => {
             let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
             let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
-            if !pill_offered(id) || !COLORS.contains(&color) {
+            if !pill_offered(id) || !normalize_chosen_color(color).is_some() {
                 return Err(CommandError);
             }
-            Ok(Command::SetPillColor { id: id.to_owned(), color: color.to_owned() })
+            Ok(Command::SetPillColor { id: id.to_owned(), color: normalize_chosen_color(color).unwrap_or_default() })
         }
         Some("clear_pill_color") if map.len() == 2 => {
             let id = map.get("id").and_then(Value::as_str).ok_or(CommandError)?;
@@ -780,8 +807,8 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             }
             let color = if map.len() == 3 {
                 let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
-                if !COLORS.contains(&color) { return Err(CommandError); }
-                Some(color.to_owned())
+                if !normalize_chosen_color(color).is_some() { return Err(CommandError); }
+                normalize_chosen_color(color)
             } else { None };
             Ok(Command::CreateBlob { name: name.to_owned(), color })
         }
@@ -795,10 +822,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
         Some("set_blob_color") if map.len() == 3 => {
             let name = map.get("name").and_then(Value::as_str).ok_or(CommandError)?;
             let color = map.get("color").and_then(Value::as_str).ok_or(CommandError)?;
-            if !valid_blob_name(name) || !(color.is_empty() || COLORS.contains(&color)) {
+            if !valid_blob_name(name) || !(color.is_empty() || normalize_chosen_color(color).is_some()) {
                 return Err(CommandError);
             }
-            Ok(Command::SetBlobColor { name: name.to_owned(), color: color.to_owned() })
+            Ok(Command::SetBlobColor { name: name.to_owned(), color: normalize_chosen_color(color).unwrap_or_default() })
         }
         // #435: the persisted order. Parse validates only the closed shape (exactly
         // action + order, an array of strings — parse_command never sees the live
@@ -891,10 +918,10 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         }
         Command::SetDisplayName(name) => next.display_name = validated_name(name)?,
         Command::SetAvatarColor { identity, color } => {
-            if !valid_identity(identity) || !COLORS.contains(&color.as_str()) {
+            if !valid_identity(identity) || !normalize_chosen_color(color).is_some() {
                 return Err(CommandError);
             }
-            next.avatar_colors.insert(identity.clone(), color.clone());
+            next.avatar_colors.insert(identity.clone(), normalize_chosen_color(color).unwrap());
         }
         Command::ClearAvatarColor { identity } => {
             if !valid_identity(identity) { return Err(CommandError); }
@@ -951,10 +978,10 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             next.chosen_models = if map.is_empty() { None } else { Some(map) };
         }
         Command::SetPillColor { id, color } => {
-            if !pill_offered(id) || !COLORS.contains(&color.as_str()) {
+            if !pill_offered(id) || !normalize_chosen_color(color).is_some() {
                 return Err(CommandError);
             }
-            next.pill_colors.insert(id.clone(), color.clone());
+            next.pill_colors.insert(id.clone(), normalize_chosen_color(color).unwrap());
         }
         Command::ClearPillColor(id) => {
             if !pill_offered(id) { return Err(CommandError); }
@@ -978,7 +1005,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             if blobs.len() >= MAX_CUSTOM_BLOBS || blobs.iter().any(|b| b.name.eq_ignore_ascii_case(name)) {
                 return Err(CommandError);
             }
-            blobs.push(CustomBlob { name: name.clone(), color: color.clone() });
+            blobs.push(CustomBlob { name: name.clone(), color: color.as_deref().and_then(normalize_chosen_color) });
             next.custom_blobs = Some(blobs);
         }
         Command::DeleteBlob { name } => {
@@ -990,12 +1017,12 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             next.custom_blobs = (!blobs.is_empty()).then_some(blobs);
         }
         Command::SetBlobColor { name, color } => {
-            if !valid_blob_name(name) || !(color.is_empty() || COLORS.contains(&color.as_str())) {
+            if !valid_blob_name(name) || !(color.is_empty() || normalize_chosen_color(color).is_some()) {
                 return Err(CommandError);
             }
             let mut blobs = current.custom_blobs.clone().unwrap_or_default();
             let Some(blob) = blobs.iter_mut().find(|b| b.name == *name) else { return Err(CommandError); };
-            blob.color = (!color.is_empty()).then(|| color.clone());
+            blob.color = normalize_chosen_color(color);
             next.custom_blobs = Some(blobs);
         }
         // #435: the persisted order — a strict permutation of the currently stored

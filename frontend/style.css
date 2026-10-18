@@ -1988,6 +1988,15 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-toggle { tr
    (--fs-label 13px / --fs-caption 12px, 12px floor, no raw px font-size) while the 44px click target
    of every control stays exactly where the rest of Ajustes keeps it. Written AFTER the #408 rail
    block so it wins at equal specificity (both are id + attribute + class). */
+
+/* Chosen hex stops only; legacy CSS defaults and the frozen engine remain unchanged. */
+#island[data-dot-color^="#"] #clay radialGradient[id$="skin"] stop:nth-child(1), .island-agent-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(1), #settings-body[data-screen="pills"] .blob-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--chosen-1); }
+#island[data-dot-color^="#"] #clay radialGradient[id$="skin"] stop:nth-child(2), .island-agent-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(2), #settings-body[data-screen="pills"] .blob-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--chosen-2); }
+#island[data-dot-color^="#"] #clay radialGradient[id$="skin"] stop:nth-child(3), .island-agent-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(3), #settings-body[data-screen="pills"] .blob-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(3) { stop-color: var(--chosen-3); }
+[data-color^="#"].sdot .sdot-swatch { background: var(--chosen-2); }
+[data-color^="#"].pill-choice { border: 1.5px solid var(--chosen-2); }
+#pill-settings-rows .srow[data-color^="#"] .srow-title { border-left-color: var(--chosen-2); }
+
 #settings-body[data-screen="accounts"] .ssec { margin-top: 20px; } /* design §3: group gap 20 */
 #settings-body[data-screen="accounts"] .ssec:first-child { margin-top: 2px; }
 #settings-body[data-screen="accounts"] .ssec > .snote { margin: 0 0 4px; }

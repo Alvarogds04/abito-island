@@ -843,12 +843,19 @@
   // Ajustes; a pose, an agent, a notice or a card is never an input (avatar-colors.js owns that
   // rule). The default green writes NO attribute, so the frozen engine paints exactly what it
   // always painted; any other colour comes from the CSS tint over the engine's own gradient.
+  function paintChosenColor(node, color) {
+    const stops = AVATAR?.gradientStops(color);
+    if (!node?.style?.setProperty) return;
+    for (let i = 0; i < 3; i++) node.style.setProperty('--chosen-' + (i + 1), stops?.[i] || '');
+    node.style.setProperty('--identity-color', stops?.[1] || '');
+  }
   const AVATAR = window.AbitoAvatarColors;
   function paintDotColor(prefsView) {
     if (!AVATAR || !island) return;
     const view = AVATAR.principalFrom(prefsView && prefsView.avatarColors);
     if (view.color === AVATAR.PRINCIPAL_COLOR) delete island.dataset.dotColor;
     else island.dataset.dotColor = view.color;
+    paintChosenColor(island, view.color);
   }
   if (invoke) {
     invoke('prefs_action', { payload: { action: 'view' } }).then(p => { paintDotColor(p); applyInteractionPrefs(p); }, () => {});

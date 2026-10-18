@@ -14,6 +14,12 @@
 // paint and on dispose(), so none leaks a timer or a frame. A state push that changes nothing
 // the screen shows is skipped entirely (no rebuild, no animation restart).
 (function (root) {
+  function paintChosenColor(node, color) {
+    const stops = A?.gradientStops(color);
+    if (!node?.style?.setProperty) return;
+    for (let i = 0; i < 3; i++) node.style.setProperty('--chosen-' + (i + 1), stops?.[i] || '');
+    node.style.setProperty('--identity-color', stops?.[1] || '');
+  }
   const C = root.AbitoPillCatalog, P = root.AbitoPills, A = root.AbitoAvatarColors;
   if (!C || !P || !A) return;
   const NS = 'http://www.w3.org/2000/svg';
@@ -82,7 +88,7 @@
     function clay(scope, { blob, color, state, live, seed }) {
       const svg = doc.createElementNS(NS, 'svg');
       svg.setAttribute('class', 'blob-clay'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
-      svg.dataset.blob = blob; svg.dataset.color = A.PALETTE.includes(color) ? color : A.PRINCIPAL_COLOR;
+      svg.dataset.blob = blob; svg.dataset.color = (A.PALETTE.includes(color) || A.normalizeChosenColor(color)) ? color : A.PRINCIPAL_COLOR; paintChosenColor(svg, svg.dataset.color);
       let inst = null;
       if (typeof o.makeClay === 'function') {
         inst = o.makeClay(svg, { seed: seedOf(seed || blob), state: state || 'idle', live: live !== false, viewBox: '36 32 128 128', shadow: false });
@@ -142,7 +148,7 @@
 
     const grid = el('div', 'pills-grid'); grid.id = 'blob-agent-grid';
     for (const agent of agents) {
-      const tile = el('button', 'blob-tile'); tile.type = 'button'; tile.dataset.agentId = agent.id; tile.dataset.color = agent.color;
+      const tile = el('button', 'blob-tile'); tile.type = 'button'; tile.dataset.agentId = agent.id; tile.dataset.color = agent.color; paintChosenColor(tile, agent.color);
       tile.id = `blob-tile-${agent.id}`;
       tile.setAttribute('aria-pressed', ui.mode !== 'create' && ui.key === agent.id ? 'true' : 'false');
       tile.setAttribute('aria-label', agent.name);
@@ -196,7 +202,7 @@
     left.append(el('span', 'psection-label', 'Así se ve en la isla'));
     const strip = el('div', 'pill-strip'); strip.id = 'blob-island-strip';
     const stripItem = (blob, name, color) => {
-      const item = el('div', 'blob-strip-item'); item.dataset.color = color;
+      const item = el('div', 'blob-strip-item'); item.dataset.color = color; paintChosenColor(item, color);
       item.append(clay(e.clays, { blob: `strip-${blob}`, color, seed: blob }).svg, el('span', 'blob-name', name));
       strip.append(item);
     };
@@ -243,9 +249,9 @@
       // R3-keyboard-swatch-entry: roving tabindex with an entry point — with no colour yet the FIRST
       // swatch keeps tabindex 0 so the radiogroup is reachable by Tab; a selection moves the entry point.
       const set = color => { const kids = [...row.children]; const entry = color || (kids[0] ? kids[0].dataset.color : '');
-        for (const b of kids) { const on = b.dataset.color === color; b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = b.dataset.color === entry ? 0 : -1; } };
+        for (const b of kids) { const on = A.normalizeChosenColor(b.dataset.color) === A.normalizeChosenColor(color); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = A.normalizeChosenColor(b.dataset.color) === A.normalizeChosenColor(entry) ? 0 : -1; } };
       for (const color of A.PALETTE) {
-        const b = el('button', 'swatch'); b.type = 'button'; b.dataset.color = color; b.setAttribute('role', 'radio');
+        const b = el('button', 'swatch'); b.type = 'button'; b.dataset.color = color; paintChosenColor(b, color); b.setAttribute('role', 'radio');
         b.setAttribute('aria-label', A.label(color)); b.disabled = o.saving === true;
         b.append(clay(e.clays, { blob: `swatch-${color}`, color, live: false, seed: color }).svg);
         b.addEventListener('click', trusted(() => { if (!b.disabled && color !== row.current) pick(color); }));
@@ -361,7 +367,7 @@
         const create = el('button', 'sbtn primary', 'Crear'); create.type = 'button'; create.id = 'blob-create-button';
         const paintCreate = () => { create.disabled = o.saving === true || !ui.createName.trim() || !ui.createColor; };
         const row = swatchRow(ui.createColor, 'Color del nuevo agente', picked => {
-          ui.createColor = picked; row.setCurrent(picked); preview.svg.dataset.color = picked; paintCreate();
+          ui.createColor = picked; row.setCurrent(picked); preview.svg.dataset.color = picked; paintChosenColor(preview.svg, picked); paintCreate();
         });
         name.addEventListener('input', trusted(() => { ui.createName = name.value; paintCreate(); }));
         what.addEventListener('input', trusted(() => { ui.createWhat = what.value; }));

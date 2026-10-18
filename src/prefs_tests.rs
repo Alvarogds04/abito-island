@@ -2,6 +2,74 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn chosen_color_normalization_migrates_and_round_trips_closed_palette() {
+    let legacy = [
+        ("green", "#4ADE80"),
+        ("blue", "#38BDF8"),
+        ("mint", "#2DD4BF"),
+        ("orange", "#F29B38"),
+        ("purple", "#C084FC"),
+    ];
+    for (name, hex) in legacy {
+        assert_eq!(normalize_chosen_color(name).as_deref(), Some(hex), "{name}");
+    }
+    for hex in [
+        "#F5F6F8", "#F4505E", "#F29B38", "#FACC15", "#4ADE80", "#2DD4BF", "#38BDF8", "#818CF8",
+        "#C084FC", "#E879F9",
+    ] {
+        for input in [hex.to_owned(), hex.to_lowercase(), hex[1..].to_lowercase()] {
+            let canonical = normalize_chosen_color(&input).unwrap();
+            assert_eq!(canonical, hex);
+            assert_eq!(normalize_chosen_color(&canonical), Some(canonical.clone()));
+            let wire = serde_json::to_string(&canonical).unwrap();
+            let decoded: String = serde_json::from_str(&wire).unwrap();
+            assert_eq!(normalize_chosen_color(&decoded), Some(canonical));
+        }
+    }
+    for bad in [
+        "",
+        "#FFFFFF",
+        "#000000",
+        "#abc",
+        "##4ADE80",
+        "#4ADE8000",
+        "GGGGGG",
+        " green",
+        "green ",
+        "GREEN",
+        " #4ADE80",
+        "#4ADE80\n",
+        "__proto__",
+        "constructor",
+        "rgb(74,222,128)",
+        "#４ＡＤＥ８０",
+    ] {
+        assert_eq!(normalize_chosen_color(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn chosen_colors_activate_only_in_memory_until_saved() {
+    let fixture = r##"{"v":1,"avatar_colors":{"abito":"mint"},"pill_colors":{"integration_claude":"2dd4bf"}}"##;
+    let p = Prefs::from_text(Some(fixture));
+    assert_eq!(p.avatar_colors["abito"], "#2DD4BF");
+    assert_eq!(p.pill_colors["integration_claude"], "#2DD4BF");
+    let wire: Value = serde_json::from_str(&p.to_text()).unwrap();
+    assert_eq!(wire["avatar_colors"]["abito"], "#2DD4BF");
+    assert_eq!(wire["pill_colors"]["integration_claude"], "#2DD4BF");
+    assert_eq!(Prefs::from_text(Some(&p.to_text())), p);
+    assert!(fixture.contains("mint"), "reading never rewrites its input");
+    for (name, hex) in LEGACY_NAMES {
+        for raw in [name.to_owned(), hex.to_lowercase(), hex[1..].to_lowercase()] {
+            let input = json!({"v":1,"avatar_colors":{"abito":raw},"pill_colors":{"integration_claude":raw}}).to_string();
+            let loaded = Prefs::from_text(Some(&input));
+            assert_eq!(loaded.avatar_colors["abito"], hex);
+            assert_eq!(loaded.pill_colors["integration_claude"], hex);
+        }
+    }
+}
+
+#[test]
 fn sound_is_on_by_default_and_only_an_explicit_off_silences_it() {
     // Human request: sound is active by default. A file that says nothing usable about it reads as the
     // default (on); only a stored, explicit `"sound": false` is honoured as the human's choice.
@@ -201,8 +269,8 @@ fn integration_name_sound_color_reload_and_clear_preserve_independent_fields() {
     for (index, payload) in [
         json!({"action":"set_display_name","display_name":"Ana"}),
         json!({"action":"sound_on"}),
-        json!({"action":"set_avatar_color","identity":"abito","color":"purple"}),
-        json!({"action":"set_avatar_color","identity":"esp-orphan","color":"mint"}),
+        json!({"action":"set_avatar_color","identity":"abito","color":"#C084FC"}),
+        json!({"action":"set_avatar_color","identity":"esp-orphan","color":"#2DD4BF"}),
         json!({"action":"clear_avatar_color","identity":"abito"}),
     ].into_iter().enumerate() {
         let command = parse_command(&payload).expect("combined command must be accepted");
@@ -219,8 +287,8 @@ fn integration_name_sound_color_reload_and_clear_preserve_independent_fields() {
         let wire: Value = serde_json::from_str(&reload.to_text()).unwrap();
         assert_eq!(wire["display_name"], "Ana");
         assert_eq!(wire["sound"], index > 0);
-        if (2..4).contains(&index) { assert_eq!(wire["avatar_colors"]["abito"], "purple"); }
-        if index >= 3 { assert_eq!(wire["avatar_colors"]["esp-orphan"], "mint"); }
+        if (2..4).contains(&index) { assert_eq!(wire["avatar_colors"]["abito"], "#C084FC"); }
+        if index >= 3 { assert_eq!(wire["avatar_colors"]["esp-orphan"], "#2DD4BF"); }
         if index == 4 { assert!(wire["avatar_colors"].get("abito").is_none()); }
         assert_eq!(events.lock().unwrap().len(), index + 1);
     }
@@ -240,7 +308,7 @@ fn integration_concurrent_three_fields_and_failed_color_preserve_commit_snapshot
         let barrier = Barrier::new(4);
         std::thread::scope(|scope| {
             for payload in [json!({"action":"set_display_name","display_name":"Ana"}), json!({"action":"sound_on"}),
-                json!({"action":"set_avatar_color","identity":"abito","color":"purple"})] {
+                json!({"action":"set_avatar_color","identity":"abito","color":"#C084FC"})] {
                 let fail = fail_color && payload["action"] == "set_avatar_color";
                 let (serial, current, disk, writes, events, attempts, barrier) = (&serial, &current, &disk, &writes, &events, &attempts, &barrier);
                 scope.spawn(move || {
@@ -266,7 +334,7 @@ fn integration_concurrent_three_fields_and_failed_color_preserve_commit_snapshot
         let wire: Value = serde_json::from_str(&disk.lock().unwrap()).unwrap();
         assert_eq!(wire["display_name"], "Ana"); assert_eq!(wire["sound"], true);
         if fail_color { assert!(wire.get("avatar_colors").is_none()); }
-        else { assert_eq!(wire["avatar_colors"]["abito"], "purple"); }
+        else { assert_eq!(wire["avatar_colors"]["abito"], "#C084FC"); }
         assert_eq!(*attempts.lock().unwrap(), 3);
         assert_eq!(*writes.lock().unwrap(), *events.lock().unwrap());
         assert_eq!(events.lock().unwrap().len(), if fail_color { 2 } else { 3 });
@@ -279,24 +347,24 @@ fn integration_invalid_failed_view_and_noop_have_no_mutation_or_events() {
     use std::sync::Mutex;
     let original = Prefs::from_text(Some(r#"{"v":1,"sound":true,"display_name":"Ana","avatar_colors":{"abito":"purple","esp-orphan":"mint"}}"#));
     let wire: Value = serde_json::from_str(&original.to_text()).unwrap();
-    assert_eq!(wire["avatar_colors"]["abito"], "purple");
+    assert_eq!(wire["avatar_colors"]["abito"], "#C084FC");
     let serial = Mutex::new(()); let current = Mutex::new(original.clone());
     let mut attempts = 0;
     for payload in [json!({"action":"view"}),json!({"action":"sound_on"}),json!({"action":"set_display_name","display_name":"Ana"}),
-        json!({"action":"set_avatar_color","identity":"abito","color":"purple"}),json!({"action":"clear_avatar_color","identity":"absent"})] {
+        json!({"action":"set_avatar_color","identity":"abito","color":"#C084FC"}),json!({"action":"clear_avatar_color","identity":"absent"})] {
         let command = parse_command(&payload).unwrap();
         let reply = transact(&serial, &current, &command, |_| { attempts += 1; false }, |_| panic!("noop event")).unwrap();
         assert_eq!(reply, original); assert_eq!(*current.lock().unwrap(), original);
     }
     assert_eq!(attempts, 0);
     for payload in [json!({"action":"set_display_name","display_name":"Other"}),json!({"action":"sound_off"}),
-        json!({"action":"set_avatar_color","identity":"abito","color":"blue"}),json!({"action":"clear_avatar_color","identity":"abito"})] {
+        json!({"action":"set_avatar_color","identity":"abito","color":"#38BDF8"}),json!({"action":"clear_avatar_color","identity":"abito"})] {
         let command = parse_command(&payload).unwrap();
         assert_eq!(transact(&serial, &current, &command, |_| { attempts += 1; false }, |_| panic!("failed event")), Err(CommandError));
         assert_eq!(*current.lock().unwrap(), original);
     }
     assert_eq!(attempts, 4);
-    for payload in [json!({"action":"set_avatar_color","identity":"pi","color":"blue"}),json!({"action":"clear_avatar_color","identity":"__proto__"}),
+    for payload in [json!({"action":"set_avatar_color","identity":"pi","color":"#38BDF8"}),json!({"action":"clear_avatar_color","identity":"__proto__"}),
         json!({"action":"set_avatar_color","identity":"abito","color":"bad"}),json!({"action":"set_display_name","display_name":"A\nB"})] {
         assert_eq!(parse_command(&payload), Err(CommandError));
         assert_eq!(*current.lock().unwrap(), original); assert_eq!(attempts, 4);
@@ -330,7 +398,7 @@ fn sound_is_on_by_default_and_only_an_explicit_off_silences_it() {
 
 #[test]
 fn prefs_round_trip_as_one_line() {
-    let with_colors = Prefs { sound: true, avatar_colors: colors(&[("abito", "purple")]), ..Prefs::default() };
+    let with_colors = Prefs { sound: true, avatar_colors: colors(&[("abito", "#C084FC")]), ..Prefs::default() };
     for p in [Prefs { sound: true, ..Default::default() }, Prefs { sound: false, ..Default::default() }, with_colors] {
         assert_eq!(Prefs::from_text(Some(&p.to_text())), p);
         assert!(!p.to_text().contains('\n'));
@@ -354,13 +422,13 @@ fn an_old_v1_file_without_colours_still_reads_and_keeps_its_sound() {
 
 #[test]
 fn a_colour_choice_round_trips_and_the_file_stays_v1_and_one_line() {
-    let p = Prefs { sound: true, avatar_colors: colors(&[("abito", "purple"), ("sub-abito-uno", "mint")]), ..Prefs::default() };
+    let p = Prefs { sound: true, avatar_colors: colors(&[("abito", "#C084FC"), ("sub-abito-uno", "#2DD4BF")]), ..Prefs::default() };
     let text = p.to_text();
     assert!(!text.contains('\n'));
     assert!(text.contains(r#""v":1"#));
     assert_eq!(Prefs::from_text(Some(&text)), p);
-    assert_eq!(Prefs::from_text(Some(&text)).avatar_colors["abito"], "purple");
-    assert_eq!(Prefs::from_text(Some(&text)).avatar_colors["sub-abito-uno"], "mint");
+    assert_eq!(Prefs::from_text(Some(&text)).avatar_colors["abito"], "#C084FC");
+    assert_eq!(Prefs::from_text(Some(&text)).avatar_colors["sub-abito-uno"], "#2DD4BF");
 }
 
 #[test]
@@ -388,7 +456,7 @@ fn a_damaged_colour_map_never_costs_the_sound_preference() {
         r#"{"v":1,"sound":false,"avatar_colors":{"abito":"orange","tool":"nope","Bad-Id":"blue","codex":"blue"}}"#,
     ));
     assert!(!mixed.sound);
-    assert_eq!(mixed.avatar_colors, colors(&[("abito", "orange")]), "only a well-formed pair is kept");
+    assert_eq!(mixed.avatar_colors, colors(&[("abito", "#F29B38")]), "only a well-formed pair is kept");
 }
 
 #[test]
@@ -400,8 +468,8 @@ fn command_set_is_closed_and_exact() {
                 json!({"action":"view","x":1}), json!({"action":"set","sound":true}), json!({"sound":true})] {
         assert_eq!(parse_command(&bad), Err(CommandError), "{bad}");
     }
-    assert_eq!(parse_command(&json!({"action":"set_avatar_color","identity":"abito","color":"blue"})),
-        Ok(Command::SetAvatarColor { identity: "abito".into(), color: "blue".into() }));
+    assert_eq!(parse_command(&json!({"action":"set_avatar_color","identity":"abito","color":"#38BDF8"})),
+        Ok(Command::SetAvatarColor { identity: "abito".into(), color: "#38BDF8".into() }));
     assert_eq!(parse_command(&json!({"action":"clear_avatar_color","identity":"abito"})),
         Ok(Command::ClearAvatarColor { identity: "abito".into() }));
     for id in ["abito", "sub-abito-uno", "sub_abito.dos", "s", &"a".repeat(32)] {
@@ -412,17 +480,17 @@ fn command_set_is_closed_and_exact() {
     }
     for bad in [
         json!({"action":"set_avatar_color","identity":"abito"}),
-        json!({"action":"set_avatar_color","color":"blue"}),
-        json!({"action":"set_avatar_color","identity":"abito","color":"blue","x":1}),
-        json!({"action":"set_avatar_color","identity":"abito","color":"blue","identity2":"abito"}),
-        json!({"action":"set_avatar_color","identity":"Abito","color":"blue"}),
-        json!({"action":"set_avatar_color","identity":"","color":"blue"}),
+        json!({"action":"set_avatar_color","color":"#38BDF8"}),
+        json!({"action":"set_avatar_color","identity":"abito","color":"#38BDF8","x":1}),
+        json!({"action":"set_avatar_color","identity":"abito","color":"#38BDF8","identity2":"abito"}),
+        json!({"action":"set_avatar_color","identity":"Abito","color":"#38BDF8"}),
+        json!({"action":"set_avatar_color","identity":"","color":"#38BDF8"}),
         json!({"action":"set_avatar_color","identity":"abito","color":"chartreuse"}),
         json!({"action":"set_avatar_color","identity":"abito","color":"Green"}),
-        json!({"action":"set_avatar_color","identity":"__proto__","color":"blue"}),
-        json!({"action":"set_avatar_color","identity":"constructor","color":"blue"}),
-        json!({"action":"set_avatar_color","identity":1,"color":"blue"}),
-        json!({"action":"set_avatar_color","identity":&"a".repeat(33),"color":"blue"}),
+        json!({"action":"set_avatar_color","identity":"__proto__","color":"#38BDF8"}),
+        json!({"action":"set_avatar_color","identity":"constructor","color":"#38BDF8"}),
+        json!({"action":"set_avatar_color","identity":1,"color":"#38BDF8"}),
+        json!({"action":"set_avatar_color","identity":&"a".repeat(33),"color":"#38BDF8"}),
         json!({"action":"clear_avatar_color"}),
         json!({"action":"clear_avatar_color","identity":"__proto__"}),
         json!({"action":"clear_avatar_color","identity":"Abito"}),
@@ -435,29 +503,29 @@ fn command_set_is_closed_and_exact() {
 
 #[test]
 fn an_invalid_change_never_produces_or_mutates_a_value() {
-    let current = Prefs { sound: true, avatar_colors: colors(&[("abito", "green")]), ..Prefs::default() };
+    let current = Prefs { sound: true, avatar_colors: colors(&[("abito", "#4ADE80")]), ..Prefs::default() };
     for bad in [
-        Command::SetAvatarColor { identity: "Abito".into(), color: "blue".into() },
+        Command::SetAvatarColor { identity: "Abito".into(), color: "#38BDF8".into() },
         Command::SetAvatarColor { identity: "abito".into(), color: "chartreuse".into() },
-        Command::SetAvatarColor { identity: "__proto__".into(), color: "blue".into() },
+        Command::SetAvatarColor { identity: "__proto__".into(), color: "#38BDF8".into() },
         Command::ClearAvatarColor { identity: "constructor".into() },
     ] {
         assert_eq!(apply(&current, &bad), Err(CommandError), "{bad:?}");
     }
-    assert_eq!(current, Prefs { sound: true, avatar_colors: colors(&[("abito", "green")]), ..Prefs::default() }, "apply never mutates in place");
+    assert_eq!(current, Prefs { sound: true, avatar_colors: colors(&[("abito", "#4ADE80")]), ..Prefs::default() }, "apply never mutates in place");
 }
 
 #[test]
 fn a_change_keeps_every_other_preference_and_view_changes_nothing() {
-    let current = Prefs { sound: true, avatar_colors: colors(&[("sub-abito-uno", "mint")]), ..Prefs::default() };
-    let set = apply(&current, &Command::SetAvatarColor { identity: "abito".into(), color: "purple".into() }).unwrap();
+    let current = Prefs { sound: true, avatar_colors: colors(&[("sub-abito-uno", "#2DD4BF")]), ..Prefs::default() };
+    let set = apply(&current, &Command::SetAvatarColor { identity: "abito".into(), color: "#C084FC".into() }).unwrap();
     assert!(set.sound, "a colour choice never flips the sound switch");
-    assert_eq!(set.avatar_colors, colors(&[("abito", "purple"), ("sub-abito-uno", "mint")]));
+    assert_eq!(set.avatar_colors, colors(&[("abito", "#C084FC"), ("sub-abito-uno", "#2DD4BF")]));
     let off = apply(&set, &Command::SoundOff).unwrap();
     assert!(!off.sound);
     assert_eq!(off.avatar_colors, set.avatar_colors, "the sound switch never drops a colour");
     let cleared = apply(&set, &Command::ClearAvatarColor { identity: "abito".into() }).unwrap();
-    assert_eq!(cleared.avatar_colors, colors(&[("sub-abito-uno", "mint")]));
+    assert_eq!(cleared.avatar_colors, colors(&[("sub-abito-uno", "#2DD4BF")]));
     // clearing something that was never set is a no-op, not an error
     let again = apply(&cleared, &Command::ClearAvatarColor { identity: "abito".into() }).unwrap();
     assert_eq!(again, cleared);
@@ -466,8 +534,8 @@ fn a_change_keeps_every_other_preference_and_view_changes_nothing() {
 
 #[test]
 fn a_failed_save_keeps_the_old_preferences_and_is_reported_as_a_failure() {
-    let current = Prefs { sound: false, avatar_colors: colors(&[("abito", "green")]), ..Prefs::default() };
-    let change = Command::SetAvatarColor { identity: "abito".into(), color: "purple".into() };
+    let current = Prefs { sound: false, avatar_colors: colors(&[("abito", "#4ADE80")]), ..Prefs::default() };
+    let change = Command::SetAvatarColor { identity: "abito".into(), color: "#C084FC".into() };
     let next = apply(&current, &change).unwrap();
     // the write is attempted with the NEW value (so a successful write and a failed one differ)...
     let mut seen = None;
@@ -475,8 +543,8 @@ fn a_failed_save_keeps_the_old_preferences_and_is_reported_as_a_failure() {
     assert_eq!(seen, Some(next.clone()));
     assert_eq!(failed, Err(CommandError), "a failed write must never read as success");
     // ...and when it fails the caller keeps the OLD value: memory never runs ahead of disk
-    assert_eq!(current.avatar_colors["abito"], "green");
-    assert_eq!(current.to_text(), Prefs { sound: false, avatar_colors: colors(&[("abito", "green")]), ..Prefs::default() }.to_text());
+    assert_eq!(current.avatar_colors["abito"], "#4ADE80");
+    assert_eq!(current.to_text(), Prefs { sound: false, avatar_colors: colors(&[("abito", "#4ADE80")]), ..Prefs::default() }.to_text());
     // a successful write returns the new value
     assert_eq!(update(&current, &change, |_| true), Ok(next));
     // reading (`view`) writes nothing at all
@@ -502,7 +570,7 @@ fn f055_volume_public_transaction_boundaries_and_failure() {
         let next = transact(&serial, &state, &command, |p| { *disk.lock().unwrap() = p.to_text(); true }, |p| events.lock().unwrap().push(p.to_text())).unwrap();
         let value: Value = serde_json::from_str(&next.to_text()).unwrap();
         assert_eq!(value["gain"], gain); assert!(next.sound);
-        assert_eq!(next.display_name.as_deref(), Some("Ana")); assert_eq!(next.avatar_colors["orphan"], "blue");
+        assert_eq!(next.display_name.as_deref(), Some("Ana")); assert_eq!(next.avatar_colors["orphan"], "#38BDF8");
         assert_eq!(Prefs::from_text(Some(&disk.lock().unwrap())), next);
         transact(&serial, &state, &command, |_| panic!("no-op write"), |_| panic!("no-op event")).unwrap();
     }
@@ -533,7 +601,7 @@ fn f055_gain_defaults_direct_validation_and_concurrent_existing_writers() {
     let bytes = Mutex::new(original.to_text()); let writes = Mutex::new(Vec::new()); let events = Mutex::new(Vec::new());
     let barrier = Barrier::new(5);
     std::thread::scope(|scope| {
-        for payload in [json!({"action":"set_sound_gain","gain":0.2}),json!({"action":"sound_on"}),json!({"action":"set_display_name","display_name":"Ana"}),json!({"action":"set_avatar_color","identity":"abito","color":"purple"})] {
+        for payload in [json!({"action":"set_sound_gain","gain":0.2}),json!({"action":"sound_on"}),json!({"action":"set_display_name","display_name":"Ana"}),json!({"action":"set_avatar_color","identity":"abito","color":"#C084FC"})] {
             let command = parse_command(&payload).unwrap();
             let (state,serial,bytes,writes,events,barrier) = (&state,&serial,&bytes,&writes,&events,&barrier);
             scope.spawn(move || {
@@ -552,7 +620,7 @@ fn f055_gain_defaults_direct_validation_and_concurrent_existing_writers() {
     });
     let final_view = transact(&serial,&state,&Command::View,|_| panic!("view write"),|_| panic!("view event")).unwrap();
     assert_eq!(final_view.gain(),0.2); assert!(final_view.sound); assert_eq!(final_view.display_name.as_deref(),Some("Ana"));
-    assert_eq!(final_view.avatar_colors["orphan"],"mint"); assert_eq!(final_view.avatar_colors["abito"],"purple");
+    assert_eq!(final_view.avatar_colors["orphan"],"#2DD4BF"); assert_eq!(final_view.avatar_colors["abito"],"#C084FC");
     assert_eq!(Prefs::from_text(Some(&bytes.lock().unwrap())),final_view);
     assert_eq!(events.lock().unwrap().len(),4); assert_eq!(*events.lock().unwrap(),*writes.lock().unwrap());
 }
@@ -612,8 +680,8 @@ fn an_old_prefs_file_without_a_position_reads_and_writes_back_the_same_bytes() {
     assert!(p.sound);
     assert_eq!(p.display_name.as_deref(), Some("Ana"));
     assert_eq!(p.gain(), 0.12);
-    assert_eq!(p.avatar_colors["abito"], "purple");
-    assert_eq!(p.to_text(), old, "the position key must not change an untouched file");
+    assert_eq!(p.avatar_colors["abito"], "#C084FC");
+    assert_eq!(p.to_text(), old.replace("purple", "#C084FC"), "only the saved legacy colour migrates; position stays absent");
     // the same promise the #384 test pins for colours
     let minimal = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#)).to_text();
     assert!(!minimal.contains("position"), "{minimal}");
@@ -723,7 +791,7 @@ fn f032_main_and_toggle_public_transactions_preserve_legacy_fields() {
         let next = transact(&serial,&state,&command,|p| { *disk.lock().unwrap()=p.to_text(); true },
             |p| { assert!(serial.try_lock().is_err()); assert_eq!(*state.try_lock().unwrap(),*p); events.lock().unwrap().push(p.to_text()); }).unwrap();
         assert!(next.sound); assert_eq!(next.gain(),0.2); assert_eq!(next.display_name.as_deref(),Some("Ana"));
-        assert_eq!(next.avatar_colors["orphan"],"mint");
+        assert_eq!(next.avatar_colors["orphan"],"#2DD4BF");
         assert_eq!(Prefs::from_text(Some(&disk.lock().unwrap())),next);
     }
     let v: Value = serde_json::from_str(&disk.lock().unwrap()).unwrap();
@@ -782,13 +850,13 @@ fn f032_every_legacy_writer_keeps_typed_pill_choices_and_drops_unknown_json() {
     for payload in [
         json!({"action":"view"}),json!({"action":"sound_on"}),json!({"action":"sound_off"}),
         json!({"action":"set_sound_gain","gain":0.1}),json!({"action":"set_display_name","display_name":"Bea"}),
-        json!({"action":"set_avatar_color","identity":"abito","color":"blue"}),
+        json!({"action":"set_avatar_color","identity":"abito","color":"#38BDF8"}),
         json!({"action":"clear_avatar_color","identity":"abito"}),
     ] {
         let next=update(&current,&parse_command(&payload).unwrap(),|_| true).unwrap();
         let v:Value=serde_json::from_str(&next.to_text()).unwrap();
         assert_eq!(v["main_pill"],"agent_codex"); assert_eq!(v["declared_pills"],json!(["ai_google"]));
-        assert!(v.get("unvalidated_secret").is_none()); assert_eq!(next.avatar_colors["orphan"],"mint");
+        assert!(v.get("unvalidated_secret").is_none()); assert_eq!(next.avatar_colors["orphan"],"#2DD4BF");
     }
 }
 
@@ -798,10 +866,10 @@ fn f033_pill_colors_keep_the_closed_palette_and_never_destroy_the_catalogue() {
     let raw = r##"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_amp":"mint","agent_cursor":"#ff0000","agent_muse":"MINT","integration_claude":"expression(alert(1))","integration_n8n":"<img src=x onerror=alert(1)>","ai_google":7,"unknown_pill":"blue","__proto__":"purple"},"future_unvalidated":{"secret":"not retained"}}"##;
     let loaded = Prefs::from_text(Some(raw));
     let v: Value = serde_json::from_str(&loaded.to_text()).unwrap();
-    assert_eq!(v["pill_colors"], json!({"agent_amp":"mint"}), "only a catalog id carrying a palette name survives");
+    assert_eq!(v["pill_colors"], json!({"agent_amp":"#2DD4BF"}), "only a catalog id carrying a palette name survives");
     assert_eq!(v["main_pill"], json!("agent_codex"));
     assert_eq!(v["declared_pills"], json!(["ai_google"]));
-    assert_eq!(v["avatar_colors"], json!({"abito":"mint"}));
+    assert_eq!(v["avatar_colors"], json!({"abito":"#2DD4BF"}));
     assert!(loaded.sound);
     assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded, "the kept entries round-trip");
     // Absent/unusable pill_colors never writes the key: «ausente/vacío nunca escribe».
@@ -817,11 +885,11 @@ fn f033_pill_colors_keep_the_closed_palette_and_never_destroy_the_catalogue() {
 #[test]
 fn f033_set_pill_color_is_exact_arity_and_only_touches_its_own_field() {
     let current = Prefs::from_text(Some(r#"{"v":1,"sound":true,"gain":0.2,"display_name":"Ana","avatar_colors":{"abito":"mint"},"main_pill":"agent_codex","declared_pills":["ai_google"],"pill_colors":{"agent_cursor":"blue"}}"#));
-    let command = parse_command(&json!({"action":"set_pill_color","id":"agent_amp","color":"purple"}))
+    let command = parse_command(&json!({"action":"set_pill_color","id":"agent_amp","color":"#C084FC"}))
         .expect("closed three-key pill colour command accepted");
     let next = update(&current, &command, |_| true).expect("a palette colour applies");
     let written: Value = serde_json::from_str(&next.to_text()).unwrap();
-    assert_eq!(written["pill_colors"], json!({"agent_amp":"purple","agent_cursor":"blue"}), "the new key lands beside the kept one");
+    assert_eq!(written["pill_colors"], json!({"agent_amp":"#C084FC","agent_cursor":"#38BDF8"}), "the new key lands beside the kept one");
     let mut before: Value = serde_json::from_str(&current.to_text()).unwrap();
     let mut after: Value = serde_json::from_str(&next.to_text()).unwrap();
     before.as_object_mut().unwrap().remove("pill_colors");
@@ -830,8 +898,8 @@ fn f033_set_pill_color_is_exact_arity_and_only_touches_its_own_field() {
     for bad in [
         json!({"action":"set_pill_color"}),
         json!({"action":"set_pill_color","id":"agent_amp"}),
-        json!({"action":"set_pill_color","color":"purple"}),
-        json!({"action":"set_pill_color","id":"agent_amp","color":"purple","extra":1}),
+        json!({"action":"set_pill_color","color":"#C084FC"}),
+        json!({"action":"set_pill_color","id":"agent_amp","color":"#C084FC","extra":1}),
         json!({"action":"set_pill_color","id":"agent_amp","color":"#9fdb7f"}),
         json!({"action":"set_pill_color","id":"agent_amp","color":"MINT"}),
         json!({"action":"set_pill_color","id":"agent_amp","color":"rgb(0,255,0)"}),
@@ -839,11 +907,11 @@ fn f033_set_pill_color_is_exact_arity_and_only_touches_its_own_field() {
         json!({"action":"set_pill_color","id":"agent_amp","color":""}),
         json!({"action":"set_pill_color","id":"agent_amp","color":null}),
         json!({"action":"set_pill_color","id":"agent_amp","color":7}),
-        json!({"action":"set_pill_color","id":"integration_music","color":"purple"}),
-        json!({"action":"set_pill_color","id":"unknown_pill","color":"purple"}),
-        json!({"action":"set_pill_color","id":"__proto__","color":"purple"}),
-        json!({"action":"set_pill_color","id":7,"color":"purple"}),
-        json!({"action":"set_pill_color","id":["agent_amp"],"color":"purple"}),
+        json!({"action":"set_pill_color","id":"integration_music","color":"#C084FC"}),
+        json!({"action":"set_pill_color","id":"unknown_pill","color":"#C084FC"}),
+        json!({"action":"set_pill_color","id":"__proto__","color":"#C084FC"}),
+        json!({"action":"set_pill_color","id":7,"color":"#C084FC"}),
+        json!({"action":"set_pill_color","id":["agent_amp"],"color":"#C084FC"}),
     ] {
         assert!(parse_command(&bad).is_err(), "{bad}");
     }
@@ -856,18 +924,18 @@ fn f033_clear_pill_color_is_exact_arity_and_only_removes_its_own_key() {
         .expect("closed two-key pill colour clear accepted");
     let next = update(&current, &command, |_| true).expect("the key is removable");
     let v: Value = serde_json::from_str(&next.to_text()).unwrap();
-    assert_eq!(v["pill_colors"], json!({"agent_cursor":"blue"}), "only that pill loses its colour");
+    assert_eq!(v["pill_colors"], json!({"agent_cursor":"#38BDF8"}), "only that pill loses its colour");
     assert_eq!(next.declared_pills(), current.declared_pills());
     assert_eq!(next.main_pill(), current.main_pill());
     assert!(next.sound && next.display_name.is_some() && !next.avatar_colors.is_empty());
     let untouched = update(&current,
         &parse_command(&json!({"action":"clear_pill_color","id":"integration_n8n"})).unwrap(), |_| true).unwrap();
     let untouched_text: Value = serde_json::from_str(&untouched.to_text()).unwrap();
-    assert_eq!(untouched_text["pill_colors"], json!({"agent_amp":"mint","agent_cursor":"blue"}), "clearing an absent colour changes nothing");
+    assert_eq!(untouched_text["pill_colors"], json!({"agent_amp":"#2DD4BF","agent_cursor":"#38BDF8"}), "clearing an absent colour changes nothing");
     for bad in [
         json!({"action":"clear_pill_color"}),
-        json!({"action":"clear_pill_color","color":"blue"}),
-        json!({"action":"clear_pill_color","id":"agent_amp","color":"blue"}),
+        json!({"action":"clear_pill_color","color":"#38BDF8"}),
+        json!({"action":"clear_pill_color","id":"agent_amp","color":"#38BDF8"}),
         json!({"action":"clear_pill_color","id":"unknown_pill"}),
         json!({"action":"clear_pill_color","id":"integration_music"}),
         json!({"action":"clear_pill_color","id":7}),
@@ -925,7 +993,7 @@ fn set_theme_is_a_closed_command_and_rejects_leave_state_and_counters_unchanged(
     use std::sync::Mutex;
     let mut current = Prefs { sound: true, theme: Some(Theme::Dark), ..Prefs::default() };
     let mut writes = 0;
-    for value in [json!(null), json!(42), json!({}), json!("blue"), json!("System"), json!("DARK"), json!("")] {
+    for value in [json!(null), json!(42), json!({}), json!("#38BDF8"), json!("System"), json!("DARK"), json!("")] {
         let before = current.clone();
         let command = parse_command(&json!({"action":"set_theme", "theme":value}));
         assert_eq!(command, Err(CommandError), "{value} is outside the closed enum");
@@ -1147,16 +1215,16 @@ mod chosen_models {
             sound: true,
             gain: Some(0.2),
             display_name: Some("Ana".into()),
-            avatar_colors: [("abito".to_string(), "mint".to_string())].into(),
+            avatar_colors: [("abito".to_string(), "#2DD4BF".to_string())].into(),
             position: Some((10, 20)),
             main_pill: Some("agent_codex".into()),
             declared_pills: Some(vec!["integration_github".into()]),
-            pill_colors: [("agent_amp".to_string(), "mint".to_string())].into(),
+            pill_colors: [("agent_amp".to_string(), "#2DD4BF".to_string())].into(),
             theme: Some(Theme::Dark),
             chosen_models: Some([("anthropic".to_string(), vec!["claude-sonnet-4-5".to_string()])].into()),
             auto_close_seconds: Some(30),
             open_on_hover: Some(true),
-            custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("mint".into()) }]),
+            custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("#2DD4BF".into()) }]),
             monitor: Some("DP-1".into()),
             settings_window: None,
             settings_window_size: Some((960, 640)),
@@ -1240,10 +1308,10 @@ fn set_island_interaction_keeps_every_known_field_and_drops_unknown_json() {
     assert_eq!(value["sound"], json!(true));
     assert_eq!(value["gain"], json!(0.2));
     assert_eq!(value["display_name"], json!("Alvaro"));
-    assert_eq!(value["avatar_colors"]["abito"], json!("mint"));
+    assert_eq!(value["avatar_colors"]["abito"], json!("#2DD4BF"));
     assert_eq!(value["main_pill"], json!("agent_cursor"));
     assert_eq!(value["declared_pills"], json!(["integration_n8n"]));
-    assert_eq!(value["pill_colors"]["agent_amp"], json!("purple"));
+    assert_eq!(value["pill_colors"]["agent_amp"], json!("#C084FC"));
     assert_eq!(value["theme"], json!("dark"));
     assert_eq!(value["auto_close_seconds"], json!(5), "the new pair must be stored");
     assert_eq!(value["open_on_hover"], json!(false), "the new pair must be stored");
@@ -1345,7 +1413,7 @@ fn blobs_default_to_absent_and_an_untouched_file_keeps_its_bytes() {
 #[test]
 fn create_blob_accepts_the_human_examples_and_round_trips() {
     let current = Prefs { sound: false, ..Prefs::default() }; // a non-default sound value, to prove it survives beside the new blobs
-    let github = parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"green"})).unwrap();
+    let github = parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"#4ADE80"})).unwrap();
     let step1 = update(&current, &github, |_| true).unwrap();
     let reviewer = parse_command(&json!({"action":"create_blob","name":"Abito Reviewer"})).unwrap();
     let step2 = update(&step1, &reviewer, |_| true).unwrap();
@@ -1354,7 +1422,7 @@ fn create_blob_accepts_the_human_examples_and_round_trips() {
     let blobs = step3.custom_blobs.as_ref().unwrap();
     assert_eq!(blobs.len(), 3);
     assert_eq!(blobs[0].name, "Abito GitHub");
-    assert_eq!(blobs[0].color.as_deref(), Some("green"));
+    assert_eq!(blobs[0].color.as_deref(), Some("#4ADE80"));
     assert_eq!(blobs[1].name, "Abito Reviewer");
     assert_eq!(blobs[1].color, None, "no colour is a valid created blob");
     assert_eq!(blobs[2].name, "Abito correo");
@@ -1365,7 +1433,7 @@ fn create_blob_accepts_the_human_examples_and_round_trips() {
     // every other known field survives beside the new one
     let value: Value = serde_json::from_str(&step3.to_text()).unwrap();
     assert_eq!(value["sound"], json!(false));
-    assert_eq!(value["custom_blobs"][0], json!({"name":"Abito GitHub","color":"green"}));
+    assert_eq!(value["custom_blobs"][0], json!({"name":"Abito GitHub","color":"#4ADE80"}));
     assert_eq!(value["custom_blobs"][1], json!({"name":"Abito Reviewer"}));
 }
 
@@ -1375,7 +1443,7 @@ fn create_blob_accepts_the_human_examples_and_round_trips() {
 #[test]
 fn create_blob_refusals_leave_the_store_byte_identical() {
     let start = update(&Prefs::default(),
-        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"mint"})).unwrap(), |_| true).unwrap();
+        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"#2DD4BF"})).unwrap(), |_| true).unwrap();
     let baseline = start.clone();
     // a refusal may come from the parse gate (untrimmed/oversized names) or from
     // apply (duplicates, the principal, the cap); either way nothing may change.
@@ -1397,8 +1465,8 @@ fn create_blob_refusals_leave_the_store_byte_identical() {
     refused(json!({"action":"create_blob","name":"Abito correo","color":"teal"})); // off-set colour
     refused(json!({"action":"create_blob","name":"Abito correo","color":42}));
     refused(json!({"action":"create_blob","name":42}));
-    refused(json!({"action":"create_blob","color":"green"}));
-    refused(json!({"action":"create_blob","name":"Abito correo","color":"green","x":1}));
+    refused(json!({"action":"create_blob","color":"#4ADE80"}));
+    refused(json!({"action":"create_blob","name":"Abito correo","color":"#4ADE80","x":1}));
     refused(json!({"action":"create_blob"}));
     assert_eq!(start, baseline, "a refusal never moves the store");
     // the ninth blob is refused too: the pref must never outgrow its panel
@@ -1416,7 +1484,7 @@ fn create_blob_refusals_leave_the_store_byte_identical() {
 #[test]
 fn delete_blob_removes_only_the_named_entry() {
     let start = update(&Prefs::default(),
-        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"mint"})).unwrap(), |_| true).unwrap();
+        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"#2DD4BF"})).unwrap(), |_| true).unwrap();
     let start = update(&start,
         &parse_command(&json!({"action":"create_blob","name":"Abito correo"})).unwrap(), |_| true).unwrap();
     let after = update(&start, &parse_command(&json!({"action":"delete_blob","name":"Abito GitHub"})).unwrap(), |_| true).unwrap();
@@ -1458,7 +1526,7 @@ fn hostile_stored_blobs_are_dropped_on_load() {
     let blobs = p.custom_blobs.as_ref().unwrap();
     assert_eq!(blobs.len(), 3, "only the valid entries survive: the off-set colour drops, not the entry (the pill_colors reading rule)");
     assert_eq!(blobs[0].name, "Abito GitHub");
-    assert_eq!(blobs[0].color.as_deref(), Some("green"));
+    assert_eq!(blobs[0].color.as_deref(), Some("#4ADE80"));
     assert_eq!(blobs[1].name, "Ok");
     assert_eq!(blobs[1].color, None, "an off-set colour reads as no colour");
     assert_eq!(blobs[2].name, "Solo");
@@ -1758,7 +1826,7 @@ fn reorder_declared_pills_is_a_strict_permutation_gate() {
 #[test]
 fn reorder_blobs_is_a_strict_permutation_gate_by_exact_name() {
     let start = update(&Prefs::default(),
-        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"mint"})).unwrap(), |_| true).unwrap();
+        &parse_command(&json!({"action":"create_blob","name":"Abito GitHub","color":"#2DD4BF"})).unwrap(), |_| true).unwrap();
     let start = update(&start, &parse_command(&json!({"action":"create_blob","name":"Notas"})).unwrap(), |_| true).unwrap();
     let baseline = start.clone();
     let reorder = parse_command(&json!({"action":"reorder_blobs","order":["Notas","Abito GitHub"]})).unwrap();
@@ -1766,7 +1834,7 @@ fn reorder_blobs_is_a_strict_permutation_gate_by_exact_name() {
     let blobs = next.custom_blobs.as_ref().unwrap();
     assert_eq!(blobs[0].name, "Notas");
     assert_eq!(blobs[1].name, "Abito GitHub");
-    assert_eq!(blobs[1].color.as_deref(), Some("mint"), "reordering keeps each entry's own colour");
+    assert_eq!(blobs[1].color.as_deref(), Some("#2DD4BF"), "reordering keeps each entry's own colour");
     // the new order survives a full file round trip
     let reread = Prefs::from_text(Some(&next.to_text()));
     assert_eq!(reread.custom_blobs, next.custom_blobs, "created blobs read back exactly");

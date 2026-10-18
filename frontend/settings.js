@@ -91,6 +91,12 @@
   let daemonBusy = false;
   let daemonNote = null;
   // #327 owns the sole role cache; Settings reads only its immutable id/name projection.
+  function paintChosenColor(node, color) {
+    const stops = AVATAR?.gradientStops(color);
+    if (!node?.style?.setProperty) return;
+    for (let i = 0; i < 3; i++) node.style.setProperty('--chosen-' + (i + 1), stops?.[i] || '');
+    node.style.setProperty('--identity-color', stops?.[1] || '');
+  }
   const AVATAR = window.AbitoAvatarColors;
   const specialistIdentities = () => window.AbitoSpecialistsPanel?.identityView() || { kind: 'loading', identities: [] };
   document.addEventListener('abito:specialist-identities', () => render());
@@ -131,7 +137,7 @@
   function colorRow(row) {
     const line = el('div', 'srow scolors');
     line.dataset.identity = row.id;
-    line.dataset.color = row.color;
+    line.dataset.color = row.color; paintChosenColor(line, row.color);
     line.append(el('span', 'srow-title', row.name));
     const options = el('span', 'sdot-options');
     options.setAttribute('role', 'radiogroup');
@@ -142,7 +148,7 @@
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', option.selected ? 'true' : 'false');
       b.setAttribute('aria-label', option.aria);
-      b.dataset.color = option.color;
+      b.dataset.color = option.color; paintChosenColor(b, option.color);
       // render() restores focused IDs on both invoke responses and prefs:state events.
       b.id = `dot-color-${row.id}-${option.color}`;
       b.tabIndex = option.selected ? 0 : -1;

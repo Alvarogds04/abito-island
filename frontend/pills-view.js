@@ -8,6 +8,12 @@
   const host = get('pill-choices'), name = get('pill-name'), state = get('pill-state');
   const detail = get('pill-detail'), live = get('pill-live'), capsule = get('capsule');
   if (!host || !name || !state || !detail || !capsule) return;
+  function paintChosenColor(node, color) {
+    const stops = A?.gradientStops(color);
+    if (!node?.style?.setProperty) return;
+    for (let i = 0; i < 3; i++) node.style.setProperty('--chosen-' + (i + 1), stops?.[i] || '');
+    node.style.setProperty('--identity-color', stops?.[1] || '');
+  }
   const A = root.AbitoAvatarColors;
   let prefs = {}, version = 0, busy = false;
   const mounted = new Map();
@@ -63,6 +69,7 @@
         button.addEventListener('click', event => { if (event.isTrusted === true && onScreen()) choose(row.id); });
       }
       item.label.textContent = row.name; item.button.dataset.color = row.color; item.svg.dataset.color = row.color;
+      paintChosenColor(item.button, row.color); paintChosenColor(item.svg, row.color);
       item.button.setAttribute('aria-pressed', selected === row.id ? 'true' : 'false');
       item.button.setAttribute('aria-label', `${row.name}${row.id === A.PRINCIPAL_ID ? ', principal' : ''}: destino de conversación`);
       syncClay(item);

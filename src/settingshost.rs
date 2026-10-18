@@ -746,20 +746,20 @@ mod settings_view_tests {
     }
 
     /// #346 F033: `pillColors` is the same projection shape as `avatarColors` — already
-    /// validated colour names only, and a cleared pill simply has no key.
+    /// validated canonical palette hex only, and a cleared pill simply has no key.
     #[test]
     fn f033_the_webview_projection_carries_validated_pill_colours_and_a_clear_drops_the_key() {
         use abito_island::prefs::{parse_command, update, Prefs};
-        let prefs = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"mint"}}"#));
+        let prefs = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"mint"},"avatar_colors":{"abito":"mint"}}"#));
         let view = view_prefs(&prefs);
         assert_eq!(
             view["pillColors"],
-            json!({"agent_amp":"mint"}),
+            json!({"agent_amp":"#2DD4BF"}),
             "same shape as avatarColors"
         );
         assert_eq!(
             view["avatarColors"],
-            json!({}),
+            json!({"abito":"#2DD4BF"}),
             "the established field keeps its shape"
         );
         let cleared = update(
@@ -797,7 +797,7 @@ mod settings_view_tests {
         assert_eq!(
             view["customBlobs"],
             json!([
-                {"name":"Abito GitHub","color":"green"},
+                {"name":"Abito GitHub","color":"#4ADE80"},
                 {"name":"Abito correo","color":null},
             ])
         );

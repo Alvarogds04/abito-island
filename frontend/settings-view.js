@@ -668,7 +668,7 @@
       const name = typeof identity.name === 'string' && identity.name ? identity.name : row.id;
       return { id: row.id, name, color: row.color, label: row.label, aria: `Color de ${name}: ${row.label}`,
         options: colors.PALETTE.map(color => ({
-          color, label: colors.label(color), selected: color === row.color, aria: `${colors.label(color)} para ${name}`,
+          color, label: colors.label(color), selected: color === row.color || !!(colors.normalizeChosenColor && colors.normalizeChosenColor(color) === colors.normalizeChosenColor(row.color)), aria: `${colors.label(color)} para ${name}`,
         })),
       };
     });

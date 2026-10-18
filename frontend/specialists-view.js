@@ -332,7 +332,7 @@
   // first three stored). Specialists beyond three stay stored and are listed in `stored`.
   const MAX_ISLAND = 3;
   // The colour contract (avatar-colors.js, #384) is INJECTED: this module carries no colour logic.
-  const palette = A => (A && Array.isArray(A.PALETTE) ? A.PALETTE : []);
+  const palette = A => (A && Array.isArray(A.PALETTE) ? [...A.PALETTE, ...(A.HEX_PALETTE || [])] : []);
   const colorFor = (A, map, id) => (A && typeof A.resolveColor === 'function' ? A.resolveColor(id, map) : '');
   const shortRole = text => {
     const line = String(text || '').split('\n')[0].trim();

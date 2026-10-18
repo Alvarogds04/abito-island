@@ -24,7 +24,7 @@
   // #346 F033: the ONLY colour vocabulary — avatar-colors.js PALETTE, the same five names
   // src/prefs.rs COLORS holds. A missing palette fails closed: nothing is ever painted.
   const PALETTE = A && Array.isArray(A.PALETTE) ? A.PALETTE : [];
-  const isColor = value => typeof value === 'string' && PALETTE.includes(value);
+  const isColor = value => typeof value === 'string' && (PALETTE.includes(value) || !!A.normalizeChosenColor(value));
   function normalize(raw, os = C.HOST_OS) {
     const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const mainPill = isMain(input.mainPill, os) ? input.mainPill : DEFAULT_MAIN;
@@ -38,7 +38,7 @@
     const rawColors = input.pillColors && typeof input.pillColors === 'object' && !Array.isArray(input.pillColors) ? input.pillColors : {};
     const pillColors = {};
     for (const id of Object.keys(rawColors)) {
-      if (C.definition(id) && isColor(rawColors[id])) pillColors[id] = rawColors[id];
+      if (C.definition(id) && isColor(rawColors[id])) pillColors[id] = PALETTE.includes(rawColors[id]) ? rawColors[id] : A.normalizeChosenColor(rawColors[id]);
     }
     // #415 WU2: created blobs. The Rust wire key is `customBlobs`; an already
     // normalized snapshot (blobs) re-reads the same way. Only valid, deduplicated
@@ -49,7 +49,7 @@
     for (const entry of rawBlobs) {
       const name = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry.name : null;
       if (validBlobName(name) && blobs.length < MAX_BLOBS && !blobs.some(b => b.name.toLowerCase() === name.toLowerCase())) {
-        blobs.push({ name, color: typeof entry.color === 'string' && isColor(entry.color) ? entry.color : '' });
+        blobs.push({ name, color: typeof entry.color === 'string' && isColor(entry.color) ? (PALETTE.includes(entry.color) ? entry.color : A.normalizeChosenColor(entry.color)) : '' });
       }
     }
     return { mainPill, declaredPills, pillColors, blobs };

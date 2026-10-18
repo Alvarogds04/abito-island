@@ -49,6 +49,74 @@ const HOST_CONDITIONS = ['compact', 'expanded', 'card-pending', 'question-pendin
 const COLLIDE_A = 'sub-abito-1';
 const COLLIDE_B = 'sub-abito-5';
 
+test('chosen hex foundation: migration, closed palette, canonicalization and JSON round-trip', () => {
+  const palette = ['#F5F6F8', '#F4505E', '#F29B38', '#FACC15', '#4ADE80',
+    '#2DD4BF', '#38BDF8', '#818CF8', '#C084FC', '#E879F9'];
+  const legacy = { green: '#4ADE80', blue: '#38BDF8', mint: '#2DD4BF', orange: '#F29B38', purple: '#C084FC' };
+  for (const [name, hex] of Object.entries(legacy)) assert.equal(A.normalizeChosenColor(name), hex, name);
+  assert.deepEqual(A.HEX_PALETTE, palette);
+  const vendor = fs.readFileSync(path.join(frontend, 'vendor/coucou/core/pill-colors.ts'), 'utf8');
+  assert.deepEqual(vendor.match(/"#[0-9A-F]{6}"/g).map(s => s.slice(1, -1)), palette, 'MIT palette cannot drift');
+  assert.ok(Object.isFrozen(A.HEX_PALETTE));
+  for (const hex of palette) {
+    for (const raw of [hex, hex.toLowerCase(), hex.slice(1).toLowerCase()]) {
+      const canonical = A.normalizeChosenColor(raw);
+      assert.equal(canonical, hex);
+      assert.equal(A.normalizeChosenColor(canonical), canonical, 'idempotent');
+      assert.equal(A.normalizeChosenColor(reload(canonical)), hex, 'JSON round-trip');
+    }
+  }
+  for (const bad of [null, undefined, true, 42, [], {}, Object('#4ADE80'), '', '#FFFFFF',
+    '#000000', '#abc', '##4ADE80', '#4ADE8000', 'GGGGGG', ' green', 'green ', 'GREEN',
+    ' #4ADE80', '#4ADE80\n', '__proto__', 'constructor', 'rgb(74,222,128)', '#４ＡＤＥ８０']) {
+    assert.equal(A.normalizeChosenColor(bad), null, String(bad));
+  }
+});
+
+test('chosen gradient foundation: exact HSL stops, bounded lightness, pure and deterministic', () => {
+  assert.deepEqual(A.gradientStops('#4ade80'), ['hsl(141.89 69.16% 70.04%)', '#4ADE80', 'hsl(141.89 69.16% 46.04%)']);
+  assert.deepEqual(A.gradientStops('#F5F6F8'), ['hsl(220 17.65% 100%)', '#F5F6F8', 'hsl(220 17.65% 84.67%)']);
+  assert.equal(A.gradientStops('green'), null, 'only explicit hex gets a new paint; defaults stay CSS');
+  assert.equal(A.gradientStops('#FFFFFF'), null, 'off-palette never painted');
+  for (const hex of A.HEX_PALETTE) {
+    const stops = A.gradientStops(hex);
+    assert.equal(stops.length, 3); assert.equal(stops[1], hex);
+    assert.deepEqual(A.gradientStops(hex.slice(1).toLowerCase()), stops);
+    const light = Number(stops[0].match(/ ([\d.]+)%\)$/)[1]);
+    const dark = Number(stops[2].match(/ ([\d.]+)%\)$/)[1]);
+    assert.ok(light <= 100 && dark >= 0 && light > dark, hex);
+    stops[0] = 'mutated';
+    assert.notEqual(A.gradientStops(hex)[0], 'mutated', 'fresh result, no shared mutable state');
+  }
+});
+
+test('canonical backend hex reaches the principal and pill consumers without changing defaults', () => {
+  assert.equal(A.resolveColor('abito', { abito: '#2dd4bf' }), '#2DD4BF');
+  assert.equal(A.resolveColor('abito', {}), 'green');
+  assert.equal(A.label('#2DD4BF'), 'Menta');
+  const P = require(path.join(frontend, 'pills.js'));
+  const state = P.normalize({ pillColors: { integration_claude: '#2dd4bf', constructor: '#2DD4BF', unknown: '#2DD4BF' },
+    customBlobs: [{ name: 'Correo', color: '#f4505e' }] });
+  assert.deepEqual(state.pillColors, { integration_claude: '#2DD4BF' });
+  assert.equal(state.blobs[0].color, '#F4505E');
+  assert.deepEqual(A.sanitizeOverrides({ abito: '#FFFFFF', constructor: '#2DD4BF' }), {});
+});
+
+test('hex consumers apply and clear all three stops without changing the engine/default tokens', () => {
+  for (const file of ['island.js', 'specialists.js', 'pills-view.js', 'settings.js', 'pill-settings.js']) {
+    const source = fs.readFileSync(path.join(frontend, file), 'utf8');
+    const helper = source.match(/function paintChosenColor\(node, color\) \{[\s\S]*?\n  \}/)[0];
+    const paint = require('node:vm').runInNewContext('(' + helper + ')', { A, AVATAR: A });
+    const vars = {}; const node = { style: { setProperty: (key, value) => { vars[key] = value; } } };
+    paint(node, '#2DD4BF');
+    assert.deepEqual([1, 2, 3].map(i => vars['--chosen-' + i]), A.gradientStops('#2DD4BF'), file);
+    paint(node, 'green');
+    assert.deepEqual(Object.values(vars), ['', '', '', ''], file + ' clears chosen paint for defaults');
+  }
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+  for (const i of [1, 2, 3]) assert.ok(css.includes('stop-color: var(--chosen-' + i + ')'), 'chosen stop ' + i);
+});
+
 // ---- the principal: green by default, never a function of activity ----------------------
 test('the pose list used here is the engine\'s own ORDER (a copy would drift)', () => {
   const m = /const ORDER = (\[[^\]]*\])/.exec(engine);
