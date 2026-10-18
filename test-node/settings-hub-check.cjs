@@ -70,6 +70,14 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert.equal((html.match(/<script\b/g) || []).length, 2);
   assert(/<script type="module" src="\.\/settings-app\.js"><\/script>/.test(html));
   for (const css of ['settings/settings.css', 'hub/hub.css']) assert(html.includes(`vendor/coucou/${css}`));
+  const entry = fs.readFileSync(path.join(root, 'frontend/settings-app.js'), 'utf8');
+  assert(entry.includes("import { renderAgentSettings }")); assert(entry.includes("import { renderChatSettings }"));
+  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action']", 'slice 3 does not expand IPC allow-list');
+  for (const file of ['agents.ts','chat.ts']) {
+    const source = fs.readFileSync(path.join(base,file),'utf8');
+    assert(!/innerHTML|setAttribute\(['"]style|console\.|localStorage|sessionStorage/.test(source), file);
+    assert(!/call\(['"](?:hooks_apply|statusline_preview|statusline_apply|local_connect|open_chat_url)/.test(source), file);
+  }
   const gate = fs.readFileSync(path.join(root, 'src/bridge.rs'), 'utf8');
   assert(gate.includes('tauri://localhost/settings.html'));
   const native = fs.readFileSync(path.join(root, 'src/settingswindow.rs'), 'utf8');

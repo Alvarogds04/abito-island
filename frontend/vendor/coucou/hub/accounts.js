@@ -11,7 +11,7 @@ const PRESETS = [
   ["lmstudio", "LM Studio (local)", "http://127.0.0.1:1234/v1", "openai-completions"],
   ["custom", "Endpoint personalizado (HTTPS)", "", "openai-completions"]
 ];
-async function renderAccounts({ invoke, V, listen, timers, page = "all" }) {
+async function renderAccounts({ invoke, V, listen, timers, page = "all", keys: showKeys = true }) {
   const s = session(invoke, listen, timers), { root, call, work, watch, later, message } = s;
   const agent = (p) => call("agent_action", p);
   let state = null, owned = null, form = null, generation = 0;
@@ -334,11 +334,11 @@ async function renderAccounts({ invoke, V, listen, timers, page = "all" }) {
     if (services.kind !== "ready") connectors.append(status(services));
     else for (const i of services.items) connectors.append(row(i.label, [i.word, i.sends ? "Puede enviar" : ""].filter(Boolean).join(" · ")));
     if (page !== "chat") root.append(connectors);
-    if (page !== "integrations") root.append(keys);
+    if (page !== "integrations" && showKeys) root.append(keys);
     root.append(message);
     restore();
   }
-  if (page !== "integrations") paintKeys();
+  if (page !== "integrations" && showKeys) paintKeys();
   paint();
   watch("agent:state", apply);
   later(() => {
@@ -356,7 +356,7 @@ async function renderAccounts({ invoke, V, listen, timers, page = "all" }) {
     ask.timedOut = true;
     paint();
   }, V.AGENTS_WAIT_MS);
-  if (page !== "integrations") work(async () => {
+  if (page !== "integrations" && showKeys) work(async () => {
     const presence = {};
     for (const id of V.KEY_IDS) {
       const r = await call("secret_action", V.keyPayload("present", id));

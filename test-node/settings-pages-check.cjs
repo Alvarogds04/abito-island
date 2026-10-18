@@ -18,6 +18,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const host = new Element('div'); document.getElementById = () => host;
   vm.runInNewContext(source, { window: {}, document, inactivePages, renderUnavailable,
     renderAccounts: fake('accounts'), renderModels: fake('models'), renderPills: fake('pills'),
+    renderAgentSettings: fake('agent-settings'), renderChatSettings: fake('chat-settings'),
     renderGeneral: fake('general'), card: x => x, row: () => new Element('div'),
     startHub: async (_root, opts) => { config = opts; }, Set, Promise });
   for (const id of ids) {
@@ -29,13 +30,14 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       assert(text(container).includes('pendiente de conectar'), id);
     } else {
       const cleanup = await config.renderNotch(id, container);
-      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['pills','agents']], chat:[['accounts','chat'],['models',undefined]], integrations:[['accounts','integrations']]}[id];
+      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['agent-settings',undefined],['pills','agents']], chat:[['chat-settings',undefined],['models',undefined],['accounts','chat']], integrations:[['accounts','integrations']]}[id];
       if (expected) { assert.deepEqual(invoked, expected); assert(container.children.length); cleanup?.(); }
       else { assert(text(container).includes(id === 'phone' ? 'No disponible' : 'pendiente de conectar')); }
     }
     for (const e of all(container).filter(e => ['button','input','select','textarea'].includes(e.tagName))) assert.equal(e.disabled, true, id);
   }
   assert(source.includes("page === 'pills' || page === 'agents'"), 'pills and agents retain the existing closed planner');
+  assert(disposed.includes('agent-settings') && disposed.includes('chat-settings'), 'new page adapters are disposed');
   const generalSource = fs.readFileSync(path.join(base,'general.ts'),'utf8');
   assert(generalSource.includes("t('Weekly recap')"), 'General includes the upstream recap rows');
   assert(disposed.includes('accounts') && disposed.includes('models') && disposed.includes('pills'));

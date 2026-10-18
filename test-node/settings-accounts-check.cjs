@@ -12,6 +12,7 @@ class Element {
   getAttribute(k) { return this.attrs[k]; }
   get ownerDocument() { return global.document; }
   append(...nodes) { this.children.push(...nodes); }
+  prepend(...nodes) { this.children.unshift(...nodes); }
   appendChild(node) { this.append(node); return node; }
   replaceChildren(...nodes) { this.children = nodes; }
   removeChild(n) { this.children.splice(this.children.indexOf(n),1); }
@@ -78,6 +79,12 @@ if (require.main === module) (async () => {
   ui = await renderAccounts({ ...options, page: 'integrations' }); await ui.settled(); calls.length = 0;
   assert(text(ui).includes('Conectores')); assert(!text(ui).includes('Claves')); assert(!text(ui).includes('Configurar proveedor'));
   ui.dispose(); assert.equal(Object.keys(events).length, 0);
+  calls.length = 0;
+  ui = await renderAccounts({ ...options, page:'chat', keys:false }); await ui.settled();
+  assert(!text(ui).includes('Claves'), 'Coucou key controls own the Chat page; no duplicate key editor');
+  assert(!calls.some(([cmd]) => cmd === 'secret_action'), 'the additional account section does not re-query keys');
+  assert(text(ui).includes('Configurar proveedor'), 'saved/custom account functionality remains available');
+  ui.dispose();
   // Frame-driven authentication: reuse the existing account, never invent a command.
   state = { connection:'connected', providers:[{id:'anthropic',name:'Anthropic',methods:['api_key','oauth'],configured:false}], accounts:[{accountId:'personal',provider:'anthropic',label:'Personal',authMethod:'none',configured:false}], ownedAccounts:{accounts:[]}, auth:{} };
   ui = await renderAccounts(options); await ui.settled(); calls.length = 0;

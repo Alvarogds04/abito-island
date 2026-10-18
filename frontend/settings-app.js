@@ -7,6 +7,8 @@ import './pills.js';
 import './specialists-view.js';
 import './theme.js';
 import { renderAccounts, renderModels } from './vendor/coucou/hub/accounts.js';
+import { renderAgentSettings } from './vendor/coucou/hub/agents.js';
+import { renderChatSettings } from './vendor/coucou/hub/chat.js';
 import { renderPills } from './vendor/coucou/hub/personalization.js';
 import { startHub } from './vendor/coucou/hub/shell.js';
 import { inactivePages, renderUnavailable } from './vendor/coucou/hub/pages.js';
@@ -34,9 +36,17 @@ startHub(root, {
       const mounted = [];
       // Each renderer retains its closed IPC planner and per-mount cleanup.
       try {
+        if (page === 'agents') mounted.push(await renderAgentSettings(options));
         if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page }));
-        if (page === 'chat' || page === 'integrations') mounted.push(await renderAccounts({ ...options, page }));
-        if (page === 'chat') mounted.push(await renderModels(options));
+        if (page === 'chat') {
+          const chat = await renderChatSettings(options); mounted.push(chat);
+          const models = await renderModels(options);
+          // Preserve Abito's verified model controls inside Coucou's Local models section.
+          chat.children[2]?.append(models);
+          const disposeChat = chat.dispose;
+          chat.dispose = () => { models.dispose(); disposeChat(); };
+        }
+        if (page === 'chat' || page === 'integrations') mounted.push(await renderAccounts({ ...options, page, keys: page !== 'chat' }));
         if (mounted.length) container.append(...mounted);
         else container.append(renderUnavailable(page));
       } catch {

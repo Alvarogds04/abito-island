@@ -11,7 +11,7 @@ const PRESETS = [
   ['lmstudio', 'LM Studio (local)', 'http://127.0.0.1:1234/v1', 'openai-completions'],
   ['custom', 'Endpoint personalizado (HTTPS)', '', 'openai-completions'],
 ];
-export async function renderAccounts({ invoke, V, listen, timers, page = 'all' }: any) {
+export async function renderAccounts({ invoke, V, listen, timers, page = 'all', keys: showKeys = true }: any) {
   const s = session(invoke, listen, timers), { root, call, work, watch, later, message } = s;
   const agent = (p: any) => call('agent_action', p);
   let state: any = null, owned: any = null, form: HTMLElement | null = null, generation = 0;
@@ -183,17 +183,17 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all' }
     else for (const i of services.items) connectors.append(row(i.label, [i.word, i.sends ? 'Puede enviar' : ''].filter(Boolean).join(' · ')));
     // Legacy services are read-only: do not invent a connector toggle command.
     if (page !== 'chat') root.append(connectors);
-    if (page !== 'integrations') root.append(keys);
+    if (page !== 'integrations' && showKeys) root.append(keys);
     root.append(message); restore();
   }
-  if (page !== 'integrations') paintKeys();
+  if (page !== 'integrations' && showKeys) paintKeys();
   paint();
   watch('agent:state', apply);
   later(() => { if (state === null) { state = { connection: 'no_daemon' }; paint(); } }, V.CONNECT_WAIT_MS);
   work(() => agent({ action: 'view' }), next => { ask.at = next?.last_error?.n || 0; apply(next); });
   for (const a of ['connectors_list','agents_list','hooks_preview']) work(() => agent({ action: a }), apply);
   later(() => { ask.timedOut = true; paint(); }, V.AGENTS_WAIT_MS);
-  if (page !== 'integrations') work(async () => {
+  if (page !== 'integrations' && showKeys) work(async () => {
     const presence: any = {};
     for (const id of V.KEY_IDS) { const r = await call('secret_action', V.keyPayload('present', id)); presence[id] = r?.present === true; }
     keyPresence = presence; paintKeys();

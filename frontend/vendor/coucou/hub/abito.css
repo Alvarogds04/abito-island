@@ -5,3 +5,5 @@ body.settings-window { background: #000; color: #f5f6f8; }
 .hub-hero { background: #000; }
 .hub-brand svg { width: 28px; height: 28px; }
 .hub-hero svg.troupe { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Per-mount status must not create an empty extra settings row. */
+.abito-settings-feedback:empty { display: none; }
