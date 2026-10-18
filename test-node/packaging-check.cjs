@@ -48,7 +48,10 @@ test('build receipt hashes every curated path, including nested vendor files', (
     'vendor/coucou/hub/hub.css', 'vendor/coucou/hub/abito.css',
     'vendor/coucou/hub/accounts.ts', 'vendor/coucou/hub/accounts.js',
     'vendor/coucou/hub/personalization.ts', 'vendor/coucou/hub/personalization.js',
-    'vendor/coucou/hub/runtime.ts', 'vendor/coucou/hub/runtime.js', 'clay-engine.js']) {
+    'vendor/coucou/hub/runtime.ts', 'vendor/coucou/hub/runtime.js',
+    'vendor/coucou/hub/pages.ts', 'vendor/coucou/hub/pages.js',
+    'vendor/coucou/hub/notch.ts', 'vendor/coucou/hub/notch.js',
+    'vendor/coucou/settings/colors.ts', 'vendor/coucou/hub/i18n-es.ts', 'clay-engine.js']) {
     assert.equal(receipt.inputs.frontend[nested], L.sha256File(path.join(crate, 'frontend', nested)));
   }
   assert.deepEqual(Object.keys(receipt.inputs.frontend).sort(), [...L.FRONTEND_FILES].sort());

@@ -7,8 +7,9 @@ import './pills.js';
 import './specialists-view.js';
 import './theme.js';
 import { renderAccounts, renderModels } from './vendor/coucou/hub/accounts.js';
-import { renderPills, renderAppearance } from './vendor/coucou/hub/personalization.js';
+import { renderPills } from './vendor/coucou/hub/personalization.js';
 import { startHub } from './vendor/coucou/hub/shell.js';
+import { inactivePages, renderUnavailable } from './vendor/coucou/hub/pages.js';
 import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
@@ -24,18 +25,25 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
-  version: '', flowPages: {},
+  version: '0.1.0', flowPages: inactivePages,
   async renderNotch(page, container) {
     if (page === 'general') {
       try { container.append(await renderGeneral({ invoke, V: window.AbitoSettings })); }
       catch { container.append(card(row('No disponible', 'No se pudieron leer los ajustes. Vuelve a abrir esta página.'))); }
-    } else if (['accounts', 'models', 'pills', 'appearance'].includes(page)) {
-      const renderer = { accounts: renderAccounts, models: renderModels, pills: renderPills, appearance: renderAppearance }[page];
-      const ui = await renderer(page === 'pills' || page === 'appearance' ? personal : options);
-      container.append(ui);
-      return () => ui.dispose();
     } else {
-      container.append(card(row(page === 'phone' ? 'No disponible' : 'Próximamente', null)));
+      const mounted = [];
+      // Each renderer retains its closed IPC planner and per-mount cleanup.
+      try {
+        if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page }));
+        if (page === 'chat' || page === 'integrations') mounted.push(await renderAccounts({ ...options, page }));
+        if (page === 'chat') mounted.push(await renderModels(options));
+        if (mounted.length) container.append(...mounted);
+        else container.append(renderUnavailable(page));
+      } catch {
+        for (const ui of mounted) ui.dispose();
+        container.append(card(row('No disponible', 'No se pudieron leer los ajustes. Vuelve a abrir esta página.')));
+      }
+      return () => { for (const ui of mounted) ui.dispose(); };
     }
   },
 }).catch(() => { root.textContent = 'No se pudieron abrir los ajustes.'; });

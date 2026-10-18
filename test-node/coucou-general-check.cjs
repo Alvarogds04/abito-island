@@ -85,5 +85,8 @@ const controls = section => {
     if (control === 'volume' || control === 'close') { ui[control].value = value; ui[control].fire('change'); }
     await pending; assert.deepEqual(calls, [expected]);
   }
+  const hubSource = fs.readFileSync(path.join(vendor, 'hub/general.ts'), 'utf8');
+  assert(hubSource.includes("t('seconds after you leave the island')"), 'mounted General retains upstream seconds copy');
+  assert(!hubSource.includes('autoCloseSegments'), 'mounted General must not retain segmented auto-close');
   console.log('PASS coucou-general: pure section, immutable saves, commit volume, interval normalization, unavailable rows, real bridge payloads');
 })().catch(error => { console.error(error); process.exitCode = 1; });

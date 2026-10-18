@@ -1,5 +1,9 @@
 // Abito-owned migration of settings.js/runIntent and pill-settings.js, using literal MIT hub controls.
 import { h, clear } from "../views/dom.js";
+import { colorDot } from "../settings/colors.js";
+import { PILL_CATEGORIES, pillDefinition, MAX_DECLARED } from "../core/pills.js";
+import { t } from "./i18n-es.js";
+import { notchSection, notchRow, notchHint } from "./notch.js";
 import { row, card, select, toggle, segmented } from "./ui.js";
 import { action, field, note, section, trusted, session, preserveFocus } from "./runtime.js";
 function preview() {
@@ -73,9 +77,15 @@ async function renderAppearance({ invoke, listen, V, S, A }) {
   });
   return s.finish();
 }
-async function renderPills({ invoke, listen, V, S, A, P, C }) {
+async function renderPills({ invoke, listen, V, S, A, P, C, page = "all" }) {
   const s = session(invoke, listen), { root, call, work, watch, message } = s;
   let prefs = {}, store = null, listing = null, saving = false;
+  let connection = null, presence = {};
+  const dots = /* @__PURE__ */ new Set();
+  const closeDots = () => {
+    for (const dot of dots) dot.dispose();
+    dots.clear();
+  };
   let editor = null, deleting = "", editorId = "", lastKey = "", editorRevision = 0;
   const owned = () => S.storeView(store, listing);
   const agents = () => S.agentsView(store, prefs, A);
@@ -242,28 +252,72 @@ async function renderPills({ invoke, listen, V, S, A, P, C }) {
     if (e.isTrusted) instructionsDraft = true;
   });
   function paint() {
-    const key = JSON.stringify([prefs.avatarColors, prefs.pillColors, prefs.declaredPills, prefs.mainPill, prefs.customBlobs, prefs.islandAgents, prefs.abitoInstructions, store, listing, saving, !!editor, editorRevision, deleting]);
+    const key = JSON.stringify([prefs.avatarColors, prefs.pillColors, prefs.declaredPills, prefs.mainPill, prefs.customBlobs, prefs.islandAgents, prefs.abitoInstructions, store, listing, connection, presence, saving, !!editor, editorRevision, deleting]);
     if (key === lastKey) return;
     lastKey = key;
     const restore = preserveFocus(root);
+    closeDots();
     clear(root);
     const cur = P.normalize(prefs), choices = C.mainChoices();
-    const main = trusted(select(choices.map((d) => [d.id, d.name]), cur.mainPill, (id) => {
+    const main = trusted(select(choices.map((d) => [d.id, pillDefinition(d.id)?.name || d.name]), cur.mainPill, (id) => {
       if (P.chooseMain(cur, id)) run({ type: "prefs", payload: { action: "set_main_pill", id } });
     }));
+    main.className = "";
+    main.disabled = saving;
     main.setAttribute("aria-label", "Píldora principal");
-    const active = section("Píldoras activas", row("Principal", null, main));
-    for (const d of C.available()) {
-      const on = cur.declaredPills.includes(d.id), sw = trusted(toggle(on, () => {
+    const slots = h("div", { class: "hint", text: t("{used}/{max} slots in use — the main tool doesn't take one.", { used: cur.declaredPills.length, max: MAX_DECLARED }) });
+    slots.classList.toggle("full", cur.declaredPills.length >= MAX_DECLARED);
+    const groups = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
+    const hookIds = { integration_claude: "claude-code", agent_cursor: "cursor", agent_codex: "codex", agent_gemini: "gemini-cli", agent_copilot: "copilot-cli", agent_opencode: "opencode", agent_amp: "amp" };
+    const hooks = V.agentsView(connection).rows || [];
+    function pillRow(entry) {
+      const d = pillDefinition(entry.id) || entry, isMain = d.id === cur.mainPill;
+      const on = cur.declaredPills.includes(d.id), full = !isMain && !on && cur.declaredPills.length >= MAX_DECLARED;
+      const dot = colorDot(d, "width:10px;height:10px", () => P.normalize(prefs).pillColors, (next) => {
+        if (saving) return;
+        run({ type: "prefs", payload: Object.hasOwn(next, d.id) ? { action: "set_pill_color", id: d.id, color: next[d.id] } : { action: "clear_pill_color", id: d.id } });
+      }, true);
+      dots.add(dot);
+      const el = h("div", { class: full ? "pill-row full" : "pill-row" }, dot, h("span", { class: "name", text: d.name }));
+      if (isMain) {
+        el.append(h("span", { class: "state", text: t("Main") }));
+        return el;
+      }
+      let why = "";
+      if (d.support === "soon") why = t("Coming soon");
+      else if (d.connect?.kind === "hooks") {
+        const state = hooks.find((r) => r.id === hookIds[d.id])?.state;
+        why = state === "connected" ? "" : state && state !== "unknown" ? t("Hooks not installed") : "No disponible todavía";
+      } else if (d.connect?.kind === "key") why = presence[d.connect.key] ? "" : t("Key not configured");
+      else if (d.connect?.kind === "server") {
+        const provider = d.id === "ai_ollama" ? "ollama" : "lmstudio";
+        const connected = (connection?.accounts || []).some((a) => a.provider === provider && a.configured === true);
+        why = connected ? "" : t("Not connected");
+      }
+      const sw = trusted(toggle(on, () => {
         if (P.toggle(P.normalize(prefs), d.id)) run({ type: "prefs", payload: { action: "toggle_declared_pill", id: d.id } });
       }));
-      sw.disabled = saving || !P.toggle(cur, d.id);
+      sw.disabled = saving || full;
       sw.setAttribute("aria-label", d.name);
-      const color = trusted(select([["", "Predeterminado"], ...A.HEX_PALETTE.map((v2) => [v2, A.label(v2)])], cur.pillColors[d.id] || "", (v2) => run({ type: "prefs", payload: v2 ? { action: "set_pill_color", id: d.id, color: v2 } : { action: "clear_pill_color", id: d.id } })));
-      color.setAttribute("aria-label", `Color de ${d.name}`);
-      active.append(row(d.name, d.description || null, sw, color));
+      el.append(h("span", { class: "state", text: why }), sw);
+      return el;
     }
-    root.append(active);
+    for (const cat of PILL_CATEGORIES) {
+      if (cat.id === "service") continue;
+      const pills = C.available().filter((d) => d.category === cat.id);
+      if (pills.length) groups.append(h("div", { class: "pill-group" }, h("h3", { text: t(cat.title) }), ...pills.map(pillRow)));
+    }
+    const active = notchSection(
+      t("Active pills"),
+      notchHint(t("Choose the tools you use. Abito only shows what you declare here.")),
+      slots,
+      notchRow(t("Main tool"), main),
+      groups
+    );
+    if (page !== "agents") {
+      root.append(active);
+      root.append(section("Servicios", ...C.available().filter((d) => d.category === "service").map(pillRow)));
+    }
     if (!instructionsDraft) principalInstructions.value = prefs.abitoInstructions || "";
     const principal = section("Abito", row("Instrucciones", "Declarativo: todavía no se aplica", principalInstructions, action("Guardar instrucciones", () => {
       run({ type: "set_abito_instructions", text: principalInstructions.value });
@@ -321,7 +375,9 @@ async function renderPills({ invoke, listen, V, S, A, P, C }) {
     if (editorId && !record(editorId)) editor = null;
     if (editor) spec.append(card(editor));
     principal.append(preview());
-    root.append(principal, spec, colors(V, A, prefs, [{ id: A.PRINCIPAL_ID, name: "Abito" }, ...S.identityView(store).identities], (p) => run({ type: "prefs", payload: p })), message);
+    if (page !== "pills") root.append(principal, spec);
+    if (page !== "agents") root.append(colors(V, A, prefs, [{ id: A.PRINCIPAL_ID, name: "Abito" }, ...S.identityView(store).identities], (p) => run({ type: "prefs", payload: p })));
+    root.append(message);
     restore();
   }
   paint();
@@ -349,7 +405,29 @@ async function renderPills({ invoke, listen, V, S, A, P, C }) {
     listing = p;
     paint();
   });
-  return s.finish();
+  if (page !== "agents") {
+    watch("agent:state", (p) => {
+      connection = { ...connection, ...p };
+      paint();
+    });
+    for (const action2 of ["view", "agents_list"]) work(() => call("agent_action", { action: action2 }), (p) => {
+      connection = { ...connection, ...p };
+      paint();
+    });
+    work(async () => {
+      const next = {};
+      for (const key of ["anthropic-api-key", "google-api-key", "openai-api-key"]) next[key] = (await call("secret_action", V.keyPayload("present", key)))?.present === true;
+      return next;
+    }, (p) => {
+      presence = p;
+      paint();
+    });
+  }
+  const ui = s.finish(), dispose = ui.dispose;
+  return Object.assign(ui, { dispose: () => {
+    closeDots();
+    dispose();
+  } });
 }
 export {
   renderAppearance,

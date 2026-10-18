@@ -15,17 +15,14 @@ const FLOW_PAGES = [
   { id: "flowsettings", icon: "sliders", title: () => t("Settings") }
 ];
 const NOTCH_PAGES = [
-  { id: "general", icon: "gear", title: () => t("General"), subtitle: () => t("The character, its sounds and how the island behaves.") },
-  { id: "pills", icon: "grid", title: () => "Blobs", subtitle: () => "Píldoras activas, especialistas y colores de identidad." },
+  { id: "general", icon: "gear", title: () => t("General"), subtitle: () => t("Abito, his sounds and how the island behaves.") },
+  { id: "pills", icon: "grid", title: () => t("Active pills"), subtitle: () => t("The pills shown in the island, their order and their colours.") },
   { id: "agents", icon: "terminal", title: () => t("Agents"), subtitle: () => t("Claude Code, Codex and the other agents Abito follows.") },
   { id: "chat", icon: "chat", title: () => t("Chat"), subtitle: () => t("The AI of the island's chat, with your own keys.") },
   { id: "voice", icon: "wave", title: () => "OK Abito" },
   { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
-  { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") },
-  { id: "accounts", icon: "lock", title: () => "Cuentas", subtitle: () => "Proveedores, conectores y claves de Abito." },
-  { id: "models", icon: "sliders", title: () => "Modelos", subtitle: () => "Modelos de tus cuentas y modelos locales verificados." },
-  { id: "appearance", icon: "sliders", title: () => "Apariencia", subtitle: () => "Tema y colores de Abito y tus especialistas." }
+  { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") }
 ];
 const ALL = [...FLOW_PAGES, ...NOTCH_PAGES];
 const DEFAULT_STATUS = {
@@ -97,21 +94,21 @@ async function startHub(root, opts) {
     statusLine.append(h("i", { class: "dot", style: `background:${color}` }), h("span", { text }));
   }
   async function show(page) {
-    const def = ALL.find((p) => p.id === page);
+    const def = ALL.find((p) => p.id === page) ?? FLOW_PAGES[0];
     ctx.onLeave?.();
     ctx.onLeave = void 0;
-    current = def?.id ?? page;
+    current = def.id;
     for (const [id, el] of items) el.classList.toggle("on", id === current);
     const token = ++rendering;
     const page_ = h("div", { class: "hub-page" });
-    const renderer = opts.flowPages[page];
+    const renderer = opts.flowPages[def.id];
     if (renderer) {
       await renderer(page_, ctx);
     } else {
-      page_.append(hero(page, def?.title() ?? t("Settings"), def?.subtitle?.() ?? null));
+      page_.append(hero(def.id, def.title(), def.subtitle?.() ?? null));
       const container = h("div", { id: "settings-root" });
       page_.append(container);
-      const dispose = await opts.renderNotch(page, container);
+      const dispose = await opts.renderNotch(def.id, container);
       if (token !== rendering) {
         dispose?.();
         return;
@@ -145,7 +142,7 @@ async function startHub(root, opts) {
   await show(current);
   void onEvent("hub-page", (page) => {
     const id = page === "settings" ? "flowsettings" : page;
-    void show(id);
+    if (ALL.some((p) => p.id === id)) void show(id);
   });
   void onEvent("flow-prefs", (prefs) => {
     status = { ...status, prefs };

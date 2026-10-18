@@ -19,7 +19,9 @@ export function colorDot(
   size: string,
   colors: () => unknown,
   pick: (next: Record<string, string>) => void,
-): HTMLElement {
+  trustedOnly = false, // Abito: opt-in boundary for the settings webview.
+): HTMLElement & { dispose(): void } {
+  let release = () => {};
   const current = () => pillColor(def.id, def.color, colors());
   const dot = h("i", {
     class: "dot color-dot",
@@ -67,13 +69,13 @@ export function colorDot(
         "aria-label": hex,
         "aria-pressed": hex === now,
       });
-      swatch.addEventListener("click", () => choose(hex));
+      swatch.addEventListener("click", e => { if (!trustedOnly || e.isTrusted) choose(hex); });
       palette.append(swatch);
     }
     // Back to the catalog's colour: only offered once it has been changed.
     if (now !== pillColor(def.id, def.color, null)) {
       const reset = h("button", { class: "reset", text: t("Default") });
-      reset.addEventListener("click", () => choose(null));
+      reset.addEventListener("click", e => { if (!trustedOnly || e.isTrusted) choose(null); });
       palette.append(reset);
     }
 
@@ -88,15 +90,17 @@ export function colorDot(
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", close);
     closeOpen = close;
+    release = () => { if (closeOpen === close) close(); };
     (palette.querySelector<HTMLElement>(".swatch.on") ?? palette.querySelector<HTMLElement>(".swatch"))?.focus();
   };
 
-  dot.addEventListener("click", () => (closeOpen ? closeOpen() : open()));
+  dot.addEventListener("click", e => { if (!trustedOnly || e.isTrusted) (closeOpen ? closeOpen() : open()); });
   dot.addEventListener("keydown", (e) => {
+    if (trustedOnly && !e.isTrusted) return;
     const key = (e as KeyboardEvent).key;
     if (key !== "Enter" && key !== " ") return;
     e.preventDefault();
     open();
   });
-  return dot;
+  return Object.assign(dot, { dispose: () => release() });
 }

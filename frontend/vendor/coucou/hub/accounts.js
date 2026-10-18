@@ -11,7 +11,7 @@ const PRESETS = [
   ["lmstudio", "LM Studio (local)", "http://127.0.0.1:1234/v1", "openai-completions"],
   ["custom", "Endpoint personalizado (HTTPS)", "", "openai-completions"]
 ];
-async function renderAccounts({ invoke, V, listen, timers }) {
+async function renderAccounts({ invoke, V, listen, timers, page = "all" }) {
   const s = session(invoke, listen, timers), { root, call, work, watch, later, message } = s;
   const agent = (p) => call("agent_action", p);
   let state = null, owned = null, form = null, generation = 0;
@@ -267,7 +267,7 @@ async function renderAccounts({ invoke, V, listen, timers }) {
         if (s.alive()) paint();
       });
     }, daemonBusy);
-    root.append(section("Motor", row(d.rowTitle, conn?.aria || d.rowSub, restart)));
+    if (page !== "integrations") root.append(section("Motor", row(d.rowTitle, conn?.aria || d.rowSub, restart)));
     const ownedSec = section("Configuración de proveedores");
     if (form) ownedSec.append(card(form));
     else if (!owned) ownedSec.append(note("El almacén de cuentas no está disponible. No se modificó ninguna cuenta."));
@@ -291,7 +291,7 @@ async function renderAccounts({ invoke, V, listen, timers }) {
         paint();
       }, saving));
     }
-    root.append(ownedSec);
+    if (page !== "integrations") root.append(ownedSec);
     const auth = state?.auth || {}, prompt = V.promptView(auth.prompt), ev = V.eventView(auth.event);
     const flowLive = !!(prompt || ev || auth.flowId && !auth.last);
     if (login?.phase === "active") {
@@ -324,7 +324,7 @@ async function renderAccounts({ invoke, V, listen, timers }) {
       for (const input of flow.querySelectorAll("input")) input.value = "";
       flow = null;
     }
-    root.append(providers);
+    if (page !== "integrations") root.append(providers);
     const connectors = section("Conectores"), av = V.agentsView(state, { askedAtError: ask.at, timedOut: ask.timedOut });
     connectors.append(label("Agentes"));
     if (av.kind !== "ready") connectors.append(status(av));
@@ -333,10 +333,12 @@ async function renderAccounts({ invoke, V, listen, timers }) {
     connectors.append(label("Servicios"));
     if (services.kind !== "ready") connectors.append(status(services));
     else for (const i of services.items) connectors.append(row(i.label, [i.word, i.sends ? "Puede enviar" : ""].filter(Boolean).join(" · ")));
-    root.append(connectors, keys, message);
+    if (page !== "chat") root.append(connectors);
+    if (page !== "integrations") root.append(keys);
+    root.append(message);
     restore();
   }
-  paintKeys();
+  if (page !== "integrations") paintKeys();
   paint();
   watch("agent:state", apply);
   later(() => {
@@ -354,7 +356,7 @@ async function renderAccounts({ invoke, V, listen, timers }) {
     ask.timedOut = true;
     paint();
   }, V.AGENTS_WAIT_MS);
-  work(async () => {
+  if (page !== "integrations") work(async () => {
     const presence = {};
     for (const id of V.KEY_IDS) {
       const r = await call("secret_action", V.keyPayload("present", id));

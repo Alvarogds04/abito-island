@@ -42,7 +42,7 @@ if (require.main === module) (async () => {
     if (cmd === 'models_action') return structuredClone(modelListing);
     return structuredClone(state);
   };
-  const options = { invoke, V, listen: async (name,f) => { events[name] = f; return () => { delete events[name]; }; }, timers: { setTimeout: (f,ms) => { timers.push({f,ms}); return timers.length; }, clearTimeout() {} } };
+  const options = { invoke, V, page: 'chat', listen: async (name,f) => { events[name] = f; return () => { delete events[name]; }; }, timers: { setTimeout: (f,ms) => { timers.push({f,ms}); return timers.length; }, clearTimeout() {} } };
   ui = await renderAccounts(options); await ui.settled();
   for (const action of ['view','connectors_list','agents_list','hooks_preview']) assert(calls.some(([c,p]) => c === 'agent_action' && p.action === action));
   assert(timers.some(t => t.ms === V.AGENTS_WAIT_MS)); assert(timers.some(t => t.ms === V.CONNECT_WAIT_MS));
@@ -72,7 +72,11 @@ if (require.main === module) (async () => {
   click('Editar');field('account-form').fire('submit');await ui.settled();assert.deepEqual(calls.pop(),['agent_action',{action:'abito_account_save',accountId:'saved-one',provider:'openai',config:saved.config}]);
   click('Editar');click('Guardar endpoint');await ui.settled();assert.deepEqual(calls.pop(),['agent_action',{action:'abito_account_endpoint_set',accountId:'saved-one',provider:'openai',config:saved.config}]);
   click('Quitar conexión',false);await ui.settled();assert.deepEqual(calls,[]);click('Quitar conexión');await ui.settled();assert.deepEqual(calls.pop(),['agent_action',{action:'abito_account_remove',accountId:'saved-one'}]);
-  assert(text(ui).indexOf('Conectores') < text(ui).indexOf('Claves'));
+  assert(!text(ui).includes('Conectores'));
+  assert(text(ui).includes('Claves'));
+  ui.dispose(); assert.equal(Object.keys(events).length, 0);
+  ui = await renderAccounts({ ...options, page: 'integrations' }); await ui.settled(); calls.length = 0;
+  assert(text(ui).includes('Conectores')); assert(!text(ui).includes('Claves')); assert(!text(ui).includes('Configurar proveedor'));
   ui.dispose(); assert.equal(Object.keys(events).length, 0);
   // Frame-driven authentication: reuse the existing account, never invent a command.
   state = { connection:'connected', providers:[{id:'anthropic',name:'Anthropic',methods:['api_key','oauth'],configured:false}], accounts:[{accountId:'personal',provider:'anthropic',label:'Personal',authMethod:'none',configured:false}], ownedAccounts:{accounts:[]}, auth:{} };
@@ -114,7 +118,7 @@ if (require.main === module) (async () => {
   const fs = require('node:fs'), vm = require('node:vm');
   const entry = fs.readFileSync(path.resolve(__dirname,'../frontend/settings-app.js'),'utf8');
   const forwarded=[];
-  const context={window:{__TAURI__:{core:{invoke:async(c,a)=>{forwarded.push([c,a]);}}}},document:{getElementById:()=>new Element('div')},startHub:async()=>{},renderAccounts(){},renderModels(){},renderPills(){},renderAppearance(){}};
+  const context={window:{__TAURI__:{core:{invoke:async(c,a)=>{forwarded.push([c,a]);}}}},document:{getElementById:()=>new Element('div')},startHub:async()=>{},inactivePages:{},renderUnavailable(){},renderAccounts(){},renderModels(){},renderPills(){},renderAppearance(){}};
   vm.runInNewContext(entry.replace(/^import .*;\n/gm,'')+'\nglobalThis.closedInvoke=invoke;',context);
   await context.closedInvoke('daemon_action',{payload:{action:'restart'}});assert.equal(forwarded.length,1);
   for(const args of [{payload:{action:'status'}},{payload:{action:'restart',extra:true}},{payload:{action:'restart'},extra:true},{}]) await assert.rejects(context.closedInvoke('daemon_action',args),/No disponible/);

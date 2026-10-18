@@ -11,7 +11,7 @@ const PRESETS = [
   ['lmstudio', 'LM Studio (local)', 'http://127.0.0.1:1234/v1', 'openai-completions'],
   ['custom', 'Endpoint personalizado (HTTPS)', '', 'openai-completions'],
 ];
-export async function renderAccounts({ invoke, V, listen, timers }: any) {
+export async function renderAccounts({ invoke, V, listen, timers, page = 'all' }: any) {
   const s = session(invoke, listen, timers), { root, call, work, watch, later, message } = s;
   const agent = (p: any) => call('agent_action', p);
   let state: any = null, owned: any = null, form: HTMLElement | null = null, generation = 0;
@@ -143,7 +143,7 @@ export async function renderAccounts({ invoke, V, listen, timers }: any) {
       if (daemonBusy) return; daemonBusy = true; paint();
       work(() => call('daemon_action', { action: 'restart' }), result => { message.textContent = V.daemonRestartOutcome(result).say; work(() => agent({ action: 'view' }), apply); }).finally(() => { daemonBusy = false; if (s.alive()) paint(); });
     }, daemonBusy);
-    root.append(section('Motor', row(d.rowTitle, conn?.aria || d.rowSub, restart)));
+    if (page !== 'integrations') root.append(section('Motor', row(d.rowTitle, conn?.aria || d.rowSub, restart)));
     const ownedSec = section('Configuración de proveedores');
     if (form) ownedSec.append(card(form));
     else if (!owned) ownedSec.append(note('El almacén de cuentas no está disponible. No se modificó ninguna cuenta.'));
@@ -154,7 +154,7 @@ export async function renderAccounts({ invoke, V, listen, timers }: any) {
       }, saving))));
       ownedSec.append(action('Configurar proveedor', () => { form = accountForm(null); paint(); }, saving));
     }
-    root.append(ownedSec);
+    if (page !== 'integrations') root.append(ownedSec);
     const auth = state?.auth || {}, prompt = V.promptView(auth.prompt), ev = V.eventView(auth.event);
     const flowLive = !!(prompt || ev || (auth.flowId && !auth.last));
     if (login?.phase === 'active') {
@@ -173,7 +173,7 @@ export async function renderAccounts({ invoke, V, listen, timers }: any) {
     }
     if (flowLive) providers.append(card(renderFlow(auth, prompt, ev)));
     else if (flow) { for (const input of flow.querySelectorAll('input')) (input as HTMLInputElement).value = ''; flow = null; }
-    root.append(providers);
+    if (page !== 'integrations') root.append(providers);
     const connectors = section('Conectores'), av = V.agentsView(state, { askedAtError: ask.at, timedOut: ask.timedOut });
     connectors.append(label('Agentes'));
     if (av.kind !== 'ready') connectors.append(status(av));
@@ -182,15 +182,18 @@ export async function renderAccounts({ invoke, V, listen, timers }: any) {
     if (services.kind !== 'ready') connectors.append(status(services));
     else for (const i of services.items) connectors.append(row(i.label, [i.word, i.sends ? 'Puede enviar' : ''].filter(Boolean).join(' · ')));
     // Legacy services are read-only: do not invent a connector toggle command.
-    root.append(connectors, keys, message); restore();
+    if (page !== 'chat') root.append(connectors);
+    if (page !== 'integrations') root.append(keys);
+    root.append(message); restore();
   }
-  paintKeys(); paint();
+  if (page !== 'integrations') paintKeys();
+  paint();
   watch('agent:state', apply);
   later(() => { if (state === null) { state = { connection: 'no_daemon' }; paint(); } }, V.CONNECT_WAIT_MS);
   work(() => agent({ action: 'view' }), next => { ask.at = next?.last_error?.n || 0; apply(next); });
   for (const a of ['connectors_list','agents_list','hooks_preview']) work(() => agent({ action: a }), apply);
   later(() => { ask.timedOut = true; paint(); }, V.AGENTS_WAIT_MS);
-  work(async () => {
+  if (page !== 'integrations') work(async () => {
     const presence: any = {};
     for (const id of V.KEY_IDS) { const r = await call('secret_action', V.keyPayload('present', id)); presence[id] = r?.present === true; }
     keyPresence = presence; paintKeys();

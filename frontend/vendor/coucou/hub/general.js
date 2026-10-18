@@ -1,8 +1,9 @@
-// Abito-owned General wiring using the MIT hub components; no new IPC commands.
+// Adapted from Coucou src/settings/main.ts generalSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
 import { h, clear } from "../views/dom.js";
 import { createBridge } from "../bridge-abito.js";
-import { card, row, toggle, segmented, select, button, label } from "./ui.js";
-import { t } from "./i18n-es.js";
+import { toggle, select, button } from "./ui.js";
+import { t, LANGUAGES } from "./i18n-es.js";
+import { notchSection, notchRow as row, notchHint as hint } from "./notch.js";
 function trusted(el) {
   for (const node of [el, ...el.querySelectorAll("button")]) {
     for (const type of ["click", "change", "input"]) node.addEventListener(type, (e) => {
@@ -21,6 +22,7 @@ const identify = (el, id) => {
 async function renderGeneral({ invoke, V }) {
   const bridge = createBridge(invoke);
   let settings = await bridge.boot();
+  const namedScreens = settings.screen !== "primary" && settings.screen !== "cursor" ? [settings.screen] : [];
   let prefs = await invoke("prefs_action", { payload: { action: "view" } });
   let hotkey = await invoke("hotkey_action", { payload: { action: "view" } });
   let queue = Promise.resolve(), issue = "", nameDraft = null, capturing = false;
@@ -82,8 +84,7 @@ async function renderGeneral({ invoke, V }) {
     });
     const hover = identify(trusted(toggle(settings.openOnHover, (value) => patch({ openOnHover: value }))), "hub-hover");
     hover.setAttribute("aria-label", t("Open on hover"));
-    const close = trusted(segmented(V.autoCloseSegments(settings.autoCloseInterval).map((s) => [String(s.seconds), s.label]), String(settings.autoCloseInterval), (value) => patch({ autoCloseInterval: Number(value) })));
-    const seconds = h("input", { class: "hub-input", type: "number", min: "0", max: "120", step: "1", value: String(settings.autoCloseInterval), "aria-label": "Cierre automático en segundos" });
+    const seconds = h("input", { type: "number", min: "0", max: "120", step: "1", style: "width:72px", value: String(settings.autoCloseInterval), "aria-label": "Cierre automático en segundos" });
     seconds.addEventListener("change", (e) => {
       if (!e.isTrusted) return;
       const value = Number(seconds.value);
@@ -120,24 +121,59 @@ async function renderGeneral({ invoke, V }) {
     });
     const enabled = trusted(toggle(hotkey.enabled !== false, (value) => shortcut({ action: value ? "enable" : "disable" })));
     enabled.setAttribute("aria-label", "Atajo activo");
-    root.append(
-      label("Perfil"),
-      card(row("Nombre visible", null, name, save), nameIssue),
-      label(t("General")),
-      card(row(t("Sound"), null, sound, volume), row(t("Open on hover"), null, hover), row(t("Auto-close"), null, close, seconds)),
-      label("Apariencia"),
-      card(row(t("Theme"), null, themeSelect), row(t("Motion"), "No disponible en esta ventana", motion)),
-      label("Atajo global"),
-      card(row(
-        "Atajo global",
-        g.hotkey?.note || g.hotkey?.backendLabel || null,
-        capture,
-        change,
-        trusted(button("Original", () => shortcut({ action: "reset" }))),
-        enabled
-      )),
+    const unavailable = (el, id) => {
+      el.disabled = true;
+      el.setAttribute("title", "No disponible todavía");
+      return identify(el, id);
+    };
+    const screen = trusted(select([
+      ["primary", t("Main display")],
+      ["cursor", t("Display under the cursor")],
+      ...namedScreens.map((name2) => [name2, name2])
+    ], settings.screen, (value) => {
+      if (value !== "cursor") patch({ screen: value });
+    }));
+    screen.className = "";
+    screen.setAttribute("aria-label", t("Island lives on"));
+    screen.setAttribute("id", "hub-screen");
+    const cursor = screen.children[1];
+    cursor.disabled = true;
+    cursor.title = "No disponible todavía";
+    const language = unavailable(select([["", t("System")], ...LANGUAGES], "", () => {
+    }), "hub-language");
+    language.className = "";
+    root.append(notchSection(
+      t("General"),
+      row(t("Sound"), sound, volume),
+      h(
+        "div",
+        { class: "row" },
+        unavailable(h("button", { text: t("Open sounds folder") }), "hub-sounds-folder"),
+        unavailable(h("button", { text: t("Reload sounds") }), "hub-sounds-reload"),
+        h("span", { class: "hint", text: "No disponible todavía" })
+      ),
+      hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload.")),
+      row(t("Open on hover"), hover),
+      hint(t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.")),
+      row(t("Auto-close"), seconds, h("span", { class: "hint", text: t("seconds after you leave the island") })),
+      hint(t("0 means never")),
+      row(t("Island lives on"), screen),
+      row(t("Theme"), themeSelect),
+      row(t("Launch at startup"), unavailable(toggle(false, () => {
+      }), "hub-autostart"), h("span", { class: "hint", text: "No disponible todavía" })),
+      row(t("Weekly recap"), unavailable(toggle(false, () => {
+      }), "hub-recap"), h("span", { class: "hint", text: t("Keep a history of my coding sessions") })),
+      row("", unavailable(h("button", { class: "danger", text: t("Clear history") }), "hub-recap-clear"), h("span", { class: "hint", text: "No disponible todavía" })),
+      row("", h("span", { class: "hint", style: "flex:1 1 0;min-width:0", text: t("Counts and project names only — never commands, files or prompts. Kept on this computer for 12 weeks.") })),
+      row(t("Language"), language, h("span", { class: "hint", text: "No disponible todavía" })),
+      row("Nombre visible", name, save),
+      nameIssue,
+      row(t("Motion"), motion, h("span", { class: "hint", text: "No disponible en esta ventana" })),
+      row("Atajo global", capture, change, trusted(button("Original", () => shortcut({ action: "reset" }))), enabled),
+      hint(g.hotkey?.note || g.hotkey?.backendLabel || ""),
       h("p", { class: "hub-note", role: "status", text: issue })
-    );
+    ));
+    themeSelect.className = "";
     if (capturing) {
       capture.focus?.();
     }

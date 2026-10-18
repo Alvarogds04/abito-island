@@ -3,7 +3,9 @@ import { PILL_PALETTE, pillColor, withPillColor } from "../core/pill-colors.js";
 import { h } from "../views/dom.js";
 import { t } from "../i18n/i18n.js";
 let closeOpen = null;
-function colorDot(def, size, colors, pick) {
+function colorDot(def, size, colors, pick, trustedOnly = false) {
+  let release = () => {
+  };
   const current = () => pillColor(def.id, def.color, colors());
   const dot = h("i", {
     class: "dot color-dot",
@@ -48,12 +50,16 @@ function colorDot(def, size, colors, pick) {
         "aria-label": hex,
         "aria-pressed": hex === now
       });
-      swatch.addEventListener("click", () => choose(hex));
+      swatch.addEventListener("click", (e) => {
+        if (!trustedOnly || e.isTrusted) choose(hex);
+      });
       palette.append(swatch);
     }
     if (now !== pillColor(def.id, def.color, null)) {
       const reset = h("button", { class: "reset", text: t("Default") });
-      reset.addEventListener("click", () => choose(null));
+      reset.addEventListener("click", (e) => {
+        if (!trustedOnly || e.isTrusted) choose(null);
+      });
       palette.append(reset);
     }
     document.body.append(palette);
@@ -65,16 +71,22 @@ function colorDot(def, size, colors, pick) {
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", close);
     closeOpen = close;
+    release = () => {
+      if (closeOpen === close) close();
+    };
     (palette.querySelector(".swatch.on") ?? palette.querySelector(".swatch"))?.focus();
   };
-  dot.addEventListener("click", () => closeOpen ? closeOpen() : open());
+  dot.addEventListener("click", (e) => {
+    if (!trustedOnly || e.isTrusted) closeOpen ? closeOpen() : open();
+  });
   dot.addEventListener("keydown", (e) => {
+    if (trustedOnly && !e.isTrusted) return;
     const key = e.key;
     if (key !== "Enter" && key !== " ") return;
     e.preventDefault();
     open();
   });
-  return dot;
+  return Object.assign(dot, { dispose: () => release() });
 }
 export {
   colorDot
