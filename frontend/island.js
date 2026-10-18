@@ -43,12 +43,12 @@
   };
   reduced.addEventListener('change', applyMotion);
 
-  // Visible island geometry per state. Native windows: 78x78 compact (the dot plus
+  // Visible island geometry per state. Native windows: 44x44 compact (the dot plus
   // a 6px transparent margin) and 672x176 overview (set by Rust); margins are the
-  // difference. #302: the resting island is gentle-dot's ROUND DOT, a 66px disc
+  // difference. #302: the resting island is gentle-dot's ROUND DOT, a 32px disc (S10, Coucou's pill height)
   // (geometry::DOT_DIAMETER); the character fills it. Drag, snap and edge memory
   // are Rust's and only ever see the native rectangle.
-  const COMPACT = { w: 66, h: 66, r: 33, gap: 6, clay: 54, drop: 2 };
+  const COMPACT = { w: 32, h: 32, r: 16, gap: 6, clay: 26, drop: 1 };
   // UI.1: R6 is 128px at the left of the plain overview and 72px while the
   // approval card is shown (only scale/position; the engine is frozen).
   const OVERVIEW = { w: 640, h: 160, r: 22, gap: 8, clay: 140, drop: 10, clayX: 82 }; // drop 10: the drawn blob (not the box) is centred in the 140px card

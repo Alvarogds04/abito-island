@@ -4,7 +4,7 @@
 //! and of Tauri's `outer_position`/`inner_size` getters). The logical contract
 //! sizes are converted with [`scaled_size`] at the boundary.
 //!
-//! Contract: compact native window 78x78 (visible round dot, 66 px diameter),
+//! Contract: compact native window 44x44 (visible round dot, 32 px diameter),
 //! overview native window 672x176 (visible island 640x160 r22), origin at the
 //! top-center of the work area, clamp to the work area, drag release snaps to
 //! the nearest vertical edge keeping the chosen X (only clamped), expanding
@@ -43,10 +43,10 @@ pub enum Edge {
 }
 
 
-/// #302: the resting island is a ROUND DOT. Diameter measured from gentle-dot
-/// (MIT, read-only reference): its Dot window is 72x72 pt holding a 66 pt black
-/// disc (`docs/design.md`, `DOT_SIZE` in `shell.rs`). Same visible size here.
-pub const DOT_DIAMETER: i32 = 66;
+/// #302: the resting island is a ROUND DOT. S10 (owner decision, #467): the disc is
+/// 32 px, the height of Coucou's compact pill (`NOTCH_H` in windows/src/core/layout.ts
+/// @434d6a2b); it was 66 (gentle-dot's disc).
+pub const DOT_DIAMETER: i32 = 32;
 
 /// Native window size per state, in logical px. Compact = the dot plus a 6 px
 /// transparent margin on every side (the same edge gap the pill had), so
@@ -87,7 +87,7 @@ pub enum View {
 /// F009 — the ONE table of logical sizes per view: `(window, visible)` in logical
 /// px for a work area of `area_w_phys` x `area_h_phys` physical px at `scale`.
 /// `window` is the native window size; `visible` is the view the page animates to
-/// inside it (for compact they coincide: the dot fills its 78x78 window). The arms
+/// inside it (for compact they coincide: the dot fills its 44x44 window). The arms
 /// delegate to the per-view functions, so the frozen contracts (#302/#309/#408)
 /// keep owning their own numbers — the table only routes them.
 pub fn view_sizes(view: View, area_w_phys: i32, area_h_phys: i32, scale: f64) -> ((i32, i32), (i32, i32)) {
@@ -335,14 +335,14 @@ mod tests {
 
     #[test]
     fn scaled_size_applies_scale_factor() {
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.0), (78, 78));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.0), (44, 44));
         assert_eq!(scaled_size(LOGICAL_OVERVIEW, 1.0), (672, 176));
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 2.0), (156, 156));
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.25), (98, 98));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 2.0), (88, 88));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 1.25), (55, 55));
         assert_eq!(scaled_size((304, 44), 1.25), (380, 55)); // an arbitrary size still scales per axis
         // broken scale factors must not poison the sizes
-        assert_eq!(scaled_size(LOGICAL_COMPACT, 0.0), (78, 78));
-        assert_eq!(scaled_size(LOGICAL_COMPACT, f64::NAN), (78, 78));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, 0.0), (44, 44));
+        assert_eq!(scaled_size(LOGICAL_COMPACT, f64::NAN), (44, 44));
     }
 
     #[test]
@@ -684,10 +684,10 @@ mod tests {
     fn approved_overview_and_compact_are_untouched_by_the_chat_view() {
         assert_eq!(OVERVIEW_VISIBLE, (640, 160));
         assert_eq!(LOGICAL_OVERVIEW, (672, 176));
-        // #302: the resting state is a ROUND DOT (gentle-dot's 66-point disc) in a 78x78
+        // #302: the resting state is a ROUND DOT (S10: 32 px, Coucou's pill height) in a 44x44
         // native window (6px transparent margin each side, the same edge gap as the pill).
-        assert_eq!(LOGICAL_COMPACT, (78, 78));
-        assert_eq!(DOT_DIAMETER, 66);
+        assert_eq!(LOGICAL_COMPACT, (44, 44));
+        assert_eq!(DOT_DIAMETER, 32);
         assert_eq!((LOGICAL_COMPACT.0 - DOT_DIAMETER) / 2, 6);
         // it takes less room than the pill it replaces (288x32 visible)
         assert!(DOT_DIAMETER * DOT_DIAMETER < 288 * 32 && LOGICAL_COMPACT.0 < 304);

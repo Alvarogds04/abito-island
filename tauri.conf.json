@@ -12,8 +12,8 @@
       {
         "label": "main",
         "title": "Abito",
-        "width": 78,
-        "height": 78,
+        "width": 44,
+        "height": 44,
         "resizable": false,
         "decorations": false,
         "transparent": true,
