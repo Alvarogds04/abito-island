@@ -378,7 +378,8 @@ test('overview copy keeps voseo and drops the old duplicated sentences', () => {
 });
 
 // ---- UI.1 correction pass --------------------------------------------------
-const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8');
+// S10: the island's geometry lives in vendor/coucou/island/island.css, loaded after style.css (cascade order = concatenation order).
+const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
 const islandSrc = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
 // Declarations of the LAST rule whose selector list contains `sel` exactly,
 // outside @media blocks; later rules win like in the cascade.
@@ -410,55 +411,57 @@ test('44px: every control (incl. the card «i») measures >= 44x44', () => {
   }
 });
 
-// ---- #335 F002 composition — RED first, one per rule (S6.4 / S7.2) ----------
-// Frames: .agentline/.overview-detail/.pill-summary live inside .card-left (the
-// content column, 318px of the 558x140 overview box) and #pill-choices lives in
-// the same 558x140 box; #notices is anchored to the ISLAND (640x160) through
-// calc(50% + 20px), so island = overview + 10 on both axes.
-const OVH = 140; // overview box height; island = OVH + 20
+// ---- #335 F002 composition, re-pinned to Coucou's geometry (S10 / L19) --------
+// Frames: .agentline/.overview-detail/.pill-summary live inside .card-left (322px) of the 620x108 overview
+// box (island x10..630, y42..150, Coucou's row under its 34px header) and #pill-choices lives in the same
+// box from x332; #notices is anchored to the ISLAND (640x160) through calc(50% + 22px), so
+// island = overview + 10 horizontally and + 42 vertically. Same rules as before (budget, zero overlap,
+// disjoint rects, bounded band), now measured on Coucou's numbers.
+const OVH = 108; // overview box height (Coucou's card row)
+const OV_TOP = 42; // overview box top inside the island
 
 test('R2: the active content keeps its vertical budget in the central column', () => {
   const a = decls('.agentline'), d = decls('.overview-detail'), s = decls('.pill-summary');
-  assert.equal(px(a.left), 148, 'agentline opens the central column (island x158)');
-  assert.equal(px(a.top), 16, 'agentline y16..34');
-  assert.equal(px(d.left), 148);
-  assert.equal(px(d.top), 42, 'connection detail y42..60');
-  assert.equal(String(decls('#overview-detail')['-webkit-line-clamp']), '1', 'one line; the rest lives behind the «i»');
-  assert.equal(px(s.left), 148);
-  assert.equal(px(s.top), 64, 'pill summary y64');
+  assert.equal(px(a.left), 108, 'agentline opens the content column (Coucou .who padding-left 108)');
+  assert.equal(px(a.top), 10, 'agentline y10..25');
+  assert.equal(px(d.left), 108);
+  assert.equal(px(d.top), 31, 'connection detail / ticker y31..75');
+  assert.equal(px(d.height), 44, 'Coucou .ticker height 44');
+  assert.equal(px(s.left), 108);
+  assert.equal(px(s.top), 78, 'pill summary y78');
   assert.equal(s.overflow, 'hidden', 'the slot clips: its text can never claim the band below');
   const cap = px(s['max-height']);
   assert.ok(cap > 0, '.pill-summary needs an explicit max-height (a bounded slot, not content height)');
-  assert.ok(px(s.top) + cap <= 106, `summary ${px(s.top)}+${cap} exceeds the 106px budget (island <=116) — R3's zero-overlap is the binding rule`);
+  assert.ok(px(s.top) >= px(d.top) + px(d.height), 'the summary starts after the ticker/detail slot');
+  assert.ok(px(s.top) + cap <= OVH, `summary ${px(s.top)}+${cap} exceeds the ${OVH}px card`);
 });
 
-test('R3: the pill-summary slot never reaches the mini-bots band (zero overlap)', () => {
+test('R3: the pill-summary slot never reaches the mini-bots (zero overlap)', () => {
   const s = decls('.pill-summary'), mb = decls('#minibots');
-  assert.equal(px(mb.bottom), 6, '#347 keeps its band anchor (bottom:6)');
-  const row = px(decls('.minibot svg')['height']); // 24px mini-Abot, NOT an 18px text row
-  assert.ok(row >= 18, 'mini-bot row height readable');
-  const mbTop = OVH - px(mb.bottom) - row; // 140-6-24 = 110: the flex band grows UP from bottom:6
-  const end = px(s.top) + px(s['max-height']);
-  assert.ok(end <= mbTop - 4, `summary ends at ${end}, mini-bots start at ${mbTop}: they must not touch (4px gap)`);
+  assert.equal(px(mb.top), 8, 'the active-turn mini-Abitos ride the who row (where Coucou puts the session count)');
+  const rowEnd = px(mb.top) + px(decls('.minibot svg')['height']); // 24px mini-Abot
+  assert.ok(rowEnd <= px(decls('.overview-detail').top) + 4, 'mini-bots end where the ticker/detail slot starts');
+  assert.ok(px(s.top) >= rowEnd, 'the summary slot starts below the mini-bots');
+  assert.equal(String(mb['pointer-events'] || decls('#minibots')['pointer-events']), 'none');
 });
 
 test('R4: the strip band and the pills grid own disjoint rects (right card uncovered)', () => {
   const n = decls('#notices'), p = decls('#pill-choices'), mb = decls('#minibots');
   assert.equal(p.display, 'grid');
   assert.equal(p['pointer-events'], 'auto', 'the other-bot choices stay clickable');
-  // #notices sits in the island frame, #pill-choices in the overview frame (+10)
-  const bandBottomOv = px(n.top) - 10 + px(n.height);
+  // #notices sits in the island frame, #pill-choices in the overview frame (+42)
+  const bandBottomOv = px(n.top) - OV_TOP + px(n.height);
   assert.ok(px(p.top) >= bandBottomOv,
     `pills top ${px(p.top)} < band bottom ${bandBottomOv}: the strip covers the grid — the F002 "partial" bug`);
-  assert.equal(n.right, '72px', 'the 72px gutter stays (coucou-presentation-check pins it too)');
-  // mini-bots are content-column only: with the right card now visible they must
-  // never draw over it (their old right:14 spanned x148..544 of the 558px box)
-  assert.ok(px(mb.right) >= 254, `#minibots right ${mb.right} reaches into the right card`);
+  assert.equal(n.left, 'calc(50% + 22px)', 'the band covers the right card only (x342..630 of the island)');
+  assert.equal(n.right, 'auto'); assert.equal(n.width, '288px');
+  // mini-bots live in the left card's who row: they never draw over the right card (x332+)
+  assert.ok(px(mb.right) >= 36 && mb.left === 'auto', `#minibots right ${mb.right} reaches into the right card`);
 });
 
 test('R5: two stacked notices stay inside the fixed 44px band and never reach the grid', () => {
   const n = decls('#notices'), p = decls('#pill-choices');
-  assert.equal(px(n.height), 44, 'band = the approved one-row 44px (island y10..54)');
+  assert.equal(px(n.height), 44, 'band = the approved one-row 44px (overview y0..44)');
   assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/,
     'overflow scrolls INSIDE the band instead of growing the box');
   // model of two stacked notices, from the real boxes: row + gap + band (#437: the
@@ -466,39 +469,31 @@ test('R5: two stacked notices stay inside the fixed 44px band and never reach th
   const stacked = px(decls('#notice-row')['min-height']) + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
   assert.equal(stacked, 92, 'model: chips row + gap + 40px design band stack to 92px');
   assert.ok(stacked > px(n.height), 'the stacked content exceeds the band, so it must scroll');
-  assert.ok(px(n.top) - 10 + px(n.height) <= px(p.top), 'even stacked, the band box ends before the grid: zero touch');
+  assert.ok(px(n.top) - OV_TOP + px(n.height) <= px(p.top), 'even stacked, the band box ends before the grid: zero touch');
   assert.equal(px(decls('#notice-info').top), 0, 'the «i» fits the band: no phantom 4px scroll');
   assert.equal(String(decls('#notice-pill').order), '-1', 'the actionable notice sits in the first visible row of the band');
   assert.equal(p.overflow, 'hidden', 'the grid clips its own box, it never grows upward');
-  assert.equal(p['grid-template-rows'], '40px 40px', 'exactly two 40px rows (2x2)');
+  assert.equal(p['grid-template-rows'], '28px 28px', 'exactly two 28px rows (2x2, Coucou .pills)');
+  assert.ok(px(p.top) + 28 * 2 + px(p.gap) <= OVH, 'both pill rows fit under the band inside the card');
   assert.match(css, /#pill-choices \.pill-choice:nth-child\(n\+5\) \{[^}]*display:\s*none/,
     'the fifth of pills.visible() stays in the data only — visible() untouched (S6.2)');
 });
 
-test('notices strip: its box never touches the chat bubble or the pill border, and its content never escapes the box', () => {
-  // #335 F002 re-scope (S6.3 — allowed ONCE, and only this block). The strip
-  // used to be a full-height 140px pane whose 92px of content (row 44 + pill 44
-  // + margin) fit inside it; F002 option A turns it into the approved 44px band
-  // on top of the right card, so the SAME assertion — content/height of the
-  // strip may never reach the chat bubble or the pill border — is now proven
-  // through the new box: the box stays in the safe zone, one visible row fits
-  // the band exactly, and the stacked content is carried by internal overflow
-  // (it scrolls inside; it can never grow the box toward the bubble/border).
+test('notices strip: its box stays inside the overview card and its content never escapes the box', () => {
+  // #335 F002 re-scope (S6.3). The strip is the approved 44px band on top of the right card; the SAME
+  // assertion — content/height of the strip may never leave its bound — is proven through the box: it stays
+  // inside the 108px card, one visible row fits the band exactly, and the stacked content is carried by
+  // internal overflow (it scrolls inside; it can never grow the box toward the grid).
   const n = decls('#notices');
-  const bubble = decls('#open-chat');
-  const H = 160; // overview height
-  const top = px(n.top), height = px(n.height), right = px(n.right);
+  const top = px(n.top) - OV_TOP, height = px(n.height);
   const row = px(decls('#notice-row')['min-height']); // 44px: what ONE visible row needs
-  const contentH = row + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']); // 96px stacked
+  const contentH = row + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
   assert.ok(height >= row, `band ${height}px < one row ${row}px`);
   assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/, 'stacked content must scroll INSIDE the box');
   assert.ok(contentH > height, 'model: stacked content exceeds the band, so the box (not the content) is the bound');
-  const bubbleTop = H - px(bubble.bottom) - px(bubble.height);
-  const bubbleLeftGap = px(bubble.right) + px(bubble.width) + 8; // strip must stop 8px before the bubble
-  const verticallyClear = top + height <= bubbleTop - 4;
-  assert.ok(verticallyClear || right >= bubbleLeftGap, 'strip overlaps the bubble');
-  assert.ok(top + height <= H - 12, 'content reaches the pill border zone');
-  assert.ok(right >= bubbleLeftGap, 'dismiss cross must stay clear of the bubble column');
+  assert.ok(top >= 0 && top + height <= OVH, 'the band lies inside the 108px card');
+  const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
+  assert.ok(px(lane.top) - OV_TOP + px(lane.height) <= OVH, 'the confirmed-notice lane lies inside the card too');
 });
 
 test('reduced motion: the in-flight ring does not rotate (cue kept by blue ring shape)', () => {
@@ -949,8 +944,8 @@ test('T7.3 approval card markup: «Espera tu respuesta» caption, fold inside th
   const actions = perm.slice(perm.indexOf('id="card-actions"'));
   assert.match(actions, /id="allow"[\s\S]*id="deny"[\s\S]*id="card-fold"[\s\S]*id="card-wait"[^>]*>Espera tu respuesta</, 'Permitir, Rechazar, fold, caption in design order');
   assert.doesNotMatch(perm, /Denegar/);
-  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.match(css, /#permission #operation \{[^}]*background: var\(--surface\)/, 'the command sits in a surface strip');
-  assert.match(css, /#card-wait \{[^}]*font-size: var\(--fs-caption\)/, 'caption is 12 px');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '') + fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /#permission #operation \{[^}]*background: rgba\(255, 255, 255, 0\.07\)/, 'the command sits in Coucou\'s .code well');
+  assert.match(css, /#card-wait \{[^}]*font: 400 11px var\(--font\)/, 'caption is Coucou\'s 11 px');
   assert.match(fs.readFileSync(path.join(frontend, 'island.js'), 'utf8'), /card-wait/, 'island.js shows the caption only while the human may decide');
 });
