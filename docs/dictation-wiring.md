@@ -43,6 +43,51 @@ keys), and return it from `Backend::cleanup_provider` in a wrapper around
 `flow::System`. `Request::system_prompt()` / `user_message()` give the Coucou
 instructions. Without a provider `cleanup` is a no-op even if the pref is on.
 
+## dictation_action contract
+
+The main island and settings window invoke `dictation_action` with `{payload: ...}`.
+The sender URL/label gate and shared chat rate limiter apply to every action.
+Unknown actions, extra/missing fields, and wrong types are rejected.
+
+- `{action:"status"}` returns `{prefs,models,keys,hasClaudeKey:false,mics,platform:"linux",autostarted:false}`.
+  `prefs` contains the seven stored fields below plus constants `summaryEngine:"off"`,
+  `openAtLaunch:false`, `voice:false`, `voiceOutput:"off"`, `voiceGender:"female"`.
+  `models` is `{parakeet:{state:"missing"|"downloading"|"ready"|"failed"},downloadMb}`;
+  downloading adds `fraction`, failed adds `error`. `downloadMb` is available BEFORE downloading.
+  `keys` is `ok|pending|denied|unsupported` from the live portal, or `ok` when disabled.
+  `mics` is `[{name,default}]`, enumerated without opening a capture stream.
+- `{action:"set_prefs",prefs:{enabled,key,edge,mic,keepDays,cleanup,defaultStyle}}`
+  requires exactly these seven keys. `key`: `right_ctrl|right_alt|right_shift|left_ctrl_super`;
+  `edge`: `bottom|left|right`; `defaultStyle`: `verbatim|natural|polished`;
+  `keepDays`: `0|7|30|365|-1` (Coucou's exact UI set; **90 is rejected**).
+  `mic` is empty (system default) or a current input-device name, at most 200 UTF-8 bytes;
+  validation enumerates devices but never opens capture. `cleanup` MUST be false:
+  no provider is configured, so true is rejected. Returns the seven persisted prefs.
+  Enabling starts the engine/portal; disabling drops both and stops dictation.
+  Same-enabled writes retain the running engine. The desktop owns the actual shortcut:
+  the stored key enum does not replace the portal's `CTRL+ALT+v` preferred binding.
+- `{action:"download_model"}` is explicit-click-only: starts `speech::download`, returns
+  ModelsStatus, and emits download progress/completion through `dictation:models`.
+- `{action:"remove_model"}` removes and unloads the model, returning ModelsStatus.
+- `{action:"hands_free"}`, `{action:"finish"}`, `{action:"cancel"}` map to
+  `KeyEvent::HandsFree|Finish|Cancel`. Return `{ok:true}` when running, `{ok:false}` otherwise.
+  Of these command actions, **only hands_free may open the microphone**, after an explicit
+  user click. A user-held portal shortcut may also open it. Status, setup, preference
+  changes, finish and cancel never initiate capture. Delivery is clipboard-only (Ctrl+V).
+
+Events (emitted with `app.emit`, payload is the object itself, not a wrapper):
+
+| Name | Exact payload | When |
+| --- | --- | --- |
+| `dictation:phase` | `{phase:"idle"|"listening"|"locked"|"thinking"|"copied"|"failed"}` | Engine phase changes; copied means clipboard ready, idle also follows stop/cancel. |
+| `dictation:bands` | `{bands:[nine floats]}` | While recording, throttled by the engine (~30 Hz). |
+| `dictation:note` | `{note:"needModel"|"noMicrophone"|"clipboardRefused"}` | Capture/model/clipboard requires user attention. |
+| `dictation:models` | `{parakeet:{state,...},downloadMb}` (ModelsStatus above) | Download callback: start, progress, completion or failure. |
+
+Startup loads one shared Store and restores only the user's saved enabled choice.
+No setup download, network call, microphone capture, or cleanup provider is introduced.
+Model removal returns its status directly; it does not emit a download-progress event.
+
 ## Known follow-ups
 
 - Two GlobalShortcuts sessions (island + dictation) each show a bind dialog;
