@@ -455,3 +455,48 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #overview-view[data-plan="on"] .card-left > .who, #overview-view[data-plan="on"] .card-left > .ticker,
 #overview-view[data-plan="on"] #overview-empty, #overview-view[data-plan="on"] .spotify-card,
 #overview-view[data-plan="on"] #minibots { display: none; }
+
+/* ── GitHub card (style.css "Integration cards" + "GitHub pulse" @434d6a2b) ──
+   It stands in for the overview's left card while the main pill is GitHub. */
+
+.card-left > .gh-card { position: absolute; inset: 0; z-index: 1; }
+.card-left > .gh-card[hidden] { display: none; }
+#overview-view[data-github="on"] .card-left > .who, #overview-view[data-github="on"] .card-left > .ticker,
+#overview-view[data-github="on"] #overview-empty, #overview-view[data-github="on"] .spotify-card,
+#overview-view[data-github="on"] #minibots { display: none; }
+.int-card { padding: 10px 12px 0 108px; display: flex; flex-direction: column; }
+.int-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 24px; }
+.int-head b { font: 600 12px var(--font); color: var(--ink); }
+.int-head > span { font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; }
+.int-head > .dot { width: 7px; height: 7px; margin: 0; background: #f4505e; }
+.int-status { display: flex; align-items: center; gap: 5px; padding-top: 4px; font: 400 11px var(--font); color: var(--dim-3); }
+.int-stats { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; padding-right: 12px; }
+.int-stat { display: flex; align-items: center; gap: 7px; }
+.int-stat-icon { width: 14px; display: grid; place-items: center; }
+.int-stat-label { font: 400 11px var(--font); color: var(--dim-3); }
+.int-stat-value { margin-left: auto; font: 600 12px var(--font); color: #c5c8cd; font-variant-numeric: tabular-nums; }
+.gh-spark { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 0; background: transparent; font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; cursor: pointer; min-width: 0; }
+.gh-mini { display: inline-flex; gap: 2px; }
+.gh-mini i, .gh-cell { width: 7px; height: 7px; border-radius: 1.5px; flex: 0 0 auto; }
+.int-stats.gh-rows { gap: 4px; padding-top: 6px; }
+.gh-stat { position: relative; border: 0; padding: 0; background: transparent; width: 100%; text-align: left; cursor: pointer; }
+.gh-stat::after, .gh-spark::after, .gh-back::after { content: ""; position: absolute; inset: -5px -4px; } /* hit area around the 14px rows */
+.gh-spark, .gh-back { position: relative; }
+.gh-detail-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gh-back { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 0; background: transparent; font: 600 12px var(--font); color: var(--ink); white-space: nowrap; cursor: pointer; flex: 0 0 auto; }
+.gh-head-right { margin-left: auto; border: 0; padding: 0; background: transparent; font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; cursor: pointer; }
+.gh-list { display: flex; flex-direction: column; max-height: 60px; overflow-y: auto; margin-top: 4px; scrollbar-width: none; }
+.gh-list::-webkit-scrollbar { display: none; }
+.gh-list.fade { -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 80%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0%, #000 80%, transparent 100%); }
+.gh-row { display: flex; align-items: center; gap: 5px; height: 20px; flex: 0 0 20px; padding: 0 4px 0 0; border: 0; border-radius: 4px; background: transparent; text-align: left; cursor: pointer; min-width: 0; }
+.gh-row:hover { background: rgba(255, 255, 255, 0.05); }
+.gh-row.selected { background: rgba(255, 255, 255, 0.12); }
+.gh-gap { width: 5px; flex: 0 0 5px; }
+.gh-ref { font: 400 10.5px var(--font); color: #9398a1; white-space: nowrap; flex: 0 0 auto; }
+.gh-title { font: 400 11px var(--font); color: #c5c8cd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.gh-draft { font: 400 9.5px var(--font); color: var(--dim-3); flex: 0 0 auto; }
+.gh-word { margin-left: auto; padding-left: 4px; font: 400 10px var(--font); white-space: nowrap; flex: 0 0 auto; }
+.gh-empty { font: 400 10.5px var(--font); color: var(--dim-3); padding-top: 8px; }
+.gh-grid { display: flex; gap: 1.5px; padding-top: 5px; }
+.gh-week { display: flex; flex-direction: column; gap: 1.5px; }
+.gh-cell.empty { background: transparent; }

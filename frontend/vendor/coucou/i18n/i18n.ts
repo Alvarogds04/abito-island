@@ -16,6 +16,13 @@ const messages = {
   "just now": "ahora mismo", "{n} min ago": "hace {n} min", "{n} h ago": "hace {n} h", "5 hours": "5 horas", Week: "Semana",
   Resets: "Reinicios", "Resetting…": "Reiniciando…", "in {h} h {m}": "en {h} h {m}", "in {m} min": "en {m} min",
   "{n} available": "{n} disponibles", " · until {date}": " · hasta {date}",
+  // S10 (L30): GitHub card (views/github.ts, core/github.ts)
+  Overview: "Resumen", "Total stars": "Estrellas", Repositories: "Repositorios", "My PRs": "Mis PRs", "To review": "Por revisar",
+  "Default branch CI": "CI de la rama principal", Activity: "Actividad", "Nothing here": "Nada por aquí", "Loading…": "Cargando…",
+  Draft: "Borrador", failing: "fallando", running: "en curso", passing: "pasando", "all green": "todo en verde", "no repos": "sin repos",
+  unknown: "desconocido", "No contributions": "Sin contribuciones", "{total} past year": "{total} el último año",
+  "{count} contribution": "{count} contribución", "{count} contributions": "{count} contribuciones",
+  "{count} repo": "{count} repo", "{count} repos": "{count} repos",
   "Unavailable features": "No disponible en Abito todavía: carpeta de sonidos; recarga y contador de sonidos; inicio automático; idioma; resumen.",
 } as const;
 /** `{name}` placeholders, filled from `vars` (Coucou's interpolate). A missing variable stays as written. */
@@ -25,6 +32,10 @@ function interpolate(text: string, vars?: Record<string, string | number>): stri
 export function t(key: string, vars?: Record<string, string | number>): string {
   if (!Object.prototype.hasOwnProperty.call(messages, key)) throw new Error(`Traducción de Abito no disponible: ${key}`);
   return interpolate(messages[key as keyof typeof messages], vars);
+}
+/** A count with its words: Spanish has two forms, singular for exactly 1. */
+export function tn(one: string, other: string, count: number, vars?: Record<string, string | number>): string {
+  return t(count === 1 ? one : other, { ...vars, count });
 }
 /** The fixed interface language (Abito ships Spanish only here). */
 export function language(): string { return "es"; }
