@@ -23,7 +23,25 @@ const identify = (el, id) => {
 async function renderGeneral({ invoke, V }) {
   const bridge = createBridge(invoke);
   let settings = await bridge.boot();
-  const namedScreens = settings.screen !== "primary" && settings.screen !== "cursor" ? [settings.screen] : [];
+  let monitors = [];
+  const listMonitors = async () => {
+    try {
+      monitors = ((await invoke("monitor_action", { payload: { action: "list" } }))?.monitors ?? []).map((m) => String(m.key));
+    } catch {
+      monitors = [];
+    }
+  };
+  await listMonitors();
+  const namedScreens = () => [.../* @__PURE__ */ new Set([...settings.screen !== "primary" && settings.screen !== "cursor" ? [settings.screen] : [], ...monitors])];
+  let customCount = 0;
+  const countCustom = async () => {
+    try {
+      customCount = ((await invoke("sound_action", { payload: { action: "list" } }))?.names ?? []).length;
+    } catch {
+      customCount = 0;
+    }
+  };
+  await countCustom();
   let prefs = await invoke("prefs_action", { payload: { action: "view" } });
   let hotkey = await invoke("hotkey_action", { payload: { action: "view" } });
   const recap = await renderRecapRows({ invoke });
@@ -131,7 +149,7 @@ async function renderGeneral({ invoke, V }) {
     const screen = trusted(select([
       ["primary", t("Main display")],
       ["cursor", t("Display under the cursor")],
-      ...namedScreens.map((name2) => [name2, name2])
+      ...namedScreens().map((name2) => [name2, name2])
     ], settings.screen, (value) => {
       if (value !== "cursor") patch({ screen: value });
     }));
@@ -141,19 +159,24 @@ async function renderGeneral({ invoke, V }) {
     const cursor = screen.children[1];
     cursor.disabled = true;
     cursor.title = "No disponible todavía";
+    const soundsFolder = identify(trusted(h("button", { text: t("Open sounds folder"), onclick: () => {
+      run(async () => {
+        await send("sound_action", { action: "reveal" });
+      });
+    } })), "hub-sounds-folder");
+    const soundsReload = identify(trusted(h("button", { text: t("Reload sounds"), onclick: () => {
+      run(async () => {
+        await send("sound_action", { action: "reload" });
+        await countCustom();
+      });
+    } })), "hub-sounds-reload");
     const language = unavailable(select([["", t("System")], ...LANGUAGES], "", () => {
     }), "hub-language");
     language.className = "";
     root.append(notchSection(
       t("General"),
       row(t("Sound"), sound, volume),
-      h(
-        "div",
-        { class: "row" },
-        unavailable(h("button", { text: t("Open sounds folder") }), "hub-sounds-folder"),
-        unavailable(h("button", { text: t("Reload sounds") }), "hub-sounds-reload"),
-        h("span", { class: "hint", text: "No disponible todavía" })
-      ),
+      h("div", { class: "row" }, soundsFolder, soundsReload, h("span", { class: "hint", text: customCount > 0 ? t("{0} custom", { 0: customCount }) : "" })),
       hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload.")),
       row(t("Open on hover"), hover),
       hint(t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.")),

@@ -153,6 +153,7 @@ const es = {
   "Auto-close": "Cierre automático",
   "Theme": "Tema",
   "Motion": "Movimiento",
+  "{0} custom": "{0} personalizados",
   "Open sounds folder": "Abrir la carpeta de sonidos",
   "Reload sounds": "Recargar sonidos",
   "Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload.": "Deja en la carpeta de sonidos un archivo con el nombre de uno de los sonidos de el personaje (finish.wav, approval.mp3, greet.m4a…) para reemplazarlo y luego recarga.",
