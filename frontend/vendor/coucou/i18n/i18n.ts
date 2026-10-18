@@ -23,6 +23,15 @@ const messages = {
   unknown: "desconocido", "No contributions": "Sin contribuciones", "{total} past year": "{total} el último año",
   "{count} contribution": "{count} contribución", "{count} contributions": "{count} contribuciones",
   "{count} repo": "{count} repo", "{count} repos": "{count} repos",
+  // S10 (L30): weekly recap (views/recap.ts, recap/summary.ts)
+  "Weekly recap": "Resumen semanal", "No activity last week": "Sin actividad la semana pasada",
+  "Abito counts your agent sessions as they happen — check back next Monday.": "Abito cuenta tus sesiones de agentes a medida que ocurren: volvé el próximo lunes.",
+  coding: "programando", session: "sesión", sessions: "sesiones", file: "archivo", files: "archivos", lines: "líneas", commands: "comandos",
+  "Top agent": "Agente principal", "Top project": "Proyecto principal", "Busiest day": "Día más activo", "Longest session": "Sesión más larga",
+  Permissions: "Permisos", "{allowed} allowed, {denied} denied": "{allowed} permitidos, {denied} denegados", Questions: "Preguntas",
+  "Share image": "Compartir imagen", "The share image is not available in Abito yet.": "La imagen para compartir todavía no está disponible en Abito.", OK: "OK",
+  Sunday: "domingo", Monday: "lunes", Tuesday: "martes", Wednesday: "miércoles", Thursday: "jueves", Friday: "viernes", Saturday: "sábado",
+  "{n}m": "{n} min", "{n}h": "{n} h", "{h}h {m}m": "{h} h {m} min",
   "Unavailable features": "No disponible en Abito todavía: carpeta de sonidos; recarga y contador de sonidos; inicio automático; idioma; resumen.",
 } as const;
 /** `{name}` placeholders, filled from `vars` (Coucou's interpolate). A missing variable stays as written. */
