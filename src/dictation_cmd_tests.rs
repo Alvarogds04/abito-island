@@ -83,3 +83,19 @@ fn dictation_lifecycle_starts_and_drops_only_on_transitions() {
     assert_eq!(starts.get(),2); assert_eq!(stops.get(),1);
     drop(e); assert_eq!(stops.get(),2);
 }
+#[test]
+fn dictation_plan_never_asks_the_host_to_start_or_stop_under_its_lock() {
+    // The planner only DECIDES while the host lock is held; starting (portal, thread, model preload)
+    // and stopping (a join that waits for a transcription) happen outside it, on what the plan returns.
+    let mut e: Engine<u8> = Engine { running: None };
+    assert!(matches!(e.plan(false, false), Plan::Keep), "off and nothing running: nothing to do");
+    assert!(matches!(e.plan(true, false), Plan::Start), "enabled and idle: the caller starts it outside the lock");
+    assert!(matches!(e.plan(true, true), Plan::Keep), "a start already in flight is never doubled");
+    assert!(e.install(7, true).is_none(), "installed while still wanted");
+    assert!(matches!(e.plan(true, false), Plan::Keep), "already running: same-state write does not restart");
+    assert!(matches!(e.plan(false, false), Plan::Stop(7)), "disabling hands the running value out, to be dropped outside the lock");
+    assert!(e.running.is_none());
+    assert_eq!(e.install(9, false), Some(9), "a start that is no longer wanted comes back to be dropped, not installed");
+    assert!(e.running.is_none());
+    assert!(matches!(e.plan(false, true), Plan::Keep), "disabling during a start: nothing running to stop yet");
+}
