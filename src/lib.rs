@@ -29,6 +29,8 @@ pub mod core;
 pub mod desktop;
 pub mod files;
 pub mod focushost;
+pub mod github;
+pub mod githubcmd;
 pub mod daemonhost;
 #[cfg(any(debug_assertions, feature = "probe"))]
 pub mod fakebridge;

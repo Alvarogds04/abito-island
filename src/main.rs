@@ -34,6 +34,7 @@ mod hotkeyhost;
 mod tray;
 mod trayhost;
 mod fileshost;
+mod githubhost;
 mod monitorshost;
 mod secretshost;
 mod settingshost;
@@ -1933,6 +1934,7 @@ fn main() {
             spotifyhost::spotify_action,
             secretshost::secret_action,
             fileshost::open_action,
+            githubhost::github_action,
             monitorshost::monitor_action,
             settingshost::settings_view,
             settingshost::daemon_action,
