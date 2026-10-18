@@ -10,7 +10,7 @@ import { icon, keyLabel } from "./ui.js";
 
 export type PageId =
   | "dictation" | "notes" | "insights" | "dictionary" | "snippets" | "styles" | "flowsettings"
-  | "general" | "pills" | "agents" | "chat" | "voice" | "integrations" | "phone" | "shortcuts";
+  | "general" | "pills" | "agents" | "chat" | "voice" | "integrations" | "phone" | "shortcuts" | "accounts" | "models" | "appearance";
 
 interface PageDef {
   id: PageId;
@@ -32,13 +32,16 @@ export const FLOW_PAGES: PageDef[] = [
 
 export const NOTCH_PAGES: PageDef[] = [
   { id: "general", icon: "gear", title: () => t("General"), subtitle: () => t("The character, its sounds and how the island behaves.") },
-  { id: "pills", icon: "grid", title: () => t("Active pills"), subtitle: () => t("The pills shown in the island, their order and their colours.") },
+  { id: "pills", icon: "grid", title: () => "Blobs", subtitle: () => "Píldoras activas, especialistas y colores de identidad." },
   { id: "agents", icon: "terminal", title: () => t("Agents"), subtitle: () => t("Claude Code, Codex and the other agents Abito follows.") },
   { id: "chat", icon: "chat", title: () => t("Chat"), subtitle: () => t("The AI of the island's chat, with your own keys.") },
   { id: "voice", icon: "wave", title: () => "OK Abito" },
   { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
   { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") },
+  { id: "accounts", icon: "lock", title: () => "Cuentas", subtitle: () => "Proveedores, conectores y claves de Abito." },
+  { id: "models", icon: "sliders", title: () => "Modelos", subtitle: () => "Modelos de tus cuentas y modelos locales verificados." },
+  { id: "appearance", icon: "sliders", title: () => "Apariencia", subtitle: () => "Tema y colores de Abito y tus especialistas." },
 ];
 
 const ALL = [...FLOW_PAGES, ...NOTCH_PAGES];
@@ -56,7 +59,7 @@ export type FlowPageRenderer = (container: HTMLElement, ctx: HubContext) => void
 export interface HubOptions {
   version: string;
   flowPages: Partial<Record<PageId, FlowPageRenderer>>;
-  renderNotch(page: PageId, container: HTMLElement): Promise<void>;
+  renderNotch(page: PageId, container: HTMLElement): Promise<void | (() => void)>;
 }
 const DEFAULT_STATUS: FlowStatus = {
   prefs: {
@@ -131,7 +134,9 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
       page_.append(hero(page, def?.title() ?? t("Settings"), def?.subtitle?.() ?? null));
       const container = h("div", { id: "settings-root" });
       page_.append(container);
-      await opts.renderNotch(page, container);
+      const dispose = await opts.renderNotch(page, container);
+      if (token !== rendering) { dispose?.(); return; }
+      if (dispose) ctx.onLeave = dispose;
     }
     if (token !== rendering) return;
     clear(scroll);
@@ -140,9 +145,9 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
   }
   // ── The sidebar ──
   const side = h("nav", { class: "hub-side" });
-  const logo = h("canvas", {});
+  const logo = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   side.append(h("div", { class: "hub-brand" }, logo, h("span", { text: "Abito" })));
-  liveMochi(logo as HTMLCanvasElement);
+  liveMochi(logo);
   const group = (title: string, pages: PageDef[]) => {
     side.append(h("div", { class: "hub-group", text: title }));
     for (const p of pages) {

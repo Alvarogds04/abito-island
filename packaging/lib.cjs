@@ -36,6 +36,9 @@ FRONTEND_FILES.push(
   'vendor/coucou/hub/bridge-shim.ts', 'vendor/coucou/hub/bridge-shim.js',
   'vendor/coucou/hub/i18n-es.ts', 'vendor/coucou/hub/i18n-es.js',
   'vendor/coucou/hub/general.ts', 'vendor/coucou/hub/general.js',
+  'vendor/coucou/hub/runtime.ts', 'vendor/coucou/hub/runtime.js',
+  'vendor/coucou/hub/accounts.ts', 'vendor/coucou/hub/accounts.js',
+  'vendor/coucou/hub/personalization.ts', 'vendor/coucou/hub/personalization.js',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
