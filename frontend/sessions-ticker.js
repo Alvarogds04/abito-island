@@ -110,7 +110,32 @@
     }
   }
 
-  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render };
+  // ---- the feed of Coucou's Ticker (S10) --------------------------------------------
+  // The ticker shows the last two STEPS of a task. Abito's sessions are a live list, so a step is a
+  // session row that appeared (or a one-time notice that the list is bounded / unavailable). `memory`
+  // is the caller's object; the result is the task shape Ticker.sync reads, plus whether to show it.
+  const LOG_CAP = 20; // Coucou caps steps at 20 too (core/state.ts)
+  const newMemory = () => ({ log: [], seq: 0, prev: new Set(), error: false, bounded: false });
+  function feed(memory, view) {
+    if (!view || view.state !== 'ready') {
+      if (!memory.error) { memory.error = true; memory.log.push(errorText()); memory.seq++; }
+    } else {
+      memory.error = false;
+      const texts = view.rows.map(r => r.text);
+      for (const text of texts) if (!memory.prev.has(text)) { memory.log.push(text); memory.seq++; }
+      memory.prev = new Set(texts);
+      if (view.truncated && !memory.bounded) { memory.log.push(boundedText(view)); memory.seq++; }
+      memory.bounded = view.truncated;
+      if (!texts.length && !memory.error) { // nothing running: forget the history, show nothing
+        memory.log = []; memory.seq = 0; memory.bounded = false;
+        return { active: false, task: null };
+      }
+    }
+    if (memory.log.length > LOG_CAP) memory.log = memory.log.slice(-LOG_CAP);
+    return { active: true, task: { steps: memory.log.slice(), stepSeq: memory.seq - 1, finalLine: null } };
+  }
+
+  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -121,16 +146,29 @@ function mount(V) {
   if (!invoke) return;
 
   const POLL_MS = 2000; // the floor: never faster than the daemon's scan cache
-  const host = document.createElement('div');
-  host.setAttribute('data-abito', 'sessions-ticker');
-  host.style.cssText = 'position:fixed;left:14px;bottom:10px;z-index:40;pointer-events:none;display:none;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70vw;';
-  document.body.append(host);
+  // Coucou's Ticker (vendor/coucou/views/ticker.js, MIT) inside the overview's left card. It is an ES module,
+  // so it is loaded with a dynamic import; until it arrives (or if it cannot load) nothing is drawn.
+  const overview = document.getElementById('overview-view');
+  const leftCard = overview && overview.querySelector('.card-left');
+  if (!leftCard) return;
+  let ticker = null, raf = 0;
+  const memory = V.newMemory();
+  const frame = now => { raf = 0; if (ticker) { ticker.tick(now); if (ticker.animating && !document.hidden) raf = requestAnimationFrame(frame); } };
+  import('./vendor/coucou/views/ticker.js').then(mod => { ticker = new mod.Ticker(); ticker.el.hidden = true; leftCard.append(ticker.el); }).catch(() => {});
 
   // The Rust host folds the `sessions` frame into ClientState.sessions
   // ({rows, truncated}); rebuild OUR closed frame shape for the pure view.
   const toFrame = state => (state && Array.isArray(state.rows))
     ? { type: 'sessions', schema: V.SCHEMA, sessions: state.rows, truncated: state.truncated === true }
     : null;
+  function show(view) {
+    if (!ticker) return;
+    const { active, task } = V.feed(memory, view);
+    ticker.el.hidden = !active;
+    if (active) overview.dataset.ticker = 'on'; else delete overview.dataset.ticker;
+    ticker.sync(task);
+    if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
+  }
 
   let timer = null;
   let inFlight = false;
@@ -139,10 +177,9 @@ function mount(V) {
     inFlight = true;
     try {
       const state = await invoke('agent_action', { payload: { action: 'sessions_list' } });
-      const view = V.sessionsView(toFrame(state && state.sessions));
-      V.render(host, view || { state: 'error' });
+      show(V.sessionsView(toFrame(state && state.sessions)) || { state: 'error' });
     } catch {
-      V.render(host, { state: 'error' }); // one honest muted line; rows return on the next good answer
+      show({ state: 'error' }); // one honest muted line; rows return on the next good answer
     } finally {
       inFlight = false;
     }

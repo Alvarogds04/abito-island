@@ -40,6 +40,35 @@ const test = async (_n, fn) => { await fn(); passed += 1; };
     for (const bad of ['view', 'stop', 'seek', 'volume', '', 'rm', undefined]) assert.equal(S.payload(bad), null);
   });
 
+  await test('progress: position runs on from positionAt while playing; ads are not seekable; formatTime is m:ss', () => {
+    const st = { running: true, playing: true, position: 30, positionAt: 1000, track: { id: 'spotify:track:1', duration: 200 } };
+    const p = S.progressView(st, 11000);
+    assert.deepEqual([p.elapsed, p.remaining, p.seekable, p.fraction], ['0:40', '-2:40', true, 0.2]);
+    assert.equal(S.progressView({ ...st, playing: false }, 99000).elapsed, '0:30', 'paused: no run-on');
+    assert.equal(S.progressView({ ...st, position: 190 }, 99000).elapsed, '3:20', 'clamped to the duration');
+    assert.equal(S.progressView({ ...st, track: { id: 'spotify:ad:9', duration: 30 } }, 1000).seekable, false);
+    assert.deepEqual(S.progressView({ running: false }, 1).seekable, false);
+    assert.equal(S.formatTime(65.9), '1:05'); assert.equal(S.formatTime(-4), '0:00'); assert.equal(S.formatTime(NaN), '0:00');
+    assert.equal(S.volumeOf({ volume: 42 }), 42); assert.equal(S.volumeOf({ volume: 400 }), 100); assert.equal(S.volumeOf(null), 0);
+  });
+
+  await test('valuedPayload: closed set matching spotify.rs parse_command (seek >=0, volume 0..100 int, shuffle/repeat bool)', () => {
+    assert.deepEqual(S.valuedPayload('seek', 12.5), { action: 'seek', value: 12.5 });
+    assert.deepEqual(S.valuedPayload('volume', 33.4), { action: 'volume', value: 33 });
+    assert.deepEqual(S.valuedPayload('volume', 150), { action: 'volume', value: 100 });
+    assert.deepEqual(S.valuedPayload('shuffle', true), { action: 'shuffle', value: true });
+    assert.deepEqual(S.valuedPayload('repeat', false), { action: 'repeat', value: false });
+    for (const [a, v] of [['seek', NaN], ['seek', 'x'], ['shuffle', 1], ['repeat', 'true'], ['next', 1], ['view', true], ['volume', undefined], ['rm', 1]]) assert.equal(S.valuedPayload(a, v), null, `${a}/${v}`);
+  });
+
+  await test('controller: a valued control sends exactly that payload, only while shown', async () => {
+    const calls = [];
+    const c = S.controller({ invoke: (cmd, a) => { calls.push(a.payload); return Promise.resolve({ ok: true, state: { running: true } }); }, onState() {} });
+    await c.control('seek', 5); assert.deepEqual(calls, [], 'not shown: nothing sent');
+    await c.show(); await c.control('seek', 5); await c.control('volume', 20); await c.control('seek', NaN); await c.control('shuffle', true);
+    assert.deepEqual(calls, [{ action: 'view' }, { action: 'seek', value: 5 }, { action: 'volume', value: 20 }, { action: 'shuffle', value: true }]);
+  });
+
   await test('controller: view once on show, stop once on hide, controls only while shown', async () => {
     const calls = [], states = [];
     const state = { running: true, playing: true, track: { title: 'T', artist: 'A' } };

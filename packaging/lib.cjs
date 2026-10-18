@@ -28,6 +28,23 @@ FRONTEND_FILES.push(
   'vendor/coucou/settings/toggle.js', 'vendor/coucou/settings/toggle.ts',
   'vendor/coucou/settings/general.js', 'vendor/coucou/settings/general.ts',
   'vendor/coucou/views/dom.js', 'vendor/coucou/views/dom.ts',
+  'vendor/coucou/views/icons.js', 'vendor/coucou/views/icons.ts',
+  'vendor/coucou/views/ticker.js', 'vendor/coucou/views/ticker.ts',
+  'vendor/coucou/views/diff.js', 'vendor/coucou/views/diff.ts',
+  'vendor/coucou/core/anim.js', 'vendor/coucou/core/anim.ts',
+  'vendor/coucou/core/diff.js', 'vendor/coucou/core/diff.ts',
+  'settings.html', 'settings-app.js',
+  'vendor/coucou/hub/hub.css', 'vendor/coucou/hub/abito.css',
+  'vendor/coucou/hub/ui.ts', 'vendor/coucou/hub/ui.js',
+  'vendor/coucou/hub/shell.ts', 'vendor/coucou/hub/shell.js',
+  'vendor/coucou/hub/hero.ts', 'vendor/coucou/hub/hero.js',
+  'vendor/coucou/hub/flow-shim.ts', 'vendor/coucou/hub/flow-shim.js',
+  'vendor/coucou/hub/bridge-shim.ts', 'vendor/coucou/hub/bridge-shim.js',
+  'vendor/coucou/hub/i18n-es.ts', 'vendor/coucou/hub/i18n-es.js',
+  'vendor/coucou/hub/general.ts', 'vendor/coucou/hub/general.js',
+  'vendor/coucou/hub/runtime.ts', 'vendor/coucou/hub/runtime.js',
+  'vendor/coucou/hub/accounts.ts', 'vendor/coucou/hub/accounts.js',
+  'vendor/coucou/hub/personalization.ts', 'vendor/coucou/hub/personalization.js',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];

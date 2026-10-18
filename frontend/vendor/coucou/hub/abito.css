@@ -1,0 +1,7 @@
+/* Abito-only CSP adaptation of settings.html's inline styles. */
+body.settings-window { background: #000; color: #f5f6f8; }
+.hub-loading { padding: 24px; }
+/* Plain band retained; Abito SVG uses upstream canvas positioning/sizing verbatim. */
+.hub-hero { background: #000; }
+.hub-brand svg { width: 28px; height: 28px; }
+.hub-hero svg.troupe { position: absolute; inset: 0; width: 100%; height: 100%; }

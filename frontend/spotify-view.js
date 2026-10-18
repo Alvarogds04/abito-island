@@ -1,5 +1,5 @@
 'use strict';
-/* #467 / #470 — the Spotify card of the island (provisional placement: the overview, below the Abito text).
+/* #467 / #470 — the Spotify card of the island (the overview's left card, where Coucou puts its now-playing card).
    Layout and wording adapted from Coucou src/views/spotify.ts (SpotifyCardView), commit 434d6a2b,
    Copyright (c) 2026 Louis Raillé, MIT. Abito's own icons and copy; no artwork (the CSP admits img-src 'self'
    only, so a remote art URL is never requested) and no Spotify mark.
@@ -40,6 +40,31 @@
     return { kind: 'track', title, artist, playing, controls: true, aria: `Spotify: ${title}${artist ? ', ' + artist : ''}. ${playing ? 'Reproduciendo' : 'En pausa'}` };
   }
 
+  // ---- the extra controls of Coucou's now-playing card (spotify.rs parse_command accepts them) ----------
+  const num = (v, lo, hi) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null);
+  /** m:ss, as Coucou's formatTime. */
+  const formatTime = seconds => { const t = Math.max(0, Math.floor(num(seconds, 0, 359999) ?? 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+  const isAd = track => isObject(track) && typeof track.id === 'string' && track.id.startsWith('spotify:ad:');
+  /** Where the bar is `now` (ms): the position runs on from positionAt while playing. */
+  function progressView(state, now) {
+    const track = isObject(state) && state.running === true && isObject(state.track) ? state.track : null;
+    const duration = track ? num(track.duration, 0, 359999) : null;
+    if (!track || !duration) return { fraction: 0, elapsed: '0:00', remaining: '0:00', seekable: false, duration: 0 };
+    const base = num(state.position, 0, duration) ?? 0;
+    const at = num(state.positionAt, 0, Number.MAX_SAFE_INTEGER);
+    const run = state.playing === true && at !== null && Number.isFinite(now) ? Math.max(0, (now - at) / 1000) : 0;
+    const position = Math.min(duration, base + run);
+    return { fraction: position / duration, elapsed: formatTime(position), remaining: '-' + formatTime(duration - position), seekable: !isAd(track), duration };
+  }
+  const volumeOf = state => (isObject(state) ? (num(state.volume, 0, 100) ?? 0) : 0);
+  /** The valued commands, closed: seek (seconds), volume (0..100 int), shuffle/repeat (bool). Anything else is null. */
+  function valuedPayload(action, value) {
+    if (action === 'seek') { const v = num(value, 0, 359999); return v === null ? null : { action, value: v }; }
+    if (action === 'volume') { const v = num(value, 0, 100); return v === null ? null : { action, value: Math.round(v) }; }
+    if (action === 'shuffle' || action === 'repeat') return typeof value === 'boolean' ? { action, value } : null;
+    return null;
+  }
+
   const payload = action => (Object.prototype.hasOwnProperty.call(CONTROLS, action) ? { action } : null);
 
   // The lifecycle: `view` on show, `stop` on hide, nothing twice. `invoke` and `onState` are injected.
@@ -57,8 +82,8 @@
         shown = false; generation += 1;
         return invoke('spotify_action', { payload: { action: 'stop' } }).then(() => {}, () => {});
       },
-      control(action) {
-        const body = payload(action);
+      control(action, value) {
+        const body = value === undefined ? payload(action) : valuedPayload(action, value);
         if (!body || !shown) return Promise.resolve();
         return invoke('spotify_action', { payload: body }).then(apply, () => {});
       },
@@ -66,7 +91,7 @@
     };
   }
 
-  return { PILL_ID, CONTROLS, wanted, cardView, payload, controller };
+  return { PILL_ID, CONTROLS, wanted, cardView, payload, controller, formatTime, progressView, volumeOf, valuedPayload };
 });
 
 function mount(api) {
@@ -85,17 +110,91 @@ function mount(api) {
   if (!invoke) return;
   const os = typeof navigator !== 'undefined' && /Windows/.test(navigator.userAgent || '') ? 'windows' : 'linux';
   const mk = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
-  const title = mk('strong', 'spotify-title'), artist = mk('span', 'spotify-artist');
-  const text = mk('div', 'spotify-text'); text.append(title, artist);
+  // Coucou's now-playing card (views/spotify.ts, NowPlayingViews.swift): green dot + title, subtitle, then
+  // backward / play-pause / forward. Glyph paths are Coucou's ICONS (MIT, 24x24 grid, filled). There is no
+  // artwork, progress bar, volume, shuffle or repeat: Abito's `spotify_action` set is closed (previous,
+  // play_pause, next) and its state carries no position, so those parts of the card are not drawn.
+  const GLYPH = {
+    previous: 'M21.5 6.2c0-.7-.8-1.1-1.4-.7l-7.6 5.8c-.5.4-.5 1 0 1.4l7.6 5.8c.6.4 1.4 0 1.4-.7V6.2zm-10 0c0-.7-.8-1.1-1.4-.7l-7.6 5.8c-.5.4-.5 1 0 1.4l7.6 5.8c.6.4 1.4 0 1.4-.7V6.2z',
+    next: 'M2.5 6.2c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2zm10 0c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2z',
+    play: 'M7 4.6c0-.8.9-1.3 1.6-.9l11 6.9c.6.4.6 1.4 0 1.8l-11 6.9c-.7.4-1.6-.1-1.6-.9V4.6z',
+    pause: 'M6 4.5h4v15H6zM14 4.5h4v15h-4z',
+  };
+  const NS = 'http://www.w3.org/2000/svg';
+  const glyph = (name, size) => {
+    const el = doc.createElementNS(NS, 'svg'); el.setAttribute('viewBox', '0 0 24 24');
+    el.setAttribute('width', String(size)); el.setAttribute('height', String(size)); el.setAttribute('aria-hidden', 'true');
+    const path = doc.createElementNS(NS, 'path'); path.setAttribute('d', GLYPH[name]); path.setAttribute('fill', 'currentColor');
+    el.append(path); return el;
+  };
+  const title = mk('span', 'np-title'), artist = mk('div', 'np-sub');
+  const row = mk('div', 'np-title-row'); row.append(mk('span', 'np-dot'), title);
+  const text = mk('div', 'np-text'); text.append(row, artist);
+  const head = mk('div', 'np-head'); head.append(text);
   const buttons = {};
-  const bar = mk('div', 'spotify-controls');
+  const bar = mk('div', 'np-buttons');
   for (const [action, name] of Object.entries(api.CONTROLS)) {
-    const b = mk('button', 'spotify-btn'); b.type = 'button'; b.dataset.action = action; b.setAttribute('aria-label', name);
-    b.textContent = action === 'previous' ? '⏮' : action === 'next' ? '⏭' : '⏯';
+    const b = mk('button', action === 'play_pause' ? 'np-play' : 'np-icon'); b.type = 'button'; b.dataset.action = action; b.setAttribute('aria-label', name);
+    if (action !== 'play_pause') b.append(glyph(action, 11));
+    else b.append(glyph('play', 9));
     b.addEventListener('click', e => { if (e.isTrusted === true) ctl.control(action); });
     buttons[action] = b; bar.append(b);
   }
-  host.append(text, bar);
+  // progress row: elapsed, bar, remaining (Coucou .np-progress); controls: shuffle, previous, play, next, repeat | volume.
+  const barOf = (label, onCommit) => {
+    const el = mk('div', 'np-bar'), track = mk('i', 'np-track'), fill = mk('i', 'np-fill'), knob = mk('i', 'np-knob');
+    el.setAttribute('role', 'slider'); el.setAttribute('aria-label', label); el.tabIndex = 0; el.append(track, fill, knob);
+    const api2 = { el, fraction: 0, dragging: false, enabled: false };
+    api2.paint = f => { api2.fraction = Math.min(1, Math.max(0, f)); fill.style.width = (api2.fraction * 100) + '%'; knob.style.left = `calc(${api2.fraction * 100}% - 4.5px)`; };
+    const at = e => { const r = el.getBoundingClientRect(); return r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0; };
+    el.addEventListener('pointerdown', e => {
+      if (!api2.enabled || e.button !== 0 || e.isTrusted !== true) return;
+      e.stopPropagation(); api2.dragging = true; el.classList.add('active');
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      api2.paint(at(e));
+    });
+    el.addEventListener('pointermove', e => { if (api2.dragging) api2.paint(at(e)); });
+    const end = e => { if (!api2.dragging) return; api2.dragging = false; el.classList.remove('active'); onCommit(at(e)); };
+    el.addEventListener('pointerup', end); el.addEventListener('pointercancel', () => { api2.dragging = false; el.classList.remove('active'); });
+    el.addEventListener('keydown', e => {
+      if (!api2.enabled || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      e.preventDefault(); const f = Math.min(1, Math.max(0, api2.fraction + (e.key === 'ArrowRight' ? 0.05 : -0.05))); api2.paint(f); onCommit(f);
+    });
+    return api2;
+  };
+  const elapsed = mk('span', 'np-time elapsed'), remaining = mk('span', 'np-time remaining');
+  let last = null;
+  const progress = barOf('Posición', f => { const p = api.progressView(last, Date.now()); if (p.seekable) ctl.control('seek', f * p.duration); });
+  const progressRow = mk('div', 'np-progress'); progressRow.append(elapsed, progress.el, remaining);
+  const GLYPH_FLAGS = {
+    shuffle: 'M3 7h3.2c1.9 0 3.1.9 4.1 2.5l3.4 5c1 1.6 2.2 2.5 4.1 2.5H21M3 17h3.2c1.6 0 2.7-.6 3.6-1.8M14.2 8.8C15.1 7.6 16.2 7 17.8 7H21M18.6 4.6 21 7l-2.4 2.4M18.6 14.6 21 17l-2.4 2.4',
+    repeat: 'M4 11.5V10a3 3 0 0 1 3-3h13.5M17.6 4.1 20.5 7l-2.9 2.9M20 12.5V14a3 3 0 0 1-3 3H3.5M6.4 19.9 3.5 17l2.9-2.9',
+  };
+  const flagBtn = (name, label) => {
+    const b = mk('button', 'np-icon np-flag'); b.type = 'button'; b.dataset.action = name; b.setAttribute('aria-label', label); b.setAttribute('aria-pressed', 'false');
+    const el = doc.createElementNS(NS, 'svg'); el.setAttribute('viewBox', '0 0 24 24'); el.setAttribute('width', '10'); el.setAttribute('height', '10'); el.setAttribute('aria-hidden', 'true');
+    const path = doc.createElementNS(NS, 'path'); path.setAttribute('d', GLYPH_FLAGS[name]); path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2.2'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round'); el.append(path); b.append(el);
+    b.addEventListener('click', e => { if (e.isTrusted === true && last) ctl.control(name, !(last[name] === true)); });
+    return b;
+  };
+  const shuffle = flagBtn('shuffle', 'Mezclar'), repeat = flagBtn('repeat', 'Repetir');
+  bar.prepend(shuffle); bar.append(repeat);
+  const volume = barOf('Volumen', f => ctl.control('volume', Math.round(f * 100)));
+  volume.el.classList.add('np-volume-bar');
+  const volBox = mk('div', 'np-volume'); volBox.append(volume.el);
+  const spacer = mk('div', 'grow');
+  const controls = mk('div', 'np-controls'); controls.append(bar, spacer, volBox);
+  const card = mk('div', 'np-card'); card.append(head, progressRow, controls);
+  host.append(card);
+  function tickProgress() {
+    const p = api.progressView(last, Date.now());
+    progress.enabled = p.seekable; if (!progress.dragging) progress.paint(p.fraction);
+    elapsed.textContent = p.elapsed; remaining.textContent = p.remaining;
+    progress.el.setAttribute('aria-valuenow', String(Math.round(p.fraction * 100)));
+  }
+  let clock = null;
+  const runClock = on => { if (on && !clock) clock = setInterval(tickProgress, 500); else if (!on && clock) { clearInterval(clock); clock = null; } };
   const live = mk('span', 'sr-only'); live.setAttribute('role', 'status'); live.setAttribute('aria-live', 'polite'); host.append(live);
   let lastAria = '';
   function paint(state) {
@@ -103,8 +202,15 @@ function mount(api) {
     title.textContent = v.title; artist.textContent = v.artist;
     host.dataset.kind = v.kind; host.dataset.playing = v.playing ? 'true' : 'false';
     host.setAttribute('aria-label', v.aria);
+    last = state && typeof state === 'object' ? state : null;
+    const ok = v.controls && v.kind === 'track';
+    shuffle.setAttribute('aria-pressed', ok && last.shuffle === true ? 'true' : 'false');
+    repeat.setAttribute('aria-pressed', ok && last.repeat === true ? 'true' : 'false');
+    volume.enabled = v.controls; if (!volume.dragging) volume.paint(api.volumeOf(last) / 100);
+    volume.el.setAttribute('aria-valuenow', String(api.volumeOf(last)));
+    tickProgress(); runClock(v.kind === 'track' && v.playing);
     for (const b of Object.values(buttons)) b.disabled = !v.controls;
-    buttons.play_pause.textContent = v.playing ? '⏸' : '▶';
+    buttons.play_pause.replaceChildren(glyph(v.playing ? 'pause' : 'play', 9));
     if (v.aria !== lastAria) { lastAria = v.aria; live.textContent = v.aria; }
   }
   const ctl = api.controller({ invoke, onState: paint });

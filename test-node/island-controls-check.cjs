@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const dir = path.join(__dirname, '..', 'frontend');
-const css = fs.readFileSync(path.join(dir, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const css = (fs.readFileSync(path.join(dir, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(dir, 'vendor/coucou/island/island.css'), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '');
 function decls(sel) {
   const out = {};
   for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -23,28 +23,28 @@ function decls(sel) {
 let failed = 0;
 const test = (n, f) => { try { f(); console.log('PASS ' + n); } catch (e) { failed++; console.error('FAIL ' + n + ': ' + e.message); } };
 
-test('rail tabs keep the 44px hit height and draw a 36px visual on ::after (design §1: rail tab 36)', () => {
+test('header tabs keep the 44px hit area and draw Coucou\'s 30x22 r11 visual on ::after (S10: header on top, no rail)', () => {
   assert.equal(decls('#island-header .tab, #island-header .hdr-action')['height'], '44px');
   const a = decls('#island-header .tab::after');
-  assert.equal(a.inset, '4px', '44 hit - 2x4 inset = 36 visual');
-  assert.equal(a['border-radius'], '10px');
+  assert.equal(a.inset, '11px 7px', '44x44 hit - 2x7 / 2x11 inset = 30x22 visual');
+  assert.equal(a['border-radius'], '11px');
   assert.equal(decls('#island-header .tab[aria-pressed="true"]').background, 'transparent', 'the visible tab fill moves to ::after');
   assert.equal(decls('#island-header .tab[aria-pressed="true"]::after').background, 'var(--tab-on)');
 });
 
-test('question options: 32px visual inside the 44px hit area (design §2)', () => {
+test('question options: Coucou .btn pill, 30px visual inside the 44px hit area', () => {
   assert.equal(decls('.q-option')['min-height'], '44px');
   const a = decls('.q-option::after');
-  assert.equal(a.inset, '6px', '44 hit - 2x6 inset = 32 visual');
-  assert.equal(a['border-radius'], '10px');
+  assert.equal(a.inset, '7px 0', '44 hit - 2x7 inset = 30 visual');
+  assert.equal(a['border-radius'], '999px');
   assert.equal(a['background'], 'var(--btn-bg)');
   assert.equal(decls('.q-option').background, 'transparent', 'the visible fill moves to ::after');
 });
 
-test('approval buttons: 32px visual inside the 44px hit area, «Permitir» primary (design §2)', () => {
+test('approval buttons: Coucou .btn pill, 30px visual inside the 44px hit area, «Permitir» primary', () => {
   for (const sel of ['#allow', '#deny']) {
     assert.equal(decls(sel)['min-height'], '44px');
-    assert.equal(decls(sel + '::after').inset, '6px');
+    assert.equal(decls(sel + '::after').inset, '7px 0');
     assert.equal(decls(sel).background, 'transparent');
   }
   assert.equal(decls('#allow::after').background, 'var(--primary-bg)', 'Permitir is the primary');

@@ -43,8 +43,14 @@ test('build receipt hashes every curated path, including nested vendor files', (
     require: name => name === 'node:fs' ? fakeFs : name === './lib.cjs' ? fakeLib
       : name === 'node:child_process' ? { spawnSync: () => ({ stdout: 'stub' }) } : require(name),
   });
-  const nested = 'vendor/coucou/settings/colors.js';
-  assert.equal(receipt.inputs.frontend[nested], L.sha256File(path.join(crate, 'frontend', nested)));
+  for (const nested of ['vendor/coucou/settings/colors.js', 'settings.html', 'settings-app.js',
+    'vendor/coucou/hub/shell.js', 'vendor/coucou/hub/ui.js', 'vendor/coucou/hub/general.js',
+    'vendor/coucou/hub/hub.css', 'vendor/coucou/hub/abito.css',
+    'vendor/coucou/hub/accounts.ts', 'vendor/coucou/hub/accounts.js',
+    'vendor/coucou/hub/personalization.ts', 'vendor/coucou/hub/personalization.js',
+    'vendor/coucou/hub/runtime.ts', 'vendor/coucou/hub/runtime.js', 'clay-engine.js']) {
+    assert.equal(receipt.inputs.frontend[nested], L.sha256File(path.join(crate, 'frontend', nested)));
+  }
   assert.deepEqual(Object.keys(receipt.inputs.frontend).sort(), [...L.FRONTEND_FILES].sort());
 });
 

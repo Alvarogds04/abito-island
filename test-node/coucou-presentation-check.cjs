@@ -68,15 +68,17 @@ test('V1 D1: a question outcome is a 2-4s confirmation that returns to the previ
   assert.match(src, /trackOutcome\(previous, next\)/);
 });
 
-test('V1 gutter: the view rail lives in the 72px right gutter; cards stop at it; panels start below one header', () => {
+test('S10 header on top (replaces the V1 gutter): 640x34 header above the cards; the chat hides it; 44px hit tabs', () => {
   const css = read('style.css');
   const v1 = css.slice(css.indexOf('Visual correction V1'));
-  assert.match(v1, /#island-header \{[^}]*width: 56px/);
-  assert.match(v1, /#overview-view \{[^}]*right: 72px/);
-  assert.match(v1, /#notices \{[^}]*right: 72px/);
-  assert.match(v1, /#question, #permission \{[^}]*right: 72px/);
-  assert.match(v1, /#capsule\[data-phase="expanded"\]\[data-view="chat"\] #island-header \{ opacity: 0/, 'one header in the chat: the rail leaves');
-  for (const sel of ['#island-header .tab, #island-header .hdr-action']) assert.match(v1, new RegExp(sel.replace(/[.#,]/g, m => '\\' + m) + ' \\{[^}]*height: 44px'), sel);
+  const isl = read('vendor/coucou/island/island.css');
+  assert.match(isl, /#island-header \{[^}]*top: 8px;[^}]*width: 640px; height: 34px;[^}]*flex-direction: row/);
+  assert.match(isl, /#overview-view \{[^}]*width: 620px;[^}]*top: 42px;[^}]*height: 108px/);
+  assert.match(isl, /#notices \{[^}]*width: 288px;[^}]*top: 42px;[^}]*height: 44px/);
+  assert.match(isl, /#permission, #question \{[^}]*width: 620px;[^}]*top: 42px;[^}]*height: 108px/);
+  assert.doesNotMatch(v1 + isl, /(#island-header|#overview-view|#notices|#question, #permission|#permission, #question)[^{}]*\{[^}]*(right: 72px|width: 56px)/, 'no rail gutter any more');
+  assert.match(v1, /#capsule\[data-phase="expanded"\]\[data-view="chat"\] #island-header \{ opacity: 0/, 'one header in the chat: the header leaves');
+  assert.match(isl, /#island-header \.tab, #island-header \.hdr-action \{[^}]*height: 44px/);
 });
 
 test('V1 dot: a panel left open can never move the dot character (scoped to the expanded chat view)', () => {
@@ -103,6 +105,7 @@ test('V1 type ramp: roles are tokens (>=12px floor) and the V1 block declares no
 
 test('S10 island type scale: Coucou\'s exact sizes (windows/src/style.css @434d6a2b) on island surfaces; chat and settings keep the V1 ramp', () => {
   const css = read('style.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const literal = read('vendor/coucou/island/island.css').replace(/\/\*[\s\S]*?\*\//g, '');
   // Adapted from Coucou windows/src/style.css @434d6a2b: .who .name 12, .who .tool 11, .chip 11.5, .btn / .bubble 12.5, .diff-note 10.5, status 13.
   const scale = { '--cc-fs-name': '12px', '--cc-fs-detail': '11px', '--cc-fs-chip': '11.5px', '--cc-fs-body': '12.5px', '--cc-fs-state': '13px', '--cc-fs-note': '10.5px' };
   const block = /:root \{ --cc-fs-name: ([\d.]+)px; --cc-fs-detail: ([\d.]+)px; --cc-fs-chip: ([\d.]+)px; --cc-fs-body: ([\d.]+)px; --cc-fs-state: ([\d.]+)px; --cc-fs-note: ([\d.]+)px; \}/.exec(css);
@@ -111,9 +114,10 @@ test('S10 island type scale: Coucou\'s exact sizes (windows/src/style.css @434d6
   assert.deepEqual(Object.values(scale).length, 6);
   const from = css.lastIndexOf('.agentline { font-size: var(--cc-fs-name)');
   const tail = css.slice(from, css.indexOf('#settings-body[data-screen="accounts"]', from));
-  for (const sel of ['.agentline', '.overview-detail', '.pill-summary', '#notice-row .chip', '#notice-title', '#notice-sub', '#notice-action', '#notice-list-title', '.notice-list-title', '.notice-list-time', '#card-head .chip', '#question-asker', '#question-body', '#question-skip', '.q-option', '#permission #operation', '#allow, #deny', '#card-wait', '.minibot', '.spotify-text', '.pill-choice'])
-    assert(tail.includes(sel), `${sel} is on the Coucou scale`);
+  for (const sel of ['.agentline', '.overview-detail', '.pill-summary', '#notice-row .chip', '#notice-title', '#notice-sub', '#notice-action', '#notice-list-title', '.notice-list-title', '.notice-list-time', '#card-head .chip', '#question-asker', '#question-body', '#question-skip', '.q-option', '#permission #operation', '#allow, #deny', '#card-wait', '.minibot', '.pill-choice'])
+    assert((tail + literal).includes(sel), `${sel} is on the Coucou scale`);
   assert.doesNotMatch(tail, /font-size:\s*\d|font:\s*\d+\s+\d/, 'the block uses only the --cc-fs-* tokens');
+  assert.match(literal, /\.agentline strong \{ font: 600 12px/); assert.match(literal, /\.overview-detail \{[^}]*font: 500 13px/); assert.match(literal, /\.btn|#allow, #deny, \.q-option \{[^}]*font: 500 12\.5px/);
   for (const chat of ['#chat', '#settings', '#models']) assert(!tail.includes(chat), `${chat} untouched (S10: chat stays Abito's)`);
 });
 
