@@ -297,3 +297,64 @@ fn utc_stamp_and_picture_dirs_are_plain() {
     assert_eq!(utc_stamp(T0), "20261005-000000");
     assert_eq!(utc_stamp(0), "19700101-000000");
 }
+
+fn rec(event: &str, session: &str, extra: Value) -> Value {
+    let mut v = json!({"v": 1, "at": 0, "event": event, "session": session, "project": "proj"});
+    if let (Some(o), Value::Object(m)) = (v.as_object_mut(), extra) {
+        o.extend(m);
+    }
+    v
+}
+
+#[test]
+fn reduced_hook_events_count_a_whole_turn_from_prompt_to_stop() {
+    let dir = scratch("reduced");
+    let file = dir.join("recap.json");
+    let mut r = Recap::load(file.clone(), T0);
+    r.observe_reduced(&rec("prompt", "s", json!({})), T0 + 10);
+    r.observe_reduced(&rec("tool", "s", json!({"kind":"command"})), T0 + 20);
+    r.observe_reduced(&rec("tool", "s", json!({"kind":"question"})), T0 + 25);
+    r.observe_reduced(&rec("tool", "s", json!({"kind":"edit","added":3,"removed":1,"file":"aaaa"})), T0 + 30);
+    r.observe_reduced(&rec("tool", "s", json!({"kind":"edit","added":2,"removed":0,"file":"aaaa"})), T0 + 40);
+    r.observe_reduced(&rec("tool", "s", json!({"kind":"edit","added":1,"removed":1,"file":"bbbb"})), T0 + 45);
+    r.observe_reduced(&rec("tool", "s", json!({"kind":"other"})), T0 + 46);
+    r.observe_reduced(&rec("stop", "s", json!({})), T0 + 60);
+    let t = &r.view(0).turns;
+    assert_eq!(t.len(), 1);
+    assert_eq!(
+        (t[0].agent.as_str(), t[0].project.as_str(), t[0].start, t[0].end),
+        ("integration_claude", "proj", T0 + 10, T0 + 60)
+    );
+    assert_eq!((t[0].files_changed, t[0].lines_added, t[0].lines_removed, t[0].commands_run, t[0].questions), (2, 6, 2, 1, 1));
+    assert_eq!(on_disk(&file)["turns"][0]["filesChanged"], 2);
+    // nothing but counts and the two names reach the disk
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("aaaa"));
+}
+
+#[test]
+fn reduced_events_respect_enabled_and_reject_bad_shapes() {
+    let dir = scratch("reduced2");
+    let mut r = Recap::load(dir.join("recap.json"), T0);
+    for bad in [json!(1), json!({"event":"prompt"}), json!({"v":2,"event":"prompt","session":"s"}), rec("nope", "s", json!({})), rec("tool", "s", json!({"kind":"x"})), rec("prompt", "", json!({}))] {
+        r.observe_reduced(&bad, T0 + 1);
+        r.observe_reduced(&rec("stop", "s", json!({})), T0 + 2);
+        assert!(r.view(0).turns.is_empty(), "{bad}");
+    }
+    r.set_enabled(false);
+    r.observe_reduced(&rec("prompt", "s", json!({})), T0 + 3);
+    r.observe_reduced(&rec("stop", "s", json!({})), T0 + 4);
+    assert!(r.view(0).turns.is_empty());
+}
+
+#[test]
+fn a_settled_notice_right_after_hook_events_is_not_counted_twice() {
+    let dir = scratch("dedupe");
+    let mut r = Recap::load(dir.join("recap.json"), T0);
+    r.observe_reduced(&rec("prompt", "s", json!({})), T0 + 10);
+    r.observe_reduced(&rec("stop", "s", json!({})), T0 + 20);
+    r.record_settled("agent_pi", "proj", T0 + 21);
+    assert_eq!(r.view(0).turns.len(), 1);
+    // far from any hook event the Pi/other turn is counted
+    r.record_settled("agent_pi", "proj", T0 + 500);
+    assert_eq!(r.view(0).turns.len(), 2);
+}
