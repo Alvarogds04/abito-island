@@ -5,7 +5,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '../frontend/vendor/coucou');
 const compiler = process.env.ESBUILD_BINARY_PATH || '/home/alvaro/.pi/agent/npm/node_modules/@esbuild/linux-x64/bin/esbuild';
-const inputs = ['settings/colors', 'settings/parts', 'core/pill-colors', 'views/dom', 'i18n/i18n'];
+const inputs = ['settings/colors', 'settings/parts', 'core/pill-colors', 'views/dom', 'i18n/i18n', 'core/pills', 'core/shortcuts', 'core/providers', 'core/state'];
 if (!fs.existsSync(compiler)) throw new Error('Falta esbuild local: indicar ESBUILD_BINARY_PATH; no se instalará nada.');
 const version = execFileSync(compiler, ['--version'], { encoding: 'utf8' }).trim();
 if (version !== '0.28.2') throw new Error(`esbuild ${version}: se requiere 0.28.2 para salida reproducible`);

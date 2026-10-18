@@ -16,6 +16,10 @@ const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'character-minibots.js'
 FRONTEND_FILES.push(
   'vendor/coucou/LICENSE', 'vendor/coucou/bridge-abito.js', 'vendor/coucou/package.json',
   'vendor/coucou/core/pill-colors.js', 'vendor/coucou/core/pill-colors.ts',
+  'vendor/coucou/core/pills.js', 'vendor/coucou/core/pills.ts',
+  'vendor/coucou/core/shortcuts.js', 'vendor/coucou/core/shortcuts.ts',
+  'vendor/coucou/core/providers.js', 'vendor/coucou/core/providers.ts',
+  'vendor/coucou/core/state.js', 'vendor/coucou/core/state.ts',
   'vendor/coucou/i18n/i18n.js', 'vendor/coucou/i18n/i18n.ts',
   'vendor/coucou/settings/colors.js', 'vendor/coucou/settings/colors.ts',
   'vendor/coucou/settings/parts.js', 'vendor/coucou/settings/parts.ts',

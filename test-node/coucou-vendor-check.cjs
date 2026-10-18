@@ -41,6 +41,68 @@ function hashTree() {
   walk(vendor); return hash.digest('hex');
 }
 (async () => {
+  // Pure modules must import and run without even the minimal DOM below.
+  delete global.document; delete global.window;
+  const pills = await load('core/pills.js');
+  const keys = await load('core/shortcuts.js');
+  const providers = await load('core/providers.js');
+  const { N_, t: translate } = await load('i18n/i18n.js');
+  assert.equal(N_('Untranslated marker'), 'Untranslated marker');
+  assert.throws(() => translate('Untranslated marker'), /Traducción/);
+  for (const name of keys.KEY_NAMES) {
+    const text = `Ctrl+Alt+Shift+Super+${name}`;
+    assert.equal(keys.formatKeys(keys.parseKeys(text)), text);
+  }
+  assert.equal(keys.normalizeKeys(' option + control + ArrowRight '), 'Ctrl+Alt+Right');
+  assert.equal(keys.displayKeys('Super+Right'), 'Win+→');
+  for (const text of ['', 'A', 'Shift+A', 'Ctrl', 'Ctrl++A', 'Ctrl+A+B', 'Ctrl+Escape', 'Ctrl+F25', 'Ctrl+Unknown']) {
+    assert.equal(keys.parseKeys(text), null, `invalid accelerator: ${text}`);
+  }
+  assert.deepEqual([...keys.duplicates([['a', 'Control+A'], ['b', 'Ctrl+A'], ['c', 'Alt+A'], ['d', 'invalid']])].sort(), ['a', 'b']);
+  const shortcut = keys.SHORTCUTS[0];
+  assert.deepEqual(keys.effective(shortcut), { keys: shortcut.defaultKeys, enabled: shortcut.enabledByDefault });
+  assert.deepEqual(keys.effective(shortcut, { [shortcut.id]: { keys: '', enabled: false } }), { keys: '', enabled: false });
+  assert(!/Coucou|Mochi/i.test(JSON.stringify(keys.SHORTCUT_TEXT)));
+  assert.equal(keys.SHORTCUT_TEXT.muteToggle, 'Mute or unmute Abito');
+  assert.equal(keys.SHORTCUT_TEXT.desktopToggle, 'Send Abito to the desktop');
+  for (const [raw, expected] of [
+    ['', 'local'], ['localhost:11434', 'local'], ['http://127.1.2.3', 'local'], ['http://[::1]', 'local'],
+    ['https://example.org', 'remote'], ['example.org:8080', 'remote-http'],
+    ['ftp://localhost', 'invalid'], ['http://u:p@localhost', 'invalid'], ['http://', 'invalid'], ['not a url', 'invalid'],
+  ]) assert.equal(providers.urlExposure(raw), expected, raw);
+  for (const host of ['LOCALHOST', 'app.localhost', '127.0.0.2', '0.0.0.0', '[::1]', '::', '::ffff:127.0.0.1', '::ffff:7f00:1']) assert(providers.isLoopbackHost(host), host);
+  for (const host of ['localhost.example.org', 'example.org', '192.168.1.1', '::2']) assert(!providers.isLoopbackHost(host), host);
+  const settings = { chatProvider: 'anthropic', model: '', chatModels: {}, ollamaUrl: '', lmstudioUrl: '', customUrl: '' };
+  assert.equal(providers.activeModel(settings), providers.providerDef('anthropic').defaultModel);
+  assert.equal(providers.activeModel(providers.withModel(settings, 'anthropic', 'chosen')), 'chosen');
+  const openai = providers.withModel({ ...settings, chatProvider: 'openai' }, 'openai', 'other');
+  assert.equal(providers.activeModel(openai), 'other');
+  assert.deepEqual(settings.chatModels, {});
+  assert.equal(providers.pickModel(providers.providerDef('openai'), [], ''), null);
+  assert.equal(providers.pickModel(providers.providerDef('openai'), ['saved', 'mini'], 'saved'), 'saved');
+  assert.equal(providers.pickModel(providers.providerDef('openai'), ['first', 'gpt-mini'], ''), 'gpt-mini');
+  assert.equal(providers.pickModel(providers.providerDef('custom'), ['first', 'second'], ''), 'first');
+  assert.deepEqual(providers.visibleProviders(settings).map(p => p.id), ['anthropic', 'google', 'openai', 'openrouter']);
+  assert(providers.visibleProviders({ ...settings, chatProvider: 'ollama' }).some(p => p.id === 'ollama'));
+  assert(providers.visibleProviders({ ...settings, customUrl: 'https://example.org' }).some(p => p.id === 'custom'));
+  const prefs = fs.readFileSync(path.join(root, 'src/prefs.rs'), 'utf8');
+  const rustIds = prefs.match(/pub const PILL_IDS: \[&str; \d+\] = \[([\s\S]*?)\];/);
+  assert(rustIds, 'Rust PILL_IDS declaration must remain readable');
+  assert.deepEqual(pills.PILL_CATALOG.map(p => p.id), [...rustIds[1].matchAll(/"([^"]+)"/g)].map(m => m[1]));
+  assert.equal(pills.DEFAULT_MAIN_PILL, 'integration_claude');
+  assert.equal(pills.DEFAULT_MAIN_PILL, prefs.match(/pub const DEFAULT_MAIN_PILL: &str = "([^"]+)";/)?.[1]);
+  assert.equal(pills.MAX_DECLARED, 4);
+  assert.equal(pills.MAX_DECLARED, Number(prefs.match(/pub const MAX_DECLARED_PILLS: usize = (\d+);/)?.[1]));
+  for (const os of ['windows', 'linux']) {
+    const ids = pills.availablePills(os).map(p => p.id);
+    assert.equal(ids.length, os === 'windows' ? 24 : 23);
+    assert.equal(ids.includes('agent_claude-desktop'), os === 'windows');
+    assert(!ids.includes('integration_music'));
+    assert(ids.includes('integration_spotify'));
+  }
+  assert(!/Coucou|Mochi/i.test(JSON.stringify(pills.PILL_CATALOG)));
+  global.document = document; global.window = Object.assign(new Target(), { innerWidth: 320 });
+  console.log('PASS pure modules: shortcuts, providers, OS catalog, Rust parity (25 IDs)');
   const { h } = await load('views/dom.js');
   const styled = h('div', { style: 'background:#F4505E;--x:1' });
   assert.deepEqual(styled.styleCalls, [['background', '#F4505E'], ['--x', '1']]);
