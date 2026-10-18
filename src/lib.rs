@@ -48,6 +48,7 @@ pub mod nativedialog;
 pub mod prefs;
 pub mod protocol;
 pub mod secrets;
+pub mod sounds;
 pub mod question;
 pub mod spotify;
 pub mod questioncmd;
