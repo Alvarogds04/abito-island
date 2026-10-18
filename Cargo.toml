@@ -14,6 +14,10 @@ probe = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Dependency policy (#467, owner decision): new crates are allowed only for functions Abito
+# did not have and the owner asked for (key store: keyring; dictation: cpal, sherpa-onnx,
+# reqwest 0.12). Each one is added in its own reviewed commit with the reason next to it.
+# Everything else still reuses what Cargo.lock already resolves.
 # OS-neutral: these compile for x86_64-pc-windows-msvc as they are.
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }

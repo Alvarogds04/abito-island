@@ -10,7 +10,10 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Webview};
 
 fn err(code: &str) -> BridgeError {
-    BridgeError { code: code.into(), message: "No se pudo controlar Spotify.".into() }
+    BridgeError {
+        code: code.into(),
+        message: "No se pudo controlar Spotify.".into(),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -28,7 +31,13 @@ fn client(app: &AppHandle) -> &'static spotify::Client {
 /// `{"action": …}` closed set: view, stop, play_pause, next, previous, seek, shuffle, repeat,
 /// volume. Answers `{ok, state}`; `ok` is false when Spotify is not running or refused.
 #[tauri::command]
-pub async fn spotify_action(app: AppHandle, webview: Webview, payload: Value) -> Result<Value, BridgeError> {
+pub async fn spotify_action(
+    app: AppHandle,
+    webview: Webview,
+    payload: Value,
+) -> Result<Value, BridgeError> {
+    // #366 F093: the Spotify pill lives in the island; the settings window never drives it.
+    crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     let action = spotify::parse_command(&payload).ok_or_else(|| err("invalid_schema"))?;
@@ -51,7 +60,11 @@ async fn run(app: AppHandle, action: Action) -> Result<Value, BridgeError> {
             }
             control => client.control(control),
         };
-        let state = if matches!(action, Action::View) { client.refresh().unwrap_or_else(|| client.state()) } else { client.state() };
+        let state = if matches!(action, Action::View) {
+            client.refresh().unwrap_or_else(|| client.state())
+        } else {
+            client.state()
+        };
         json!({ "ok": ok, "state": state })
     })
     .await
