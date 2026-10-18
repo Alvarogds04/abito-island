@@ -24,7 +24,11 @@ impl Bus {
         let _ = std::fs::DirBuilder::new().mode(0o700).create(&dir);
         let sock = dir.join("s");
         let address = format!("unix:path={}", sock.display());
-        let child = Command::new("dbus-daemon").args(["--session", "--nofork", &format!("--address={address}"), "--nopidfile"])
+        // A bare config with NO <servicedir>: `--session` alone loads the system's activatable services,
+        // so on a machine with xdg-desktop-portal installed the "missing portal" bus auto-starts the real one.
+        let conf = dir.join("bus.conf");
+        std::fs::write(&conf, format!("<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\"><busconfig><type>session</type><listen>{address}</listen><auth>EXTERNAL</auth><policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/><allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>", address = address)).expect("write bus config");
+        let child = Command::new("dbus-daemon").args([&format!("--config-file={}", conf.display()), "--nofork", "--nopidfile"])
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().expect("dbus-daemon is required (no skip, no fake)");
         for _ in 0..100 { if sock.exists() { break; } std::thread::sleep(Duration::from_millis(30)); }
         Bus { child, address, _dir: dir }
