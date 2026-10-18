@@ -51,6 +51,7 @@
   if (WINDOW_MODE) {
     document.body.dataset.window = 'settings';
     document.body.append(panel); // the settings window has no island ancestor or clipping
+    $('coucou-settings-style').media = 'all'; // never apply the vendor reset to the island
   }
   const moreGroup = $('connections-more'); // FAKE services cards; render() wipes the body, so it is re-appended per render
   const tabsHost = $('settings-tabs');
@@ -111,6 +112,18 @@
 
   const say = text => { if (text) { live.textContent = ''; requestAnimationFrame(() => { live.textContent = text; }); } };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
+  // Frame adapted from windows/src/hub/shell.ts: sidebar + existing settings page.
+  // Copyright (c) 2026 Louis Raillé, MIT. No Flow, reserved artwork or new IPC.
+  function mountSettingsFrame() {
+    const side = el('nav', 'hub-side');
+    side.append(el('div', 'hub-brand', 'Abito'), $('settings-tabs'));
+    const page = el('main', 'hub-panel');
+    page.append($('settings-bar'), $('settings-hint'), $('settings-body'), $('models'));
+    panel.append(side, page);
+  }
+  // ---- settings frame end
+  if (WINDOW_MODE) mountSettingsFrame();
+
   function wordBtn(word, onClick, opts) {
     const o = opts || {};
     const b = el('button', 'sbtn' + (o.primary ? ' primary' : ''));
@@ -882,8 +895,9 @@
   // Copyright (c) 2026 Louis Raillé, MIT. Abito copy, controls, icons and synthesized sound only.
   function renderGeneral() {
     const g = V.generalView({ sound: prefs.sound, gain: prefs.gain, motionOverride, hotkey });
-    // each section belongs to one tab (#408); a section of another tab is built detached and never attached
-    const group = (tab, title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); if (tab === screen) body.append(sec); return sec; };
+    // T6: General also exposes motion/theme; Appearance retains its existing content.
+    // Other tabs' sections stay detached, including Appearance's identity colours.
+    const group = (tab, title, hint, inGeneral = false) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); if (tab === screen || (screen === 'general' && inGeneral)) body.append(sec); return sec; };
     // #460 E2: clear groups, with sound toggle + volume in one row like the MIT pattern.
     // Keep Abito's persisted values and validation, including «Nunca» and custom intervals.
     const perfil = group('general', 'Perfil');
@@ -1055,14 +1069,14 @@
     }));
 
     paintAuto();
-    const motion = group('appearance', 'Movimiento', '');
+    const motion = group('appearance', 'Movimiento', '', true);
     motion.append(toggleRow('sw-motion', 'Animación reducida', g.motion.respectSystem, () => {
       if (!window.desktop) return;
       (g.motion.respectSystem ? window.desktop.animateAnyway() : window.desktop.respectSystemMotion()).then(s => { motionOverride = s.motionOverride !== false; render(); say(motionOverride ? 'Abito se anima siempre.' : 'Abito respeta el movimiento del sistema.'); }, () => {});
     }));
     // #380: the theme. Three fixed choices; the SAVED mode is the truth (the row renders from
     // `prefs`), and applying it is theme.js's job after the host confirms the write.
-    const theme = group('appearance', 'Tema', '');
+    const theme = group('appearance', 'Tema', '', true);
     const themePick = V.themeView(prefs);
     const picker = el('span', 'stheme-options');
     picker.setAttribute('role', 'radiogroup');

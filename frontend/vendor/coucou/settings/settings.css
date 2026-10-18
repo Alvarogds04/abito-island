@@ -432,3 +432,130 @@ html[dir="rtl"] :is(.diff, .path, .keycap, input[type="password"], input[type="t
 /* Settings → Android phone: the pairing QR code (an SVG from Rust, black on white). */
 .qr { width: 220px; max-width: 100%; background: #fff; border-radius: 8px; padding: 4px; }
 .qr svg { display: block; width: 100%; height: auto; }
+
+/* Abito window integration, adapted from windows/src/hub/hub.css and
+   hub/shell.ts, settings/main.ts @434d6a2b.
+   Copyright (c) 2026 Louis Raillé, MIT.
+   Keep Abito's live controls and icons; no hero/character or Flow dependencies.
+   This sheet is enabled only in the settings webview (index.html/settings.js). */
+body[data-window="settings"] {
+  background: #000;
+  color: var(--ink);
+  font: 400 13px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+body[data-window="settings"] #settings {
+  display: flex;
+  gap: 0;
+  background: #000;
+  color: var(--ink);
+  border: 0;
+  box-shadow: none;
+}
+body[data-window="settings"] #settings .hub-side {
+  width: 228px;
+  flex: 0 0 228px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 18px 12px 12px;
+  overflow-y: auto;
+}
+body[data-window="settings"] #settings .hub-brand {
+  padding: 4px 8px 14px;
+  font: 700 18px var(--font);
+}
+body[data-window="settings"] #settings-tabs {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 3px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  overflow: visible;
+}
+body[data-window="settings"] #settings-tabs .stab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 11px;
+  width: 100%;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #c7cad0;
+  font: 500 13.5px var(--font);
+  text-align: start;
+  transform: none;
+}
+body[data-window="settings"] #settings-tabs .stab::after { display: none; }
+body[data-window="settings"] #settings-tabs .stab:hover { background: rgba(255,255,255,.05); }
+body[data-window="settings"] #settings-tabs .stab[aria-selected="true"] {
+  background: rgba(255,255,255,.09);
+  color: var(--ink);
+  font-weight: 600;
+}
+body[data-window="settings"] #settings .hub-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 12px 12px 12px 0;
+  border-radius: 22px;
+  background: #0e0f11;
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+body[data-window="settings"] #settings-bar { padding: 24px 28px 12px; flex: 0 0 auto; }
+body[data-window="settings"] #settings-title { font: 600 22px var(--font); letter-spacing: -.02em; }
+body[data-window="settings"] #settings-hint { padding: 0 28px; color: var(--dim); }
+body[data-window="settings"] #settings-body,
+body[data-window="settings"] #settings #models {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: static;
+  padding: 12px 28px 28px;
+  overflow-y: auto;
+}
+body[data-window="settings"] #settings-body[hidden] { display: none; }
+body[data-window="settings"] #settings-body .ssec {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+body[data-window="settings"] #settings-body .ssection { font: 600 13px var(--font); color: var(--ink); margin: 0; }
+body[data-window="settings"] #settings-body .srow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+body[data-window="settings"] #settings-body .srow-title { min-width: 132px; color: var(--dim); font: 400 12.5px var(--font); }
+body[data-window="settings"] #settings-body .snote { color: var(--dim); font: 400 12px/1.45 var(--font); }
+body[data-window="settings"] #settings-body .sbtn { border-radius: 999px; padding: 7px 14px; font: 500 12.5px var(--font); }
+body[data-window="settings"] #settings-body .sfield { color: var(--ink); background: rgba(255,255,255,.07); border: 1px solid var(--hairline); border-radius: 8px; }
+body[data-window="settings"] #settings-body .srange { height: 4px; width: 140px; padding: 0; background: rgba(255,255,255,.2); }
+/* Preserve Abito's aria-checked switch contract instead of changing its events. */
+body[data-window="settings"] #settings-body .switch { width: 36px; height: 20px; min-height: 20px; flex: 0 0 36px; padding: 0; border: 0; background: rgba(255,255,255,.15); }
+body[data-window="settings"] #settings-body .switch::after { display: none; }
+body[data-window="settings"] #settings-body .switch[aria-checked="true"] { background: var(--green); }
+body[data-window="settings"] #settings-body .switch .knob { width: 16px; height: 16px; top: 2px; left: 2px; background: #fff; }
+body[data-window="settings"] #settings-body .switch[aria-checked="true"] .knob { transform: translateX(16px); }
+body[data-window="settings"] #settings :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-window="settings"] #settings * { transition: none; }
+}

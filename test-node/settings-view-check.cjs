@@ -57,7 +57,7 @@ test('T6.3 auto-close segmented projection: presets, honest custom value, enable
 // #460 E2: execute the shipped General renderer against a small DOM, without a browser.
 // Structure adapted from windows/src/settings/main.ts (generalSection),
 // Copyright (c) 2026 Louis Raillé, MIT. Only Abito controls and copy are rendered.
-function generalHarness() {
+function generalHarness(overrides = {}) {
   const vm = require('node:vm');
   class Node {
     constructor(tag, cls = '', text = '') {
@@ -78,7 +78,11 @@ function generalHarness() {
     motionOverride: true, capturing: false, nameDraft: null, nameSaving: false, nameError: '',
     gainDraft: null, gainSaving: false, gainPending: null, gainError: '', autoSaving: false, autoError: '', themeError: '',
     el: (tag, cls, text) => new Node(tag, cls, text), sectionTitle: text => new Node('h2', '', text),
-    chipNode: () => new Node('span'), wordBtn: text => new Node('button', '', text),
+    chipNode: () => new Node('span'), wordBtn: (text, action) => {
+      const button = new Node('button', '', text);
+      button.addEventListener('click', e => { if (e.isTrusted) action(); });
+      return button;
+    },
     specialistIdentities: () => ({ identities: [] }), render() {}, say: text => feedback.push(text),
     $: () => null, fail: false,
   });
@@ -86,6 +90,7 @@ function generalHarness() {
     calls.push({ command, ...payload });
     return { then(ok, bad) { if (ctx.fail) return bad(); return ok(ctx.prefs); } };
   };
+  Object.assign(ctx, overrides);
   const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
   const start = src.indexOf('  function toggleRow(');
   const end = src.indexOf('  // ---- #442 T7.4: the closed intents', start);
@@ -96,9 +101,28 @@ function generalHarness() {
   return { body, calls, feedback, ctx, find, walk };
 }
 
-test('#460 General separates profile, island, sound and global shortcut; sound shares its volume row', () => {
+test('T6 mounts Coucou sidebar and page without replacing existing tab hosts', () => {
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const start = src.indexOf('  function mountSettingsFrame()');
+  const end = src.indexOf('  // ---- settings frame end', start);
+  assert.ok(start > 0 && end > start, 'shipped sidebar frame exists');
+  const nodes = new Map(['settings-tabs', 'settings-bar', 'settings-hint', 'settings-body', 'models'].map(id => [id, { id }]));
+  const panel = { children: [], append(...items) { this.children.push(...items); } };
+  const el = (tag, className, textContent) => ({ tag, className, textContent, children: [], append(...items) { this.children.push(...items); } });
+  require('node:vm').runInNewContext(src.slice(start, end) + '\nmountSettingsFrame();', { panel, el, $: id => nodes.get(id) });
+  assert.deepEqual(panel.children.map(n => n.className), ['hub-side', 'hub-panel']);
+  const [side, page] = panel.children;
+  assert.equal(side.children[0].textContent, 'Abito');
+  assert.equal(side.children[1], nodes.get('settings-tabs'));
+  assert.deepEqual(page.children.map(n => n.id), ['settings-bar', 'settings-hint', 'settings-body', 'models']);
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /id="coucou-settings-style"[^>]*href="vendor\/coucou\/settings\/settings.css"[^>]*media="not all"/);
+  assert.match(src, /\$\('coucou-settings-style'\)\.media = 'all'/);
+});
+
+test('T6 General preserves every group, now including motion and theme', () => {
   const h = generalHarness();
-  assert.deepEqual(h.body.children.map(sec => sec.children[0].textContent), ['Perfil', 'Isla', 'Sonido', 'Atajo global']);
+  assert.deepEqual(h.body.children.map(sec => sec.children[0].textContent), ['Perfil', 'Isla', 'Sonido', 'Atajo global', 'Movimiento', 'Tema']);
   const sound = h.body.children[2];
   assert.ok(sound.children.some(row => h.walk(row).includes(h.find('sw-sound')) && h.walk(row).includes(h.find('settings-sound-gain'))),
     'sound toggle and volume belong to the same row, as in the MIT General pattern');
@@ -124,6 +148,76 @@ test('#460 General gestures keep the closed prefs commands and announce rejected
   assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_island_interaction', auto_close_seconds: 0, open_on_hover: false });
   const gain = h.find('settings-sound-gain'); gain.value = '0.05'; gain.fire('input'); gain.fire('change');
   assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_sound_gain', gain: 0.05 });
+});
+
+test('T6 name validation, trusted submission and failed save retain the draft', () => {
+  const h = generalHarness();
+  const input = h.find('settings-display-name');
+  const form = h.walk(h.body).find(n => n.tag === 'form');
+  input.value = 'x'.repeat(81); input.fire('input');
+  assert.equal(input.attrs['aria-invalid'], 'true');
+  form.fire('submit'); assert.equal(h.calls.length, 0);
+  input.value = 'Grace'; input.fire('input');
+  assert.equal(input.attrs['aria-invalid'], 'false');
+  form.fire('submit', false); assert.equal(h.calls.length, 0);
+  h.ctx.fail = true; form.fire('submit');
+  assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_display_name', display_name: 'Grace' });
+  assert.equal(h.ctx.nameDraft, 'Grace');
+  assert.match(h.ctx.nameError, /No se pudo guardar/);
+  h.ctx.fail = false; form.fire('submit');
+  assert.equal(h.ctx.nameDraft, null);
+});
+
+test('T6 volume saves on release, queues latest in-flight value and reports failures', () => {
+  const saves = [];
+  const h = generalHarness({ call: (command, payload) => ({ then(ok, bad) { saves.push({ command, payload, ok, bad }); } }) });
+  const slider = h.find('settings-sound-gain');
+  slider.value = '0.05'; slider.fire('input');
+  assert.equal(saves.length, 0, 'dragging never persists');
+  assert.equal(slider.attrs['aria-valuetext'], '25%');
+  slider.fire('change');
+  slider.value = '0.10'; slider.fire('input'); slider.fire('change');
+  slider.value = '0.20'; slider.fire('input'); slider.fire('change');
+  assert.equal(saves.length, 1);
+  saves[0].ok({ ...h.ctx.prefs, gain: 0.05 });
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1].payload.gain, 0.2, 'only the most recent release survives');
+  saves[1].ok({ ...h.ctx.prefs, gain: 0.2 });
+  assert.equal(h.ctx.gainDraft, null);
+  slider.value = '0.01'; slider.fire('change'); saves[2].bad();
+  assert.equal(h.ctx.prefs.gain, 0.2);
+  assert.match(h.ctx.gainError, /No se pudo guardar/);
+});
+
+test('T6 shortcut capture/reset/toggle and backend explanation remain accessible', () => {
+  const h = generalHarness({ hotkey: { combo: 'Ctrl+Space', enabled: true, backend: 'portal', portal_note: 'permission_denied' } });
+  const buttons = h.walk(h.body);
+  buttons.find(n => n.textContent === 'Cambiar').fire('click');
+  assert.equal(h.ctx.capturing, true);
+  buttons.find(n => n.textContent === 'Original').fire('click');
+  assert.deepEqual(h.calls.pop(), { command: 'hotkey_action', action: 'reset' });
+  h.find('sw-hotkey').fire('click');
+  assert.deepEqual(h.calls.pop(), { command: 'hotkey_action', action: 'disable' });
+  assert.ok(buttons.some(n => /Rechazaste el permiso/.test(n.textContent)));
+});
+
+test('T6 General keeps reduced motion and all theme choices; custom auto-close is not rewritten', () => {
+  const motion = [], themes = [];
+  const h = generalHarness({
+    prefs: { autoCloseSeconds: 20, openOnHover: true, theme: 'light' },
+    window: { desktop: { respectSystemMotion: () => ({ then(ok) { motion.push('respect'); ok({ motionOverride: false }); } }) } },
+    chooseTheme: id => themes.push(id),
+  });
+  assert.equal(h.find('autoclose-20').attrs['aria-checked'], 'true');
+  assert.equal(h.calls.length, 0, 'render does not normalize the stored custom interval');
+  h.find('sw-island-hover').fire('click');
+  assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_island_interaction', auto_close_seconds: 20, open_on_hover: false });
+  h.find('sw-motion').fire('click');
+  assert.deepEqual(motion, ['respect']);
+  assert.equal(h.ctx.motionOverride, false);
+  assert.equal(h.find('theme-mode-light').attrs['aria-checked'], 'true');
+  for (const mode of ['system', 'light', 'dark']) h.find(`theme-mode-${mode}`).fire('click');
+  assert.deepEqual(themes, ['system', 'light', 'dark']);
 });
 
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
