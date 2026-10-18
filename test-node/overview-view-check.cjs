@@ -529,21 +529,22 @@ test('§3: a card never hides a missing Pi / downed notices channel', () => {
   assert.equal(O.cardConnection(O.connectionView({ unavailable: true })).word, 'Avisos caídos');
 });
 
-test('R6 visible size: ~128px plain overview, ~72px with the card (scale/viewBox only)', () => {
+test('R6 visible size: Coucou botDiameter 58 plain overview, 56 with a card (scale/viewBox only; S10 L19)', () => {
   const num = re => { const m = re.exec(islandSrc); assert.ok(m, String(re)); return m.slice(1).map(Number); };
   const [units] = num(/R6_VISIBLE_UNITS = (\d+)/);
   const vb = num(/OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/);
   const [plain] = num(/OVERVIEW = \{[^}]*clay: (\d+)/);
   const [card] = num(/OVERVIEW_CARD = \{ clay: (\d+)/);
   const scale = Math.min(1, 1) / Math.max(vb[2], vb[3]);
-  assert.ok(Math.abs(units * scale * plain - 128) <= 6, `plain visible ${units * scale * plain}`);
-  assert.ok(Math.abs(units * scale * card - 72) <= 4, `card visible ${units * scale * card}`);
+  assert.ok(Math.abs(units * scale * plain - 58) <= 2, `plain visible ${units * scale * plain}`);
+  assert.ok(Math.abs(units * scale * card - 56) <= 2, `card visible ${units * scale * card}`);
   assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(frontend, 'clay-engine.js'))).digest('hex').slice(0, 8), '40625d7f');
 });
 
 test('R6 margins: card box keeps >=20px from the island edge (reject shake ~2px), viewBox top air', () => {
   const [clay, clayX] = /OVERVIEW_CARD = \{ clay: (\d+), clayX: (\d+)/.exec(islandSrc).slice(1).map(Number);
   assert.ok(clayX - clay / 2 >= 20, `box left ${clayX - clay / 2}`);
+  assert.deepEqual([/OVERVIEW = \{[^}]*clayX: (\d+), cy: (\d+)/.exec(islandSrc).slice(1).map(Number), [clayX, /OVERVIEW_CARD = \{[^}]*cy: (\d+)/.exec(islandSrc)[1] * 1]], [[68, 101], [62, 101]], 'Coucou VIEW_LAYOUTS botX 68 / 62, cy 101');
   const vb = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   assert.deepEqual(vb, [36, 32, 128, 128]);
 });

@@ -1,0 +1,194 @@
+/* Island surfaces in Coucou's own geometry (S10, L19).
+   Adapted from Coucou windows/src/style.css ("Content shell", "Cards", "Overview", "Agent
+   pills") @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
+   Loaded AFTER style.css, so at equal specificity these rules win. Values are copied from the
+   reference; only three things are Abito's: the selectors (Abito's DOM ids and classes), the
+   44 px hit areas (an invisible ::after/::before around Coucou's smaller visual) and the theme
+   (light maps the tokens to Abito's light palette). The chat, Ajustes and the compact disc are
+   not styled here. Mochi, Coucou's icons and sounds are not used (LICENSE-ASSETS.md). */
+
+:root {
+  --dim: #9398a1;
+  --dim-2: #8e939c;
+  --dim-3: #6b7079;
+  --dim-4: #5f646d;
+  --dim-5: #4b5563;
+  --card: #141518;
+  --card-flat: #0e0f11;
+  --hairline: rgba(255, 255, 255, 0.035);
+  --red: #f4505e;
+  --red-text: #ff8d97;
+  --green: #22c55e;
+  --green-2: #34d399;
+  --amber: #f5a524;
+  --cyan: #22d3ee;
+  --indigo: #6366f1;
+  --pink: #f472b6;
+  --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+html[data-theme="light"] {
+  --dim: var(--muted-2);
+  --dim-2: var(--muted);
+  --dim-3: var(--hdr-muted);
+  --dim-4: var(--hdr-muted);
+  --card: var(--card-bg);
+  --card-flat: var(--surface);
+  --hairline: var(--card-line);
+}
+
+/* ── Content shell: #content padding 8px 10px 10px, #header 34px, views from y=42 ── */
+
+#island-header {
+  top: 8px; right: auto; bottom: auto; left: calc(50% - 320px);
+  width: 640px; height: 34px;
+  flex-direction: row; align-items: center; justify-content: space-between;
+  gap: 0; padding: 0;
+}
+.tabs { flex-direction: row; align-items: center; gap: 1px; height: 34px; padding-left: 12px; }
+
+/* Coucou .tab: 30x22, radius 11, dim-2; hover rgba(255,255,255,.07) / #b0b5be; on = tab-on / ink.
+   The button is the 44x44 hit area (pitch 35 = 30 + 5 as in Coucou), the visual is its ::after. */
+#island-header .tab, #island-header .hdr-action {
+  width: 44px; height: 44px; min-width: 44px; flex: 0 0 44px;
+  margin: 0 -5px; border-radius: 0; background: transparent; color: var(--dim-2);
+}
+#island-header .hdr-action { margin: 0 1px 0 0; }
+#island-header .tab::after, #island-header .hdr-action::after {
+  content: ""; position: absolute; inset: 11px 7px; z-index: -1;
+  border-radius: 11px; background: transparent;
+}
+#island-header .hdr-action::after { background: transparent; }
+#island-header .tab:hover:not([aria-pressed="true"])::after { background: rgba(255, 255, 255, 0.07); }
+#island-header .tab:hover, #island-header .hdr-action:hover { color: #b0b5be; }
+#island-header .tab[aria-pressed="true"] { background: transparent; color: var(--ink); }
+#island-header .tab[aria-pressed="true"]::after { background: var(--tab-on); }
+#island-header .tab .ico svg { width: 13px; height: 13px; }
+#island-header .hdr-action .ico svg { width: 14px; height: 14px; }
+#island-header .hdr-action { color: var(--dim-2); }
+
+/* ── Cards ── */
+
+.card { border-radius: 20px; background: var(--card); border: 1px solid var(--hairline); }
+
+/* ── Overview: .overview (gap 10) > .left 322 + .right flex, in the 108px row under the header ── */
+
+#overview-view { left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px; }
+.card-left { width: 322px; inset: 0 auto 0 0; }
+#pill-choices { left: 332px; right: 0; bottom: 0; }
+
+/* .who (name 600 12px ink, tool 400 11px dim-2) padded 0 36px 0 108px, 10px under the card top */
+.agentline { top: 10px; left: 108px; right: 36px; flex-wrap: nowrap; gap: 6px; line-height: 15px; min-width: 0; }
+.agentline strong { font: 600 12px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agentline .source { font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; }
+/* .ticker: 44px under the who row (6px), margin 0 12px 0 108px, rows of 22px, text 500 13px */
+.overview-detail {
+  top: 31px; left: 108px; right: 12px; height: 44px;
+  font: 500 13px/22px var(--font); color: var(--ink);
+  -webkit-line-clamp: 2;
+}
+/* the focused blob's name + state + detail: the two lines below the ticker */
+.pill-summary { top: 78px; left: 108px; right: 12px; max-height: 27px; font: 600 12px/14px var(--font); color: var(--ink); }
+.pill-summary .source { font: 400 11px var(--font); color: var(--dim-2); }
+.pill-summary p { margin: 0; font: 400 11px/13px var(--font); color: var(--dim-2); }
+#overview-view[data-spotify="on"] .overview-detail { -webkit-line-clamp: 2; }
+
+/* ── Agent pills: .pills grid 1fr 1fr, 28px rows, gap 4, padding 0 8px ──
+   The notices band (44px, Abito's connection chips / notice) owns the top of the right card, so the grid
+   takes the 62px under it: two 28px rows + the 4px gap, which is Coucou's pill exactly. */
+
+#pill-choices {
+  top: 44px; grid-template-columns: 1fr 1fr; grid-template-rows: 28px 28px; grid-auto-rows: 28px;
+  gap: 4px; align-content: center; padding: 0 8px;
+}
+.pill-choice {
+  position: relative; height: 28px; min-height: 28px; padding: 0;
+  justify-content: flex-start; gap: 0; border-radius: 999px; background: var(--card-flat);
+  border: 1px solid rgba(255, 255, 255, 0.14); color: var(--dim-3); font: 600 10px var(--font);
+  transition: transform 0.2s cubic-bezier(0.3, 1.2, 0.4, 1), background 0.18s, border-color 0.18s, filter 0.18s;
+}
+.pill-choice:hover { transform: scale(1.04); filter: brightness(1.06); }
+.pill-choice .island-agent-clay { margin-left: 7px; width: 24px; height: 24px; }
+.pill-choice span:not(.ico) {
+  position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; padding: 0 8px 0 34px; pointer-events: none;
+}
+.pill-choice[aria-pressed="true"] { background: rgba(255, 255, 255, 0.1); box-shadow: none; border-color: rgba(255, 255, 255, 0.3); color: var(--ink); }
+.pill-choice:focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
+.pill-choice[data-color] { border-width: 1px; }
+.pill-choice[data-color="green"] { border-color: var(--dot-green-2); }
+.pill-choice[data-color="blue"] { border-color: var(--dot-blue-2); }
+.pill-choice[data-color="mint"] { border-color: var(--dot-mint-2); }
+.pill-choice[data-color="orange"] { border-color: var(--dot-orange-2); }
+.pill-choice[data-color="purple"] { border-color: var(--dot-purple-2); }
+.pill-choice[data-color^="#"] { border: 1px solid var(--chosen-2); }
+
+/* the active-turn mini-Abitos ride the who row, where Coucou puts the session count */
+#minibots { left: auto; right: 36px; top: 8px; bottom: auto; width: auto; flex-wrap: nowrap; gap: 4px; }
+#overview-view[data-spotify="on"] #minibots { bottom: auto; }
+
+/* ── Notices: the 44px band on top of the right card (x342..630 of the island), full-card lane ── */
+
+#notices { left: calc(50% + 22px); right: auto; width: 288px; top: 42px; bottom: auto; height: 44px; padding: 0 8px; }
+#capsule[data-view="overview"] #notices[data-grouped="true"] { left: calc(50% + 22px); width: 288px; top: 42px; height: 44px; padding: 0 8px; }
+#capsule[data-view="overview"] #notices[data-list="open"] { left: calc(50% - 310px); width: 620px; top: 42px; height: 108px; padding: 8px; }
+/* a confirmed finished/error notice takes the whole 620x108 card, like Coucou's finished and error views */
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices {
+  left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px;
+  padding: 4px 16px 4px 116px; background: var(--card); border: 1px solid var(--hairline); border-radius: 20px; overflow: hidden;
+}
+#notice-row .chip { font: 400 11px var(--font); color: var(--dim-2); }
+#notice-row .chip .ico svg { width: 12px; height: 12px; }
+
+/* ── Approval (.card.wash amber) and question (.card.wash cyan): .stack padding 4px 16px 4px 116px, gap 5 ── */
+
+#permission, #question {
+  left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px;
+  padding: 4px 16px 4px 116px; gap: 5px; justify-content: center; overflow: hidden;
+  background: var(--card); border: 1px solid var(--hairline); border-radius: 20px;
+}
+#permission { --wash: rgba(245, 165, 36, 0.42); }
+#question { --wash: rgba(34, 211, 238, 0.38); }
+#permission::before, #question::before { background: radial-gradient(280px 280px at 50% 130%, var(--wash) 0%, rgba(0, 0, 0, 0) 70%); }
+#capsule[data-question="outcome"]:not([data-card]) #question { padding: 4px 16px 4px 116px; }
+/* the island no longer rings itself while expanded: the card wash is the state */
+#capsule[data-phase="expanded"][data-card-tone] #island,
+#capsule[data-question="pending"][data-phase="expanded"][data-view="overview"]:not([data-card]) #island { box-shadow: none; }
+
+/* .who-row: 12px dim-2, name 600 ink */
+#card-head, #question-head { gap: 7px; min-height: 0; padding-right: 64px; font: 400 12px var(--font); color: var(--dim-2); }
+#card-head .chip, #question-head .chip { min-height: 0; font: 400 12px/1.25 var(--font); color: var(--dim-2); gap: 7px; }
+#card-head .chip .ico svg, #question-head .chip .ico svg { width: 12px; height: 12px; }
+#card-status, #question-asker { font-weight: 600; color: var(--ink); }
+#question-head { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "asker expiry" "body body"; column-gap: 7px; row-gap: 5px; }
+#question-asker { grid-area: asker; } #question-expiry, #question-state { grid-area: expiry; }
+/* .title 600 15px, two lines; .code 12px mono in a rounded well */
+#question-body { grid-area: body; font: 600 15px/1.25 var(--font); color: var(--ink); max-height: 38px; -webkit-line-clamp: 2; }
+#permission #operation {
+  align-self: flex-start; max-width: 100%; margin: 0; padding: 5px 10px; border-radius: 10px;
+  font: 400 12px var(--mono); color: #e8e9ec; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text;
+}
+/* .btn: 500 12.5px, padding 7px 13px, pill. 30px visual inside the 44px hit (the margin gives the
+   14px back to the layout, so the stack keeps Coucou's height). */
+#card-actions { gap: 8px; margin: 0; align-items: center; }
+#allow, #deny, .q-option { min-height: 44px; margin: -7px 0; padding: 0 13px; gap: 7px; font: 500 12.5px var(--font); border-radius: 0; }
+#allow::after, #deny::after, .q-option::after { inset: 7px 0; border-radius: 999px; }
+#allow .ico, #deny .ico { display: none; }
+#allow:disabled, #deny:disabled { opacity: 0.4; }
+#question-options { flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; }
+.q-key { width: auto; height: auto; padding: 0 4px; font: 400 10.5px var(--font); border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 4px; background: transparent; opacity: 0.55; color: inherit; }
+#card-wait { font: 400 11px var(--font); color: var(--dim-2); }
+/* .link-btn 11px #8e939c: «Omitir» is the question's quiet exit */
+#question-skip { position: absolute; top: 0; right: 4px; padding: 0 12px; font: 500 11px var(--font); color: var(--dim-2); }
+#question-skip::after { background: transparent; }
+#question-skip .ico { display: none; }
+/* .icon-btn.fold / .jump: 16px round, rgba(255,255,255,.07), dim-4, 8px glyph; 44px hit around it */
+#permission .icon-btn { position: absolute; margin: 0; min-width: 44px; min-height: 44px; color: var(--dim-4); }
+#permission #card-fold { top: -6px; right: -4px; }
+#permission #card-info { top: -6px; right: 26px; }
+#capsule #permission .icon-btn::after { inset: 14px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.07); }
+#permission .icon-btn .ico svg { width: 8px; height: 8px; }
+
+/* hit area of a 28px pill: the largest that fits without overlapping its neighbours (rows and columns
+   are 4px apart, so 2px into each gap); the visual is unchanged. */
+.pill-choice::after { content: ""; position: absolute; inset: -2px; }
