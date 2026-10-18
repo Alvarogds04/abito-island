@@ -296,6 +296,9 @@ pub settings_window: Option<bool>,
     /// S10 (L30): whether the Claude plan-usage pill shows in the island header (Coucou's `showPlanInNotch`).
     /// `None` means the default (off) and is never written, so an untouched file keeps its bytes.
     pub show_plan_in_notch: Option<bool>,
+    /// S10 (L30): whether the Codex plan-usage pill shows. Turning it on lets the island ask the user's own
+    /// `codex app-server` for its rate limits, so it is an explicit opt-in. `None` means off and is never written.
+    pub show_codex_plan_in_notch: Option<bool>,
 }
 
 impl Default for Prefs {
@@ -321,6 +324,7 @@ impl Default for Prefs {
             island_agents: None,
             abito_instructions: None,
             show_plan_in_notch: None,
+            show_codex_plan_in_notch: None,
         }
     }
 }
@@ -544,6 +548,8 @@ impl Prefs {
 
     /// S10 (L30): the effective plan-pill policy — absent means off.
     pub fn show_plan_in_notch(&self) -> bool { self.show_plan_in_notch.unwrap_or(false) }
+    /// S10 (L30): the effective Codex pill policy — absent means off (no `codex app-server` is ever started).
+    pub fn show_codex_plan_in_notch(&self) -> bool { self.show_codex_plan_in_notch.unwrap_or(false) }
 
     /// #366 F093: the effective Ajustes placement — absent means in-island (#408).
     pub fn settings_window_on(&self) -> bool { self.settings_window.unwrap_or(false) }
@@ -583,6 +589,7 @@ impl Prefs {
             abito_instructions: v.get(ABITO_INSTRUCTIONS).and_then(Value::as_str)
                 .and_then(|text| clean_instructions(text).ok()).flatten(),
             show_plan_in_notch: v.get("show_plan_in_notch").and_then(Value::as_bool),
+            show_codex_plan_in_notch: v.get("show_codex_plan_in_notch").and_then(Value::as_bool),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -649,6 +656,9 @@ impl Prefs {
         if let Some(on) = self.show_plan_in_notch {
             v["show_plan_in_notch"] = json!(on);
         }
+        if let Some(on) = self.show_codex_plan_in_notch {
+            v["show_codex_plan_in_notch"] = json!(on);
+        }
         v.to_string()
     }
 }
@@ -714,6 +724,8 @@ pub enum Command {
     SetSettingsWindow(bool),
     /// S10 (L30): show or hide the Claude plan-usage pill in the island header. `false` stores no key.
     SetShowPlanInNotch(bool),
+    /// S10 (L30): show or hide the Codex plan-usage pill (an opt-in to `codex app-server`). `false` stores no key.
+    SetShowCodexPlanInNotch(bool),
     /// T6.2: the remembered inner size of the own Ajustes window (logical px).
     /// Deliberately NOT produced by [`parse_command`]: the WebView can read
     /// neither the size nor the fact that one is stored — the size comes from
@@ -901,6 +913,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             let on = map.get("show_plan_in_notch").and_then(Value::as_bool).ok_or(CommandError)?;
             Ok(Command::SetShowPlanInNotch(on))
         }
+        Some("set_show_codex_plan_in_notch") if map.len() == 2 => {
+            let on = map.get("show_codex_plan_in_notch").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(Command::SetShowCodexPlanInNotch(on))
+        }
         // #442 T7.4: exactly action + order (≤3 unique well-shaped ids).
         Some("set_island_agents") if map.len() == 2 => {
             let order = ordered_strings(map.get("order"))?;
@@ -1085,6 +1101,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         // untouched file keeps its bytes) — the same rule as every optional field.
         Command::SetSettingsWindow(on) => next.settings_window = on.then_some(true),
         Command::SetShowPlanInNotch(on) => next.show_plan_in_notch = on.then_some(true),
+        Command::SetShowCodexPlanInNotch(on) => next.show_codex_plan_in_notch = on.then_some(true),
         // T6.2: the value gate ran nowhere else — apply is the ONLY boundary for
         // this Rust-side command, so the bounds check runs here for every caller.
         Command::SetSettingsWindowSize(w, h) => {
