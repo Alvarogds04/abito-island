@@ -52,6 +52,7 @@
    that uses them (the V1 block used to declare the ramp late, ~line 917). One variable per role;
    spacing base 4/8. Light and dark safe: values are theme-independent; themes only recolour. */
 :root { --fs-title: 16px; --fs-body: 14px; --fs-label: 13px; --fs-caption: 12px; --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-20: 20px; --space-24: 24px; --space-32: 32px; }
+:root { --cc-fs-name: 12px; --cc-fs-detail: 11px; --cc-fs-chip: 11.5px; --cc-fs-body: 12.5px; --cc-fs-state: 13px; --cc-fs-note: 10.5px; }
 #capsule[data-edge="top"] { --view-dir: -1; }
 #capsule[data-edge="bottom"] { --view-dir: 1; }
 
@@ -2009,12 +2010,50 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-toggle { tr
 [data-color^="#"].pill-choice { border: 1.5px solid var(--chosen-2); }
 #pill-settings-rows .srow[data-color^="#"] .srow-title { border-left-color: var(--chosen-2); }
 
+/* ==========================================================================
+   Coucou island type scale (S10). The owner asked for a smaller font on the
+   island; the sizes are Coucou's own, copied value for value.
+   Adapted from Coucou windows/src/style.css @434d6a2b, Copyright (c) 2026
+   Louis Raillé, MIT: .who .name 12, .who .tool 11, .chip 11.5, .btn and
+   .bubble 12.5, status 13, .diff-note 10.5. This supersedes the 12px floor of
+   the V1 ramp ONLY for the island surfaces below (overview, notices, approval,
+   question, pills, Spotify); the chat, Ajustes and Modelos keep --fs-*.
+   ========================================================================== */
+.agentline { font-size: var(--cc-fs-name); }
+.overview-detail { font-size: var(--cc-fs-detail); }
+.pill-summary { font-size: var(--cc-fs-name); }
+.pill-summary p { font-size: var(--cc-fs-detail); }
+.pill-choice { font-size: var(--cc-fs-detail); }
+.minibot { font-size: var(--cc-fs-detail); }
+.spotify-text { font-size: var(--cc-fs-name); }
+#notice-row .chip { font-size: var(--cc-fs-chip); }
+#notice-title { font-size: var(--cc-fs-name); }
+#notice-sub { font-size: var(--cc-fs-detail); }
+#notice-detail { font-size: var(--cc-fs-detail); }
+#notice-action { font-size: var(--cc-fs-detail); }
+#notice-list-title { font-size: var(--cc-fs-name); }
+#notice-clear { font-size: var(--cc-fs-detail); }
+.notice-list-title { font-size: var(--cc-fs-name); }
+.notice-list-time { font-size: var(--cc-fs-detail); }
+#card-head .chip, #question-head .chip { font-size: var(--cc-fs-chip); }
+#question-asker { font-size: var(--cc-fs-chip); }
+#question-expiry, #question-state { font-size: var(--cc-fs-chip); }
+#question-state { font-size: var(--cc-fs-state); }
+#question-body { font-size: var(--cc-fs-body); }
+#question-skip { font-size: var(--cc-fs-body); }
+.q-option { font-size: var(--cc-fs-body); }
+.q-key { font-size: var(--cc-fs-detail); }
+#permission #operation { font-size: var(--cc-fs-body); }
+#allow, #deny { font-size: var(--cc-fs-body); }
+#card-wait { font-size: var(--cc-fs-detail); }
+
 #settings-body[data-screen="accounts"] .ssec { margin-top: 20px; } /* design §3: group gap 20 */
 #settings-body[data-screen="accounts"] .ssec:first-child { margin-top: 2px; }
 #settings-body[data-screen="accounts"] .ssec > .snote { margin: 0 0 4px; }
 #settings-body[data-screen="accounts"] .ssection { line-height: 18px; margin-bottom: 2px; }
 #settings-body[data-screen="accounts"] .srows { gap: var(--space-8); }
 #settings-body[data-screen="accounts"] .srow { gap: var(--space-8); min-height: 40px; padding: 0; }
+
 #settings-body[data-screen="accounts"] .srow-title { font-size: var(--fs-label); }
 #settings-body[data-screen="accounts"] .snote, #settings-body[data-screen="accounts"] .sempty { font-size: var(--fs-caption); }
 #settings-body[data-screen="accounts"] .sline { font-size: var(--fs-label); }

@@ -101,6 +101,22 @@ test('V1 type ramp: roles are tokens (>=12px floor) and the V1 block declares no
   assert(/var\(--fs-body\)/.test(css) && /var\(--fs-label\)/.test(css) && /var\(--fs-caption\)/.test(css));
 });
 
+test('S10 island type scale: Coucou\'s exact sizes (windows/src/style.css @434d6a2b) on island surfaces; chat and settings keep the V1 ramp', () => {
+  const css = read('style.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Adapted from Coucou windows/src/style.css @434d6a2b: .who .name 12, .who .tool 11, .chip 11.5, .btn / .bubble 12.5, .diff-note 10.5, status 13.
+  const scale = { '--cc-fs-name': '12px', '--cc-fs-detail': '11px', '--cc-fs-chip': '11.5px', '--cc-fs-body': '12.5px', '--cc-fs-state': '13px', '--cc-fs-note': '10.5px' };
+  const block = /:root \{ --cc-fs-name: ([\d.]+)px; --cc-fs-detail: ([\d.]+)px; --cc-fs-chip: ([\d.]+)px; --cc-fs-body: ([\d.]+)px; --cc-fs-state: ([\d.]+)px; --cc-fs-note: ([\d.]+)px; \}/.exec(css);
+  assert(block, 'one :root block declares the Coucou scale');
+  assert.deepEqual(block.slice(1).map(Number), [12, 11, 11.5, 12.5, 13, 10.5].map(Number));
+  assert.deepEqual(Object.values(scale).length, 6);
+  const from = css.lastIndexOf('.agentline { font-size: var(--cc-fs-name)');
+  const tail = css.slice(from, css.indexOf('#settings-body[data-screen="accounts"]', from));
+  for (const sel of ['.agentline', '.overview-detail', '.pill-summary', '#notice-row .chip', '#notice-title', '#notice-sub', '#notice-action', '#notice-list-title', '.notice-list-title', '.notice-list-time', '#card-head .chip', '#question-asker', '#question-body', '#question-skip', '.q-option', '#permission #operation', '#allow, #deny', '#card-wait', '.minibot', '.spotify-text', '.pill-choice'])
+    assert(tail.includes(sel), `${sel} is on the Coucou scale`);
+  assert.doesNotMatch(tail, /font-size:\s*\d|font:\s*\d+\s+\d/, 'the block uses only the --cc-fs-* tokens');
+  for (const chat of ['#chat', '#settings', '#models']) assert(!tail.includes(chat), `${chat} untouched (S10: chat stays Abito's)`);
+});
+
 test('V1 icon: the settings glyph is a cog (closed 8-tooth outline + hub), stroke-only, not the old sun/asterisk', () => {
   const I = require(path.join(frontend, 'icons.js'));
   const svg = I.svg('gear');
