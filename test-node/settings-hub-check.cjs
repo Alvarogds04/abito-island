@@ -1,0 +1,123 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { pathToFileURL } = require('node:url');
+const root = path.resolve(__dirname, '..');
+class Element {
+  constructor(tag) {
+    this.tagName = tag; this.children = []; this.attrs = {}; this.listeners = {}; this.className = '';
+    this.style = { setProperty() {} };
+    this.classList = { add: c => { this.className += ` ${c}`; }, contains: c => this.className.split(' ').includes(c), toggle: (c, on) => {
+      const s = new Set(this.className.split(' ')); if (on) s.add(c); else s.delete(c); this.className = [...s].join(' ');
+    } };
+  }
+  setAttribute(k, v) { assert.notEqual(k, 'style'); this.attrs[k] = String(v); if (k === 'value') this.value = String(v); }
+  append(...nodes) { this.children.push(...nodes); }
+  removeChild(n) { this.children.splice(this.children.indexOf(n), 1); }
+  get firstChild() { return this.children[0]; }
+  addEventListener(k, f, capture) { (this.listeners[k] ||= []).push({ f, capture }); }
+  querySelectorAll(tag) { return all(this).filter(e => e !== this && e.tagName === tag); }
+  fire(k, trusted = true, props = {}) {
+    const e = { target: this, isTrusted: trusted, preventDefault() {}, stopImmediatePropagation() { this.stopped = true; }, ...props };
+    for (const { f } of [...(this.listeners[k] || [])].sort((a, b) => Number(!!b.capture) - Number(!!a.capture))) { f(e); if (e.stopped) break; }
+  }
+}
+const all = e => [e, ...e.children.flatMap(all)];
+const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
+(async () => {
+  global.document = { createElement: t => new Element(t), createElementNS: (_, t) => new Element(t), documentElement: { lang: 'es' }, body: new Element('body') };
+  Object.defineProperty(global, 'navigator', { value: { userAgent: 'Linux' }, configurable: true });
+  const base = path.join(root, 'frontend/vendor/coucou/hub');
+  const { FLOW_PAGES, NOTCH_PAGES, startHub } = await import(pathToFileURL(path.join(base, 'shell.js')));
+  const { renderGeneral } = await import(pathToFileURL(path.join(base, 'general.js')));
+  const hash = text => crypto.createHash('sha256').update(text).digest('hex');
+  const css = fs.readFileSync(path.join(base, 'hub.css'), 'utf8').split('\n').slice(1).join('\n');
+  assert.equal(hash(css), '9f63d2944c7e4e267c863a8121b48e64a3cf7609fcaf24573f84c87c182f2ed8');
+  const upstreamUi = fs.readFileSync(path.join(base, 'ui.ts'), 'utf8').split('\n').slice(1).join('\n')
+    .replace('"../views/dom.js"', '"../views/dom"').replace('"./i18n-es.js"', '"../i18n/i18n"')
+    .replace('"./flow-shim.js"', '"../core/flow"').replace('the keys the app suggests.', 'the keys Coucou suggests.');
+  assert.equal(hash(upstreamUi), '67c5f63da4a672ddc74649f28fe17f032d49af5bbb1efcddbbc6eaea46ea6269');
+  assert.deepEqual(FLOW_PAGES.map(p => [p.id, p.icon]), [['dictation','mic'],['notes','record'],['insights','chart'],['dictionary','book'],['snippets','bolt'],['styles','text'],['flowsettings','sliders']]);
+  assert.deepEqual(NOTCH_PAGES.map(p => [p.id,p.icon]), [['general','gear'],['pills','grid'],['agents','terminal'],['chat','chat'],['voice','wave'],['integrations','puzzle'],['phone','phone'],['shortcuts','keyboard']]);
+  const events = {};
+  global.window = { __TAURI__: { event: { listen: async (name, handler) => { events[name] = handler; return () => {}; } } } };
+  const pages = [], host = new Element('div');
+  await startHub(host, { version: 'test', flowPages: {}, renderNotch: async p => { pages.push(p); } });
+  assert.equal(all(host).filter(e => e.className === 'hub-item' || e.className === 'hub-item on').length, 15);
+  assert.deepEqual(pages, ['dictation']);
+  const items = all(host).filter(e => e.className.split(' ').includes('hub-item'));
+  assert.deepEqual(items.map(e => e.children[1].textContent), ['Dictado','Notas','Estadísticas','Diccionario','Fragmentos','Estilos','Ajustes','General','Píldoras activas','Agentes','Chat','OK Abito','Integraciones','Teléfono Android','Atajos']);
+  for (const item of items) { item.fire('click'); await Promise.resolve(); }
+  assert.deepEqual(pages.slice(1), [...FLOW_PAGES, ...NOTCH_PAGES].map(p => p.id));
+  events['hub-page']({ payload: 'future-page' }); await Promise.resolve();
+  assert.equal(pages.at(-1), 'future-page');
+  assert(!/Coucou|Mochi/.test(text(host)));
+  const { t: hubT, N_ } = await import(pathToFileURL(path.join(base, 'i18n-es.js')));
+  assert.equal(hubT('Future English key'), 'Future English key');
+  assert.equal(N_('Future English key'), 'Future English key');
+  assert.equal(hubT('Ready · hold {0}', { 0: 'Ctrl' }), 'Listo · mantén Ctrl');
+  const html = fs.readFileSync(path.join(root, 'frontend/settings.html'), 'utf8');
+  assert(html.includes('lang="es"')); assert(html.includes('<title>Ajustes</title>'));
+  assert(!/\sstyle\s*=|<style\b/i.test(html));
+  assert.equal((html.match(/<script\b/g) || []).length, 1);
+  assert(/<script type="module" src="\.\/settings-app\.js"><\/script>/.test(html));
+  for (const css of ['settings/settings.css', 'hub/hub.css']) assert(html.includes(`vendor/coucou/${css}`));
+  const gate = fs.readFileSync(path.join(root, 'src/bridge.rs'), 'utf8');
+  assert(gate.includes('tauri://localhost/settings.html'));
+  const native = fs.readFileSync(path.join(root, 'src/settingswindow.rs'), 'utf8');
+  assert(native.includes('WebviewUrl::App(std::path::PathBuf::from("settings.html"))'));
+  const V = require('../frontend/settings-view.js');
+  let prefs = { sound: true, gain: .12, autoCloseSeconds: 15, openOnHover: false, declaredPills: [], pillColors: {}, mainPill: 'integration_claude', theme: 'system', displayName: '' };
+  const calls = []; let rejectGain = false;
+  const invoke = async (cmd, { payload: p }) => {
+    calls.push([cmd, p]);
+    if (cmd === 'hotkey_action') return { combo: 'Ctrl+Space', enabled: true, status: 'active' };
+    if (p.action === 'sound_off') prefs.sound = false;
+    if (p.action === 'set_sound_gain') { if (rejectGain) throw Error('simulated write failure'); prefs.gain = p.gain; }
+    if (p.action === 'set_theme') prefs.theme = p.theme;
+    if (p.action === 'set_display_name') prefs.displayName = p.display_name;
+    if (p.action === 'set_island_interaction') { prefs.autoCloseSeconds = p.auto_close_seconds; prefs.openOnHover = p.open_on_hover; }
+    return structuredClone(prefs);
+  };
+  const ui = await renderGeneral({ invoke, V });
+  calls.length = 0;
+  const field = id => all(ui).find(e => e.attrs.id === id);
+  field('hub-sound').fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+  field('hub-sound').fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'sound_off' }]);
+  const vol = field('hub-volume'); vol.value = '0.08'; vol.fire('input'); await ui.settled(); assert.equal(calls.length, 0);
+  vol.fire('change'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_sound_gain', gain: .08 }]);
+  field('hub-hover').fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_island_interaction', auto_close_seconds: 15, open_on_hover: true }]);
+  assert(field('hub-motion').disabled); assert(text(ui).includes('No disponible en esta ventana'));
+  assert.equal(calls.length, 0);
+  const number = () => all(ui).find(e => e.attrs.type === 'number');
+  for (const value of ['4', '121', '2.5', '']) { const n = number(); n.value = value; n.fire('change'); await ui.settled(); assert.deepEqual(calls, []); }
+  number().value = '0'; number().fire('change'); await ui.settled();
+  assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_island_interaction', auto_close_seconds: 0, open_on_hover: true }]);
+  const select = () => all(ui).find(e => e.tagName === 'select');
+  select().value = 'dark'; select().fire('change', false); await ui.settled(); assert.deepEqual(calls, []);
+  select().fire('change'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_theme', theme: 'dark' }]);
+  const name = () => all(ui).find(e => e.attrs['aria-label'] === 'Nombre visible');
+  const saveName = () => all(ui).find(e => e.textContent === 'Guardar nombre');
+  name().value = 'Ana'; name().fire('input'); saveName().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+  saveName().fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_display_name', display_name: 'Ana' }]);
+  const reset = () => all(ui).find(e => e.textContent === 'Original');
+  reset().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+  reset().fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['hotkey_action', { action: 'reset' }]);
+  const volume = field('hub-volume'); volume.value = '0.04'; volume.fire('change'); volume.value = '0.06'; volume.fire('change'); await ui.settled();
+  assert.deepEqual(calls.splice(0), [['prefs_action', { action: 'set_sound_gain', gain: .04 }], ['prefs_action', { action: 'set_sound_gain', gain: .06 }]]);
+  const enabled = () => all(ui).find(e => e.attrs['aria-label'] === 'Atajo activo');
+  enabled().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+  enabled().fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['hotkey_action', { action: 'disable' }]);
+  all(ui).find(e => e.textContent === 'Cambiar').fire('click');
+  const key = all(ui).find(e => e.attrs['aria-label'] === 'Atajo global');
+  key.fire('keydown', false, { code: 'KeyK', key: 'k', ctrlKey: true }); await ui.settled(); assert.deepEqual(calls, []);
+  key.fire('keydown', true, { code: 'KeyK', key: 'k', ctrlKey: true }); await ui.settled();
+  assert.deepEqual(calls.pop(), ['hotkey_action', { action: 'set', combo: 'Ctrl+K' }]);
+  rejectGain = true; field('hub-volume').value = '0.1'; field('hub-volume').fire('change'); await ui.settled();
+  assert(text(ui).includes('No se pudo guardar.'));
+  assert.equal(field('hub-volume').attrs.value, '0.06');
+  assert(calls.every(([cmd]) => ['prefs_action','hotkey_action'].includes(cmd)));
+  console.log('PASS settings-hub: sidebar parity, CSP, page gate, trusted gestures, bridge payloads, volume commit, unavailable motion');
+})().catch(e => { console.error(e); process.exitCode = 1; });

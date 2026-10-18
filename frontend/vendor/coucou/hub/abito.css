@@ -1,0 +1,5 @@
+/* Abito-only CSP adaptation of settings.html's inline styles. */
+body.settings-window { background: #000; color: #f5f6f8; }
+.hub-loading { padding: 24px; }
+/* Authorized plain-band fallback: no character, particles or invented tokens. */
+.hub-hero { background: #000; }

@@ -2,8 +2,8 @@
 //! The closed open/close command keeps its sender and rate gates. Legacy
 //! placement preferences are retained on disk but never restore island settings.
 //!
-//! The window is created by RUST ONLY: the label and the SAME page URL
-//! (`index.html`, the same closed allowlist entry the island uses) never
+//! The window is created by RUST ONLY: the label and its dedicated page URL
+//! (`settings.html`, admitted only for the exact settings label) never
 //! come from the page. The window shares the main sender gate (extended to
 //! the exact `settings` label, approved narrowly) and the shared rate
 //! limiter. No secret, token or path crosses to the WebView here.
@@ -161,7 +161,7 @@ pub(crate) fn opens_own_window(_pref: Option<bool>) -> bool {
 
 /// The window, created or shown by Rust only. A repeat `open` shows and
 /// focuses the existing window instead of building a second one. The URL is
-/// the SAME page as the island (the closed `index.html` entry); the window is
+/// the dedicated `settings.html` page (the closed settings-label entry); the window is
 /// decorated, resizable and NOT always-on-top — it is a normal window.
 fn open_window(app: &AppHandle) -> tauri::Result<()> {
     if let Some(win) = app.get_webview_window(SETTINGS_LABEL) {
@@ -185,7 +185,7 @@ fn open_window(app: &AppHandle) -> tauri::Result<()> {
     WebviewWindowBuilder::new(
         app,
         SETTINGS_LABEL,
-        WebviewUrl::App(std::path::PathBuf::from("index.html")),
+        WebviewUrl::App(std::path::PathBuf::from("settings.html")),
     )
     .title("Ajustes")
     .inner_size(w, h)

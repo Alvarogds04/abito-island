@@ -27,6 +27,15 @@ FRONTEND_FILES.push(
   'vendor/coucou/settings/toggle.js', 'vendor/coucou/settings/toggle.ts',
   'vendor/coucou/settings/general.js', 'vendor/coucou/settings/general.ts',
   'vendor/coucou/views/dom.js', 'vendor/coucou/views/dom.ts',
+  'settings.html', 'settings-app.js',
+  'vendor/coucou/hub/hub.css', 'vendor/coucou/hub/abito.css',
+  'vendor/coucou/hub/ui.ts', 'vendor/coucou/hub/ui.js',
+  'vendor/coucou/hub/shell.ts', 'vendor/coucou/hub/shell.js',
+  'vendor/coucou/hub/hero.ts', 'vendor/coucou/hub/hero.js',
+  'vendor/coucou/hub/flow-shim.ts', 'vendor/coucou/hub/flow-shim.js',
+  'vendor/coucou/hub/bridge-shim.ts', 'vendor/coucou/hub/bridge-shim.js',
+  'vendor/coucou/hub/i18n-es.ts', 'vendor/coucou/hub/i18n-es.js',
+  'vendor/coucou/hub/general.ts', 'vendor/coucou/hub/general.js',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
