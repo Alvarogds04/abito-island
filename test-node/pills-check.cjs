@@ -297,11 +297,12 @@ test('RDD U10 a volume change made while a save is in flight is saved afterwards
   assert.equal(b.get('settings-sound-gain').value, '0.1');
 });
 
-// T6.3 #434: General groups exactly as the design shows them, with the copy diet.
-test('T6.3 #434 General groups: Perfil / Isla / Sonido y atajo, name in Perfil, no hint walls', async () => {
+// #460 E2: MIT General row pattern; windows/src/settings/main.ts (generalSection).
+// Copyright (c) 2026 Louis Raillé, MIT. Abito keeps its own controls and copy.
+test('#460 E2 General groups: Perfil / Isla / Sonido / Atajo global, name in Perfil, no hint walls', async () => {
   const b = await settingsBoot({}, 'general');
   const text = b.get('settings-body').textContent;
-  for (const word of ['Perfil', 'Isla', 'Sonido y atajo', 'Nombre', 'Auto-cierre', 'Abrir al pasar el mouse', 'Volumen', 'Atajo global']) {
+  for (const word of ['Perfil', 'Isla', 'Sonido', 'Nombre', 'Auto-cierre', 'Abrir al pasar el mouse', 'Volumen', 'Atajo global']) {
     assert.ok(text.includes(word), word);
   }
   const name = b.get('settings-display-name');

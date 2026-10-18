@@ -871,20 +871,19 @@
     row.append(b);
     return row;
   }
-  // ---- Ajustes (gentle-dot SettingsPanel): «Atajo de teclado» first, then the rest, each under its own heading -----------
+  // General row/section pattern adapted from windows/src/settings/main.ts (generalSection)
+  // and windows/src/settings/settings.css (.row / section).
+  // Copyright (c) 2026 Louis Raillé, MIT. Abito copy, controls, icons and synthesized sound only.
   function renderGeneral() {
     const g = V.generalView({ sound: prefs.sound, gain: prefs.gain, motionOverride, hotkey });
     // each section belongs to one tab (#408); a section of another tab is built detached and never attached
     const group = (tab, title, hint) => { const sec = el('section', 'ssec'); sec.append(sectionTitle(title)); if (hint) sec.append(el('p', 'snote', hint)); if (tab === screen) body.append(sec); return sec; };
-    // #366 F093: where Ajustes opens — inside the island (default, #408) or in its own
-    // window. The typed pref is the only chooser; a failed save keeps the previous
-    // placement and says so.
-    // T6.3 #434: General groups exactly as the design shows them: PERFIL / ISLA / SONIDO Y ATAJO
-    // (design ajustes-ventana-general-{dark,light}.png, DESIGN-NOTES §3). Created in the design's
-    // order, filled below. Copy diet: no hint walls, one hint at most.
+    // #460 E2: clear groups, with sound toggle + volume in one row like the MIT pattern.
+    // Keep Abito's persisted values and validation, including «Nunca» and custom intervals.
     const perfil = group('general', 'Perfil');
     const isla = group('general', 'Isla');
-    const sound = group('general', 'Sonido y atajo');
+    const sound = group('general', 'Sonido');
+    const shortcut = group('general', 'Atajo global');
     const personal = perfil;
     const nameForm = el('form', 'sname-form sperfil-form'); nameForm.noValidate = true;
     const label = el('label', 'srow-title', 'Nombre'); label.htmlFor = 'settings-display-name';
@@ -919,12 +918,13 @@
       });
     });
     nameForm.append(label, nameInput, error, save); personal.append(nameForm); paint();
-    // Sonido y atajo: the toggle keeps its contract; the volume is a SLIDER (D6/design). Same
-    // closed command, same validation gate, same honest failure — only the control changes.
-    sound.append(toggleRow('sw-sound', 'Sonido', g.sound.on, () => call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); }, () => {})));
-    const volRow = el('div', 'srow');
-    volRow.append(el('span', 'srow-title', 'Volumen'));
+    const volRow = toggleRow('sw-sound', 'Sonido', g.sound.on, () =>
+      call('prefs_action', { action: g.sound.on ? 'sound_off' : 'sound_on' }).then(
+        p => { prefs = p; render(); say(p.sound ? 'Sonido activado.' : 'Sonido apagado.'); },
+        () => say('No se pudo guardar. El sonido sigue sin cambios; probá de nuevo.')));
     const volActions = el('span', 'srow-actions');
+    const gainLabel = el('label', 'srow-sub', 'Volumen'); gainLabel.htmlFor = 'settings-sound-gain';
+    volActions.append(gainLabel);
     const gainInput = el('input', 'sfield srange'); gainInput.type = 'range'; gainInput.id = 'settings-sound-gain';
     gainInput.min = '0'; gainInput.max = '0.2'; gainInput.step = '0.01';
     gainInput.value = gainDraft === null ? String(g.sound.gain) : gainDraft;
@@ -986,8 +986,8 @@
       actions.append(wordBtn(capturing ? 'Cancelar' : 'Cambiar', () => { capturing = !capturing; render(); if (capturing) say('Pulsá la combinación nueva; Escape cancela.'); }, { icon: 'refresh' }));
       actions.append(wordBtn('Original', () => call('hotkey_action', { action: 'reset' }).then(r => { hotkey = r; render(); }, () => {})));
       row.append(actions);
-      sound.append(row);
-      sound.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
+      shortcut.append(row);
+      shortcut.append(toggleRow('sw-hotkey', 'Atajo activo', h.enabled, () => call('hotkey_action', { action: h.enabled ? 'disable' : 'enable' }).then(r => { hotkey = r; render(); }, () => {})));
     }
     // #336 F003/F004: la isla se cierra sola tras la inactividad configurada y se abre al
     // pasar el mouse. The closed command always carries the FULL typed pair (exact keys,

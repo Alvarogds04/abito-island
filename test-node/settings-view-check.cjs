@@ -54,6 +54,78 @@ test('T6.3 auto-close segmented projection: presets, honest custom value, enable
   assert.equal(fallback.find(s => s.selected).seconds, 15);
 });
 
+// #460 E2: execute the shipped General renderer against a small DOM, without a browser.
+// Structure adapted from windows/src/settings/main.ts (generalSection),
+// Copyright (c) 2026 Louis Raillé, MIT. Only Abito controls and copy are rendered.
+function generalHarness() {
+  const vm = require('node:vm');
+  class Node {
+    constructor(tag, cls = '', text = '') {
+      this.tag = tag; this.className = cls; this.textContent = text;
+      this.children = []; this.attrs = {}; this.events = {}; this.dataset = {}; this.value = '';
+    }
+    append(...nodes) { this.children.push(...nodes); }
+    setAttribute(key, value) { this.attrs[key] = value; }
+    addEventListener(type, fn) { this.events[type] = fn; }
+    focus() {}
+    fire(type, trusted = true) { this.events[type]({ isTrusted: trusted, preventDefault() {} }); }
+  }
+  const body = new Node('main'), calls = [], feedback = [];
+  const ctx = vm.createContext({
+    V: S, body, screen: 'general', window: {}, AVATAR: null,
+    prefs: { sound: true, gain: 0.12, displayName: 'Ada', autoCloseSeconds: 15, openOnHover: false },
+    hotkey: { combo: 'Ctrl+Space', enabled: true, status: 'active', backend: 'x11' },
+    motionOverride: true, capturing: false, nameDraft: null, nameSaving: false, nameError: '',
+    gainDraft: null, gainSaving: false, gainPending: null, gainError: '', autoSaving: false, autoError: '', themeError: '',
+    el: (tag, cls, text) => new Node(tag, cls, text), sectionTitle: text => new Node('h2', '', text),
+    chipNode: () => new Node('span'), wordBtn: text => new Node('button', '', text),
+    specialistIdentities: () => ({ identities: [] }), render() {}, say: text => feedback.push(text),
+    $: () => null, fail: false,
+  });
+  ctx.call = (command, payload) => {
+    calls.push({ command, ...payload });
+    return { then(ok, bad) { if (ctx.fail) return bad(); return ok(ctx.prefs); } };
+  };
+  const src = fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8');
+  const start = src.indexOf('  function toggleRow(');
+  const end = src.indexOf('  // ---- #442 T7.4: the closed intents', start);
+  assert.ok(start > 0 && end > start, 'the shipped renderer is exercised, not a duplicate');
+  vm.runInContext(src.slice(start, end) + '\nrenderGeneral();', ctx);
+  const walk = node => [node, ...node.children.flatMap(walk)];
+  const find = id => walk(body).find(node => node.id === id);
+  return { body, calls, feedback, ctx, find, walk };
+}
+
+test('#460 General separates profile, island, sound and global shortcut; sound shares its volume row', () => {
+  const h = generalHarness();
+  assert.deepEqual(h.body.children.map(sec => sec.children[0].textContent), ['Perfil', 'Isla', 'Sonido', 'Atajo global']);
+  const sound = h.body.children[2];
+  assert.ok(sound.children.some(row => h.walk(row).includes(h.find('sw-sound')) && h.walk(row).includes(h.find('settings-sound-gain'))),
+    'sound toggle and volume belong to the same row, as in the MIT General pattern');
+  assert.equal(h.find('settings-display-name').value, 'Ada');
+  assert.equal(h.find('settings-sound-gain').value, '0.12');
+  assert.equal(h.find('settings-sound-gain-value').textContent, '60%');
+});
+
+test('#460 General gestures keep the closed prefs commands and announce rejected sound saves', () => {
+  const h = generalHarness();
+  h.find('sw-sound').fire('click', false);
+  assert.equal(h.calls.length, 0, 'synthetic gestures never write');
+  h.find('sw-sound').fire('click');
+  assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'sound_off' });
+  h.ctx.fail = true;
+  h.find('sw-sound').fire('click');
+  assert.match(h.feedback.at(-1), /No se pudo guardar/);
+  assert.equal(h.ctx.prefs.sound, true, 'failed saves keep the stored preference');
+  h.ctx.fail = false;
+  h.find('sw-island-hover').fire('click');
+  assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_island_interaction', auto_close_seconds: 15, open_on_hover: true });
+  h.find('autoclose-never').fire('click');
+  assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_island_interaction', auto_close_seconds: 0, open_on_hover: false });
+  const gain = h.find('settings-sound-gain'); gain.value = '0.05'; gain.fire('input'); gain.fire('change');
+  assert.deepEqual(h.calls.pop(), { command: 'prefs_action', action: 'set_sound_gain', gain: 0.05 });
+});
+
 // ---- screens (copied from gentle-dot: one screen per header button, each covering the chat body) -------
 test('#442 T7.4 five sub-tabs of ONE Ajustes entry, design order (DESIGN-NOTES §3/§9): General, Conexiones, Modelos, Blobs, Apariencia — Especialistas is merged into Blobs', () => {
   assert.deepEqual(S.TABS.map(x => x.id), ['general', 'accounts', 'models', 'pills', 'appearance']);
@@ -1403,10 +1475,11 @@ test('T6.3 General screen source contract: slider, segmented auto-close, groups,
   assert.match(src, /action: 'set_island_interaction', auto_close_seconds: seconds, open_on_hover:/);
   assert.match(src, /settings-autoclose-error/);
   assert.match(src, /No se pudo guardar\. La interacción sigue sin cambios/);
-  // groups exactly as the design shows them (PERFIL / ISLA / SONIDO Y ATAJO)
+  // #460 E2: separate sound and shortcut groups, retaining the existing controls.
   assert.match(src, /'Perfil'/);
   assert.match(src, /'Isla'/);
-  assert.match(src, /'Sonido y atajo'/);
+  assert.match(src, /group\('general', 'Sonido'\)/);
+  assert.match(src, /group\('general', 'Atajo global'\)/);
   assert.doesNotMatch(src, /'Abrir Ajustes en ventana'/, '#455 S8: placement is no longer optional');
   assert.match(src, /'Atajo global'/);
   // copy diet: the explanatory paragraphs of the General screen are gone
