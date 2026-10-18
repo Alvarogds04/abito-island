@@ -303,12 +303,13 @@ mod tests {
     /// never silently become reachable from the settings window.
     #[test]
     fn f093_the_commands_reachable_from_settings_are_pinned_exactly() {
-        const REACHABLE: [&str; 7] = [
+        const REACHABLE: [&str; 8] = [
             "agent_action",
             "daemon_action",
             "hotkey_action",
             "models_action",
             "prefs_action",
+            "secret_action",
             "settings_window_action",
             "specialists_action",
         ];
