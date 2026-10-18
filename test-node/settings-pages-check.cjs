@@ -16,11 +16,20 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const fake = name => async opts => { invoked.push([name, opts.page]); return Object.assign(new Element('section'), { dispose() { disposed.push(name); } }); };
   const source = fs.readFileSync(path.resolve(__dirname, '../frontend/settings-app.js'), 'utf8').replace(/^import .*;\n/gm, '');
   const host = new Element('div'); document.getElementById = () => host;
-  vm.runInNewContext(source, { window: {}, document, inactivePages, renderUnavailable,
+  const rawCalls=[];
+  const context = { window: {__TAURI__:{core:{invoke:async(c,a)=>{rawCalls.push([c,a]);return {};}}}}, document, inactivePages, renderUnavailable,
     renderAccounts: fake('accounts'), renderModels: fake('models'), renderPills: fake('pills'),
     renderAgentSettings: fake('agent-settings'), renderChatSettings: fake('chat-settings'),
+    renderIntegrations: fake('integrations'), renderShortcuts: fake('shortcuts'),
     renderGeneral: fake('general'), card: x => x, row: () => new Element('div'),
-    startHub: async (_root, opts) => { config = opts; }, Set, Promise });
+    startHub: async (_root, opts) => { config = opts; }, Set, Promise };
+  vm.runInNewContext(source+'\nglobalThis.closedInvoke = invoke;',context);
+  for (const payload of [{action:'prefs'},{action:'set_enabled',enabled:true},{action:'set_enabled',enabled:false},{action:'clear'}]) {
+    await context.closedInvoke('recap_action',{payload});assert.deepEqual(rawCalls.pop(),['recap_action',{payload}]);
+  }
+  for (const args of [undefined,{}, {payload:{action:'view',since:0}}, {payload:{action:'clear',extra:1}}, {payload:{action:'set_enabled',enabled:1}}, {payload:{action:'set_enabled'}}, {payload:{action:'prefs'},extra:1}]) await assert.rejects(context.closedInvoke('recap_action',args));
+  for (const command of ['shortcuts_action','spotify_action','flow_status','phone_link_status']) await assert.rejects(context.closedInvoke(command,{}));
+  assert.equal(rawCalls.length,0,'unreachable commands and out-of-slice recap verbs never cross IPC');
   for (const id of ids) {
     const container = new Element('div');
     invoked.length = 0;
@@ -28,18 +37,34 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       await config.flowPages[id](container, { hero, status: { prefs: { key: 'right_ctrl' }, platform: 'linux' } });
       assert(all(container).some(e => e.className.includes('hub-hero')), id);
       assert(text(container).includes('pendiente de conectar'), id);
+      if (id === 'voice') {
+        assert.deepEqual(all(container).filter(e=>e.className==='hub-label').map(text),['Escucha','Respuestas','Privacidad']);
+        assert.equal(all(container).filter(e=>e.className==='hub-card').length,3);
+        assert(text(container).includes('Escuchar « OK Abito »'));
+        assert(text(container).includes('Parakeet, en tu ordenador'));
+        assert(text(container).includes('Abito responde en voz alta'));
+        assert(text(container).includes('Abito nunca envía un correo'));
+      }
     } else {
       const cleanup = await config.renderNotch(id, container);
-      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['agent-settings',undefined],['pills','agents']], chat:[['chat-settings',undefined],['models',undefined],['accounts','chat']], integrations:[['accounts','integrations']]}[id];
+      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['agent-settings',undefined],['pills','agents']], chat:[['chat-settings',undefined],['models',undefined],['accounts','chat']], integrations:[['integrations',undefined],['accounts','integrations']], shortcuts:[['shortcuts',undefined]]}[id];
       if (expected) { assert.deepEqual(invoked, expected); assert(container.children.length); cleanup?.(); }
-      else { assert(text(container).includes(id === 'phone' ? 'No disponible' : 'pendiente de conectar')); }
+      else {
+        assert(text(container).includes(id === 'phone' ? 'No disponible' : 'pendiente de conectar'));
+        if(id==='phone') {
+          assert.deepEqual(all(container).filter(e=>e.tagName==='h2').map(e=>text(e).trim()),['Teléfono Android']);
+          assert(text(container).includes('Enlace con el teléfono'));
+          assert.equal(all(container).filter(e=>e.tagName==='button').length,1);
+          assert.equal((text(container).match(/No disponible/g)||[]).length,1);
+        }
+      }
     }
     for (const e of all(container).filter(e => ['button','input','select','textarea'].includes(e.tagName))) assert.equal(e.disabled, true, id);
   }
   assert(source.includes("page === 'pills' || page === 'agents'"), 'pills and agents retain the existing closed planner');
   assert(disposed.includes('agent-settings') && disposed.includes('chat-settings'), 'new page adapters are disposed');
   const generalSource = fs.readFileSync(path.join(base,'general.ts'),'utf8');
-  assert(generalSource.includes("t('Weekly recap')"), 'General includes the upstream recap rows');
+  assert(generalSource.includes('renderRecapRows({ invoke })'), 'General reuses the wired upstream recap rows in their original position');
   assert(disposed.includes('accounts') && disposed.includes('models') && disposed.includes('pills'));
   console.log('PASS settings-pages: 15 routes, mapped renderer lifecycles, inactive controls and hero bands');
 })().catch(e => { console.error(e); process.exitCode = 1; });

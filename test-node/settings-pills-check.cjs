@@ -66,6 +66,7 @@ const {all, text, dom, Element} = require('./settings-accounts-check.cjs');
   ui.dispose();
   ui=await renderPills({...options,page:'pills'}); await ui.settled(); calls.length=0;
   assert(!text(ui).includes('Especialistas')); assert(text(ui).includes('Pestañas activas'));
+  assert(!text(ui).includes('Servicios'), 'service declarations now belong to the exact Integrations section');
   assert.equal(ui.firstChild.tagName, 'section');
   assert.deepEqual(all(ui.firstChild).filter(e=>e.tagName==='h3').map(e=>e.textContent), ['Dónde programas','Agentes','IA para el chat']);
   assert(text(ui).includes('0/4'));

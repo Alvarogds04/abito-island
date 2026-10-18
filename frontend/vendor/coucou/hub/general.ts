@@ -1,6 +1,7 @@
 // Adapted from Coucou src/settings/main.ts generalSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
-// Abito-owned persistence, name, theme and shortcut wiring; no new IPC commands.
+// Abito-owned persistence, name, theme, shortcut and recap wiring through existing closed hosts.
 import { h, clear } from '../views/dom.js';
+import { renderRecapRows } from './recap.js';
 import { createBridge } from '../bridge-abito.js';
 import { toggle, select, button } from './ui.js';
 import { t, LANGUAGES } from './i18n-es.js';
@@ -17,13 +18,14 @@ function trusted<T extends HTMLElement>(el: T): T {
   return el;
 }
 const identify = <T extends HTMLElement>(el: T, id: string): T => { el.setAttribute('id', id); return el; };
-export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args: any) => Promise<any>; V: any }): Promise<HTMLElement & { settled(): Promise<void> }> {
+export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args: any) => Promise<any>; V: any }): Promise<HTMLElement & { dispose(): void; settled(): Promise<void> }> {
   const bridge = createBridge(invoke);
   let settings = await bridge.boot();
   // No monitor enumeration command is admitted: retain the saved named choice.
   const namedScreens = settings.screen !== 'primary' && settings.screen !== 'cursor' ? [settings.screen] : [];
   let prefs = await invoke('prefs_action', { payload: { action: 'view' } });
   let hotkey = await invoke('hotkey_action', { payload: { action: 'view' } });
+  const recap = await renderRecapRows({ invoke });
   let queue = Promise.resolve(), issue = '', nameDraft: string | null = null, capturing = false;
   const root = h('div', {});
   const send = (cmd: string, payload: any) => invoke(cmd, { payload });
@@ -110,9 +112,7 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       hint(t('0 means never')),
       row(t('Island lives on'), screen), row(t('Theme'), themeSelect),
       row(t('Launch at startup'), unavailable(toggle(false, () => {}), 'hub-autostart'), h('span', { class: 'hint', text: 'No disponible todavía' })),
-      row(t('Weekly recap'), unavailable(toggle(false, () => {}), 'hub-recap'), h('span', { class: 'hint', text: t('Keep a history of my coding sessions') })),
-      row('', unavailable(h('button', { class: 'danger', text: t('Clear history') }), 'hub-recap-clear'), h('span', { class: 'hint', text: 'No disponible todavía' })),
-      row('', h('span', { class: 'hint', style: 'flex:1 1 0;min-width:0', text: t('Counts and project names only — never commands, files or prompts. Kept on this computer for 12 weeks.') })),
+      recap,
       row(t('Language'), language, h('span', { class: 'hint', text: 'No disponible todavía' })),
       row('Nombre visible', name, save), nameIssue,
       row(t('Motion'), motion, h('span', { class: 'hint', text: 'No disponible en esta ventana' })),
@@ -123,5 +123,5 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
     if (capturing) { capture.focus?.(); }
   }
   paint();
-  return Object.assign(root, { settled: () => queue });
+  return Object.assign(root, { dispose: () => recap.dispose(), settled: async () => { await queue; await recap.settled(); } });
 }

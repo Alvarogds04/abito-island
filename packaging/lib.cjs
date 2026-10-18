@@ -49,6 +49,9 @@ FRONTEND_FILES.push(
   'vendor/coucou/hub/notch.ts', 'vendor/coucou/hub/notch.js',
   'vendor/coucou/hub/agents.ts', 'vendor/coucou/hub/agents.js',
   'vendor/coucou/hub/chat.ts', 'vendor/coucou/hub/chat.js',
+  'vendor/coucou/hub/integrations.ts', 'vendor/coucou/hub/integrations.js',
+  'vendor/coucou/hub/shortcuts.ts', 'vendor/coucou/hub/shortcuts.js',
+  'vendor/coucou/hub/recap.ts', 'vendor/coucou/hub/recap.js',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];

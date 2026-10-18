@@ -1,5 +1,6 @@
 // Adapted from Coucou src/settings/main.ts generalSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
 import { h, clear } from "../views/dom.js";
+import { renderRecapRows } from "./recap.js";
 import { createBridge } from "../bridge-abito.js";
 import { toggle, select, button } from "./ui.js";
 import { t, LANGUAGES } from "./i18n-es.js";
@@ -25,6 +26,7 @@ async function renderGeneral({ invoke, V }) {
   const namedScreens = settings.screen !== "primary" && settings.screen !== "cursor" ? [settings.screen] : [];
   let prefs = await invoke("prefs_action", { payload: { action: "view" } });
   let hotkey = await invoke("hotkey_action", { payload: { action: "view" } });
+  const recap = await renderRecapRows({ invoke });
   let queue = Promise.resolve(), issue = "", nameDraft = null, capturing = false;
   const root = h("div", {});
   const send = (cmd, payload) => invoke(cmd, { payload });
@@ -161,10 +163,7 @@ async function renderGeneral({ invoke, V }) {
       row(t("Theme"), themeSelect),
       row(t("Launch at startup"), unavailable(toggle(false, () => {
       }), "hub-autostart"), h("span", { class: "hint", text: "No disponible todavía" })),
-      row(t("Weekly recap"), unavailable(toggle(false, () => {
-      }), "hub-recap"), h("span", { class: "hint", text: t("Keep a history of my coding sessions") })),
-      row("", unavailable(h("button", { class: "danger", text: t("Clear history") }), "hub-recap-clear"), h("span", { class: "hint", text: "No disponible todavía" })),
-      row("", h("span", { class: "hint", style: "flex:1 1 0;min-width:0", text: t("Counts and project names only — never commands, files or prompts. Kept on this computer for 12 weeks.") })),
+      recap,
       row(t("Language"), language, h("span", { class: "hint", text: "No disponible todavía" })),
       row("Nombre visible", name, save),
       nameIssue,
@@ -179,7 +178,10 @@ async function renderGeneral({ invoke, V }) {
     }
   }
   paint();
-  return Object.assign(root, { settled: () => queue });
+  return Object.assign(root, { dispose: () => recap.dispose(), settled: async () => {
+    await queue;
+    await recap.settled();
+  } });
 }
 export {
   renderGeneral

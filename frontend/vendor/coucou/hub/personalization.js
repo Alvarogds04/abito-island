@@ -316,7 +316,7 @@ async function renderPills({ invoke, listen, V, S, A, P, C, page = "all" }) {
     );
     if (page !== "agents") {
       root.append(active);
-      root.append(section("Servicios", ...C.available().filter((d) => d.category === "service").map(pillRow)));
+      if (page !== "pills") root.append(section("Servicios", ...C.available().filter((d) => d.category === "service").map(pillRow)));
     }
     if (!instructionsDraft) principalInstructions.value = prefs.abitoInstructions || "";
     const principal = section("Abito", row("Instrucciones", "Declarativo: todavía no se aplica", principalInstructions, action("Guardar instrucciones", () => {

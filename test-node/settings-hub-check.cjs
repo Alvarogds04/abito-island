@@ -72,9 +72,10 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const css of ['settings/settings.css', 'hub/hub.css']) assert(html.includes(`vendor/coucou/${css}`));
   const entry = fs.readFileSync(path.join(root, 'frontend/settings-app.js'), 'utf8');
   assert(entry.includes("import { renderAgentSettings }")); assert(entry.includes("import { renderChatSettings }"));
-  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action']", 'plan_action (already reachable from the settings label in Rust) is the only addition after slice 3; payloads are pinned to claude|codex');
+  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action']", 'slice 4 adds only the closed recap prefs/set_enabled/clear adapter');
+  assert(entry.includes("command === 'recap_action'"), 'closed recap guard');
   assert(entry.includes("['claude', 'codex'].includes(args.payload.action)"), 'plan_action payload guard');
-  for (const file of ['agents.ts','chat.ts']) {
+  for (const file of ['agents.ts','chat.ts','integrations.ts','shortcuts.ts','recap.ts']) {
     const source = fs.readFileSync(path.join(base,file),'utf8');
     assert(!/innerHTML|setAttribute\(['"]style|console\.|localStorage|sessionStorage/.test(source), file);
     assert(!/call\(['"](?:hooks_apply|statusline_preview|statusline_apply|local_connect|open_chat_url)/.test(source), file);
@@ -88,6 +89,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   const calls = []; let rejectGain = false;
   const invoke = async (cmd, { payload: p }) => {
     calls.push([cmd, p]);
+    if (cmd === 'recap_action') return p.action === 'prefs' ? {enabled:true} : {ok:true};
     if (cmd === 'hotkey_action') return { combo: 'Ctrl+Space', enabled: true, status: 'active' };
     if (p.action === 'sound_off') prefs.sound = false;
     if (p.action === 'sound_on') prefs.sound = true;
@@ -99,13 +101,14 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     if (p.action === 'set_island_interaction') { prefs.autoCloseSeconds = p.auto_close_seconds; prefs.openOnHover = p.open_on_hover; }
     return structuredClone(prefs);
   };
-  const ui = await renderGeneral({ invoke, V });
+  const ui = await renderGeneral({ invoke, V }); await ui.settled();
+  assert(calls.some(([c,p])=>c==='recap_action'&&p.action==='prefs'));
   calls.length = 0;
   assert.equal(ui.firstChild.tagName, 'section', 'General uses the upstream settings section');
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' General']);
   assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Movimiento','Atajo global']);
   assert(!all(ui).some(e => e.className === 'hub-segmented'));
-  for (const id of ['hub-sounds-folder','hub-sounds-reload','hub-autostart','hub-recap','hub-recap-clear','hub-language']) {
+  for (const id of ['hub-sounds-folder','hub-sounds-reload','hub-autostart','hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);
     el.fire(el.tagName === 'select' ? 'change' : 'click'); await ui.settled(); assert.deepEqual(calls, []);
   }
@@ -113,6 +116,10 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(text(ui).includes('0 means never'));
   assert.equal(all(ui).find(e=>e.attrs.id==='hub-language').children.length,11);
   const field = id => all(ui).find(e => e.attrs.id === id);
+  field('hub-recap').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
+  field('hub-recap').fire('click');await ui.settled();assert.deepEqual(calls.pop(),['recap_action',{action:'set_enabled',enabled:false}]);
+  field('hub-recap-clear').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
+  field('hub-recap-clear').fire('click');await ui.settled();assert.deepEqual(calls.pop(),['recap_action',{action:'clear'}]);
   field('hub-sound').fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
   field('hub-sound').fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'sound_off' }]);
   field('hub-sound').fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'sound_on' }]);

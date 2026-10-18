@@ -192,8 +192,8 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all' 
       notchRow(t('Main tool'), main), groups);
     if (page !== 'agents') {
       root.append(active);
-      // Preserve Abito's service declarations/colours until their Integrations slice.
-      root.append(section('Servicios', ...C.available().filter((d: any) => d.category === 'service').map(pillRow)));
+      // The exact Integrations page now owns these controls; retain the legacy all-page renderer.
+      if (page !== 'pills') root.append(section('Servicios', ...C.available().filter((d: any) => d.category === 'service').map(pillRow)));
     }
     if (!instructionsDraft) principalInstructions.value = prefs.abitoInstructions || '';
     const principal = section('Abito',row('Instrucciones','Declarativo: todavía no se aplica',principalInstructions,action('Guardar instrucciones',() => { run({type:'set_abito_instructions',text:principalInstructions.value}); })));
