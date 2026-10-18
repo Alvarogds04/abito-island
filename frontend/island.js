@@ -985,7 +985,7 @@
   setInterval(() => {
     if (!current || !O) return;
     if (validCard(current.card)) paintExpiry(current.card);
-    paintRing(Array.isArray(current.notices) ? current.notices : []);
+    paintBand(Array.isArray(current.notices) ? current.notices : []); // #437 renamed paintRing -> paintBand
     paintCompactFlag(); // an expired card must stop saying «waiting»
     refreshHost(current);
   }, 5000);
