@@ -715,6 +715,8 @@ mod tests {
             session_id: "session-1".into(),
             at: 1_000,
             id: Some("event-1".into()),
+            project_name: None,
+            agent: None,
         };
         let other = crate::protocol::Message {
             id: Some("event-2".into()),

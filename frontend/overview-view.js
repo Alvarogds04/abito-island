@@ -325,12 +325,18 @@
   // name is what precedes «terminó» and the verb is the rest. Anything else keeps the whole title as the name.
   // «Abrir terminal» is Abito's existing closed `focus_host` (target terminal): island.js wires it, the host answers
   // with a public Spanish reason when there is nothing to focus.
-  function finishedCardView(notice) {
+  // S10 (L25): when the producer sent `projectName` + `agent` (additive wire fields), the who-row is Coucou's «<project> <agent> terminó»;
+  // `label` derives the agent's display name from its slug (never trusted as sent). Without them the host title is used as before.
+  function finishedCardView(notice, label) {
     const clean = v => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim() : '');
     const title = clean(notice && notice.title);
     if (!title) return null;
+    const slug = typeof (notice && notice.agent) === 'string' && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(notice.agent) ? notice.agent : null;
+    const proj = clean(notice && notice.projectName);
+    const rich = !!slug && /^[A-Za-z0-9._ -]{1,64}$/.test(proj) && typeof label === 'function';
     const m = /^(.+?)\s+(termin[oó].*)$/i.exec(title);
-    const name = m ? m[1] : title, verb = m ? m[2].replace(/\s+su turno$/i, '') : '';
+    const name = rich ? proj : m ? m[1] : title;
+    const verb = rich ? `${label(slug)} terminó` : m ? m[2].replace(/\s+su turno$/i, '') : '';
     const detail = clean(notice && notice.detail);
     return { name, verb, message: detail || title, terminal: { label: 'Abrir terminal', available: true, target: 'terminal', hint: '' }, ok: { label: 'OK' } };
   }

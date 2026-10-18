@@ -98,6 +98,15 @@ test('finishedCardView: name + verb from the host title, the detail is the bold 
   assert.equal(v.ok.label, 'OK');
   const bare = O.finishedCardView({ title: 'Aviso local', detail: '' });
   assert.deepEqual([bare.name, bare.verb, bare.message], ['Aviso local', '', 'Aviso local']);
+  // S10 (L25): the additive wire fields give Coucou's «<project> <agent> terminó»; bad or partial ones fall back to the title
+  const label = slug => ({ 'claude-code': 'Claude Code', codex: 'Codex', pi: 'Pi' }[slug] || slug);
+  const rich = O.finishedCardView({ title: 'Pi terminó su turno', detail: 'Hecho.', projectName: 'sb-second-brain', agent: 'claude-code' }, label);
+  assert.deepEqual([rich.name, rich.verb, rich.message], ['sb-second-brain', 'Claude Code terminó', 'Hecho.']);
+  for (const bad of [{ projectName: 'x' }, { agent: 'pi' }, { projectName: 'a/b', agent: 'pi' }, { projectName: 'x', agent: 'Pi' }, { projectName: '<b>', agent: 'pi' }]) {
+    const v2 = O.finishedCardView({ title: 'Pi terminó su turno', detail: 'd', ...bad }, label);
+    assert.deepEqual([v2.name, v2.verb], ['Pi', 'terminó'], JSON.stringify(bad));
+  }
+  assert.deepEqual([O.finishedCardView({ title: 'Pi terminó su turno', detail: 'd', projectName: 'x', agent: 'pi' }).name], ['Pi'], 'no labeler: the old text');
   assert.equal(O.finishedCardView({ title: '  ' }), null); assert.equal(O.finishedCardView(null), null);
   assert.equal(O.finishedCardView({ title: 'Pi\u0007 terminó', detail: 'a\u0000b' }).message, 'a b');
 });
@@ -109,6 +118,7 @@ test('finished card markup + wiring: lives inside #notices, survives the boot re
   assert.doesNotMatch(notices, /id="notice-card-terminal"[^>]*disabled/);
   const src = read('island.js');
   assert.match(src, /noticesEl\.replaceChildren\(noticeChips, noticePill, noticeDetail, noticeList, \.\.\.\(\$\('notice-card'\)/, 'the boot rebuild keeps the card');
+  assert.match(src, /O\.finishedCardView\(first, NV && NV\.agentLabel\)/);
   assert.match(src, /invoke\('focus_host', \{ payload: \{ target: 'terminal' \} \}\)/, 'closed host verb, no command/path/window id');
   assert.match(src, /noticeCardTerminal\.addEventListener\('click', event => \{\s*if \(event\.isTrusted !== true \|\| !invoke\) return;/);
   assert.match(src, /noticeCardOk\.addEventListener\('click', event => \{ if \(event\.isTrusted === true && noticeDismiss && !noticeDismiss\.hidden\) noticeDismiss\.click\(\); \}\)/);

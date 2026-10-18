@@ -737,7 +737,7 @@
   const noticeCard = $('notice-card'), noticeCardOk = $('notice-card-ok');
   function paintNoticeCard(first) {
     if (!noticeCard) return;
-    const v = first && O.finishedCardView ? O.finishedCardView(first) : null;
+    const v = first && O.finishedCardView ? O.finishedCardView(first, NV && NV.agentLabel) : null;
     noticeCard.hidden = !v;
     if (!v) return;
     $('notice-card-name').textContent = v.name;

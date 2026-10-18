@@ -104,6 +104,24 @@ pub struct Message {
     pub at: i64,
     #[serde(rename = "id", skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// S10 (L25): OPTIONAL display name of the project (basename of the cwd), only on `settled`, only together with
+    /// `agent`. Display text, never an identity: `project` (the path hash) stays the only scope.
+    #[serde(rename = "projectName", skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    /// S10 (L25): OPTIONAL slug of the agent that settled (`[a-z0-9][a-z0-9._-]{0,31}`); the label is derived from it.
+    #[serde(rename = "agent", skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+}
+
+/// S10 (L25): the optional display name of a project — a basename, at most 64 chars of `[A-Za-z0-9._ -]`,
+/// starting and ending with a non-space. Anything else refuses the whole frame.
+pub fn project_name_ok(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes.first() != Some(&b' ')
+        && bytes.last() != Some(&b' ')
+        && bytes.iter().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b' ' | b'-'))
 }
 
 /// The handshake a connection proved: afterwards every frame must match this
@@ -175,6 +193,11 @@ pub fn decode(
     let mut keys: Vec<&str> = vec!["v", "type", "project", "sessionId", "at"];
     if kind == Some("settled") {
         keys.push("id");
+        // S10 (L25): the two display keys travel together, or not at all (an old frame stays valid).
+        if object.contains_key("projectName") || object.contains_key("agent") {
+            keys.push("projectName");
+            keys.push("agent");
+        }
     }
     if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {
         return Err(DecodeError::InvalidSchemaOrScope);
@@ -194,6 +217,16 @@ pub fn decode(
         .and_then(Value::as_str)
         .ok_or(DecodeError::InvalidSchemaOrScope)?;
     let at = json_integer(object.get("at")).ok_or(DecodeError::InvalidSchemaOrScope)?;
+    let (project_name, agent) = if object.contains_key("projectName") {
+        let name = object.get("projectName").and_then(Value::as_str).filter(|v| project_name_ok(v));
+        let agent = object.get("agent").and_then(Value::as_str).filter(|v| crate::question::agent_slug_ok(v));
+        match (name, agent) {
+            (Some(n), Some(a)) => (Some(n.to_string()), Some(a.to_string())),
+            _ => return Err(DecodeError::InvalidSchemaOrScope),
+        }
+    } else {
+        (None, None)
+    };
     let message = Message {
         v: 1,
         kind: kind.unwrap_or_default().to_string(),
@@ -201,6 +234,8 @@ pub fn decode(
         session_id: session_id.to_string(),
         at,
         id: object.get("id").and_then(Value::as_str).map(str::to_string),
+        project_name,
+        agent,
     };
     validate(&message, expected_project, identity, now)?;
     Ok(message)
@@ -412,6 +447,11 @@ pub struct Notice {
     /// `settled` (a wire completion) or `transport` (the app's own failure
     /// notice). The UI renders no other kind.
     pub kind: &'static str,
+    /// S10 (L25): display-only, from the wire when the producer sent them (additive; skipped when absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 pub const NOTICE_TITLE: &str = "Pi terminó su turno";
@@ -536,6 +576,8 @@ impl NoticeStore {
             // notices therefore render exactly as before.
             severity: SEVERITY_INFO,
             kind: KIND_SETTLED,
+            project_name: event.project_name.clone(),
+            agent: event.agent.clone(),
         });
         if self.queue.len() > QUEUE {
             let excess = self.queue.len() - QUEUE;
@@ -566,6 +608,8 @@ impl NoticeStore {
             emotion: "error",
             severity: SEVERITY_ERROR,
             kind: KIND_TRANSPORT,
+            project_name: None,
+            agent: None,
         });
         // Still bounded by QUEUE — but the failure leads and is never the
         // victim: drop the OLDEST admitted notice instead (the legacy
@@ -975,6 +1019,8 @@ mod tests {
                 session_id: "session-1".to_string(),
                 at: NOW as i64,
                 id: None,
+                project_name: None,
+                agent: None,
             };
             assert!(!store.accept(&message, NOW), "accept must reject {kind}");
         }
@@ -1143,4 +1189,79 @@ mod tests {
         assert!(quota.check(61_000).is_ok());
         assert!(quota.check(61_001).is_ok());
     }
+
+    // --- S10 (L25): optional display keys on `settled` ------------------------
+
+    fn proved() -> Identity {
+        Identity { project: project(), session_id: "session-1".into(), at: NOW as i64 }
+    }
+    fn settled_with(name: Value, agent: Value) -> Value {
+        let mut v = settled_value(&project());
+        v["projectName"] = name;
+        v["agent"] = agent;
+        v
+    }
+
+    #[test]
+    fn an_old_settled_frame_is_accepted_unchanged_and_carries_no_display_fields() {
+        let message = parse(&settled_value(&project()), &project(), Some(&proved()), NOW).expect("old frame stays valid");
+        assert_eq!((message.project_name, message.agent), (None, None));
+    }
+
+    #[test]
+    fn a_settled_frame_with_both_display_fields_is_accepted_and_reaches_the_notice() {
+        let frame = settled_with(json!("sb-second-brain"), json!("claude-code"));
+        let message = parse(&frame, &project(), Some(&proved()), NOW).expect("new frame is valid");
+        assert_eq!(message.project_name.as_deref(), Some("sb-second-brain"));
+        assert_eq!(message.agent.as_deref(), Some("claude-code"));
+        let mut store = NoticeStore::new(project());
+        assert!(store.accept(&message, NOW));
+        let notice = &store.snapshot(NOW)[0];
+        assert_eq!((notice.project_name.as_deref(), notice.agent.as_deref()), (Some("sb-second-brain"), Some("claude-code")));
+        let value = serde_json::to_value(notice).unwrap();
+        assert_eq!(value["projectName"], "sb-second-brain");
+        assert_eq!(value["agent"], "claude-code");
+    }
+
+    #[test]
+    fn an_old_notice_serializes_without_the_new_keys() {
+        let message = parse(&settled_value(&project()), &project(), Some(&proved()), NOW).unwrap();
+        let mut store = NoticeStore::new(project());
+        assert!(store.accept(&message, NOW));
+        let value = serde_json::to_value(&store.snapshot(NOW)[0]).unwrap();
+        assert!(value.get("projectName").is_none() && value.get("agent").is_none(), "{value}");
+    }
+
+    #[test]
+    fn every_display_field_out_of_format_refuses_the_whole_frame() {
+        let long = "a".repeat(65);
+        for name in [json!(""), json!(" lead"), json!("trail "), json!("a/b"), json!("a\u{0}b"), json!("<b>"), json!(long), json!(7), json!(null), json!("ñandú")] {
+            let frame = settled_with(name.clone(), json!("pi"));
+            assert_eq!(parse(&frame, &project(), Some(&proved()), NOW), Err(DecodeError::InvalidSchemaOrScope), "projectName {name}");
+        }
+        let long_agent = "a".repeat(33);
+        for agent in [json!(""), json!("Pi"), json!("-pi"), json!("a b"), json!("a/b"), json!(long_agent), json!(1), json!(null)] {
+            let frame = settled_with(json!("proj"), agent.clone());
+            assert_eq!(parse(&frame, &project(), Some(&proved()), NOW), Err(DecodeError::InvalidSchemaOrScope), "agent {agent}");
+        }
+    }
+
+    #[test]
+    fn the_two_display_fields_travel_together_and_an_unknown_key_is_still_refused() {
+        let mut only_name = settled_value(&project());
+        only_name["projectName"] = json!("proj");
+        assert_eq!(parse(&only_name, &project(), Some(&proved()), NOW), Err(DecodeError::InvalidSchemaOrScope));
+        let mut only_agent = settled_value(&project());
+        only_agent["agent"] = json!("pi");
+        assert_eq!(parse(&only_agent, &project(), Some(&proved()), NOW), Err(DecodeError::InvalidSchemaOrScope));
+        let mut extra = settled_with(json!("proj"), json!("pi"));
+        extra["extra"] = json!(1);
+        assert_eq!(parse(&extra, &project(), Some(&proved()), NOW), Err(DecodeError::InvalidSchemaOrScope));
+        // the display keys exist only on `settled`
+        let mut hello = hello_value(&project());
+        hello["projectName"] = json!("proj");
+        hello["agent"] = json!("pi");
+        assert_eq!(parse(&hello, &project(), None, NOW), Err(DecodeError::InvalidSchemaOrScope));
+    }
+
 }
