@@ -35,14 +35,17 @@ pub(crate) fn opening_size(stored: Option<(u32, u32)>, work: (u32, u32)) -> (f64
     let usable = |(w, h): (u32, u32)| {
         w >= min_w && w <= max_w && h >= min_h && h <= max_h && w <= work.0 && h <= work.1
     };
-    let chosen = stored.filter(|s| usable(*s))
+    let chosen = stored
+        .filter(|s| usable(*s))
         .map(|(w, h)| (w as f64, h as f64))
         .unwrap_or(DEFAULT_INNER_SIZE);
     // ceiling-then-floor, never f64::clamp: the work area may be SMALLER than
     // the minimum, and there the minimum must win (not a panic, not zero) —
     // the WM enforces min_inner_size anyway.
-    (chosen.0.min(work.0 as f64).max(MIN_INNER_SIZE.0),
-     chosen.1.min(work.1 as f64).max(MIN_INNER_SIZE.1))
+    (
+        chosen.0.min(work.0 as f64).max(MIN_INNER_SIZE.0),
+        chosen.1.min(work.1 as f64).max(MIN_INNER_SIZE.1),
+    )
 }
 
 // ---- T6.2: the debounced persister of the remembered size --------------------
@@ -75,7 +78,11 @@ pub(crate) fn save_due(last_change_ms: u64, last_save_ms: u64, now_ms: u64, quie
 /// or while a host lock is held (review finding R2). Starts the one persister
 /// thread on the first resize.
 pub(crate) fn note_resized(app: &AppHandle, width: u32, height: u32, scale: f64) {
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
     PENDING_W.store(((width as f64) / scale).round() as u32, Ordering::SeqCst);
     PENDING_H.store(((height as f64) / scale).round() as u32, Ordering::SeqCst);
     CHANGED_AT_MS.store(crate::now_ms() as u64, Ordering::SeqCst);
@@ -89,7 +96,12 @@ fn spawn_persister(app: AppHandle) {
             break;
         }
         let now = crate::now_ms() as u64;
-        if !save_due(CHANGED_AT_MS.load(Ordering::SeqCst), SAVED_AT_MS.load(Ordering::SeqCst), now, RESIZE_QUIET_MS) {
+        if !save_due(
+            CHANGED_AT_MS.load(Ordering::SeqCst),
+            SAVED_AT_MS.load(Ordering::SeqCst),
+            now,
+            RESIZE_QUIET_MS,
+        ) {
             continue;
         }
         let w = PENDING_W.load(Ordering::SeqCst);
@@ -116,7 +128,10 @@ pub(crate) fn main_window_only(label: &str) -> Result<(), BridgeError> {
 }
 
 fn err(code: &str) -> BridgeError {
-    BridgeError { code: code.into(), message: "No se pudo abrir Ajustes en la isla.".into() }
+    BridgeError {
+        code: code.into(),
+        message: "No se pudo abrir Ajustes en la isla.".into(),
+    }
 }
 
 /// The closed payload: exactly `{"action":"open"}` or `{"action":"close"}` —
@@ -149,7 +164,11 @@ pub fn settings_window_action(
     // same shared rate limiter as every other closed command.
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
-    state.chat_rate.lock().expect("chat rate lock").check(crate::now_ms())?;
+    state
+        .chat_rate
+        .lock()
+        .expect("chat rate lock")
+        .check(crate::now_ms())?;
     let action = parse_settings_window_action(&payload).ok_or_else(|| err("invalid_schema"))?;
     match action {
         "open" => {
@@ -179,8 +198,14 @@ mod tests {
     /// #366 F093: the command payload is closed — exactly the two actions.
     #[test]
     fn f093_the_settings_window_command_is_exactly_open_or_close() {
-        assert_eq!(parse_settings_window_action(&json!({"action": "open"})), Some("open"));
-        assert_eq!(parse_settings_window_action(&json!({"action": "close"})), Some("close"));
+        assert_eq!(
+            parse_settings_window_action(&json!({"action": "open"})),
+            Some("open")
+        );
+        assert_eq!(
+            parse_settings_window_action(&json!({"action": "close"})),
+            Some("close")
+        );
         for bad in [
             json!({}),
             json!({"action": "focus"}),
@@ -192,7 +217,11 @@ mod tests {
             json!({"Action": "open"}),
             json!({"action": "open", "w": 900}),
         ] {
-            assert_eq!(parse_settings_window_action(&bad), None, "{bad} must be refused");
+            assert_eq!(
+                parse_settings_window_action(&bad),
+                None,
+                "{bad} must be refused"
+            );
         }
     }
 
@@ -211,12 +240,20 @@ mod tests {
     #[test]
     fn f093_the_four_island_commands_check_the_label_first() {
         let src = include_str!("main.rs");
-        for name in ["fn drag_press(", "fn drag_move(", "fn drag_release(", "async fn desktop_action("] {
+        for name in [
+            "fn drag_press(",
+            "fn drag_move(",
+            "fn drag_release(",
+            "async fn desktop_action(",
+        ] {
             let at = src.find(name).unwrap_or_else(|| panic!("{name} missing"));
             let body = &src[at..];
             let end = body.find("\n}\n").unwrap_or(body.len());
             let head: String = body[..end].lines().take(8).collect::<Vec<_>>().join("\n");
-            assert!(head.contains("main_window_only(webview.label())"), "{name} must gate on the label first:\n{head}");
+            assert!(
+                head.contains("main_window_only(webview.label())"),
+                "{name} must gate on the label first:\n{head}"
+            );
         }
     }
 
@@ -226,8 +263,13 @@ mod tests {
     #[test]
     fn f093_the_commands_reachable_from_settings_are_pinned_exactly() {
         const REACHABLE: [&str; 7] = [
-            "agent_action", "daemon_action", "hotkey_action", "models_action",
-            "prefs_action", "settings_window_action", "specialists_action",
+            "agent_action",
+            "daemon_action",
+            "hotkey_action",
+            "models_action",
+            "prefs_action",
+            "settings_window_action",
+            "specialists_action",
         ];
         let needle = concat!("#[tauri", "::command]");
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -235,30 +277,61 @@ mod tests {
         let mut all = std::collections::BTreeSet::new();
         for entry in std::fs::read_dir(dir).expect("src dir") {
             let path = entry.expect("entry").path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            if !name.ends_with(".rs") || name.ends_with("_tests.rs") { continue; }
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if !name.ends_with(".rs") || name.ends_with("_tests.rs") {
+                continue;
+            }
             let text = std::fs::read_to_string(&path).expect("read");
             let lines: Vec<&str> = text.lines().collect();
             for (i, line) in lines.iter().enumerate() {
-                if line.trim() != needle { continue; }
-                let Some(off) = lines[i + 1..].iter().position(|l| l.contains("fn ")) else { continue };
+                if line.trim() != needle {
+                    continue;
+                }
+                let Some(off) = lines[i + 1..].iter().position(|l| l.contains("fn ")) else {
+                    continue;
+                };
                 let decl = lines[i + 1 + off];
-                let fname = decl.split("fn ").nth(1).and_then(|r| r.split('(').next()).unwrap_or("").trim().to_string();
+                let fname = decl
+                    .split("fn ")
+                    .nth(1)
+                    .and_then(|r| r.split('(').next())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 let window = lines[i + 1..(i + 16).min(lines.len())].join("\n");
                 all.insert(fname.clone());
-                if !window.contains("main_window_only(") { ungated.insert(fname); }
+                if !window.contains("main_window_only(") {
+                    ungated.insert(fname);
+                }
             }
         }
-        let want: std::collections::BTreeSet<String> = REACHABLE.iter().map(|s| s.to_string()).collect();
-        assert_eq!(ungated, want, "commands reachable from the settings label changed");
-        assert!(all.len() >= 20, "the scan must see every command, saw {all:?}");
+        let want: std::collections::BTreeSet<String> =
+            REACHABLE.iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            ungated, want,
+            "commands reachable from the settings label changed"
+        );
+        assert!(
+            all.len() >= 20,
+            "the scan must see every command, saw {all:?}"
+        );
     }
 
     /// #444 L12: no stored value may reopen the removed standalone surface.
     #[test]
     fn l12_legacy_placement_never_opens_a_separate_window() {
-        assert!(!opens_own_window(Some(true)), "legacy true must remain inert");
-        assert!(!opens_own_window(Some(false)), "false is the in-island default (#408)");
+        assert!(
+            !opens_own_window(Some(true)),
+            "legacy true must remain inert"
+        );
+        assert!(
+            !opens_own_window(Some(false)),
+            "false is the in-island default (#408)"
+        );
         assert!(!opens_own_window(None), "absent is the in-island default");
     }
 
@@ -289,16 +362,35 @@ mod tests {
     /// never a guessed clamp of a size the current screen cannot show.
     #[test]
     fn t62_a_remembered_size_is_used_only_when_it_fits_the_current_screen() {
-        assert_eq!(opening_size(Some((1100, 700)), (1920, 1080)), (1100.0, 700.0));
-        assert_eq!(opening_size(Some((720, 480)), (1920, 1080)), (720.0, 480.0), "the min is a usable memory");
+        assert_eq!(
+            opening_size(Some((1100, 700)), (1920, 1080)),
+            (1100.0, 700.0)
+        );
+        assert_eq!(
+            opening_size(Some((720, 480)), (1920, 1080)),
+            (720.0, 480.0),
+            "the min is a usable memory"
+        );
         // outside the current screen (either axis): the default, not a clamp
-        assert_eq!(opening_size(Some((2200, 1400)), (1920, 1080)), (960.0, 640.0));
-        assert_eq!(opening_size(Some((1100, 1400)), (1920, 1080)), (960.0, 640.0));
-        assert_eq!(opening_size(Some((1921, 1080)), (1920, 1080)), (960.0, 640.0));
+        assert_eq!(
+            opening_size(Some((2200, 1400)), (1920, 1080)),
+            (960.0, 640.0)
+        );
+        assert_eq!(
+            opening_size(Some((1100, 1400)), (1920, 1080)),
+            (960.0, 640.0)
+        );
+        assert_eq!(
+            opening_size(Some((1921, 1080)), (1920, 1080)),
+            (960.0, 640.0)
+        );
         // hostile stored values (already dropped at load; re-checked here because
         // this function is pure) fall back to the default too
         assert_eq!(opening_size(Some((100, 700)), (1920, 1080)), (960.0, 640.0));
-        assert_eq!(opening_size(Some((5000, 700)), (8000, 4000)), (960.0, 640.0));
+        assert_eq!(
+            opening_size(Some((5000, 700)), (8000, 4000)),
+            (960.0, 640.0)
+        );
         assert_eq!(opening_size(Some((960, 100)), (8000, 4000)), (960.0, 640.0));
     }
 
@@ -312,8 +404,16 @@ mod tests {
         assert_eq!(opening_size(None, (1920, 1080)), (960.0, 640.0));
         // work area shorter than the default: clamped down on that axis only
         assert_eq!(opening_size(None, (900, 700)), (900.0, 640.0));
-        assert_eq!(opening_size(None, (1920, 500)), (960.0, 500.0), "clamped to the area, still above the minimum");
-        assert_eq!(opening_size(None, (1920, 470)), (960.0, 480.0), "the minimum floors the clamp");
+        assert_eq!(
+            opening_size(None, (1920, 500)),
+            (960.0, 500.0),
+            "clamped to the area, still above the minimum"
+        );
+        assert_eq!(
+            opening_size(None, (1920, 470)),
+            (960.0, 480.0),
+            "the minimum floors the clamp"
+        );
         // work area smaller than the minimum: the minimum wins on both axes
         assert_eq!(opening_size(None, (600, 400)), (720.0, 480.0));
         assert_eq!(opening_size(None, (720, 480)), (720.0, 480.0));

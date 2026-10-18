@@ -1454,7 +1454,7 @@ test('#444 L12 removes the standalone window route and controls without changing
   assert.match(route, /win\.show\(\)/);
   assert.match(route, /sync_host_visible/);
   assert.match(native, /bridge::sender_ok\(webview.label\(\), &url\)\?/);
-  assert.match(native, /chat_rate.*\.check\(crate::now_ms\(\)\)\?/);
+  assert.match(native, /chat_rate[\s\S]*?\.check\(crate::now_ms\(\)\)\?/);
   assert.match(native, /parse_settings_window_action\(&payload\)/);
 });
 

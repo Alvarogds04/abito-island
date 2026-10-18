@@ -9,8 +9,8 @@
 //! rate limiter as chat/models/questions and speaks a closed schema. The agent's
 //! per-launch token and socket path never cross to the WebView (`agentclient`).
 use crate::{now_ms, AppState};
-use abito_island::agentconn::{island_root, AgentConn};
 use abito_island::agentclient::{is_account_action, AccountStore};
+use abito_island::agentconn::{island_root, AgentConn};
 use abito_island::bridge::{self, BridgeError};
 use abito_island::prefs::{self, Command, Prefs};
 use serde_json::{json, Value};
@@ -38,25 +38,44 @@ pub struct SettingsHost {
 
 impl Default for SettingsHost {
     fn default() -> Self {
-        SettingsHost { agent: Mutex::new(None), accounts: Mutex::new(None), prefs: Mutex::new(Prefs::default()), prefs_serial: Mutex::new(()) }
+        SettingsHost {
+            agent: Mutex::new(None),
+            accounts: Mutex::new(None),
+            prefs: Mutex::new(Prefs::default()),
+            prefs_serial: Mutex::new(()),
+        }
     }
 }
 
 fn err(code: &str) -> BridgeError {
-    BridgeError { code: code.into(), message: "No se pudo completar el cambio de ajustes.".into() }
+    BridgeError {
+        code: code.into(),
+        message: "No se pudo completar el cambio de ajustes.".into(),
+    }
 }
 
 fn prefs_path(app: &AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join(prefs::FILE))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d| d.join(prefs::FILE))
 }
 
 fn load_prefs(app: &AppHandle) -> Prefs {
-    Prefs::from_text(prefs_path(app).and_then(|p| std::fs::read_to_string(p).ok()).as_deref())
+    Prefs::from_text(
+        prefs_path(app)
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .as_deref(),
+    )
 }
 
 fn persist_prefs(app: &AppHandle, p: &Prefs) -> bool {
-    let Some(path) = prefs_path(app) else { return false };
-    let Some(dir) = path.parent() else { return false };
+    let Some(path) = prefs_path(app) else {
+        return false;
+    };
+    let Some(dir) = path.parent() else {
+        return false;
+    };
     if std::fs::create_dir_all(dir).is_err() {
         return false;
     }
@@ -68,7 +87,8 @@ fn persist_prefs(app: &AppHandle, p: &Prefs) -> bool {
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     options.mode(0o600);
-    let ok = options.open(&tmp)
+    let ok = options
+        .open(&tmp)
         .and_then(|mut f| f.write_all(p.to_text().as_bytes()))
         .and_then(|_| std::fs::rename(&tmp, &path));
     if ok.is_err() {
@@ -80,9 +100,16 @@ fn persist_prefs(app: &AppHandle, p: &Prefs) -> bool {
 /// Startup: load the prefs. The agent connection is made lazily, when the human opens Settings.
 pub fn start(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let _serial = state.settings.prefs_serial.lock().expect("prefs transaction lock");
+    let _serial = state
+        .settings
+        .prefs_serial
+        .lock()
+        .expect("prefs transaction lock");
     *state.settings.prefs.lock().expect("prefs lock") = load_prefs(app);
-    *state.settings.accounts.lock().expect("accounts lock") = app.path().app_config_dir().ok()
+    *state.settings.accounts.lock().expect("accounts lock") = app
+        .path()
+        .app_config_dir()
+        .ok()
         .and_then(|dir| AccountStore::load(dir.join("accounts.json")).ok());
 }
 
@@ -114,7 +141,12 @@ pub fn display_name(host: &SettingsHost) -> Option<String> {
 pub fn settings_window_size(app: &AppHandle) -> Option<(u32, u32)> {
     let state = app.state::<AppState>();
     // the guard must drop before `state`: a tail expression would hold the borrow
-    let size = state.settings.prefs.lock().expect("prefs lock").settings_window_size;
+    let size = state
+        .settings
+        .prefs
+        .lock()
+        .expect("prefs lock")
+        .settings_window_size;
     size
 }
 
@@ -134,7 +166,13 @@ pub fn saved_position(app: &AppHandle) -> Option<(i32, i32)> {
 /// (the island's current monitor).
 pub fn chosen_monitor(app: &AppHandle) -> Option<String> {
     let state = app.state::<AppState>();
-    let monitor = state.settings.prefs.lock().expect("prefs lock").monitor.clone();
+    let monitor = state
+        .settings
+        .prefs
+        .lock()
+        .expect("prefs lock")
+        .monitor
+        .clone();
     monitor
 }
 
@@ -151,7 +189,8 @@ pub fn save_position(app: &AppHandle, x: i32, y: i32) -> bool {
         &prefs::Command::SetPosition(x, y),
         |p| persist_prefs(app, p),
         |_| {},
-    ).is_ok()
+    )
+    .is_ok()
 }
 
 /// T6.2: commit the size the human resized the own Ajustes window to, through
@@ -168,7 +207,8 @@ pub fn save_settings_window_size(app: &AppHandle, w: u32, h: u32) -> bool {
         &prefs::Command::SetSettingsWindowSize(w, h),
         |p| persist_prefs(app, p),
         |_| {},
-    ).is_ok()
+    )
+    .is_ok()
 }
 
 /// #442 T7.4: a deleted specialist leaves the island order. Rust-internal (never a wire
@@ -181,12 +221,17 @@ pub fn prune_island_agent(app: &AppHandle, id: &str) {
         &state.settings.prefs,
         &command,
         |p| persist_prefs(app, p),
-        |snapshot| { let _ = app.emit("prefs:state", view_prefs(snapshot)); },
+        |snapshot| {
+            let _ = app.emit("prefs:state", view_prefs(snapshot));
+        },
     );
 }
 
 // Shared dispatch gate: executed before any preference transaction or persistence.
-fn check_island_membership(command: &Command, specialists: &crate::specialists::Store) -> Result<(), BridgeError> {
+fn check_island_membership(
+    command: &Command,
+    specialists: &crate::specialists::Store,
+) -> Result<(), BridgeError> {
     if let Command::SetIslandAgents(order) = command {
         if order.iter().any(|id| specialists.find(id).is_none()) {
             return Err(err("invalid_schema"));
@@ -202,18 +247,30 @@ fn check_island_membership(command: &Command, specialists: &crate::specialists::
 /// #435: reorder_declared_pills and reorder_blobs take exactly action + order (an
 /// array of strings) — apply enforces the strict-permutation gate.
 #[tauri::command]
-pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+pub async fn prefs_action(
+    app: AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     let command = prefs::parse_command(&payload).map_err(|_| err("invalid_schema"))?;
     check_island_membership(&command, &state.specialists.snapshot())?;
-    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    state
+        .chat_rate
+        .lock()
+        .expect("chat rate lock")
+        .check(now_ms())?;
     let mut attempted_write = false;
     let next = prefs::transact(
         &state.settings.prefs_serial,
         &state.settings.prefs,
         &command,
-        |p| { attempted_write = true; persist_prefs(&app, p) },
+        |p| {
+            attempted_write = true;
+            persist_prefs(&app, p)
+        },
         |snapshot| {
             // Snapshot belongs to this commit. The transaction gate still holds,
             // but the state mutex is free so publish_chat may re-read the name.
@@ -222,11 +279,20 @@ pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<
                 crate::chathost::publish_chat(&app);
             }
         },
-    ).map_err(|_| {
+    )
+    .map_err(|_| {
         // Stateful refusal (main toggle / fifth addition) happens inside the
         // existing serial gate before persistence; a disk failure is different.
-        let refused = !attempted_write && matches!(command, Command::SetMainPill(_) | Command::ToggleDeclaredPill(_));
-        err(if refused { "invalid_schema" } else { "save_failed" })
+        let refused = !attempted_write
+            && matches!(
+                command,
+                Command::SetMainPill(_) | Command::ToggleDeclaredPill(_)
+            );
+        err(if refused {
+            "invalid_schema"
+        } else {
+            "save_failed"
+        })
     })?;
     Ok(view_prefs(&next))
 }
@@ -235,16 +301,28 @@ pub async fn prefs_action(app: AppHandle, webview: tauri::Webview, state: State<
 /// `agentclient::parse_ui_command`. Abito account commands are committed locally before
 /// any daemon connection; snapshots expose credential presence only.
 #[tauri::command]
-pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+pub async fn agent_action(
+    app: AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
-    AccountStore::guard(webview.label(), &url, &mut state.chat_rate.lock().expect("chat rate lock"), now_ms())?;
+    AccountStore::guard(
+        webview.label(),
+        &url,
+        &mut state.chat_rate.lock().expect("chat rate lock"),
+        now_ms(),
+    )?;
     let handle = app.clone();
     // the socket work and the first connect never block the WebView thread
     tauri::async_runtime::spawn_blocking(move || {
         let state = handle.state::<AppState>();
         if is_account_action(&payload) {
             let mut accounts = state.settings.accounts.lock().expect("accounts lock");
-            let store = accounts.as_mut().ok_or_else(|| err("account_store_unavailable"))?;
+            let store = accounts
+                .as_mut()
+                .ok_or_else(|| err("account_store_unavailable"))?;
             let saved = store.command(&payload, |snapshot| {
                 let _ = handle.emit("agent:state", json!({"ownedAccounts":snapshot}));
             })?;
@@ -259,22 +337,39 @@ pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<
                 let _ = emitter.emit("agent:state", view);
             })
         });
-        let is_view_or_refresh = payload.get("action").and_then(Value::as_str).is_some_and(|a| a == "view" || a == "refresh");
+        let is_view_or_refresh = payload
+            .get("action")
+            .and_then(Value::as_str)
+            .is_some_and(|a| a == "view" || a == "refresh");
         let connected = conn.view().get("connection").and_then(Value::as_str) == Some("connected");
         if !connected && is_view_or_refresh {
-            if let Some(reason) = handle.state::<abito_island::daemonhost::HostSlot>().failure() {
+            if let Some(reason) = handle
+                .state::<abito_island::daemonhost::HostSlot>()
+                .failure()
+            {
                 conn.startup_failed(reason);
                 return Ok(conn.view());
             }
-            let root = island_root(std::env::var("ABITO_ISLAND_DIR").ok().as_deref(), std::env::var("HOME").ok().as_deref());
+            let root = island_root(
+                std::env::var("ABITO_ISLAND_DIR").ok().as_deref(),
+                std::env::var("HOME").ok().as_deref(),
+            );
             match root {
                 Some(root) => conn.connect(&root),
                 None => return Err(err("no_island_root")),
             }
         }
-        let mut view = conn.command(&payload).map_err(|_| err("agent_unavailable"))?;
-        view["ownedAccounts"] = state.settings.accounts.lock().expect("accounts lock")
-            .as_ref().map(AccountStore::view).unwrap_or(Value::Null);
+        let mut view = conn
+            .command(&payload)
+            .map_err(|_| err("agent_unavailable"))?;
+        view["ownedAccounts"] = state
+            .settings
+            .accounts
+            .lock()
+            .expect("accounts lock")
+            .as_ref()
+            .map(AccountStore::view)
+            .unwrap_or(Value::Null);
         Ok(view)
     })
     .await
@@ -285,11 +380,20 @@ pub async fn agent_action(app: AppHandle, webview: tauri::Webview, state: State<
 /// the size (geometry::settings_visible, clamped to the work area) and restores the previous chat
 /// rectangle on close; the page never sends a number. Same sender gate and rate limiter as the others.
 #[tauri::command]
-pub async fn settings_view(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+pub async fn settings_view(
+    app: AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<Value, BridgeError> {
     crate::settingswindow::main_window_only(webview.label())?;
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
-    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    state
+        .chat_rate
+        .lock()
+        .expect("chat rate lock")
+        .check(now_ms())?;
     let open = parse_settings_view(&payload).ok_or_else(|| err("invalid_schema"))?;
     crate::chathost::switch_settings(&app, &state, open);
     Ok(json!({"open": open}))
@@ -328,7 +432,8 @@ pub(crate) fn daemon_connect(
             let _ = emitter.emit("agent:state", view);
         })
     });
-    let connected = |c: &AgentConn| c.view().get("connection").and_then(Value::as_str) == Some("connected");
+    let connected =
+        |c: &AgentConn| c.view().get("connection").and_then(Value::as_str) == Some("connected");
     let deadline = wait.map(|w| Instant::now() + w);
     let mut own_gone = false;
     loop {
@@ -350,7 +455,11 @@ pub(crate) fn daemon_connect(
         }
     }
     let view = conn.view();
-    let connection = view.get("connection").and_then(Value::as_str).unwrap_or("no_daemon").to_string();
+    let connection = view
+        .get("connection")
+        .and_then(Value::as_str)
+        .unwrap_or("no_daemon")
+        .to_string();
     (connection, own_gone)
 }
 
@@ -367,10 +476,19 @@ fn session_pid(root: &std::path::Path) -> Option<u32> {
 /// spawned, GD029 rejected it and it died, or the session belongs to someone else — a
 /// foreign motor we never touch), `timeout` (our child was still booting at the bound).
 /// Never a pid.
-pub(crate) fn restart_outcome(own: Option<u32>, session_pid: Option<u32>, own_alive: bool, connected: bool) -> &'static str {
+pub(crate) fn restart_outcome(
+    own: Option<u32>,
+    session_pid: Option<u32>,
+    own_alive: bool,
+    connected: bool,
+) -> &'static str {
     let Some(own) = own else { return "refused" };
     if connected {
-        return if session_pid == Some(own) { "restarted" } else { "refused" };
+        return if session_pid == Some(own) {
+            "restarted"
+        } else {
+            "refused"
+        };
     }
     if !own_alive {
         return "refused";
@@ -390,10 +508,19 @@ pub(crate) fn restart_response(action: &str, connection: &str, outcome: &'static
 /// `refused` | `timeout` — decided from our own child's pid vs `session.json`, never
 /// exposed. `{action, ready, connection, outcome}`: no token, no pid, no path.
 #[tauri::command]
-pub async fn daemon_action(app: AppHandle, webview: tauri::Webview, state: State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+pub async fn daemon_action(
+    app: AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    payload: Value,
+) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
-    state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
+    state
+        .chat_rate
+        .lock()
+        .expect("chat rate lock")
+        .check(now_ms())?;
     let action = parse_daemon_action(&payload).ok_or_else(|| err("invalid_schema"))?;
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -454,7 +581,15 @@ mod settings_view_tests {
     fn the_settings_view_payload_is_exactly_one_boolean() {
         assert_eq!(parse_settings_view(&json!({"open": true})), Some(true));
         assert_eq!(parse_settings_view(&json!({"open": false})), Some(false));
-        for bad in [json!({}), json!({"open": 1}), json!({"open": "true"}), json!({"open": true, "w": 900}), json!(true), json!(null), json!({"width": 900})] {
+        for bad in [
+            json!({}),
+            json!({"open": 1}),
+            json!({"open": "true"}),
+            json!({"open": true, "w": 900}),
+            json!(true),
+            json!(null),
+            json!({"width": 900}),
+        ] {
             assert_eq!(parse_settings_view(&bad), None, "{bad}");
         }
     }
@@ -467,28 +602,41 @@ mod settings_view_tests {
         // no child of ours, but a foreign daemon answers session.json
         assert_eq!(restart_outcome(None, Some(1234), false, true), "refused");
         // our own child published the session and serves it
-        assert_eq!(restart_outcome(Some(100), Some(100), true, true), "restarted");
+        assert_eq!(
+            restart_outcome(Some(100), Some(100), true, true),
+            "restarted"
+        );
         // connected, but the session belongs to someone else (ours never published)
         assert_eq!(restart_outcome(Some(100), Some(200), true, true), "refused");
         // our spawn was rejected (GD029) and the child died without serving
-        assert_eq!(restart_outcome(Some(100), Some(200), false, false), "refused");
+        assert_eq!(
+            restart_outcome(Some(100), Some(200), false, false),
+            "refused"
+        );
         assert_eq!(restart_outcome(Some(100), None, false, false), "refused");
         // still booting when the bound expired: honestly a timeout
         assert_eq!(restart_outcome(Some(100), None, true, false), "timeout");
-        assert_eq!(restart_outcome(Some(100), Some(100), true, false), "timeout");
+        assert_eq!(
+            restart_outcome(Some(100), Some(100), true, false),
+            "timeout"
+        );
         for verdict in [
             restart_outcome(None, None, false, false),
             restart_outcome(Some(100), Some(100), true, true),
             restart_outcome(Some(100), None, true, false),
         ] {
-            assert!(matches!(verdict, "restarted" | "refused" | "timeout"), "{verdict}");
+            assert!(
+                matches!(verdict, "restarted" | "refused" | "timeout"),
+                "{verdict}"
+            );
         }
     }
 
     /// #390 fix: the restart answer carries exactly its four keys — no token, pid or path.
     #[test]
     fn restart_response_never_carries_a_token_pid_or_path() {
-        let text = serde_json::to_string(&restart_response("restart", "connected", "restarted")).unwrap();
+        let text =
+            serde_json::to_string(&restart_response("restart", "connected", "restarted")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
         keys.sort();
@@ -507,14 +655,29 @@ mod settings_view_tests {
     #[test]
     fn f414_the_webview_projection_carries_the_chosen_models() {
         use abito_island::prefs::{parse_command, update, Prefs};
-        let prefs = Prefs::from_text(Some(r#"{"v":1,"chosen_models":{"anthropic":["claude-sonnet-4-5"]}}"#));
+        let prefs = Prefs::from_text(Some(
+            r#"{"v":1,"chosen_models":{"anthropic":["claude-sonnet-4-5"]}}"#,
+        ));
         let view = view_prefs(&prefs);
-        assert_eq!(view["chosenModels"], json!({"anthropic":["claude-sonnet-4-5"]}));
-        assert_eq!(view_prefs(&Prefs::default())["chosenModels"], json!(null), "nothing chosen is null, like the other optional fields");
+        assert_eq!(
+            view["chosenModels"],
+            json!({"anthropic":["claude-sonnet-4-5"]})
+        );
+        assert_eq!(
+            view_prefs(&Prefs::default())["chosenModels"],
+            json!(null),
+            "nothing chosen is null, like the other optional fields"
+        );
         // a round trip through the closed command keeps the projection
-        let cmd = parse_command(&json!({"action":"set_chosen_models","provider":"openai","models":["gpt-5.2"]})).unwrap();
+        let cmd = parse_command(
+            &json!({"action":"set_chosen_models","provider":"openai","models":["gpt-5.2"]}),
+        )
+        .unwrap();
         let next = update(&prefs, &cmd, |_| true).unwrap();
-        assert_eq!(view_prefs(&next)["chosenModels"], json!({"anthropic":["claude-sonnet-4-5"],"openai":["gpt-5.2"]}));
+        assert_eq!(
+            view_prefs(&next)["chosenModels"],
+            json!({"anthropic":["claude-sonnet-4-5"],"openai":["gpt-5.2"]})
+        );
     }
 
     /// #389: the chosen panel monitor reaches the WebView only as the validated
@@ -524,15 +687,30 @@ mod settings_view_tests {
         use abito_island::prefs::{parse_command, update, Prefs};
         let prefs = Prefs::from_text(Some(r#"{"v":1,"monitor":"DP-1"}"#));
         assert_eq!(view_prefs(&prefs)["monitor"], json!("DP-1"));
-        assert_eq!(view_prefs(&Prefs::default())["monitor"], json!(null), "no choice is null, like the other optional fields");
+        assert_eq!(
+            view_prefs(&Prefs::default())["monitor"],
+            json!(null),
+            "no choice is null, like the other optional fields"
+        );
         let cmd = parse_command(&json!({"action":"set_monitor","monitor":"eDP-1"})).unwrap();
-        assert_eq!(view_prefs(&update(&prefs, &cmd, |_| true).unwrap())["monitor"], json!("eDP-1"));
+        assert_eq!(
+            view_prefs(&update(&prefs, &cmd, |_| true).unwrap())["monitor"],
+            json!("eDP-1")
+        );
         let cleared = parse_command(&json!({"action":"clear_monitor"})).unwrap();
-        assert_eq!(view_prefs(&update(&prefs, &cleared, |_| true).unwrap())["monitor"], json!(null), "the default projects null");
+        assert_eq!(
+            view_prefs(&update(&prefs, &cleared, |_| true).unwrap())["monitor"],
+            json!(null),
+            "the default projects null"
+        );
         // the established projection shapes are untouched by the new field
         let view = view_prefs(&prefs);
         assert_eq!(view["theme"], json!("system"));
-        assert_eq!(view["sound"], json!(true), "sound is on by default: a file with no `sound` key projects the default");
+        assert_eq!(
+            view["sound"],
+            json!(true),
+            "sound is on by default: a file with no `sound` key projects the default"
+        );
         assert_eq!(view["chosenModels"], json!(null));
     }
 
@@ -541,12 +719,24 @@ mod settings_view_tests {
     fn f093_the_webview_projection_carries_the_settings_window_choice() {
         use abito_island::prefs::Prefs;
         let defaults = view_prefs(&Prefs::default());
-        assert_eq!(defaults["settingsWindow"], json!(false), "absent reads as the in-island default");
+        assert_eq!(
+            defaults["settingsWindow"],
+            json!(false),
+            "absent reads as the in-island default"
+        );
         let saved = Prefs::from_text(Some(r#"{"v":1,"settings_window":true}"#));
-        assert_eq!(view_prefs(&saved)["settingsWindow"], json!(false), "L12: legacy true stays stored but placement is in-island");
+        assert_eq!(
+            view_prefs(&saved)["settingsWindow"],
+            json!(false),
+            "L12: legacy true stays stored but placement is in-island"
+        );
         assert!(saved.settings_window_on(), "no data migration");
         let hostile = Prefs::from_text(Some(r#"{"v":1,"settings_window":"yes"}"#));
-        assert_eq!(view_prefs(&hostile)["settingsWindow"], json!(false), "a dropped value reads as the default");
+        assert_eq!(
+            view_prefs(&hostile)["settingsWindow"],
+            json!(false),
+            "a dropped value reads as the default"
+        );
         // the established projection shapes are untouched
         assert_eq!(defaults["autoCloseSeconds"], json!(15));
         assert_eq!(defaults["theme"], json!("system"));
@@ -559,13 +749,30 @@ mod settings_view_tests {
         use abito_island::prefs::{parse_command, update, Prefs};
         let prefs = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"mint"}}"#));
         let view = view_prefs(&prefs);
-        assert_eq!(view["pillColors"], json!({"agent_amp":"mint"}), "same shape as avatarColors");
-        assert_eq!(view["avatarColors"], json!({}), "the established field keeps its shape");
-        let cleared = update(&prefs,
-            &parse_command(&json!({"action":"clear_pill_color","id":"agent_amp"})).unwrap(), |_| true).unwrap();
-        assert_eq!(view_prefs(&cleared)["pillColors"], json!({}), "a cleared pill projects no colour");
+        assert_eq!(
+            view["pillColors"],
+            json!({"agent_amp":"mint"}),
+            "same shape as avatarColors"
+        );
+        assert_eq!(
+            view["avatarColors"],
+            json!({}),
+            "the established field keeps its shape"
+        );
+        let cleared = update(
+            &prefs,
+            &parse_command(&json!({"action":"clear_pill_color","id":"agent_amp"})).unwrap(),
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(
+            view_prefs(&cleared)["pillColors"],
+            json!({}),
+            "a cleared pill projects no colour"
+        );
         // A hostile stored value is already dropped at load, so it never reaches the projection.
-        let hostile = Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"<img src=x>"}}"#));
+        let hostile =
+            Prefs::from_text(Some(r#"{"v":1,"pill_colors":{"agent_amp":"<img src=x>"}}"#));
         assert_eq!(view_prefs(&hostile)["pillColors"], json!({}));
     }
 
@@ -575,15 +782,22 @@ mod settings_view_tests {
     fn f415_the_webview_projection_carries_created_blobs_or_null() {
         use abito_island::prefs::{parse_command, update, Prefs};
         let defaults = view_prefs(&Prefs::default());
-        assert_eq!(defaults["customBlobs"], json!(null), "nothing created projects as null");
+        assert_eq!(
+            defaults["customBlobs"],
+            json!(null),
+            "nothing created projects as null"
+        );
         let prefs = Prefs::from_text(Some(
             r#"{"v":1,"custom_blobs":[{"name":"Abito GitHub","color":"green"},{"name":"Abito correo"}]}"#,
         ));
         let view = view_prefs(&prefs);
-        assert_eq!(view["customBlobs"], json!([
-            {"name":"Abito GitHub","color":"green"},
-            {"name":"Abito correo","color":null},
-        ]));
+        assert_eq!(
+            view["customBlobs"],
+            json!([
+                {"name":"Abito GitHub","color":"green"},
+                {"name":"Abito correo","color":null},
+            ])
+        );
         // a round trip through the closed create command keeps the projection
         let cmd = parse_command(&json!({"action":"create_blob","name":"Abito Reviewer"})).unwrap();
         let next = update(&prefs, &cmd, |_| true).unwrap();
@@ -597,8 +811,14 @@ mod settings_view_tests {
     /// #390 GD027: `daemon_action` is closed — exactly {"action":"status"|"restart"}.
     #[test]
     fn daemon_action_is_a_closed_two_action_payload() {
-        assert_eq!(parse_daemon_action(&json!({"action": "status"})), Some("status"));
-        assert_eq!(parse_daemon_action(&json!({"action": "restart"})), Some("restart"));
+        assert_eq!(
+            parse_daemon_action(&json!({"action": "status"})),
+            Some("status")
+        );
+        assert_eq!(
+            parse_daemon_action(&json!({"action": "restart"})),
+            Some("restart")
+        );
         for bad in [
             json!({}),
             json!({"action": "nope"}),
@@ -622,28 +842,49 @@ mod settings_view_tests {
         let defaults = view_prefs(&Prefs::default());
         assert_eq!(defaults["autoCloseSeconds"], json!(15));
         assert_eq!(defaults["openOnHover"], json!(false));
-        let saved = Prefs::from_text(Some(r#"{"v":1,"auto_close_seconds":45,"open_on_hover":true}"#));
+        let saved = Prefs::from_text(Some(
+            r#"{"v":1,"auto_close_seconds":45,"open_on_hover":true}"#,
+        ));
         let view = view_prefs(&saved);
         assert_eq!(view["autoCloseSeconds"], json!(45));
         assert_eq!(view["openOnHover"], json!(true));
-        let hostile = Prefs::from_text(Some(r#"{"v":1,"auto_close_seconds":999,"open_on_hover":"yes"}"#));
+        let hostile = Prefs::from_text(Some(
+            r#"{"v":1,"auto_close_seconds":999,"open_on_hover":"yes"}"#,
+        ));
         let view = view_prefs(&hostile);
-        assert_eq!(view["autoCloseSeconds"], json!(15), "dropped values read as defaults");
-        assert_eq!(view["openOnHover"], json!(false), "dropped values read as defaults");
+        assert_eq!(
+            view["autoCloseSeconds"],
+            json!(15),
+            "dropped values read as defaults"
+        );
+        assert_eq!(
+            view["openOnHover"],
+            json!(false),
+            "dropped values read as defaults"
+        );
         // the established projection shapes are untouched
         assert_eq!(view["pillColors"], json!({}));
         assert_eq!(view["theme"], json!("system"));
-        assert_eq!(view["sound"], json!(true), "sound is on by default: a file with no `sound` key projects the default");
+        assert_eq!(
+            view["sound"],
+            json!(true),
+            "sound is on by default: a file with no `sound` key projects the default"
+        );
     }
     #[test]
     fn island_membership_dispatch_refuses_unknown_ids_before_persistence() {
         use super::{check_island_membership, err, prefs, BridgeError, Command, Prefs, Value};
         let specialists = crate::specialists::Store::from_text(Some(
-            r#"{"v":1,"active":null,"specialists":[{"id":"esp-known","name":"Notes","instructions":"Sort notes","model":null}]}"#));
+            r#"{"v":1,"active":null,"specialists":[{"id":"esp-known","name":"Notes","instructions":"Sort notes","model":null}]}"#,
+        ));
         assert_eq!(specialists.items.len(), 1);
         let current = Prefs::default();
         let before = b"{\n  \"v\": 1, \"sound\": false\n}\n".to_vec();
-        let path = std::env::temp_dir().join(format!("abito-membership-{}-{}.json", std::process::id(), super::now_ms()));
+        let path = std::env::temp_dir().join(format!(
+            "abito-membership-{}-{}.json",
+            std::process::id(),
+            super::now_ms()
+        ));
         std::fs::write(&path, &before).unwrap();
         let mut writes = 0;
         let mut dispatch = |payload: Value| -> Result<Prefs, BridgeError> {
@@ -652,21 +893,33 @@ mod settings_view_tests {
             prefs::update(&current, &command, |next| {
                 writes += 1;
                 std::fs::write(&path, next.to_text()).is_ok()
-            }).map_err(|_| err("save_failed"))
+            })
+            .map_err(|_| err("save_failed"))
         };
         assert!(dispatch(json!({"action":"set_island_agents","order":["esp-missing"]})).is_err());
-        assert!(dispatch(json!({"action":"set_island_agents","order":["esp-known","esp-missing"]})).is_err());
+        assert!(dispatch(
+            json!({"action":"set_island_agents","order":["esp-known","esp-missing"]})
+        )
+        .is_err());
         drop(dispatch);
         assert_eq!(writes, 0);
-        assert_eq!(std::fs::read(&path).unwrap(), before, "refusal preserves actual file bytes including whitespace");
-        let command = prefs::parse_command(&json!({"action":"set_island_agents","order":["esp-known"]})).unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "refusal preserves actual file bytes including whitespace"
+        );
+        let command =
+            prefs::parse_command(&json!({"action":"set_island_agents","order":["esp-known"]}))
+                .unwrap();
         assert!(check_island_membership(&command, &specialists).is_ok());
-        let saved = prefs::update(&current, &command, |next| std::fs::write(&path, next.to_text()).is_ok()).unwrap();
+        let saved = prefs::update(&current, &command, |next| {
+            std::fs::write(&path, next.to_text()).is_ok()
+        })
+        .unwrap();
         assert_eq!(saved.island_agents, Some(vec!["esp-known".into()]));
         let persisted = Prefs::from_text(Some(&std::fs::read_to_string(&path).unwrap()));
         assert_eq!(persisted.island_agents, saved.island_agents);
         std::fs::remove_file(path).unwrap();
         assert!(check_island_membership(&Command::SetIslandAgents(vec![]), &specialists).is_ok());
     }
-
 }
