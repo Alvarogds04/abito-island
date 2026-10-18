@@ -25,6 +25,7 @@ FRONTEND_FILES.push(
   'vendor/coucou/settings/parts.js', 'vendor/coucou/settings/parts.ts',
   'vendor/coucou/settings/settings.css',
   'vendor/coucou/settings/toggle.js', 'vendor/coucou/settings/toggle.ts',
+  'vendor/coucou/settings/general.js', 'vendor/coucou/settings/general.ts',
   'vendor/coucou/views/dom.js', 'vendor/coucou/views/dom.ts',
 );
 const EXPECTED_WINDOWS = ['main', 'settings'];

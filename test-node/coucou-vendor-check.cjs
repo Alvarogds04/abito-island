@@ -118,6 +118,7 @@ function hashTree() {
   const { statusDot, renderDiff } = await load('settings/parts.js');
   const { PILL_PALETTE, parsePillColors } = await load('core/pill-colors.js');
   execFileSync(process.execPath, [path.join(__dirname, 'coucou-bridge-check.cjs')], { stdio: 'inherit' });
+  execFileSync(process.execPath, [path.join(__dirname, 'coucou-general-check.cjs')], { stdio: 'inherit' });
   let colors = {}, picks = 0;
   const dot = colorDot({ id: 'agent_amp', name: 'Agente', color: '#F5F6F8' }, 'width:8px', () => colors, next => { colors = next; picks++; });
   assert.deepEqual(dot.styleCalls, [['background', '#F5F6F8'], ['width', '8px']]);

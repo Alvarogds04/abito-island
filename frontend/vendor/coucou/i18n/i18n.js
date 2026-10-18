@@ -5,7 +5,20 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 function N_(key) {
   return key;
 }
-const messages = { Color: "Color", Default: "Predeterminado" };
+const messages = {
+  Color: "Color",
+  Default: "Predeterminado",
+  General: "General",
+  Sound: "Sonido",
+  "Open on hover": "Abrir al pasar el cursor",
+  "Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.": "La isla se abre al pasar el cursor y se cierra al salir. Haz clic dentro para mantenerla abierta.",
+  "Auto-close": "Cierre automático",
+  "seconds after you leave the island": "segundos tras salir de la isla",
+  "0 means never": "0 = nunca",
+  "Island lives on": "Pantalla de la isla",
+  "Main display": "Pantalla principal",
+  "Unavailable features": "No disponible en Abito todavía: carpeta de sonidos; recarga y contador de sonidos; inicio automático; idioma; resumen."
+};
 function t(key) {
   if (!Object.prototype.hasOwnProperty.call(messages, key)) throw new Error(`Traducción de Abito no disponible: ${key}`);
   return messages[key];
