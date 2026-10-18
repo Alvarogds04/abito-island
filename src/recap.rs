@@ -29,6 +29,8 @@ pub const WINDOW_SECS: i64 = 12 * 7 * 86_400;
 /// A turn with no event for two hours is closed at its last event (agent
 /// crashed, or never sent Stop) — RecapStore.pruneStale.
 const STALE_SECS: i64 = 2 * 3600;
+/// A `settled` notice this close to a hook-fed event is the same turn.
+const HOOK_DEDUPE_SECS: i64 = 30;
 /// Hard caps, whatever the window holds: about 2 MB of JSON at most.
 const MAX_TURNS: usize = 10_000;
 const MAX_DECISIONS: usize = 10_000;
@@ -169,6 +171,8 @@ pub struct Recap {
     requests: HashMap<String, String>,
     /// The last image saved, so "Show in folder" never takes a path from the page.
     pub last_saved: Option<PathBuf>,
+    /// Unix seconds of the last hook-fed event (0: none). A `settled` notice right after one is the same turn.
+    hook_seen: i64,
 }
 
 impl Recap {
@@ -181,6 +185,7 @@ impl Recap {
             drafts: HashMap::new(),
             requests: HashMap::new(),
             last_saved: None,
+            hook_seen: 0,
         };
         recap.prune(now);
         recap
@@ -236,12 +241,17 @@ impl Recap {
 
     /// The draft for `key`, created on the first event of a turn.
     fn draft(&mut self, key: &str, agent: &str, payload: &Value, now: i64) -> &mut Draft {
+        let project = project_name(text(payload, "cwd"));
+        self.draft_named(key, agent, project, now)
+    }
+
+    fn draft_named(&mut self, key: &str, agent: &str, project: String, now: i64) -> &mut Draft {
         if !self.drafts.contains_key(key) && self.drafts.len() >= MAX_DRAFTS {
             self.close_oldest_draft();
         }
         let draft = self.drafts.entry(key.to_string()).or_insert_with(|| Draft {
             agent: agent.to_string(),
-            project: project_name(text(payload, "cwd")),
+            project,
             start: now,
             last_event: now,
             paths: HashSet::new(),
@@ -291,10 +301,67 @@ impl Recap {
         self.save();
     }
 
+    /// One REDUCED event from the notify-only Claude hooks (`recap_spool`): `{v:1, at, event:
+    /// prompt|tool|stop, session, project, kind?, added?, removed?, file?}`. Only counts and the
+    /// folder name; `file` is an opaque id used to count distinct files and is never stored.
+    pub fn observe_reduced(&mut self, rec: &Value, now: i64) {
+        if !self.history.prefs.enabled || rec.get("v").and_then(Value::as_i64) != Some(1) {
+            return;
+        }
+        let session = text(rec, "session");
+        if session.is_empty() || session.len() > 128 {
+            return;
+        }
+        let event = text(rec, "event");
+        let kind = text(rec, "kind");
+        let valid = match event {
+            "prompt" | "stop" => true,
+            "tool" => matches!(kind, "command" | "question" | "edit" | "other"),
+            _ => false,
+        };
+        if !valid {
+            return;
+        }
+        self.close_stale(now);
+        self.hook_seen = now;
+        let key = format!("hook:{session}");
+        let project = clean_name(text(rec, "project"));
+        let num = |k: &str| rec.get(k).and_then(Value::as_u64).unwrap_or(0).min(u64::from(u32::MAX)) as u32;
+        match event {
+            "prompt" => {
+                self.draft_named(&key, "integration_claude", project, now);
+            }
+            "tool" => {
+                let draft = self.draft_named(&key, "integration_claude", project, now);
+                match kind {
+                    "command" => draft.commands_run = draft.commands_run.saturating_add(1),
+                    "question" => draft.questions = draft.questions.saturating_add(1),
+                    "edit" => {
+                        let file = text(rec, "file");
+                        if !file.is_empty() && file.len() <= 64 {
+                            draft.paths.insert(file.to_string());
+                        }
+                        draft.lines_added = draft.lines_added.saturating_add(num("added"));
+                        draft.lines_removed = draft.lines_removed.saturating_add(num("removed"));
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                if let Some(draft) = self.drafts.remove(&key) {
+                    self.history.turns.push(draft.into_turn(now));
+                    self.prune(now);
+                    self.save();
+                }
+            }
+        }
+    }
+
     /// Abito feed (A): a turn Abito only knows by its end (a Pi `settled` notice). No tool
     /// counts exist for it; they stay 0 and the page shows them as unavailable.
     pub fn record_settled(&mut self, agent: &str, project: &str, now: i64) {
-        if !self.history.prefs.enabled {
+        // Hook events already described this turn (a Claude Stop also raises a `settled` notice).
+        if !self.history.prefs.enabled || (self.hook_seen > 0 && (now - self.hook_seen).abs() <= HOOK_DEDUPE_SECS) {
             return;
         }
         self.history.turns.push(Turn {

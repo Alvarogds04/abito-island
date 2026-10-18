@@ -38,13 +38,32 @@ fn with<R>(app: &AppHandle, f: impl FnOnce(&mut Recap) -> R) -> Option<R> {
     guard.as_mut().map(f)
 }
 
+/// Feed (B): reduced events the notify-only Claude hooks spooled in the runtime dir.
+fn ingest(app: &AppHandle) {
+    let Ok(runtime) = abito_island::transport::resolve_runtime() else { return };
+    let events = abito_island::recap_spool::take(&runtime);
+    if events.is_empty() {
+        return;
+    }
+    let now = recap::now_secs();
+    with(app, |r| {
+        for e in &events {
+            // the event's own time keeps a long-queued turn honest; never from the future
+            let at = e.get("at").and_then(Value::as_i64).map(|ms| ms / 1000).filter(|s| *s > 0).unwrap_or(now);
+            r.observe_reduced(e, at.min(now));
+        }
+    });
+}
+
 /// Feed (A): a Pi turn settled.
 pub fn note_settled(app: &AppHandle, project: &str) {
+    ingest(app);
     with(app, |r| r.record_settled(PI_AGENT, project, recap::now_secs()));
 }
 
 /// Feed (A): the human clicked Allow or Deny on a card (agent unknown → Claude's pill, as Coucou).
 pub fn note_decision(app: &AppHandle, allow: bool) {
+    ingest(app);
     with(app, |r| r.record_decision("", if allow { "allow" } else { "deny" }, recap::now_secs()));
 }
 
@@ -82,6 +101,7 @@ pub async fn recap_action(
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        ingest(&handle);
         let unavailable = || err("unavailable");
         match command {
             Command::View(since) => with(&handle, |r| serde_json::to_value(r.view(since)))

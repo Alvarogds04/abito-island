@@ -57,6 +57,7 @@ pub mod prefs;
 pub mod protocol;
 pub mod recap;
 pub mod recap_cmd;
+pub mod recap_spool;
 pub mod secrets;
 pub mod sounds;
 pub mod question;
