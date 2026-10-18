@@ -72,7 +72,21 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const css of ['settings/settings.css', 'hub/hub.css']) assert(html.includes(`vendor/coucou/${css}`));
   const entry = fs.readFileSync(path.join(root, 'frontend/settings-app.js'), 'utf8');
   assert(entry.includes("import { renderAgentSettings }")); assert(entry.includes("import { renderChatSettings }"));
-  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action']", 'slice 5a adds only monitor_action list and sound_action list/reveal/reload');
+  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action']", 'J1 adds only the closed dictation command');
+  const guardCalls = [], guardContext = { window: { __TAURI__: { core: { invoke: async (...args) => guardCalls.push(args) } } }, document: {getElementById: () => ({})},
+    setInvoke() {}, dictationPage() {}, flowSettingsPage() {}, inactivePages: {}, startHub: async () => {}, TextEncoder };
+  require('node:vm').runInNewContext(entry.replace(/^import .*;\n/gm, '') + '\nglobalThis.closedInvoke = invoke;', guardContext);
+  const seven = { enabled:true,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:false,defaultStyle:'natural' };
+  for (const payload of [{action:'status'}, {action:'download_model'}, {action:'remove_model'}, {action:'set_prefs',prefs:seven}]) {
+    await guardContext.closedInvoke('dictation_action', {payload}); assert.deepEqual(guardCalls.pop(), ['dictation_action',{payload}]);
+  }
+  for (const payload of [{action:'hands_free'}, {action:'finish'}, {action:'cancel'}, {action:'status',extra:1}, {action:'download_model',prefs:seven},
+    {action:'set_prefs',prefs:{...seven,cleanup:true}}, {action:'set_prefs',prefs:{...seven,summaryEngine:'off'}}, {action:'set_prefs',prefs:{...seven,voice:false}},
+    {action:'set_prefs',prefs:{...seven,keepDays:90}}, {action:'set_prefs',prefs:{...seven,enabled:1}}, {action:'set_prefs',prefs:{...seven,key:'wayland'}},
+    {action:'set_prefs',prefs:{...seven,edge:'top'}}, {action:'set_prefs',prefs:{...seven,mic:'é'.repeat(101)}}, {action:'set_prefs',prefs:{...seven,defaultStyle:'other'}},
+    {action:'set_prefs',prefs:Object.fromEntries(Object.entries(seven).filter(([k])=>k!=='mic'))}, {action:'set_prefs',prefs:[]}, {action:'set_prefs',prefs:seven,extra:0}]) await assert.rejects(guardContext.closedInvoke('dictation_action',{payload}));
+  for (const args of [undefined, {}, {payload:{action:'status'},extra:1}, {payload:null}, {payload:[]}]) await assert.rejects(guardContext.closedInvoke('dictation_action',args));
+  assert.deepEqual(guardCalls, [], 'dictation guard rejects extras, malformed preferences and capture actions before IPC');
   assert(entry.includes("command === 'recap_action'"), 'closed recap guard');
   assert(entry.includes("['claude', 'codex'].includes(args.payload.action)"), 'plan_action payload guard');
   for (const file of ['agents.ts','chat.ts','integrations.ts','shortcuts.ts','recap.ts']) {

@@ -1,4 +1,13 @@
 // Adapted from Coucou src/hub/hero.ts @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT
+import { h } from "../views/dom.js";
+function glowCard(_color, ...content) {
+  return h("div", { class: "hub-glow", style: "--glow-line:rgba(251,146,60,0.18)" }, h("canvas", {}), h("div", { class: "inner" }, ...content));
+}
+function emptyState(text) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  liveMochi(svg, "#F5F6F8", "sleeping");
+  return h("div", { class: "hub-empty" }, svg, h("div", { text }));
+}
 function liveMochi(svg, _color = "#F5F6F8", state = "idle") {
   if (typeof AbitoClay === "undefined") return null;
   svg.setAttribute("aria-hidden", "true");
@@ -33,6 +42,8 @@ function hero(_page, title, subtitle, actions = [], compact = false) {
   return el;
 }
 export {
+  emptyState,
+  glowCard,
   hero,
   liveMochi
 };

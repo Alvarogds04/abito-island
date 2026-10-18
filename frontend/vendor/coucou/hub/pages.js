@@ -4,13 +4,11 @@ import { card, row, button, keyLabel, label, divider, toggle, segmented } from "
 import { notchSection, notchRow, notchHint } from "./notch.js";
 import { t } from "./i18n-es.js";
 const definitions = {
-  dictation: ["Hello", "Hold {0} anywhere, speak, let go: it's pasted.", "Record"],
   notes: ["Notetaker", "Your calls transcribed person by person, with a summary and the to-dos. No bot in the meeting.", "Record a call"],
   insights: ["Statistics", "What you dictated, how fast, and where.", "This week"],
   dictionary: ["Dictionary", "Names and words Abito must always spell right.", "Add a word"],
   snippets: ["Snippets", "Say the trigger while dictating: Abito pastes the whole text in its place.", "Add a snippet"],
   styles: ["Styles", "Claude cleans up what you say, in the style of the app you write in.", "Add a style"],
-  flowsettings: ["Settings", null, "Enable dictation"],
   voice: ["OK Abito", "Say « OK Abito », then ask anything: add a pill, play music, the weather, an email to prepare.", "Enable"]
 };
 function renderUnavailable(page) {

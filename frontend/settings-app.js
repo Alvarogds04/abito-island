@@ -13,11 +13,13 @@ import { renderIntegrations } from './vendor/coucou/hub/integrations.js';
 import { renderShortcuts } from './vendor/coucou/hub/shortcuts.js';
 import { renderPills } from './vendor/coucou/hub/personalization.js';
 import { startHub } from './vendor/coucou/hub/shell.js';
+import { setInvoke } from './vendor/coucou/hub/flow-shim.js';
+import { dictationPage, flowSettingsPage } from './vendor/coucou/hub/dictation-pages.js';
 import { inactivePages, renderUnavailable } from './vendor/coucou/hub/pages.js';
 import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
-const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action']);
+const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action']);
 const invoke = (command, args) => {
   if (!allowed.has(command) || !rawInvoke) return Promise.reject(new Error('No disponible'));
   if (command === 'daemon_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'restart')) return Promise.reject(new Error('No disponible'));
@@ -31,15 +33,26 @@ const invoke = (command, args) => {
   }
   if (command === 'monitor_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'list')) return Promise.reject(new Error('No disponible'));
   if (command === 'sound_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || !['list', 'reveal', 'reload'].includes(args.payload.action))) return Promise.reject(new Error('No disponible'));
+  if (command === 'dictation_action') {
+    const p = args?.payload, keys = ['enabled', 'key', 'edge', 'mic', 'keepDays', 'cleanup', 'defaultStyle'];
+    const exact = (v, fields) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(k => Object.hasOwn(v, k));
+    if (!exact(args, ['payload']) || !p ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model'].includes(p.action)) ||
+        (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, keys) &&
+          typeof p.prefs.enabled === 'boolean' && ['right_ctrl', 'right_alt', 'right_shift', 'left_ctrl_super'].includes(p.prefs.key) &&
+          ['bottom', 'left', 'right'].includes(p.prefs.edge) && typeof p.prefs.mic === 'string' && new TextEncoder().encode(p.prefs.mic).length <= 200 &&
+          [0, 7, 30, 365, -1].includes(p.prefs.keepDays) && p.prefs.cleanup === false && ['verbatim', 'natural', 'polished'].includes(p.prefs.defaultStyle)))) return Promise.reject(new Error('No disponible'));
+  }
   return rawInvoke(command, args);
 };
+setInvoke(invoke);
 const root = document.getElementById('hub');
 const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.AbitoSettings,
   C: window.AbitoChatView, S: window.AbitoSpecialists, A: window.AbitoAvatarColors, P: window.AbitoPills };
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
-  version: '0.1.0', flowPages: inactivePages,
+  version: '0.1.0', flowPages: { ...inactivePages, dictation: dictationPage, flowsettings: flowSettingsPage },
   async renderNotch(page, container) {
     if (page === 'general') {
       try {

@@ -1,6 +1,16 @@
 // Adapted from Coucou src/hub/hero.ts @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT
 // Adapted for Abito: the classic lexical engine API is visible to ESM. SVG,
 // not canvas: create(svg, opts) is the real API. Static instances own no RAF/timer.
+import { h } from '../views/dom.js';
+// MIT helper layouts from src/hub/hero.ts; character remains Abito's static clay SVG.
+export function glowCard(_color: string, ...content: HTMLElement[]): HTMLElement {
+  return h('div', {class:'hub-glow',style:'--glow-line:rgba(251,146,60,0.18)'}, h('canvas', {}), h('div', {class:'inner'}, ...content));
+}
+export function emptyState(text: string): HTMLElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  liveMochi(svg, '#F5F6F8', 'sleeping');
+  return h('div', {class:'hub-empty'}, svg, h('div', {text}));
+}
 declare const AbitoClay: { create(svg: SVGSVGElement, options: any): any };
 export function liveMochi(svg: SVGSVGElement, _color = '#F5F6F8', state = 'idle'): any {
   if (typeof AbitoClay === 'undefined') return null;

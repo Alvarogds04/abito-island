@@ -34,10 +34,10 @@ const DEFAULT_STATUS = {
     keepDays: 30,
     cleanup: false,
     defaultStyle: "natural",
-    summaryEngine: "claude",
-    openAtLaunch: true,
+    summaryEngine: "off",
+    openAtLaunch: false,
     voice: false,
-    voiceOutput: "system",
+    voiceOutput: "off",
     voiceGender: "female"
   },
   models: { parakeet: { state: "missing" }, downloadMb: 700 },
@@ -55,6 +55,7 @@ async function startHub(root, opts) {
   const statusLine = h("div", { class: "hub-status" });
   const scroll = h("div", { class: "hub-scroll" });
   let rendering = 0;
+  let saving = Promise.resolve();
   const ctx = {
     get status() {
       return status;
@@ -65,11 +66,21 @@ async function startHub(root, opts) {
       drawStatus();
       return status;
     },
-    setPrefs: async (change) => {
-      const next = { ...status.prefs };
-      change(next);
-      await FlowBridge.setPrefs(next);
-      status = { ...status, prefs: next };
+    setPrefs: (change) => {
+      const task = saving.then(async () => {
+        const next = { ...status.prefs };
+        change(next);
+        const saved = await FlowBridge.setPrefs(next);
+        status = { ...status, prefs: { ...status.prefs, ...saved } };
+        status = await FlowBridge.status() ?? status;
+        drawStatus();
+      });
+      saving = task.catch(() => {
+      });
+      return task;
+    },
+    updateModels: (models) => {
+      status = { ...status, models };
       drawStatus();
     },
     hero: (page, title, subtitle, actions = [], compact = false) => hero(page, title, subtitle, actions, compact)
@@ -89,7 +100,7 @@ async function startHub(root, opts) {
       text = t("Use the pill's microphone to dictate");
     } else {
       color = "#34d399";
-      text = t("Ready · hold {0}", { 0: keyLabel(status.keys === "wayland" ? "wayland" : status.prefs.key, status.platform) });
+      text = t("Ready · hold {0}", { 0: keyLabel("wayland", status.platform) });
     }
     statusLine.append(h("i", { class: "dot", style: `background:${color}` }), h("span", { text }));
   }
@@ -103,7 +114,26 @@ async function startHub(root, opts) {
     const page_ = h("div", { class: "hub-page" });
     const renderer = opts.flowPages[def.id];
     if (renderer) {
-      await renderer(page_, ctx);
+      let leave;
+      const pageCtx = {
+        ...ctx,
+        get status() {
+          return status;
+        },
+        get onLeave() {
+          return leave;
+        },
+        set onLeave(fn) {
+          if (token !== rendering) fn?.();
+          else leave = fn;
+        }
+      };
+      ctx.onLeave = () => leave?.();
+      await renderer(page_, pageCtx);
+      if (token !== rendering) {
+        leave?.();
+        return;
+      }
     } else {
       page_.append(hero(def.id, def.title(), def.subtitle?.() ?? null));
       const container = h("div", { id: "settings-root" });
@@ -144,11 +174,9 @@ async function startHub(root, opts) {
     const id = page === "settings" ? "flowsettings" : page;
     if (ALL.some((p) => p.id === id)) void show(id);
   });
-  void onEvent("flow-prefs", (prefs) => {
-    status = { ...status, prefs };
-    drawStatus();
+  void onEvent("flow-prefs", () => {
   });
-  void onEvent("speech-models", (models) => {
+  void onEvent("dictation:models", (models) => {
     status = { ...status, models };
     drawStatus();
   });
