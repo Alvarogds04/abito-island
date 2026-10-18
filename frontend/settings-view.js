@@ -462,16 +462,52 @@
     return { action: 'set_chosen_models', provider: String(providerId), models: list };
   }
 
+
+  // ---- Claves (#467): the OS key store, presence only --------------------------------------------------------------
+  // Layout of the section adapted from Coucou src/settings/main.ts (API keys), Copyright (c) 2026 Louis Raillé, MIT.
+  // The ids mirror KNOWN_KEYS of src/secrets.rs (the host refuses anything else). Labels are OURS; the page never
+  // shows a value, only «Guardada» / «Sin definir», and sends a value only inside one `set`.
+  const KEY_LABELS = Object.freeze({
+    'anthropic-api-key': 'Anthropic', 'openai-api-key': 'OpenAI', 'google-api-key': 'Google', 'openrouter-api-key': 'OpenRouter',
+    'openai-compatible-key': 'Compatible con OpenAI', 'n8n-url': 'n8n (dirección)', 'n8n-api-key': 'n8n (clave)',
+    'vercel-token': 'Vercel', 'github-token': 'GitHub', 'stripe-api-key': 'Stripe', 'resend-api-key': 'Resend',
+    'notion-api-key': 'Notion', 'calcom-api-key': 'Cal.com', 'elevenlabs-api-key': 'ElevenLabs',
+  });
+  const KEY_IDS = Object.freeze(Object.keys(KEY_LABELS));
+  const KEY_MAX_BYTES = 2048;
+  const keyRows = presence => KEY_IDS.map(id => {
+    const known = presence && typeof presence === 'object' && Object.prototype.hasOwnProperty.call(presence, id) && typeof presence[id] === 'boolean';
+    const state = !known ? 'unknown' : (presence[id] ? 'present' : 'absent');
+    return { id, label: KEY_LABELS[id], state, word: state === 'present' ? 'Guardada' : (state === 'absent' ? 'Sin definir' : '…') };
+  });
+  function keyPayload(action, key, value) {
+    if (!KEY_IDS.includes(key)) return null;
+    if (action === 'present' || action === 'clear') return { action, key };
+    if (action !== 'set' || typeof value !== 'string' || !value || value.includes('\0')) return null;
+    if (new TextEncoder().encode(value).length > KEY_MAX_BYTES) return null;
+    return { action, key, value };
+  }
+  const KEY_ERRORS = Object.freeze({
+    unavailable: 'El llavero del sistema (Secret Service) no está disponible. La clave no se guardó y Abito no la guarda en ningún otro lado.',
+    save_failed: 'No se pudo guardar el cambio en el llavero del sistema.',
+    invalid_schema: 'La clave o el valor no son válidos. No se cambió nada.',
+  });
+  // Only the closed code picks the sentence: the host message (and anything else) is never shown.
+  const keyError = error => {
+    const code = error && typeof error === 'object' && typeof error.code === 'string' ? error.code : '';
+    return Object.prototype.hasOwnProperty.call(KEY_ERRORS, code) ? KEY_ERRORS[code] : 'No se pudo completar el cambio de claves.';
+  };
+
   // ---- agents: connect Claude Code / Codex / OpenCode with ONE click (no terminal) -------------------------------------
   // The state comes from the engine's `agents` frame. Names and sentences are OURS: nothing the engine sends is
   // shown as text, only chosen from these closed tables.
   const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' });
   const AGENT_IDS = Object.freeze(Object.keys(AGENT_NAMES));
-  // #436 T6.5 (D7): all SIX hook clients the daemon's `hooks` frame may name. The three extra
+  // #436 T6.5 (D7): all SEVEN hook clients the daemon's `hooks` frame may name. The three extra
   // ones are DISPLAY-ONLY (no install/remove exists for them; a dead button would be a lie),
   // and their names derive from OUR closed ids, never from engine text — the trailing segment
   // reads as its upper-case product word (a client's proper name, not a terminal instruction).
-  const HOOK_IDS = Object.freeze(['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp']);
+  const HOOK_IDS = Object.freeze(['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp', 'cursor']);
   const agentName = id => AGENT_NAMES[id]
     || id.split('-').map(s => (s ? s[0].toUpperCase() + s.slice(1) : s)).join(' ').replace(/Cli$/, 'CLI');
   const HOOK_STATES = Object.freeze({
@@ -748,7 +784,7 @@
     return '';
   }
 
-  return { ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, connectionView, accountRows, loginMethods, createValidity,
+  return { KEY_IDS, keyRows, keyPayload, keyError, ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,

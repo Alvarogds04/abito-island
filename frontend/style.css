@@ -1989,6 +1989,18 @@ html[data-motion="reduce"] #settings-body[data-screen="pills"] .blob-toggle { tr
    of every control stays exactly where the rest of Ajustes keeps it. Written AFTER the #408 rail
    block so it wins at equal specificity (both are id + attribute + class). */
 
+/* #467 Spotify card (provisional placement; look adapted from Coucou src/views/spotify.ts, MIT, Copyright (c) 2026 Louis Raillé). Theme tokens only. */
+.spotify-card { position: absolute; left: 148px; right: 14px; bottom: 6px; height: 30px; display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+.spotify-card[hidden] { display: none; }
+.spotify-text { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; font-size: var(--fs-label); white-space: nowrap; overflow: hidden; }
+.spotify-title, .spotify-artist { overflow: hidden; text-overflow: ellipsis; }
+.spotify-artist { color: var(--muted); }
+.spotify-controls { display: flex; gap: 4px; }
+.spotify-btn { min-width: 30px; min-height: 30px; border: 1px solid var(--card-line); border-radius: 15px; background: var(--card-bg); color: inherit; cursor: pointer; }
+.spotify-btn:disabled { opacity: .4; cursor: default; }
+#overview-view[data-spotify="on"] .overview-detail { -webkit-line-clamp: 3; }
+#overview-view[data-spotify="on"] #minibots { bottom: 40px; }
+
 /* Chosen hex stops only; legacy CSS defaults and the frozen engine remain unchanged. */
 #island[data-dot-color^="#"] #clay radialGradient[id$="skin"] stop:nth-child(1), .island-agent-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(1), #settings-body[data-screen="pills"] .blob-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(1) { stop-color: var(--chosen-1); }
 #island[data-dot-color^="#"] #clay radialGradient[id$="skin"] stop:nth-child(2), .island-agent-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(2), #settings-body[data-screen="pills"] .blob-clay[data-color^="#"] radialGradient[id$="skin"] stop:nth-child(2) { stop-color: var(--chosen-2); }

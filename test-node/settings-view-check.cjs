@@ -746,7 +746,7 @@ test('agents: three known agents, names from OUR table, never from the engine pa
   assert.equal(v.kind, 'ready');
   assert.equal(v.rows[0].name, 'Claude Code');
   // #436 D7: the design shows ALL SIX clients (was ['claude-code'] only); the engine row keeps its place
-  assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp']);
+  assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp', 'cursor']);
   // an id outside the allowlist is dropped, a duplicate keeps the first
   const odd = S.agentsView(agentsState([{ id: 'rm -rf', state: 'connected' }, { id: 'codex', state: 'connected' }, { id: 'codex', state: 'error' }]));
   assert.deepEqual(odd.rows.filter(r => r.state !== 'unknown').map(r => r.id), ['codex']);
@@ -791,7 +791,7 @@ test('agents: a backup is mentioned when there is one; the list is honest withou
   assert.equal(S.agentsView(state({ connection: 'connected', agents: null })).kind, 'loading');
   assert.equal(S.agentsView(agentsState([])).kind, 'ready');
   // #436 D7: an engine frame that names nobody leaves all SIX rows honestly unknown (was 0 rows)
-  assert.equal(S.agentsView(agentsState([])).rows.length, 6);
+  assert.equal(S.agentsView(agentsState([])).rows.length, 7);
   assert.ok(S.agentsView(agentsState([])).rows.every(r => r.word === 'No disponible' && !r.primary && !r.secondary));
 });
 
@@ -800,8 +800,8 @@ const hooksState = (clients, extra = {}) => state({ agents: null, hooks: clients
 test('agents: all SIX clients render, in our closed order, with names derived from OUR ids', () => {
   const v = S.agentsView(agentsState([{ id: 'claude-code', state: 'connected', backup: false, detail: null }]));
   assert.equal(v.kind, 'ready');
-  assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp']);
-  assert.deepEqual(v.rows.map(r => r.name), ['Claude Code', 'Codex', 'Gemini CLI', 'Copilot CLI', 'OpenCode', 'Amp']);
+  assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp', 'cursor']);
+  assert.deepEqual(v.rows.map(r => r.name), ['Claude Code', 'Codex', 'Gemini CLI', 'Copilot CLI', 'OpenCode', 'Amp', 'Cursor']);
   // the connect allowlist is untouched: the three extra rows never offer a button
   assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'opencode']);
   const extras = v.rows.filter(r => !S.AGENT_IDS.includes(r.id));
@@ -885,7 +885,7 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
   // #436 D7: the closed hook client ids and the product word are NAMES of clients the design
   // draws (Gemini CLI, Copilot CLI), not instructions to open a terminal; the guard keeps
   // watching every other fixed string.
-  const CLIENT_NAMES = new Set(['claude-code', 'codex', 'opencode', 'gemini-cli', 'copilot-cli', 'amp', 'CLI']);
+  const CLIENT_NAMES = new Set(['claude-code', 'codex', 'opencode', 'gemini-cli', 'copilot-cli', 'amp', 'cursor', 'CLI']);
   const where = [];
   for (const f of ['settings.js', 'settings-view.js']) {
     for (const lit of literals(fs.readFileSync(path.join(frontend, f), 'utf8'))) if (bad.test(lit) && !/^(agent_|abito:|settings|agents_)/.test(lit) && !CLIENT_NAMES.has(lit)) where.push(`${f}: ${lit}`);
@@ -1271,6 +1271,40 @@ test('#414 chosenToggle: one toggle returns the next map; the payload the page s
   const payload = S.chosenModelsPayload({ anthropic: ['a1', 'a2'] }, 'anthropic');
   assert.deepEqual(payload, { action: 'set_chosen_models', provider: 'anthropic', models: ['a1', 'a2'] });
   assert.deepEqual(S.chosenModelsPayload({}, 'anthropic').models, [], 'a cleared provider sends the empty list');
+});
+
+// #467 UI wiring: Claves section (secret_action). Presence only, closed key list, our own words for errors.
+test('claves: rows follow the closed key list, with OUR labels and presence only', () => {
+  assert.equal(S.KEY_IDS.length, 14);
+  assert.ok(S.KEY_IDS.includes('anthropic-api-key') && S.KEY_IDS.includes('elevenlabs-api-key'));
+  const rows = S.keyRows({ 'anthropic-api-key': true, 'github-token': false });
+  assert.deepEqual(rows.map(r => r.id), S.KEY_IDS);
+  const a = rows.find(r => r.id === 'anthropic-api-key');
+  assert.deepEqual([a.label, a.state, a.word], ['Anthropic', 'present', 'Guardada']);
+  assert.equal(rows.find(r => r.id === 'github-token').word, 'Sin definir');
+  assert.equal(rows.find(r => r.id === 'vercel-token').state, 'unknown');
+  // hostile input never widens the list
+  assert.deepEqual(S.keyRows({ 'rm -rf': true }).map(r => r.id), S.KEY_IDS);
+});
+test('claves: closed payloads, a value only ever travels in set', () => {
+  assert.deepEqual(S.keyPayload('present', 'github-token'), { action: 'present', key: 'github-token' });
+  assert.deepEqual(S.keyPayload('clear', 'github-token'), { action: 'clear', key: 'github-token' });
+  assert.deepEqual(S.keyPayload('set', 'github-token', 'abc'), { action: 'set', key: 'github-token', value: 'abc' });
+  assert.equal(S.keyPayload('set', 'github-token', ''), null);
+  assert.equal(S.keyPayload('set', 'github-token', 'a\0b'), null);
+  assert.equal(S.keyPayload('set', 'github-token', 'x'.repeat(2049)), null);
+  assert.equal(S.keyPayload('set', 'nope', 'abc'), null);
+  assert.equal(S.keyPayload('delete', 'github-token'), null);
+  assert.equal(S.keyPayload('present', 'github-token', 'leak').value, undefined);
+});
+test('claves: error codes become plain words; no fallback is promised', () => {
+  assert.match(S.keyError({ code: 'unavailable' }), /Secret Service|llavero/i);
+  assert.match(S.keyError({ code: 'unavailable' }), /no se guardó/i);
+  assert.match(S.keyError({ code: 'save_failed' }), /No se pudo guardar/);
+  assert.match(S.keyError({ code: 'invalid_schema' }), /no son válid/i);
+  assert.match(S.keyError({ code: 'weird', message: 'secret=hunter2' }), /No se pudo/);
+  assert.ok(!/hunter2/.test(S.keyError({ code: 'weird', message: 'secret=hunter2' })));
+  assert.ok(!/hunter2/.test(S.keyError(new Error('hunter2'))));
 });
 
 console.log(`settings-view-check: ${passed} passed`);

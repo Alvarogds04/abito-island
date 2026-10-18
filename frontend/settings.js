@@ -68,6 +68,11 @@
   let accountError = '';
   let accountNote = null; // #409 T2: outcome of the last removal attempt, in words we own
   let accountGeneration = 0;
+  // #467 Claves: presence only ({id: boolean}); a value lives in the field until the save click and is cleared before IPC.
+  let keyPresence = {};
+  let keyLoad = 'idle'; // idle | loading | done
+  let keyBusy = '';     // the key id with a request in flight
+  let keyNotes = {};    // id -> { tone, say } outcome in OUR words
   function discardAccountForm() {
     const secret = accountForm && accountForm.querySelector('#account-secret');
     if (secret) secret.value = '';
@@ -488,6 +493,7 @@
         agents: agentState.agents, hooks: agentState.hooks, last_error: agentState.last_error,
         auth: agentState.auth, unavailable: agentState.unavailable },
       agentsAsk ? [agentsAsk.at, agentsAsk.timedOut] : null,
+      keyPresence, keyLoad, keyBusy, keyNotes,
       loginTarget, pendingLogin, daemonBusy, daemonNote,
       nameSaving, nameError, gainSaving, gainError, autoSaving, autoError, capturing,
       themeError, colorErrors, pillSaving, pillError,
@@ -513,7 +519,7 @@
     const chip = $('settings-conn');
     chip.hidden = !conn || screen !== 'accounts';
     if (conn) { chip.dataset.tone = conn.tone; chip.setAttribute('aria-label', conn.aria); putIcon($('settings-conn-icon'), conn.icon); $('settings-conn-word').textContent = conn.word; }
-    if (screen === 'accounts') { renderAccounts(); renderConnectors(); }
+    if (screen === 'accounts') { renderAccounts(); renderConnectors(); renderKeys(); }
     else if (screen === 'models') { /* models.js owns this panel */ }
     else renderGeneral(); // pills / appearance / general: each section names its tab
     if (moreGroup) { moreGroup.hidden = !V.servicesGroupVisible(screen); if (!moreGroup.hidden) body.append(moreGroup); }
@@ -878,6 +884,76 @@
       svc.append(list);
     }
     body.append(svc);
+  }
+
+
+  // ---- Claves (#467): secret_action, presence only. Layout adapted from Coucou src/settings/main.ts (API keys),
+  // Copyright (c) 2026 Louis Raillé, MIT. The value is never read back, never kept past the save click.
+  function keyCall(payload) { return call('secret_action', payload); }
+  function loadKeys() {
+    if (keyLoad !== 'idle') return;
+    keyLoad = 'loading';
+    const next = {};
+    const step = i => {
+      if (i >= V.KEY_IDS.length) { keyPresence = next; keyLoad = 'done'; render(); return Promise.resolve(); }
+      const id = V.KEY_IDS[i];
+      return keyCall(V.keyPayload('present', id)).then(r => { next[id] = !!(r && r.present === true); return step(i + 1); });
+    };
+    step(0).catch(error => {
+      keyLoad = 'done';
+      const id = V.KEY_IDS[0];
+      keyNotes = { [id]: { tone: 'red', say: V.keyError(error) } };
+      render();
+    });
+  }
+  function changeKey(id, payload, okSay) {
+    if (keyBusy || !payload) return;
+    keyBusy = id; keyNotes = {}; render();
+    keyCall(payload).then(r => {
+      keyBusy = '';
+      keyPresence = { ...keyPresence, [id]: !!(r && r.present === true) };
+      keyNotes = { [id]: { tone: 'go', say: okSay } };
+      render(); say(okSay);
+    }, error => {
+      keyBusy = '';
+      keyNotes = { [id]: { tone: 'red', say: V.keyError(error) } };
+      render(); say(keyNotes[id].say);
+    });
+  }
+  function renderKeys() {
+    const sec = el('section', 'ssec'); sec.id = 'connections-keys'; sec.append(sectionTitle('Claves'));
+    sec.append(el('p', 'snote', 'Se guardan en el llavero del sistema. Acá sólo ves si hay una guardada; el valor no se muestra nunca.'));
+    const list = el('ul', 'srows'); list.setAttribute('aria-label', 'Claves');
+    for (const r of V.keyRows(keyLoad === 'done' ? keyPresence : null)) {
+      const li = el('li', 'srow sagent'); li.dataset.state = r.state;
+      const head = el('span', 'sagent-head');
+      head.append(el('b', 'srow-title', r.label), chipNode({ tone: r.state === 'present' ? 'go' : 'faint', icon: r.state === 'present' ? 'check' : 'plug-off', word: r.word, aria: `${r.label}: ${r.word}` }));
+      li.append(head);
+      const form = el('form', 'sform'); form.noValidate = true;
+      const inp = el('input', 'sfield'); inp.id = `key-input-${r.id}`; inp.type = 'password';
+      inp.autocomplete = 'new-password'; inp.spellcheck = false; inp.setAttribute('autocapitalize', 'off'); inp.maxLength = 2048;
+      inp.placeholder = r.state === 'present' ? 'Reemplazar…' : 'Pegá el valor';
+      inp.setAttribute('aria-label', `${r.label}: valor nuevo (se oculta al escribir)`);
+      inp.value = drafts.get(inp.id);
+      const save = wordBtn('Guardar', () => {}, { primary: true, disabled: !inp.value || !!keyBusy, aria: `Guardar ${r.label}` });
+      save.type = 'submit';
+      inp.addEventListener('input', () => { drafts.set(inp.id, inp.value); save.disabled = !inp.value || !!keyBusy; });
+      form.addEventListener('submit', e => {
+        e.preventDefault();
+        const payload = e.isTrusted === true ? V.keyPayload('set', r.id, inp.value) : null;
+        inp.value = ''; drafts.clear(inp.id); // gone from the page before the round trip, failure included
+        if (payload) changeKey(r.id, payload, `${r.label}: guardada.`);
+      });
+      form.append(inp, save);
+      if (r.state === 'present') form.append(wordBtn('Quitar', () => changeKey(r.id, V.keyPayload('clear', r.id), `${r.label}: quitada.`), { disabled: !!keyBusy, aria: `Quitar ${r.label}` }));
+      li.append(form);
+      const note = keyNotes[r.id];
+      if (note) { const n = el('p', note.tone === 'red' ? 'snote sproblem' : 'snote', note.say); n.setAttribute('role', note.tone === 'red' ? 'alert' : 'status'); li.append(n); }
+      list.append(li);
+    }
+    sec.append(list);
+    body.append(sec);
+    loadKeys();
   }
 
   function toggleRow(id, word, on, onClick, extraChip) {
