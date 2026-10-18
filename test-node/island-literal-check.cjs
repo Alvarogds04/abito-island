@@ -113,4 +113,20 @@ test('notices: 44px band on the right card; a confirmed notice takes the whole 6
   assert.equal(lane.width, '620px'); assert.equal(lane.height, '108px'); assert.equal(lane.padding, '4px 16px 4px 116px');
 });
 
+test('Spotify card: Coucou np-card (dot 6, title 600 12, sub 400 11, play 20 circle ink, icons 16x18) in the left card column', () => {
+  const c = decls('.spotify-card');
+  assert.equal(c.left, '108px'); assert.equal(c.top, '14px');
+  assert.equal(decls('.np-title').font, '600 12px var(--font)'); assert.equal(decls('.np-sub').font, '400 11px var(--font)');
+  assert.equal(decls('.np-dot').width, '6px');
+  const p = decls('.np-play'); assert.equal(p.width, '20px'); assert.equal(p['border-radius'], '50%'); assert.equal(p.background, 'var(--ink)');
+  assert.equal(decls('.np-icon').width, '16px'); assert.equal(decls('.np-icon').height, '18px');
+  assert.equal(decls('.np-buttons').gap, '10px');
+  assert.equal(decls('.np-progress').font, '400 9.5px var(--font)');
+  assert.equal(decls('.np-bar').height, '10px'); assert.equal(decls('.np-bar::after').inset, '-17px 0', '44px hit around the 10px bar');
+  assert.equal(decls('.np-track').background, 'rgba(255, 255, 255, 0.12)');
+  assert.equal(decls('.np-knob').width, '9px');
+  assert.equal(decls('.np-volume .np-bar').width, '44px');
+  assert.equal(decls('.np-icon::after, .np-play::after').inset, '-10px -5px', 'hit clears the 10px gaps');
+});
+
 if (failed) process.exit(1);

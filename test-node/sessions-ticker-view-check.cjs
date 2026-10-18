@@ -84,5 +84,48 @@ test('render is DOM-guarded: no rows clears and hides; rows are textContent-only
   assert.equal(host.style.display, 'none', 'zero layout space without sessions');
 });
 
+// ---- the feed of Coucou's Ticker (S10) ------------------------------------------
+test('feed: a session that appears is one step; the same list again adds nothing; stepSeq is the newest step index', () => {
+  const m = T.newMemory();
+  const v1 = T.sessionsView(frame());
+  let r = T.feed(m, v1);
+  assert.equal(r.active, true);
+  assert.deepEqual(r.task, { steps: ['Pi · mi-proyecto · inactiva · en herdr'], stepSeq: 0, finalLine: null });
+  r = T.feed(m, v1);
+  assert.equal(r.task.steps.length, 1, 'unchanged list: no new step');
+  const v2 = T.sessionsView(frame({ sessions: [row(), row({ id: 's-0123abce', kind: 'codex', cwd: 'otro', state: 'running', origin: null })] }));
+  r = T.feed(m, v2);
+  assert.deepEqual([r.task.steps.length, r.task.stepSeq], [2, 1]);
+  assert.equal(r.task.steps[1], 'Codex · otro · ejecutando');
+});
+
+test('feed: no sessions hides the ticker and forgets the history; an error is shown once; bounded lists say so once', () => {
+  const m = T.newMemory();
+  T.feed(m, T.sessionsView(frame()));
+  const none = T.feed(m, T.sessionsView(frame({ sessions: [] })));
+  assert.deepEqual([none.active, none.task], [false, null]);
+  assert.deepEqual([m.log.length, m.seq], [0, 0]);
+  const e1 = T.feed(m, { state: 'error' }), e2 = T.feed(m, { state: 'error' });
+  assert.equal(e1.active, true);
+  assert.deepEqual(e2.task.steps, ['Sesiones no disponibles'], 'one line, not one per poll');
+  const b = T.newMemory();
+  T.feed(b, T.sessionsView(frame({ truncated: true })));
+  const again = T.feed(b, T.sessionsView(frame({ truncated: true })));
+  assert.equal(again.task.steps.filter(x => x === T.boundedText({ state: 'ready', truncated: true })).length, 1);
+});
+
+test('feed: the log is capped at 20 steps and stepSeq keeps counting', () => {
+  const m = T.newMemory();
+  let r;
+  for (let i = 0; i < 25; i++) r = T.feed(m, T.sessionsView(frame({ sessions: [row({ cwd: `p${i}` })] })));
+  assert.equal(r.task.steps.length, 20); assert.equal(r.task.stepSeq, 24);
+});
+
+test('wiring: the mount feeds Coucou\'s Ticker through a dynamic import of the vendored module', () => {
+  const src = require('node:fs').readFileSync(path.join(__dirname, '..', 'frontend', 'sessions-ticker.js'), 'utf8');
+  assert.match(src, /import\('\.\/vendor\/coucou\/views\/ticker\.js'\)/);
+  assert.doesNotMatch(src, /position:fixed/);
+});
+
 // ---- tiny harness result (functions defined above) -----------------------------
 Promise.all(async).then(() => { console.log(`sessions-ticker-view-check: ${passed} checks ok`); process.exit(0); }, (e) => { console.error(e); process.exit(1); });
