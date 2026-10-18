@@ -12,6 +12,15 @@ const IDENTIFIER = 'com.abitog.AbitoTauri';
 const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop', 'abito-desktop-preview'];
 const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'character-minibots.js', 'character-motion.js', 'chat-cards.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'clay-engine.js', 'desktop.js', 'diff-model.js', 'diff-views.js', 'event-views.js', 'file-open.js', 'icons.js', 'index.html', 'integrations-calendar.js', 'integrations-deployments.js', 'integrations-email.js', 'integrations-finance.js', 'integrations-github.js', 'integrations-mail.js', 'integrations-n8n.js',
   'integrations-notion.js', 'integrations-payments.js', 'integrations-view.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js', 'views-f017-f019.md'];
+// Every embedded vendor source, generated module and license is a closed input.
+FRONTEND_FILES.push(
+  'vendor/coucou/LICENSE', 'vendor/coucou/bridge-abito.js', 'vendor/coucou/package.json',
+  'vendor/coucou/core/pill-colors.js', 'vendor/coucou/core/pill-colors.ts',
+  'vendor/coucou/i18n/i18n.js', 'vendor/coucou/i18n/i18n.ts',
+  'vendor/coucou/settings/colors.js', 'vendor/coucou/settings/colors.ts',
+  'vendor/coucou/settings/parts.js', 'vendor/coucou/settings/parts.ts',
+  'vendor/coucou/views/dom.js', 'vendor/coucou/views/dom.ts',
+);
 const EXPECTED_WINDOWS = ['main', 'settings'];
 const EXPECTED_PERMISSIONS = ['core:event:allow-listen', 'core:event:allow-unlisten'];
 // Inverted logic: EVERY ABITO_* variable is refused except the one the
@@ -30,7 +39,14 @@ function checkR6(crate) {
   return hash;
 }
 function checkFrontend(crate) {
-  const found = fs.readdirSync(path.join(crate, 'frontend')).sort();
+  const root = path.join(crate, 'frontend');
+  const walk = (prefix = '') => fs.readdirSync(path.join(root, prefix), { withFileTypes: true }).flatMap(entry => {
+    const rel = prefix + entry.name;
+    if (entry.isDirectory()) return walk(rel + '/');
+    if (!entry.isFile()) throw new Error(`frontend/${rel} is not a regular file or directory`);
+    return [rel];
+  });
+  const found = walk().sort();
   const extra = found.filter(f => !FRONTEND_FILES.includes(f));
   const missing = FRONTEND_FILES.filter(f => !found.includes(f));
   if (extra.length || missing.length) throw new Error(`frontend/ differs from the curated list: extra=[${extra}] missing=[${missing}]`);

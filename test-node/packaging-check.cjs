@@ -15,6 +15,39 @@ const crate = path.resolve(__dirname, '..');
 let passed = 0;
 const test = (name, fn) => { fn(); passed += 1; };
 
+function vendorFixture() {
+  const dir = copyCrate();
+  fs.cpSync(path.join(crate, 'frontend/vendor'), path.join(dir, 'frontend/vendor'), { recursive: true });
+  return dir;
+}
+test('curated gate names an extra file nested under vendor/coucou', () => {
+  const d = vendorFixture();
+  fs.writeFileSync(path.join(d, 'frontend/vendor/coucou/settings/extra.js'), '1');
+  assert.throws(() => L.checkFrontend(d), /extra=\[vendor\/coucou\/settings\/extra\.js\]/);
+});
+test('curated gate names a missing nested file', () => {
+  const d = vendorFixture();
+  fs.unlinkSync(path.join(d, 'frontend/vendor/coucou/settings/colors.js'));
+  assert.throws(() => L.checkFrontend(d), /missing=\[vendor\/coucou\/settings\/colors\.js\]/);
+});
+test('build receipt hashes every curated path, including nested vendor files', () => {
+  const vm = require('node:vm');
+  let receipt;
+  const fakeFs = { ...fs, existsSync: () => true, mkdirSync() {}, rmSync() {}, copyFileSync() {}, chmodSync() {},
+    writeFileSync(file, text) { if (file.endsWith('receipt.json')) receipt = JSON.parse(text); } };
+  const fakeLib = { ...L, requireClean: () => ({ head: 'a'.repeat(40), clean: true }), verifyStage: () => [],
+    sha256File: file => file.includes(`${path.sep}frontend${path.sep}`) ? L.sha256File(file) : 'stub' };
+  vm.runInNewContext(fs.readFileSync(path.join(crate, 'packaging/build.cjs'), 'utf8'), {
+    __dirname: path.join(crate, 'packaging'), console: { log() {} },
+    process: { argv: ['node', 'build.cjs', '--skip-cargo'], env: {} },
+    require: name => name === 'node:fs' ? fakeFs : name === './lib.cjs' ? fakeLib
+      : name === 'node:child_process' ? { spawnSync: () => ({ stdout: 'stub' }) } : require(name),
+  });
+  const nested = 'vendor/coucou/settings/colors.js';
+  assert.equal(receipt.inputs.frontend[nested], L.sha256File(path.join(crate, 'frontend', nested)));
+  assert.deepEqual(Object.keys(receipt.inputs.frontend).sort(), [...L.FRONTEND_FILES].sort());
+});
+
 test('source gates pass on the real crate (R6 pin, curated frontend, config, capabilities, no devtools)', () => {
   assert.ok(L.checkR6(crate).startsWith('40625d7f'));
   assert.equal(L.checkFrontend(crate).length, L.FRONTEND_FILES.length);
@@ -44,7 +77,10 @@ function copyCrate() {
   for (const f of ['tauri.conf.json', 'Cargo.toml']) fs.copyFileSync(path.join(crate, f), path.join(dir, f));
   fs.mkdirSync(path.join(dir, 'capabilities')); fs.copyFileSync(path.join(crate, 'capabilities', 'main.json'), path.join(dir, 'capabilities', 'main.json'));
   fs.mkdirSync(path.join(dir, 'frontend'));
-  for (const f of L.FRONTEND_FILES) fs.copyFileSync(path.join(crate, 'frontend', f), path.join(dir, 'frontend', f));
+  for (const f of L.FRONTEND_FILES) {
+    fs.mkdirSync(path.dirname(path.join(dir, 'frontend', f)), { recursive: true });
+    fs.copyFileSync(path.join(crate, 'frontend', f), path.join(dir, 'frontend', f));
+  }
   return dir;
 }
 test('each gate FAILS when its rule is broken', () => {
