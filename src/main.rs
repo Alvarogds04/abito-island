@@ -35,6 +35,7 @@ mod tray;
 mod trayhost;
 mod settingshost;
 mod settingswindow;
+mod spotifyhost;
 mod specialists;
 mod specialistshost;
 mod modelshost;
@@ -1926,6 +1927,7 @@ fn main() {
             hotkeyhost::hotkey_action,
             settingshost::agent_action,
             settingshost::prefs_action,
+            spotifyhost::spotify_action,
             settingshost::settings_view,
             settingshost::daemon_action,
             settingswindow::settings_window_action,
