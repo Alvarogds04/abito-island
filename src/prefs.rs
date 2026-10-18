@@ -405,7 +405,7 @@ fn chosen_models_from(value: Option<&Value>) -> BTreeMap<String, Vec<String>> {
 /// no control characters and never a prototype key. Unknown or disconnected names
 /// still parse — the placement fallback owns "unknown" (`workarea::chosen_area`),
 /// never the store; only hostile shapes are refused.
-fn valid_monitor_key(key: &str) -> bool {
+pub fn valid_monitor_key(key: &str) -> bool {
     !key.is_empty()
         && key.chars().count() <= MAX_MONITOR_KEY
         && key.trim() == key

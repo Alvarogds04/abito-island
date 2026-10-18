@@ -45,6 +45,7 @@ pub mod http;
 pub mod identity;
 pub mod localmodel;
 pub mod models;
+pub mod monitors;
 pub mod nativedialog;
 pub mod prefs;
 pub mod protocol;
