@@ -157,7 +157,7 @@ fn questioncmd_native_resize_known_size_never_bypasses_unsettled_generation() {
 #[test]
 fn questioncmd_native_recovery_only_accepts_current_plan_physical_size() {
     // the chat column follows the work area height (physical px): 1048 -> 432x656, 2096@2x -> same logical
-    for (expanded, chat, expected) in [(false,false,(78,78)),(false,true,(78,78)),
+    for (expanded, chat, expected) in [(false,false,(44,44)),(false,true,(44,44)),
                                      (true,false,(672,176)),(true,true,(432,656))] {
         assert_eq!(desired_native_size(expanded, chat, 1.0, 1048), expected);
         assert_eq!(desired_native_size(expanded, chat, 2.0, 2096), (expected.0*2, expected.1*2));

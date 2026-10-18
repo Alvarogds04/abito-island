@@ -779,23 +779,23 @@ test('#304 wiring: the page decides motion itself (data-motion on <html>), start
   assert.match(islandSrc, /AbitoClay\.setForced\(!honorSystem\)/);
 });
 
-test('#302 round dot: the compact island is gentle-dot\'s 66px disc, in step with the native 78x78 window; it takes less room than the pill', () => {
+test('#302 round dot: the compact island is Coucou\'s 32px pill height (S10), in step with the native 44x44 window; it takes less room than the pill', () => {
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
   const diameter = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
-  assert.equal(diameter, 66);
+  assert.equal(diameter, 32);
   assert.match(geo, /LOGICAL_COMPACT: \(i32, i32\) = \(DOT_DIAMETER \+ 12, DOT_DIAMETER \+ 12\)/);
   const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), drop: (\d+) \}/.exec(islandSrc);
   assert.ok(m, 'COMPACT constant');
   const [w, h, r, gap, clay] = m.slice(1, 6).map(Number);
   assert.deepEqual([w, h], [diameter, diameter], 'a circle: width = height = the measured diameter');
   assert.equal(r, diameter / 2, 'fully round');
-  assert.equal(gap, 6, 'the same edge gap the pill had: the transparent margin is (78-66)/2');
-  assert.equal(w + 2 * gap, 78, 'visible dot + margins = the native compact window');
+  assert.equal(gap, 6, 'the same edge gap the pill had: the transparent margin is (44-32)/2');
+  assert.equal(w + 2 * gap, 44, 'visible dot + margins = the native compact window');
   assert.ok(w * h < 288 * 32, 'less area than the old pill');
-  assert.ok(clay >= 48 && clay <= diameter, 'the character box fits the disc');
+  assert.ok(clay >= 24 && clay <= diameter, 'the character box fits the disc');
   const vbx = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   const visible = clay * 112 / vbx[2];
-  assert.ok(visible >= 44 && visible <= diameter - 12, `the visible character (${visible.toFixed(1)}px) sits inside the disc with a clear rim`);
+  assert.ok(visible >= 20 && visible <= diameter - 6, `the visible character (${visible.toFixed(1)}px) sits inside the disc with a clear rim`);
 });
 
 test('#302 the dot keeps the badge/contour vocabulary: T7.3 design isla-compacta-sun/red puts the badge at x58-67,y8-16 of the 78px window (over the rim); sun contour only in compact', () => {
@@ -804,7 +804,9 @@ test('#302 the dot keeps the badge/contour vocabulary: T7.3 design isla-compacta
   const flag = /#compact-flag \{([^}]*)\}/.exec(css)[1];
   const left = Number(/left:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
   const cx = left + size / 2, cy = top + size / 2;
-  assert.ok(Math.abs(cx - 62.5) <= 1 && Math.abs(cy - 12) <= 1, `badge centre (${cx}, ${cy}) matches the design (62.5, 12)`);
+  // S10: the disc shrank 66 -> 32 in a 44px window; the badge keeps the design's angle over the rim (same ratio 16/33).
+  const k = 16 / 33, ex = 22 + (62.5 - 39) * k, ey = 22 + (12 - 39) * k;
+  assert.ok(Math.abs(cx - ex) <= 1 && Math.abs(cy - ey) <= 1, `badge centre (${cx}, ${cy}) matches the scaled design (${ex.toFixed(1)}, ${ey.toFixed(1)})`);
   // outside #island (overflow: hidden clips the rim), inside #capsule, so the overhang is drawn
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   const chat = html.indexOf('id="chat-live"'); // last element inside #island
@@ -847,7 +849,7 @@ test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = 
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
   const dot = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
   assert.deepEqual([conf.width, conf.height], [dot + 12, dot + 12]);
-  assert.deepEqual([conf.width, conf.height], [78, 78]);
+  assert.deepEqual([conf.width, conf.height], [44, 44]);
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
   assert.doesNotMatch(readme, /All sizes land exactly 304x44/, 'README must not document the old compact size as the contract');
 });
