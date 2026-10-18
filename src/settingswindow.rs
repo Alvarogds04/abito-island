@@ -278,6 +278,20 @@ mod tests {
 
     /// #366 F093 source contract: each command acting on the MAIN island window
     /// calls the label gate before touching anything.
+    /// The navigation lock must admit exactly what the sender gate admits: the settings
+    /// window loads its own settings.html, so a lock that still used the island-only page
+    /// allowlist blocked the window at startup ("navigation blocked from settings").
+    #[test]
+    fn the_navigation_lock_uses_the_sender_gate_rule() {
+        let src = include_str!("main.rs");
+        let at = src.find("fn navigation_lock()").expect("navigation_lock missing");
+        let body = &src[at..];
+        let end = body.find("\n}\n").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(body.contains("bridge::sender_ok(webview.label(), url.as_str()).is_ok()"), "{body}");
+        assert!(!body.contains("page_url_allowed"), "{body}");
+    }
+
     #[test]
     fn f093_the_four_island_commands_check_the_label_first() {
         let src = include_str!("main.rs");

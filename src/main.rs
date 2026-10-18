@@ -945,11 +945,10 @@ fn spawn_publish_ticker(app: AppHandle) {
 fn navigation_lock() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("navigation-lock")
         .on_navigation(|webview, url| {
-            // #366 F093: the Rust-created settings window loads the SAME page,
-            // under the same closed URL allowlist — the label set here matches
-            // the one the sender gate admits, never the page's choice.
-            let allowed = (webview.label() == "main" || webview.label() == settingswindow::SETTINGS_LABEL)
-                && bridge::page_url_allowed(url.as_str());
+            // #366 F093 / #474: exactly the sender gate's rule: the island keeps its
+            // closed page allowlist and the settings window may also load its own
+            // settings.html, never anything else and never by the page's choice.
+            let allowed = bridge::sender_ok(webview.label(), url.as_str()).is_ok();
             if !allowed {
                 eprintln!("navigation blocked from {}: {url}", webview.label());
             }
