@@ -47,6 +47,8 @@ pub mod models;
 pub mod nativedialog;
 pub mod prefs;
 pub mod protocol;
+pub mod recap;
+pub mod recap_cmd;
 pub mod secrets;
 pub mod sounds;
 pub mod question;

@@ -35,6 +35,7 @@ mod tray;
 mod trayhost;
 mod secretshost;
 mod soundshost;
+mod recaphost;
 mod settingshost;
 mod settingswindow;
 mod spotifyhost;
@@ -208,11 +209,14 @@ fn start_transport(app: &AppHandle) {
                 return; // main.cjs: `if (!quitting)`
             }
             let state = notice_app.state::<AppState>();
-            state
+            let accepted = state
                 .notices
                 .lock()
                 .expect("notices lock")
                 .accept(&message, now_ms() as u64);
+            if accepted {
+                recaphost::note_settled(&notice_app, &state.project);
+            }
             publish(&notice_app, &state);
         })
         .on_connections(move |count| {
@@ -1176,7 +1180,9 @@ async fn desktop_action(
         };
         let handle = app.clone();
         Ok(tauri::async_runtime::spawn_blocking(move || {
+            let allowed = decision == approval::Decision::Allow;
             approval::decide(&approval, decision, &hooks);
+            recaphost::note_decision(&handle, allowed);
             let state = handle.state::<AppState>();
             build_snapshot(&handle, &state)
         })
@@ -1639,7 +1645,9 @@ fn dispatch_action(
             } else {
                 approval::Decision::Deny
             };
+            let allowed = decision == approval::Decision::Allow;
             approval::decide(&state.approval, decision, &hooks);
+            recaphost::note_decision(app, allowed);
             Ok(build_snapshot(app, state))
         }
         Action::Choose => {
@@ -1915,6 +1923,7 @@ fn main() {
         .plugin(navigation_lock())
         .manage(state)
         .manage(abito_island::daemonhost::HostSlot::default())
+        .manage(recaphost::RecapSlot::default())
         .invoke_handler(tauri::generate_handler![
             drag_press,
             drag_move,
@@ -1932,6 +1941,7 @@ fn main() {
             spotifyhost::spotify_action,
             secretshost::secret_action,
             soundshost::sound_action,
+            recaphost::recap_action,
             settingshost::settings_view,
             settingshost::daemon_action,
             settingswindow::settings_window_action,
