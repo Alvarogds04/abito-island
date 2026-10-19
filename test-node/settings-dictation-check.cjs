@@ -29,7 +29,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   await FlowBridge.setPrefs({...state.prefs,cleanup:true,unexpected:1});
   const expectedPrefs = () => Object.fromEntries(['enabled','key','edge','mic','keepDays','cleanup','defaultStyle'].map(k=>[k,k==='cleanup'?false:state.prefs[k]]));
   assert.deepEqual(calls.pop(), ['dictation_action',{action:'set_prefs',prefs:expectedPrefs()}]);
-  for (const [enabled,model,keys,copy] of [[false,'missing','ok','El dictado está apagado'],[true,'missing','ok','Descarga el modelo de voz para dictar'],[true,'ready','ok','Listo · mantén Ctrl+Alt+V'],[true,'ready','pending','Usa el micrófono'],[true,'ready','denied','Usa el micrófono'],[true,'ready','unsupported','Usa el micrófono']]) {
+  for (const [enabled,model,keys,copy] of [[false,'missing','ok','Dictado desactivado'],[true,'missing','ok','Descarga el modelo de voz para dictar'],[true,'ready','ok','Listo · mantén Ctrl+Alt+V'],[true,'ready','pending','Usa el micrófono'],[true,'ready','denied','Usa el micrófono'],[true,'ready','unsupported','Usa el micrófono']]) {
     state.prefs.enabled=enabled; state.models.parakeet={state:model}; state.keys=keys;
     const host=new Element('div'); await startHub(host,{version:'test',flowPages:{},renderNotch:async()=>{}});
     assert(text(all(host).find(e=>e.className==='hub-status')).includes(copy), copy);

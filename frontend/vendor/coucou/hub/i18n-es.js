@@ -236,7 +236,7 @@ const es = {
   "Stripe, GitHub, Vercel, n8n, Notion and the rest.": "Stripe, GitHub, Vercel, n8n, Notion y el resto.",
   "Your agents and their approvals on your Android phone, over your Wi-Fi.": "Tus agentes y sus aprobaciones en tu teléfono Android, por Wi-Fi.",
   "The keys that open the island and its actions.": "Las teclas que abren la isla y sus acciones.",
-  "Dictation is off": "El dictado está apagado",
+  "Dictation is off": "Dictado desactivado",
   "Downloading the voice model…": "Descargando el modelo de voz…",
   "Download the voice model to dictate": "Descarga el modelo de voz para dictar",
   "Use the pill's microphone to dictate": "Usa el micrófono de la píldora para dictar",
