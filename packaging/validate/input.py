@@ -19,7 +19,7 @@ if not display:
 try:
     if len(sys.argv) == 3 and sys.argv[1] == 'key':
         key = sys.argv[2]
-        if key not in ('Down', 'Up', 'Return', 'Escape'):
+        if key not in ('Down', 'Up', 'Right', 'Home', 'Return', 'Escape'):
             raise SystemExit('key not allowlisted')
         x.XStringToKeysym.argtypes = [C.c_char_p]
         x.XStringToKeysym.restype = C.c_ulong

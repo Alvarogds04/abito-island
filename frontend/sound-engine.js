@@ -88,8 +88,26 @@
     'snd.expired': cue('snd.expired', 'Vencido', 'Pregunta o tarjeta vencida sin respuesta', 0.3, [
       note(0, 196, 0.2, 'sine', 1, 0.03, 0.12)]),
   });
-  const CUE_IDS = deepFreeze(Object.keys(CUES));
+  // Abito-owned synthesized fallback for every reference cue name. These are
+  // independently tunable identities, not aliases: custom greet and greeting
+  // files (and all legacy Abito names) keep separate buffers and rate gates.
+  const EXTRA_CUES = [
+    ['blip', 'Toque', 920], ['slap', 'Golpe', 180], ['annoyed', 'Molestia', 210],
+    ['dizzy', 'Mareo', 330], ['greet', 'Saludo', 760], ['work', 'Trabajo', 400],
+    ['finish', 'Terminado', 1040], ['approval', 'Aprobación pendiente', 620],
+    ['question', 'Pregunta', 840], ['approve', 'Aprobado', 1240], ['gulp', 'Recibir', 260],
+    ['send', 'Enviar', 2200], ['proud', 'Orgullo', 980], ['wink', 'Guiño', 1450],
+    ['yawn', 'Bostezo', 290], ['attach', 'Adjuntar', 1100], ['search', 'Buscar', 560],
+    ['rate', 'Valorar', 1300], ['sleep', 'Dormir', 200], ['greeting', 'Bienvenida', 680],
+  ];
+  const ALL_CUES = deepFreeze(Object.assign({}, CUES, Object.fromEntries(EXTRA_CUES.map(([stem, name, f]) => [
+    'snd.' + stem, cue('snd.' + stem, name, 'Evento abito:cue explícito', 0.2,
+      [note(0, f, 0.16, 'sine', 1, 0.01, 0.1, f * 1.25)]),
+  ]))));
+  const CUE_IDS = deepFreeze(Object.keys(ALL_CUES));
   const PRIORITY = deepFreeze({
+    ...Object.fromEntries(EXTRA_CUES.map(([stem]) => ['snd.' + stem, -2])),
+    'snd.approval': 4, 'snd.question': 4, 'snd.approve': 3, 'snd.finish': 2, 'snd.send': 1,
     'snd.open': -2, 'snd.close': -2, 'snd.peek': -2, 'snd.hover': -2,
     'snd.tick': -2, 'snd.love': -2, 'snd.pop': -1,
     'snd.error': 5, 'snd.attention': 4, 'snd.confirm': 3, 'snd.reject': 3,
@@ -137,15 +155,15 @@
   }
   function resolveCues(overrides, diag) {
     const table = Object.create(null);
-    for (const id of CUE_IDS) table[id] = CUES[id];
+    for (const id of CUE_IDS) table[id] = ALL_CUES[id];
     if (overrides === undefined) return table;
     if (!isPlain(overrides)) { diag('invalid_cue_override'); return table; }
     let ids;
     try { ids = Object.keys(overrides); } catch (e) { diag('invalid_cue_override'); return table; }
     for (const id of ids) {
       let ok = false;
-      let level = CUES[id] && CUES[id].level;
-      let notes = CUES[id] && CUES[id].notes;
+      let level = ALL_CUES[id] && ALL_CUES[id].level;
+      let notes = ALL_CUES[id] && ALL_CUES[id].notes;
       try {
         const ov = overrides[id];
         const overrideKeys = isPlain(ov) ? Object.keys(ov) : null;
@@ -157,7 +175,7 @@
         if (ok && hasOwn(ov, 'notes')) { notes = validNotes(ov.notes); if (!notes) ok = false; }
       } catch (e) { ok = false; }
       if (!ok) { diag('invalid_cue_override'); continue; }
-      table[id] = deepFreeze(cue(id, CUES[id].name, CUES[id].trigger, level, notes.map((n) => ({ ...n }))));
+      table[id] = deepFreeze(cue(id, ALL_CUES[id].name, ALL_CUES[id].trigger, level, notes.map((n) => ({ ...n }))));
     }
     return table;
   }
@@ -472,7 +490,7 @@
   }
 
   return Object.freeze({
-    createSoundEngine, CUES, CUE_IDS, PRIORITY, DEFAULT_GAIN, MAX_GAIN,
+    createSoundEngine, CUES: ALL_CUES, CUE_IDS, PRIORITY, DEFAULT_GAIN, MAX_GAIN,
     REASONS: deepFreeze(REASONS.slice()), DIAGNOSTICS: deepFreeze(DIAGNOSTICS.slice()),
   });
 });

@@ -133,7 +133,7 @@ async function main(args = process.argv.slice(2)) {
       try {
         const row = JSON.parse(line);
         if (row.step === 'validation_input') {
-          const key = row.kind === 'key' && ['Down', 'Up', 'Return', 'Escape'].includes(row.key);
+          const key = row.kind === 'key' && ['Down', 'Up', 'Right', 'Home', 'Return', 'Escape'].includes(row.key);
           const click = row.kind === 'click' && Number.isInteger(row.x) && Number.isInteger(row.y) && row.x >= 0 && row.y >= 0 && row.x < 1280 && row.y < 900;
           if (!key && !click) { failure = 'entrada inválida'; return; }
           const argv = key ? ['key', row.key] : [String(row.x), String(row.y)];

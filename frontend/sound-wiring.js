@@ -88,7 +88,9 @@
 
     // Optional custom files: closed stems, <=2 MiB (the host's MAX_BYTES), no paths or MIME trust.
     const stems = ['notice', 'attention', 'confirm', 'reject', 'error', 'sent', 'think', 'reply', 'listen', 'expired',
-      'open', 'close', 'peek', 'hover', 'pop', 'tick', 'love'];
+      'open', 'close', 'peek', 'hover', 'pop', 'tick', 'love',
+      'blip', 'slap', 'annoyed', 'dizzy', 'greet', 'work', 'finish', 'approval', 'question', 'approve',
+      'gulp', 'send', 'proud', 'wink', 'yawn', 'attach', 'search', 'rate', 'sleep', 'greeting'];
     const invoke = typeof o.invoke === 'function' ? o.invoke : null;
     let sampleLoad = Promise.resolve();
     async function reloadSamples() {
@@ -99,7 +101,7 @@
         if (!c || typeof c.decodeAudioData !== 'function') return;
         const listed = await invoke('sound_action', { payload: { action: 'list' } });
         const names = listed && Array.isArray(listed.names) ? listed.names : [];
-        // Iterate our list, not host input: bounded to seventeen unique reads.
+        // Iterate our list, not host input: bounded to thirty-seven unique reads.
         for (const name of stems) {
           if (disposed) return;
           if (!names.includes(name)) continue;

@@ -89,12 +89,32 @@ fn list_and_read_answer_only_stems_and_the_file_bytes() {
 
 #[test]
 fn every_cue_of_the_sound_engine_has_a_stem() {
-    let js = include_str!("../frontend/sound-engine.js");
-    for stem in STEMS {
-        assert!(js.contains(&format!("'snd.{stem}'")), "{stem} is not a cue");
-    }
-    assert_eq!(STEMS.len(), 17);
+    // Compare the exported catalog, including computed cue definitions, not source spelling.
+    let output = std::process::Command::new("node").args(["-e",
+        "console.log(JSON.stringify(require(process.argv[1]).CUE_IDS))",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/frontend/sound-engine.js")]).output().unwrap();
+    assert!(output.status.success());
+    let mut ids: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+    ids.sort();
+    let mut expected: Vec<String> = STEMS.iter().map(|s| format!("snd.{s}")).collect();
+    expected.sort();
+    assert_eq!(ids, expected);
+    assert_eq!(STEMS.len(), 37);
     for new in ["open", "close", "peek", "hover", "pop", "tick", "love"] {
         assert!(STEMS.contains(&new), "{new} is an overridable cue (L42)");
+    }
+}
+
+#[test]
+fn every_reference_cue_stem_accepts_a_private_custom_override() {
+    let dir = std::env::temp_dir().join(format!("abito-all-cues-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for stem in ["peek", "open", "close", "hover", "blip", "slap", "annoyed", "dizzy", "greet",
+        "work", "finish", "error", "approval", "question", "approve", "gulp", "tick", "send",
+        "love", "pop", "proud", "wink", "yawn", "attach", "think", "search", "rate", "sleep", "greeting"] {
+        assert!(matches!(parse_command(&json!({"action":"read","name":stem})), Some(Command::Read(_))), "{stem}");
+        std::fs::write(dir.join(format!("{stem}.wav")), b"own-audio").unwrap();
+        assert!(list(&dir).contains(&stem), "{stem}");
+        assert_eq!(read(&dir, stem).unwrap()["data"], "b3duLWF1ZGlv");
     }
 }

@@ -178,6 +178,14 @@
       const segment=root.querySelector('.hub-segmented');
       const target=[...segment.querySelectorAll('button')].find(b=>b.textContent.includes('texto')) || segment.querySelector('button:last-child');
       await click(target); effect=await assertChanged();
+    } else if(page==='general') {
+      const volume=byId('hub-volume');
+      const gain=before.prefs.gain;
+      await click(volume); await key('Home'); await key('Right');
+      const live=await wait(async()=>{const p=await invoke('prefs_action',{action:'view'});return p.gain===.005 && p;},'volumen por teclado real');
+      if(byId('hub-motion') || !root.textContent.includes('El movimiento no se puede configurar en Abito.')) throw new Error('control de movimiento inerte o explicación ausente');
+      await invoke('prefs_action',{action:'set_sound_gain',gain});
+      effect={liveGain:live.gain,motion:'sin interruptor inerte',input:'XTest sobre rango real'};
     } else if(page==='styles'||page==='flowsettings') {
       // Keyboard navigation on a real select produces trusted change events.
       const selects=[...root.querySelectorAll('select')].filter(s=>!s.disabled && s.options.length>1);
@@ -221,7 +229,19 @@
       const reload=await invoke('sound_action',{action:'reload'});
       await wait(()=>changed,'sounds:changed tras reload');
       const after=await invoke('sound_action',{action:'list'});
-      return {ok:Array.isArray(before.names) && Array.isArray(after.names) && reload.ok===true,before,after,changed};
+      const expected=['peek','open','close','hover','blip','slap','annoyed','dizzy','greet','work','finish','error','approval','question','approve','gulp','tick','send','love','pop','proud','wink','yawn','attach','think','search','rate','sleep','greeting'];
+      const catalog=window.AbitoSound.CUE_IDS;
+      const context=new AudioContext();
+      const decoded=[];
+      try {
+        for(const name of expected) {
+          if(!catalog.includes('snd.'+name) || !after.names.includes(name)) throw new Error('cue ausente: '+name);
+          const file=await invoke('sound_action',{action:'read',name});
+          const raw=atob(file.data), bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
+          await context.decodeAudioData(bytes.buffer); decoded.push(name);
+        }
+      } finally {await context.close();}
+      return {ok:reload.ok===true && decoded.length===29,before,after,changed,decoded,audio:'decodificación privada; no afirma salida audible'};
     } finally {off();}
   }
   async function spotify() {

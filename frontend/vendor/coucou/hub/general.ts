@@ -37,17 +37,17 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
   const root = h('div', {});
   const send = (cmd: string, payload: any) => invoke(cmd, { payload });
   const DEFAULT_FAILURE = 'No se pudo guardar. Revisa el valor e inténtalo de nuevo.';
-  const run = (work: () => Promise<void>, failure = DEFAULT_FAILURE) => {
+  const run = (work: () => Promise<void>, failure = DEFAULT_FAILURE, repaint = true) => {
     queue = queue.then(async () => {
       try { await work(); issue = ''; }
       catch { issue = failure;
         // a failed SAVE re-reads the real values; a folder that did not open changed nothing, so there is nothing to re-read
         if (failure === DEFAULT_FAILURE) try { settings = await bridge.boot(); prefs = await send('prefs_action', { action: 'view' }); hotkey = await send('hotkey_action', { action: 'view' }); } catch { /* Keep error visible, never claim success. */ }
       }
-      paint();
+      if (repaint || issue) paint();
     });
   };
-  const patch = (change: Record<string, unknown>) => run(async () => { settings = await bridge.saveSettings({ ...settings, ...change }); });
+  const patch = (change: Record<string, unknown>, repaint = true) => run(async () => { settings = await bridge.saveSettings({ ...settings, ...change }); }, DEFAULT_FAILURE, repaint);
   const directPrefs = (payload: any) => run(async () => { prefs = await send('prefs_action', payload); });
   const shortcut = (payload: any) => run(async () => { hotkey = await send('hotkey_action', payload); });
   function paint() {
@@ -69,9 +69,10 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
     const sound = identify(trusted(toggle(g.sound.on, value => patch({ soundEnabled: value }))), 'hub-sound');
     sound.setAttribute('aria-label', t('Sound'));
     const volume = identify(h('input', { type: 'range', min: '0', max: '0.2', step: '0.005', value: String(g.sound.gain), 'aria-label': t('Volume') }) as HTMLInputElement, 'hub-volume');
-    volume.addEventListener('change', e => {
+    // Keep this DOM node alive during a drag; serial saves publish prefs:state live.
+    for (const type of ['input', 'change']) volume.addEventListener(type, e => {
       if (!e.isTrusted || V.soundGainProblem(volume.value)) return;
-      patch({ soundVolume: Number(volume.value) });
+      patch({ soundVolume: Number(volume.value) }, false);
     });
     const hover = identify(trusted(toggle(settings.openOnHover, value => patch({ openOnHover: value }))), 'hub-hover');
     hover.setAttribute('aria-label', t('Open on hover'));
@@ -85,8 +86,6 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
     const theme = V.themeView(prefs);
     const themeSelect = trusted(select(theme.options.map((o: any) => [o.id, o.label]), theme.mode, value => directPrefs({ action: 'set_theme', theme: value })));
     themeSelect.setAttribute('aria-label', t('Theme'));
-    const motion = identify(trusted(toggle(false, () => {})), 'hub-motion') as HTMLButtonElement;
-    motion.disabled = true; motion.setAttribute('aria-label', t('Motion'));
     const change = trusted(button(capturing ? 'Cancelar' : 'Cambiar', () => { capturing = !capturing; paint(); }));
     const capture = h('input', { class: 'hub-input', type: 'text', value: capturing ? '' : hotkey.combo, 'aria-label': 'Atajo global', readonly: true }) as HTMLInputElement;
     capture.addEventListener('keydown', e => {
@@ -124,7 +123,7 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       recap,
       row(t('Language'), language, h('span', { class: 'hint', text: 'No disponible todavía' })),
       row('Nombre visible', name, save), nameIssue,
-      row(t('Motion'), motion, h('span', { class: 'hint', text: 'No disponible en esta ventana' })),
+      hint('El movimiento no se puede configurar en Abito.'),
       row('Atajo global', capture, change, trusted(button('Original', () => shortcut({ action: 'reset' }))), enabled),
       hint(g.hotkey?.note || g.hotkey?.backendLabel || ''),
       h('p', { class: 'hub-note', role: 'status', text: issue })));

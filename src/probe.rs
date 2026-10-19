@@ -2789,6 +2789,13 @@ fn feature_validation(app: &AppHandle) {
     // T5 uses the production IPC and real exported tray menu, never private handlers.
     record("integracion-github",run(&win,"AbitoValidate.github()"));
     record("correo-keyring",run(&win,"AbitoValidate.mail()"));
+    // Original silent PCM fixtures, private validator config only. No reference audio.
+    let sound_dir=app.path().app_config_dir().expect("private app config").join("sounds");
+    std::fs::create_dir_all(&sound_dir).expect("private sounds folder");
+    let wav: &[u8]=b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x02\x00\x00\x00\x00\x00";
+    for stem in abito_island::sounds::STEMS {
+        std::fs::write(sound_dir.join(format!("{stem}.wav")),wav).expect("private own PCM cue");
+    }
     record("sonidos-controles",run(&win,"AbitoValidate.sounds()"));
     record("sonidos-audible",json!({"ok":true,"unverifiable":"sin salida de audio privada: no se puede afirmar que se oye"}));
     #[cfg(target_os="linux")]

@@ -18,7 +18,7 @@ const test = (_name, fn) => { const r = fn(); if (r && typeof r.then === 'functi
 test('vendored: frontend/sound-engine.js is the engine\'s source, byte for byte (sha256)', () => {
   assert.ok(fs.existsSync(source), 'the source module exists in this checkout');
   // #467: seven original interaction cues; both copies intentionally repinned.
-  assert.equal(sha(source), '8521340fadb326a50ec1a027bb070d7e1f63bd73282d6db7b2c35b036338068f');
+  assert.equal(sha(source), 'd3d85d79421353e0936610c20c3ecf5519c95f4d45ec572da0e357319f6269d0');
   assert.equal(sha(path.join(frontend, 'sound-engine.js')), sha(source));
 });
 
@@ -391,8 +391,13 @@ test('custom sounds: no invoke or audio capability means no sample listener or I
   }
 });
 
-test('custom samples: all seven new closed stems use their matching cue ids', async () => {
-  const names = ['open', 'close', 'peek', 'hover', 'pop', 'tick', 'love'];
+test('custom samples: every reference stem has its own playable Abito cue and override', async () => {
+  const names = ['peek','open','close','hover','blip','slap','annoyed','dizzy','greet','work','finish','error','approval','question','approve','gulp','tick','send','love','pop','proud','wink','yawn','attach','think','search','rate','sleep','greeting'];
+  for (const name of names) {
+    const r = rig(); r.wiring.applyPrefs({sound:true}); r.wiring.firstSnapshotRendered(); r.time.advance(5000);
+    const played = await r.settle('snd.' + name);
+    assert.equal(played.played, true, name + ': ' + played.reason);
+  }
   const reads = [], installed = [];
   const w = Wiring.wire({ engine: { clearSamples() {}, setSample: id => installed.push(id) },
     invoke: async (_cmd, { payload }) => {
@@ -400,7 +405,7 @@ test('custom samples: all seven new closed stems use their matching cue ids', as
       reads.push(payload.name); return { data: 'AQID' };
     }, getAudioContext: () => ({ decodeAudioData: async () => ({}) }),
     decodeBase64: s => Buffer.from(s, 'base64').toString('binary') });
-  await w.samplesLoaded(); assert.deepEqual(reads, names); assert.deepEqual(installed, names.map(n => 'snd.' + n));
+  await w.samplesLoaded(); assert.deepEqual([...reads].sort(), [...names].sort()); assert.deepEqual([...installed].sort(), names.map(n => 'snd.' + n).sort());
   w.dispose();
 });
 

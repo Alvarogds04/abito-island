@@ -126,7 +126,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   calls.length = 0;
   assert.equal(ui.firstChild.tagName, 'section', 'General uses the upstream settings section');
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' General']);
-  assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Movimiento','Atajo global']);
+  assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Atajo global']);
   assert(!all(ui).some(e => e.className === 'hub-segmented'));
   for (const id of ['hub-autostart','hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);
@@ -169,10 +169,16 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   field('hub-screen').value='DP-1'; field('hub-screen').fire('change'); await ui.settled(); assert.deepEqual(calls.pop(),['prefs_action',{action:'set_monitor',monitor:'DP-1'}]);
   field('hub-screen').value='cursor'; field('hub-screen').fire('change'); await ui.settled(); assert.deepEqual(calls,[]);
   field('hub-screen').value='HDMI-1'; field('hub-screen').fire('change'); await ui.settled(); assert.deepEqual(calls.pop(),['prefs_action',{action:'set_monitor',monitor:'HDMI-1'}], 'a listed display is selectable');
-  const vol = field('hub-volume'); vol.value = '0.08'; vol.fire('input'); await ui.settled(); assert.equal(calls.length, 0);
-  vol.fire('change'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_sound_gain', gain: .08 }]);
+  const vol = field('hub-volume'); vol.value = '0.08'; vol.fire('input', false); await ui.settled(); assert.equal(calls.length, 0);
+  vol.fire('input'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_sound_gain', gain: .08 }]);
+  assert.equal(field('hub-volume'), vol, 'live volume must not replace the slider during a drag');
+  vol.value = '0.055'; vol.fire('input'); vol.value = '0.025'; vol.fire('input'); await ui.settled();
+  assert.equal(prefs.gain, .025, 'last live value wins'); calls.length = 0;
+  vol.fire('change'); await ui.settled(); assert.equal(prefs.gain, .025); calls.length = 0;
+  assert.equal(field('hub-volume'), vol, 'keyboard change must preserve focus and the live slider too');
   field('hub-hover').fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_island_interaction', auto_close_seconds: 15, open_on_hover: true }]);
-  assert(field('hub-motion').disabled); assert(text(ui).includes('No disponible en esta ventana'));
+  assert.equal(field('hub-motion'), undefined, 'no inert motion toggle');
+  assert(text(ui).includes('El movimiento no se puede configurar en Abito.'), 'no claim of a working motion preference');
   assert.equal(calls.length, 0);
   const number = () => all(ui).find(e => e.attrs.type === 'number');
   for (const value of ['4', '121', '2.5', '']) { const n = number(); n.value = value; n.fire('change'); await ui.settled(); assert.deepEqual(calls, []); }
