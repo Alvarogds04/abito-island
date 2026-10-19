@@ -192,4 +192,25 @@ test('chat wears Coucou\'s tokens: bubble .13 r12 6/10 12.5px, reply #b0b5be, in
   for (const sel of ['#settings', '#models', '#conversations']) assert.ok(!new RegExp('(^|[\\s,}])' + sel + '[^{]*\\{').test(isl.slice(isl.indexOf('#chat-log li.user') - 1)), sel + ' untouched by the chat block');
 });
 
+// ---- #480: the chat in the island's own visual language -------------------------------------------------------------
+test('chat: keeps every id and verb; the island header stays on top at the column width; body is a Coucou card; controls are Coucou tabs/discs with 44px hits', () => {
+  const html = read('index.html');
+  for (const id of ['chat-header', 'chat-title', 'chat-target-chip', 'chat-specialist', 'open-screen-settings', 'chat-back', 'chat-status-strip', 'chat-state', 'chat-history-controls', 'chat-create', 'chat-conversations', 'chat-history-label', 'chat-log', 'chat-model-btn', 'chat-composer', 'chat-input', 'chat-send', 'chat-cancel'])
+    assert.match(html, new RegExp(`id="${id}"`), id + ' is still there');
+  const isl = read('vendor/coucou/island/island.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const from = isl.indexOf('#capsule[data-phase="expanded"][data-view="chat"] #island-header');
+  assert.ok(from > 0, 'the chat block exists'); const blk = isl.slice(from);
+  assert.match(blk, /#island-header \{\s*opacity: 1; visibility: visible; pointer-events: auto; left: calc\(50% - 200px\); width: 400px; right: auto;/);
+  assert.match(blk, /#chat \{ padding: 42px 10px 10px; \}/, 'the card starts under the 34px header');
+  assert.match(blk, /#chat-title::before \{ content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff;/, 'the who-row dot');
+  assert.match(blk, /#chat-body \{ background: var\(--card\); border: 1px solid var\(--hairline\); border-radius: 20px;/);
+  assert.match(blk, /#capsule #chat-history-controls \.icon-btn::after \{ inset: 11px 7px; border: 0; border-radius: 11px;/, 'Coucou .tab 30x22 in a 44px hit');
+  assert.match(blk, /#chat-composer \.round::after \{ inset: 8px; border: 0; border-radius: 50%;/, '28px discs in a 44px hit');
+  assert.match(blk, /#chat-composer #chat-send::after \{ background: var\(--ink\);/, 'Coucou\'s white send disc');
+  assert.match(blk, /#chat-header \.icon-btn \{[^}]*min-width: 44px; min-height: 44px;/, 'the quiet round buttons keep a 44px hit');
+  // chat behaviour files are not part of this change: the verbs the chat sends are the same closed ones
+  const chat = read('chat.js');
+  for (const verb of ["action({ action: 'new' })", "action({ action: 'open' })", "action({ action: 'back' })", "action({ action: 'list' })"]) assert.ok(chat.includes(verb), verb);
+});
+
 if (failed) process.exit(1);
