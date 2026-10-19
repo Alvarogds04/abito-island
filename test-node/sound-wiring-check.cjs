@@ -13,10 +13,12 @@ const source = path.join(__dirname, '..', '..', 'desktop-sound', 'sound-engine.j
 const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 let passed = 0;
 const pending = [];
-const test = (name, fn) => { const r = fn(); if (r && typeof r.then === 'function') pending.push(r.then(() => { passed += 1; })); else passed += 1; };
+const test = (_name, fn) => { const r = fn(); if (r && typeof r.then === 'function') pending.push(r.then(() => { passed += 1; })); else passed += 1; };
 
 test('vendored: frontend/sound-engine.js is the engine\'s source, byte for byte (sha256)', () => {
   assert.ok(fs.existsSync(source), 'the source module exists in this checkout');
+  // #467: optional injected sample overrides; both copies intentionally repinned.
+  assert.equal(sha(source), 'e08e0cd90146a94836abf921db5c1a95e1a4831b20d0154c7c6200068cfd6b32');
   assert.equal(sha(path.join(frontend, 'sound-engine.js')), sha(source));
 });
 
@@ -298,6 +300,89 @@ test('hooks: island.js and chat.js call the wiring through a null-safe lookup, s
   }
   const island = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
   assert.match(island, /soundCue\('firstSnapshotRendered'\)/, 'ready() is signalled after the first snapshot');
+});
+
+test('custom sounds: startup, exact IPC, validation, failures, removal and reload ordering', async () => {
+  const calls = [], listeners = {}, overrides = new Map();
+  let names = ['notice', 'notice', '../bad', '__proto__', 'unknown', 'error'];
+  let bad = false, failList = false, decodeFail = false, readFail = false;
+  const buffer = { duration: 0.2, getChannelData() {} };
+  const engine = { setSample: (id, b) => overrides.set(id, b), clearSamples: () => overrides.clear() };
+  const invoke = async (command, args) => {
+    calls.push([command, args]);
+    if (args.payload.action === 'list') { if (failList) throw Error('host'); return { names }; }
+    if (readFail) throw Error('read');
+    return { name: 'untrusted', mime: 'ignored', data: args.payload.name === 'error' || bad ? '!!!!' : 'AQID' };
+  };
+  let decodes = 0;
+  const wiring = Wiring.wire({ engine, invoke, listen: (n, f) => { listeners[n] = f; },
+    getAudioContext: () => ({ decodeAudioData: async bytes => {
+      decodes++; assert.deepEqual([...new Uint8Array(bytes)], [1, 2, 3]);
+      if (decodeFail) throw Error('decode'); return buffer;
+    } }), decodeBase64: s => Buffer.from(s, 'base64').toString('binary') });
+  await wiring.samplesLoaded();
+  assert.deepEqual(calls, [['sound_action', { payload: { action: 'list' } }],
+    ['sound_action', { payload: { action: 'read', name: 'notice' } }],
+    ['sound_action', { payload: { action: 'read', name: 'error' } }]]);
+  assert.equal(overrides.get('snd.notice'), buffer); assert.equal(overrides.size, 1);
+  names = []; calls.length = 0; listeners['sounds:changed']({}); await wiring.samplesLoaded();
+  assert.deepEqual(calls, [['sound_action', { payload: { action: 'list' } }]]);
+  assert.equal(overrides.size, 0);
+  names = ['notice']; bad = true; listeners['sounds:changed']({}); await wiring.samplesLoaded();
+  assert.equal(overrides.size, 0); assert.equal(decodes, 1);
+  bad = false; decodeFail = true; listeners['sounds:changed']({}); await wiring.samplesLoaded();
+  assert.equal(overrides.size, 0); assert.equal(decodes, 2);
+  decodeFail = false; readFail = true; listeners['sounds:changed']({}); await wiring.samplesLoaded();
+  assert.equal(overrides.size, 0);
+  readFail = false; failList = true; listeners['sounds:changed']({}); await wiring.samplesLoaded();
+  assert.equal(overrides.size, 0);
+  failList = false; calls.length = 0;
+  listeners['sounds:changed']({}); listeners['sounds:changed']({}); await wiring.samplesLoaded();
+  assert.equal(calls.filter(c => c[1].payload.action === 'list').length, 2);
+  assert.equal(calls.filter(c => c[1].payload.action === 'read').length, 2);
+});
+
+test('custom sounds: reject empty, malformed, non-string and oversized base64 without decoding', async () => {
+  for (const data of ['', null, 42, [], 'A', 'A===', 'AA=A', 'AQID\n', 'A'.repeat(4 * Math.ceil(2097152 / 3) + 4)]) {
+    let decodes = 0, installed = 0;
+    const w = Wiring.wire({ engine: { clearSamples() {}, setSample() { installed++; } },
+      invoke: async (_cmd, { payload }) => payload.action === 'list' ? { names: ['notice'] } : { data },
+      getAudioContext: () => ({ decodeAudioData: async () => { decodes++; } }),
+      decodeBase64: s => Buffer.from(s, 'base64').toString('binary') });
+    await w.samplesLoaded(); assert.equal(decodes, 0); assert.equal(installed, 0);
+  }
+});
+
+test('custom sounds: boot shares the decoding/playback context and never plays while off', async () => {
+  let contexts = 0, engine;
+  const sources = [], events = {};
+  const c = soft.createSoftContext();
+  c.decodeAudioData = async () => ({ duration: 0.1, getChannelData() {} });
+  c.createBufferSource = () => {
+    const s = { connect() {}, disconnect() {}, start() {}, stop() {} }; sources.push(s); return s;
+  };
+  const win = { document: { addEventListener() {} },
+    AbitoSound: { createSoundEngine: options => (engine = Engine.createSoundEngine({ ...options, coalesceMs: 0 })) },
+    AudioContext: function () { contexts++; return c; }, atob: s => Buffer.from(s, 'base64').toString('binary'),
+    __TAURI__: { event: { listen: (n, f) => { events[n] = f; } }, core: { invoke: async (cmd, { payload }) => {
+      if (cmd === 'prefs_action') return { sound: false };
+      return payload.action === 'list' ? { names: ['notice'] } : { data: 'AQID' };
+    } } } };
+  const w = Wiring.boot(win); await w.samplesLoaded(); w.firstSnapshotRendered();
+  assert.equal((await engine.play('snd.notice')).reason, 'disabled');
+  assert.equal(sources.length, 0); assert.equal(contexts, 1);
+  w.applyPrefs({ sound: true }); assert.equal((await engine.play('snd.notice')).played, true);
+  assert.equal(sources.length, 1); assert.equal(contexts, 1); assert.equal(c.oscillators.length, 0);
+  engine.close();
+});
+
+test('custom sounds: no invoke or audio capability means no sample listener or IPC', async () => {
+  for (const options of [{}, { invoke: () => { throw Error('must not invoke'); } }]) {
+    const events = [];
+    const w = Wiring.wire({ engine: {}, listen: n => events.push(n), ...options });
+    await w.samplesLoaded();
+    assert.ok(!events.includes('sounds:changed'));
+  }
 });
 
 Promise.all(pending).then(() => console.log(`sound-wiring-check: ${passed} passed`), e => { console.error(e); process.exit(1); });
