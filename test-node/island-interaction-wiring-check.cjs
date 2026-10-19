@@ -14,8 +14,8 @@ const read = file => fs.readFileSync(path.join(frontend, file), 'utf8');
 // the stub below serves the REAL pure phase view (#439): the island's render
 // loop delegates dataset.phase to O.viewPhase, so the fixture must too
 const OV = require(path.join(frontend, 'overview-view.js'));
-let passed = 0;
-const test = (_name, fn) => { fn(); passed += 1; };
+let passed = 0, failed = 0;
+const test = (name, fn) => { try { fn(); passed += 1; } catch (error) { failed++; console.error('FAIL ' + name + ': ' + error.message); } };
 
 test('#336 index.html loads island-interaction.js exactly once, defer, before island.js', () => {
   const html = read('index.html');
@@ -207,9 +207,43 @@ function engagementFixture(openOnHover) {
       target: { closest: sel => (String(sel).split(',').map(x => x.trim()).includes(tag) ? {} : null) } })); },
     release() { fire(windowListeners, 'pointerup', pointer({ type: 'pointerup' })); },
     click() { fire(documentListeners, 'click', pointer({ type: 'click' })); },
+    // Execute the shipped global pointer handlers around an independently owned
+    // control callback. This models DOM bubbling, not native/trusted input.
+    activateControl(name, button) {
+      const el = makeEl(); let actions = 0;
+      el.closest = selector => button && selector.split(',').map(s => s.trim()).includes('button') ? el : null;
+      el.onclick = () => { actions++; };
+      const event = pointer({ target: el, type: 'pointerdown', defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; } });
+      fire(windowListeners, 'pointerdown', event);
+      fire(windowListeners, 'pointerup', { ...event, type: 'pointerup' });
+      if (!event.defaultPrevented) el.onclick();
+      return actions;
+    },
     dragReleases() { return invocations.filter(i => i.cmd === 'drag_release'); },
   };
 }
+
+for (const [surface, button] of [
+  ['header home tab', true], ['header chat tab', true], ['gear', true], ['mute', true],
+  ['pill', false], ['pill choice', false], ['Spotify np-pill', false],
+  ['usage stat card', false], ['GitHub row', false], ['GitHub control', true], ['recap card', false], ['recap control', true],
+  ['notice band', false], ['notice open button', true], ['notice dismiss button', true], ['notice clear button', true],
+  ['session row', false], ['session ticker', false],
+]) test('expanded press preserves the ' + surface + ' action without toggling or collapsing', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  assert.equal(f.activateControl(surface, button), 1, 'the independently owned control action runs once');
+  assert.equal(f.invocations.filter(i => /^drag_/.test(i.cmd)).length, 0, 'no island press/release IPC');
+  assert.deepEqual(f.desktopCalls, [], 'no expand, close or auto-close');
+});
+
+test('a press on the collapsed bar expands immediately without a release toggle', () => {
+  const f = engagementFixture(false); f.mutate();
+  f.press();
+  assert.deepEqual(f.desktopCalls, ['expand']);
+  f.release();
+  assert.equal(f.dragReleases().length, 0);
+});
 
 test('#421 a Ctrl+click press on a link never starts a drag: no drag_press, no toggle, no collapse verb (facade spy)', () => {
   const f = engagementFixture(false);
@@ -222,51 +256,32 @@ test('#421 a Ctrl+click press on a link never starts a drag: no drag_press, no t
   assert.deepEqual(f.desktopCalls.filter(c => c !== 'expand'), [], 'no collapse verb after the click');
 });
 
-test('#421 narrowness: a press on a bare anchor outside #settings (and on the capsule) still sends drag_press', () => {
+test('#421 expanded links and the bare capsule never start an island press', () => {
   const f = engagementFixture(false);
-  f.mutate();
-  f.seed('expanded');
-  f.pressOn('a');
-  f.release();
-  assert.equal(f.invocations.filter(i => i.cmd === 'drag_press').length, 1, 'only an anchor inside #settings is exempt');
-  f.press();
-  f.release();
-  assert.equal(f.invocations.filter(i => i.cmd === 'drag_press').length, 2, 'ordinary presses keep dragging');
+  f.mutate(); f.seed('expanded');
+  f.pressOn('a'); f.release(); f.press(); f.release();
+  assert.equal(f.invocations.filter(i => /^drag_/.test(i.cmd)).length, 0);
+  assert.deepEqual(f.desktopCalls, []);
 });
 
-test('#336 L18 the first press after a hover-open releases as cancelled: engaged, never collapsed (facade spy)', () => {
+test('#336 hover-open engagement and later presses never collapse the expanded island', () => {
   const f = engagementFixture(true);
-  f.mutate(); // the observers exist before the boot render fires
-  f.enter();  // trusted mouse entry on the settled compact island -> hover open
-  assert.deepEqual(f.desktopCalls, ['expand'], 'the hover requests the existing expand verb');
-  f.seed('expanded'); // the native answer: snapshot + settled phase + fact sync
-  f.press();
-  f.release();
-  let releases = f.dragReleases();
-  assert.equal(releases.length, 1, 'one drag_release for the press/release pair');
-  assert.equal(releases[0].args.cancelled, true,
-    'the FIRST press after a hover-open consumes the engagement: cancelled:true skips the toggle (core.rs release)');
-  f.click(); // the deliberate click that converts hover-only into the normal delay
-  // the NEXT press toggles normally: no cancellation left to spend
-  f.press();
-  f.release();
-  releases = f.dragReleases();
-  assert.equal(releases.length, 2);
-  assert.equal(releases[1].args.cancelled, false, 'the next click keeps the legacy toggle');
-  f.click();
+  f.mutate(); f.enter();
+  assert.deepEqual(f.desktopCalls, ['expand']);
+  f.seed('expanded');
+  f.press(); f.release(); f.click();
+  f.press(); f.release(); f.click();
+  assert.equal(f.dragReleases().length, 0);
+  assert.deepEqual(f.desktopCalls, ['expand'], 'the click feed retains non-press auto-close policy');
 });
 
-test('#336 L18 a click without a hover-open is unchanged: never cancelled (facade spy)', () => {
-  const f = engagementFixture(false); // default preference: hover does not open
-  f.mutate();
-  f.enter();
-  assert.deepEqual(f.desktopCalls, [], 'hover-off never requests an open');
-  f.press();
-  f.release();
-  const releases = f.dragReleases();
-  assert.equal(releases.length, 1);
-  assert.equal(releases[0].args.cancelled, false, 'a plain press/release keeps the legacy path byte for byte');
-  f.click();
+test('#336 with hover-open off a compact press requests expansion, not a native toggle', () => {
+  const f = engagementFixture(false);
+  f.mutate(); f.enter();
+  assert.deepEqual(f.desktopCalls, []);
+  f.press(); f.release(); f.click();
+  assert.deepEqual(f.desktopCalls, ['expand']);
+  assert.equal(f.dragReleases().length, 0);
 });
 
 // ---- #419: the approved countdown decoration surface -----------------------
@@ -316,4 +331,5 @@ test('#419 style.css rules: theme tokens, transform token, reduced motion, no sy
     'no system media query: island.js paints data-motion');
 });
 
-console.log(`island-interaction-wiring-check: ${passed} passed`);
+console.log(`island-interaction-wiring-check: ${passed} passed, ${failed} failed`);
+if (failed) process.exitCode = 1;

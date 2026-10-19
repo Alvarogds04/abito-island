@@ -1,7 +1,7 @@
 //! Abito island — Electron to Rust+Tauri migration, units M1b (host/bridge)
 //! + M2 (Pi transport receiver).
 //!
-//! M1a skeleton (X11 geometry, drag/snap, read-back probe) plus the host
+//! Fixed-window island (X11 geometry, click policy, read-back probe) plus the host
 //! layer ported from the Electron sources (`preload.cjs`, `core.cjs`,
 //! `security.cjs`, `main.cjs`):
 //! - `window.desktop.*` served by the single `desktop_action` command behind
@@ -51,6 +51,7 @@ mod modelshost;
 #[cfg(unix)]
 mod nativeaudit;
 mod nativewindow;
+mod islandshape;
 mod nativedialoghost;
 #[cfg(any(debug_assertions, feature = "probe"))]
 mod probe;
@@ -75,8 +76,23 @@ use abito_island::{approval, protocol, transport, workarea};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
-const COLLAPSE_RESIZE_DELAY_MS: u64 = 400; // frontend shrink anim is 340ms
-const CHAT_SETTLE_DELAY_MS: u64 = 700; // the grow spring (R6, 160ms delay + 400ms) has settled
+/// The only native size/placement funnel for the island. A normal view toggle
+/// does not enqueue a resize or a move when the native window already matches.
+fn ensure_island_window(app: &AppHandle) -> Rect {
+    let state = app.state::<AppState>();
+    let area = refresh_work_area(app, &state);
+    let win = main_window(app);
+    let io = TauriIo(&win);
+    let wanted = geometry::island_window_rect(area, io.scale());
+    if io.size() != (wanted.w, wanted.h) {
+        io.set_size(wanted.w, wanted.h);
+    }
+    if io.outer_position() != (wanted.x, wanted.y) {
+        io.set_outer_position(wanted.x, wanted.y);
+    }
+    islandshape::apply(app, None);
+    wanted
+}
 
 /// Set once a clean quit starts (port of main.cjs `quitting`): guards the
 /// close-request handler and stops the background threads.
@@ -287,11 +303,11 @@ struct AppState {
     /// One-shot: spawn the settle-and-retry geometry pin the first time the
     /// frontend reports ready, preserving the no-user-interference guard.
     initial_pin: AtomicBool,
-    /// Set on the first real pointer press: the pin loop must never fight a
-    /// user drag, so it aborts once the human touches the island.
+    /// Set on the first real character press: startup placement must not
+    /// interfere once the human is interacting with the island.
     user_touch: AtomicBool,
-    /// Bumped on every plan application; a deferred collapse resize only runs
-    /// if its generation is still current.
+    /// Bumped on every plan application; stale click plans and startup
+    /// placement requests must not replace a newer transition.
     generation: AtomicU64,
     /// M1b: the phase `preload.cjs` consumers read (single writer: apply_plan
     /// for toggles, explicit stores for hide/restore).
@@ -449,22 +465,12 @@ fn edge_str(edge: Edge) -> &'static str {
     }
 }
 
-/// Push the island phase into the webview (the frontend animates; the native
-/// window is resized by [`apply_plan`]).
+/// Push the island phase into the webview; animation stays inside the fixed window.
 fn push_phase(app: &AppHandle, phase: &str, edge: Edge) {
     let win = main_window(app);
     let e = edge_str(edge);
     let _ = win.eval(format!(
         "window.__islandSetState && window.__islandSetState('{phase}','{e}');"
-    ));
-}
-
-/// Tell the frontend which edge it is docked to after a snap.
-fn push_edge(app: &AppHandle, edge: Edge) {
-    let win = main_window(app);
-    let _ = win.eval(format!(
-        "window.__islandSetEdge && window.__islandSetEdge('{}');",
-        edge_str(edge)
     ));
 }
 
@@ -492,7 +498,7 @@ fn refresh_work_area(app: &AppHandle, state: &AppState) -> Rect {
     rect
 }
 
-/// #389 (GD012): the geometry placement and edge snapping work in — the monitor
+/// #389 (GD012): the work area used for fixed-window placement — the monitor
 /// chosen in Ajustes when it is connected, else the island's current monitor
 /// (the behaviour before #389). Resolution goes through the pure
 /// `workarea::chosen_area` over the monitors the island itself enumerated; the
@@ -516,50 +522,8 @@ fn placement_area(win: &WebviewWindow, base: Rect, chosen: Option<&str>) -> Rect
     workarea::chosen_area(Some(key), base, &monitors)
 }
 
-/// Enqueue the guarded transaction, not a native resize previously authorized
-/// on a worker. The barrier stays until actual physical Resized or degrades;
-/// GTK/OS/WM queues still provide no causal request identifier.
-fn queue_compact_request(
-    app: AppHandle,
-    generation: u64,
-    size: (i32, i32),
-    position: (i32, i32),
-    delay_ms: u64,
-) {
-    std::thread::spawn(move || {
-        if delay_ms > 0 {
-            std::thread::sleep(Duration::from_millis(delay_ms));
-        }
-        let (guard_app, apply_app) = (app.clone(), app.clone());
-        abito_island::questioncmd::queue_compact_apply(
-            move |task| {
-                let _ = app.run_on_main_thread(task);
-            },
-            move |operation| {
-                questionhost::compact_resize_request(
-                    &guard_app,
-                    generation,
-                    (size.0 as u32, size.1 as u32),
-                    operation,
-                )
-            },
-            move |resize| {
-                // The shared helper installs a later GLib idle; GTK property
-                // signals cannot reenter this admission transaction inline.
-                let win = main_window(&apply_app);
-                if resize {
-                    TauriIo(&win).set_size(size.0, size.1);
-                }
-                TauriIo(&win).set_outer_position(position.0, position.1);
-            },
-        );
-    });
-}
-
-/// Apply a toggle plan. Expand resizes immediately (the window must be big
-/// before the spring grows); collapse tells the frontend to animate first and
-/// resizes the native window after the 340ms shrink, guarded by generation so
-/// a rapid re-toggle can never apply a stale size.
+/// Apply a toggle plan without changing native geometry when it already matches.
+/// Only the page's visible island and the GDK input shape transition.
 ///
 /// This is the SINGLE funnel for compact<->overview switches — short click,
 /// facade verb, probe, restore — so the published phase can never diverge
@@ -581,22 +545,9 @@ fn apply_plan(app: &AppHandle, state: &AppState, plan: TogglePlan) {
         Some((r.x, r.y)),
         Some((w, h)),
     );
-    let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    let win = main_window(app);
-    if expand {
-        TauriIo(&win).set_size(w, h);
-        TauriIo(&win).set_outer_position(r.x, r.y);
-        push_phase(app, "overview", edge);
-    } else {
-        push_phase(app, "compact", edge);
-        queue_compact_request(
-            app.clone(),
-            generation,
-            (w, h),
-            (r.x, r.y),
-            COLLAPSE_RESIZE_DELAY_MS,
-        );
-    }
+    state.generation.fetch_add(1, Ordering::SeqCst);
+    ensure_island_window(app);
+    push_phase(app, if expand { "overview" } else { "compact" }, edge);
     // U1: a collapse always leaves the chat view (core resets it); tell the
     // chat surface which view is current.
     chathost::publish_chat(app);
@@ -845,13 +796,9 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
     if let Some(plan) = plan {
         apply_plan(app, state, plan);
     } else {
-        let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, io.scale());
-        let (x, y) = io.outer_position();
-        let (cw, ch) = io.size();
-        let safe = geometry::clamp_rect(Rect { x, y, w: cw, h: ch }, area);
-        let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        queue_compact_request(app.clone(), generation, (w, h), (safe.x, safe.y), 0);
-        store_requested(state, "restore", Some((safe.x, safe.y)), Some((w, h)));
+        let safe = ensure_island_window(app);
+        state.generation.fetch_add(1, Ordering::SeqCst);
+        store_requested(state, "restore", Some((safe.x, safe.y)), Some((safe.w, safe.h)));
     }
     let _ = win.unminimize();
     // Q1: show, never focus — the island must not take the keyboard from
@@ -890,12 +837,8 @@ fn open_chat_and_type(app: &AppHandle) {
     let _ = win.eval("window.__islandFocusComposer && window.__islandFocusComposer();");
 }
 
-/// Monitor/work-area re-clamp. Electron had `display-metrics-changed` /
-/// `display-added` / `display-removed`; Tauri/Tao expose no display events,
-/// so the SAME work-area source (`workarea::current`) is polled once a
-/// second and a CHANGED area re-clamps the window through the pure
-/// `geometry::clamp_rect` port of `clampBounds`. A live drag is never
-/// fought: while a press is active the release snap owns geometry.
+/// Poll the work area once a second and re-place the fixed window when it changes.
+/// Island pointer gestures never own native placement.
 fn spawn_workarea_watcher(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(1000));
@@ -915,22 +858,8 @@ fn spawn_workarea_watcher(app: AppHandle) {
             }
             *stored = area;
         }
-        if state.core.lock().expect("core lock").press_active() {
-            continue;
-        }
-        let io = TauriIo(&win);
-        let (x, y) = io.outer_position();
-        let (w, h) = io.size();
-        if let Some(safe) = geometry::reclamp_on_workarea_change(Rect { x, y, w, h }, area) {
-            io.set_size(safe.w, safe.h);
-            io.set_outer_position(safe.x, safe.y);
-            store_requested(
-                &state,
-                "workarea-clamp",
-                Some((safe.x, safe.y)),
-                Some((safe.w, safe.h)),
-            );
-        }
+        let safe = ensure_island_window(&app);
+        store_requested(&state, "workarea-clamp", Some((safe.x, safe.y)), Some((safe.w, safe.h)));
         publish(&app, &state);
     });
 }
@@ -970,7 +899,18 @@ fn navigation_lock() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 }
 
 // --- Commands: the webview only reports pointer events and evidence; every
-// --- click-vs-drag, snap, clamp and anchor decision lives in core/geometry.
+// --- click cancellation and fixed placement policy lives in core/geometry.
+
+#[tauri::command]
+fn island_shape(app: AppHandle, webview: tauri::Webview, state: State<AppState>, payload: Value) -> Result<(), BridgeError> {
+    settingswindow::main_window_only(webview.label())?;
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    bridge::sender_ok(webview.label(), &url)?;
+    let report = islandshape::parse(&payload).ok_or_else(|| BridgeError::denied("invalid island shape"))?;
+    state.chat_rate.lock().expect("shape rate lock").check(now_ms())?;
+    islandshape::apply(&app, Some(report));
+    Ok(())
+}
 
 #[tauri::command]
 fn drag_press(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x: f64, y: f64) {
@@ -1021,19 +961,6 @@ fn drag_release(app: AppHandle, webview: tauri::Webview, state: State<AppState>,
                 apply_plan(&app, &state, plan);
                 publish(&app, &state);
                 "toggle".to_string()
-            }
-            ReleaseOutcome::Snapped { rect, edge } => {
-                store_requested(&state, "snap", Some((rect.x, rect.y)), None);
-                // #264 (GD049): this release is the placement the next launch
-                // restores. It goes through the same prefs gate and file as every
-                // other preference; a failed write keeps the previous position.
-                if let Some((x, y)) = outcome.saved_position() {
-                    if !settingshost::save_position(&app, x, y) {
-                        eprintln!("island position not persisted: keeping the previous one");
-                    }
-                }
-                push_edge(&app, edge);
-                "snap".to_string()
             }
             ReleaseOutcome::Cancelled => "cancelled".to_string(),
         }
@@ -1288,35 +1215,20 @@ fn dispatch_click(app: &AppHandle, state: &AppState, click: bridge::Click) -> Re
             let (w, h) = plan.size();
             let r = plan.rect();
             store_requested(state, "expand", Some((r.x, r.y)), Some((w, h)));
-            io.set_size(w, h);
-            io.set_outer_position(r.x, r.y);
+            ensure_island_window(app);
             push_phase(app, "overview", plan.edge());
         }
         desktop::ClickPlan::Overview(plan) => {
             let (w, h) = plan.size;
             let r = plan.rect;
-            let stage = plan.stage;
             let (vw, vh) = plan.visible;
             store_requested(state, "overview", Some((r.x, r.y)), Some((w, h)));
-            io.set_size(stage.w, stage.h);
-            io.set_outer_position(stage.x, stage.y);
+            ensure_island_window(app);
             let _ = win.eval(format!(
                 "window.__islandSetView && window.__islandSetView('overview',{vw},{vh});"
             ));
             push_phase(app, "overview", plan.edge);
-            let handle = app.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(COLLAPSE_RESIZE_DELAY_MS));
-                let scheduler = handle.clone();
-                let _ = scheduler.run_on_main_thread(move || {
-                    let state = handle.state::<AppState>();
-                    if click_native_current(&state, generation) {
-                        let win = main_window(&handle);
-                        TauriIo(&win).set_size(w, h);
-                        TauriIo(&win).set_outer_position(r.x, r.y);
-                    }
-                });
-            });
+
         }
         desktop::ClickPlan::Show(edge) => push_phase(app, "overview", edge),
     }
@@ -1744,30 +1656,9 @@ fn record_frontend_evidence(
                 return;
             }
             platform::audit::sample(&app, "pin-before", attempt, None);
+            let rect = ensure_island_window(&app);
+            let (w, h) = (rect.w, rect.h);
             let win = main_window(&app);
-            let scale = win.scale_factor().unwrap_or(1.0);
-            let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
-            let wa = workarea::current(&win);
-            // #389: the first placement of a launch honours the chosen monitor
-            // when it is connected; the fallback path is byte-for-byte today's.
-            let area = placement_area(&win, wa.rect, settingshost::chosen_monitor(&app).as_deref());
-            let rect = geometry::restore_position(settingshost::saved_position(&app), area, w, h);
-            let io = TauriIo(&win);
-            if win
-                .inner_size()
-                .map(|s| (s.width as i32, s.height as i32))
-                .unwrap_or((0, 0))
-                == (w, h)
-            {
-                io.set_outer_position(rect.x, rect.y); // size fine: only pin position
-                *state.work_area.lock().expect("work area lock") = area;
-                store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
-                return;
-            }
-            io.set_size(w, h);
-            platform::audit::sample(&app, "pin-shrink-enqueued", attempt, Some((w, h)));
-            io.set_outer_position(rect.x, rect.y);
-            *state.work_area.lock().expect("work area lock") = area;
             store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
             std::thread::sleep(Duration::from_millis(200));
             platform::audit::sample(&app, "pin-settled", attempt, Some((w, h)));
@@ -1944,6 +1835,7 @@ fn main() {
             drag_press,
             drag_move,
             drag_release,
+            island_shape,
             desktop_action,
             open_chat_url,
             characterhost::character_info,
@@ -2011,11 +1903,12 @@ fn main() {
                 // scale getter is inline here; keep the off-main cache fresh.
                 if let tauri::WindowEvent::ScaleFactorChanged { scale_factor, .. } = event {
                     store_scale(*scale_factor);
+                    ensure_island_window(window.app_handle());
                 }
                 if let tauri::WindowEvent::Resized(size) = event {
                     #[cfg(any(debug_assertions, feature = "probe"))]
                     probe::mark(format!("tao Resized {}x{}", size.width, size.height));
-                    questionhost::native_resized(window.app_handle(), (size.width, size.height));
+                    islandshape::apply(window.app_handle(), None);
                     platform::audit::sample(
                         window.app_handle(),
                         "resized",
@@ -2056,23 +1949,16 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             let win = main_window(&handle);
-            // #264: the remembered position must be in memory BEFORE the first
-            // geometry decision, so the prefs host starts here (it only reads
-            // prefs.json/accounts.json; it has no window dependency).
+            // Load preferences before placement so the chosen monitor is available.
+            // The legacy position preference stays on disk but is never applied.
             settingshost::start(&handle);
             dictationhost::start(&handle);
             characterhost::manage(&handle);
             characterhost::restore_on_launch(&handle);
-            let wa = workarea::current(&win);
             let scale = win.scale_factor().unwrap_or(1.0);
             store_scale(scale); // #431: seed the off-main scale cache
-            let (w, h) = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
-            // Origin: the position the human last dragged the island to, when it
-            // still fits the current work area; otherwise the M1a top-centre default.
-            let rect = geometry::restore_position(settingshost::saved_position(&handle), wa.rect, w, h);
-            let io = TauriIo(&win);
-            io.set_size(w, h);
-            io.set_outer_position(rect.x, rect.y);
+            let rect = ensure_island_window(&handle);
+            let (w, h) = (rect.w, rect.h);
             // Contract attribute, set explicitly as well as via the window
             // config: the read-back probe must show is_always_on_top=true and
             // under XWayland the config path alone did not guarantee it.
@@ -2083,11 +1969,8 @@ fn main() {
             // (main thread here, so the live getter is inline and safe).
             sync_host_visible(&win);
             let state = app.state::<AppState>();
-            *state.work_area.lock().expect("work area lock") = wa.rect;
-            // #264: the dock edge follows the RESTORED origin, so an island that
-            // came back at the bottom still grows upward when it expands (the
-            // default top-centre placement derives Top, as before).
-            state.core.lock().expect("core lock").edge = geometry::nearest_vertical_edge(rect, wa.rect);
+            // ensure_island_window has cached the chosen work area already.
+            state.core.lock().expect("core lock").edge = Edge::Top;
             store_requested(&state, "initial", Some((rect.x, rect.y)), Some((w, h)));
             platform::audit::sample(&handle, "setup", 0, Some((w, h)));
             // Read-only sampling stops with this process. No probe or UI actions.

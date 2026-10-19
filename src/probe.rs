@@ -124,9 +124,8 @@ fn simulated_drag(app: &AppHandle, area: geometry::Rect, target: (f64, f64)) {
     let io = TauriIo(&win);
     let scale = io.scale();
     for i in 1..=10 {
-        // The window follows the pointer, so the pointer's screen point is
-        // outer origin + grab offset; interpolate toward the target from there
-        // and convert back to a client coordinate for the shared handler.
+        // Interpolate screen points and convert to client coordinates. The
+        // island itself stays fixed while the shared handler records travel.
         let (ox, oy) = io.outer_position();
         let start = screen_at(&io, (50.0, 20.0));
         let t = i as f64 / 10.0;
@@ -146,7 +145,32 @@ fn simulated_drag(app: &AppHandle, area: geometry::Rect, target: (f64, f64)) {
     }
 }
 
+/// Bounded native verification only: real view paths, no model turn or input injection.
+fn fixed_window_evidence(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    for step in ["fixed_compact", "fixed_overview", "fixed_chat", "fixed_compact_again"] {
+        match step {
+            "fixed_overview" => { let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None); }
+            "fixed_chat" => crate::chathost::switch_view(app, &state, true),
+            "fixed_compact_again" => { let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Close, None); }
+            _ => {}
+        }
+        sleep(Duration::from_secs(3));
+        readback(app, step);
+        state.chat_probe.lock().expect("chat probe lock").clear();
+        let _ = main_window(app).eval("(()=>{const r=document.getElementById('island').getBoundingClientRect();window.__TAURI__.core.invoke('record_chat_evidence',{evidence:{visible:[r.width,r.height],phase:document.getElementById('capsule').dataset.phase}});})()");
+        let lines = wait_chat_lines(app, 1, Duration::from_secs(3));
+        emit(&json!({"step": step, "page_readback": lines}));
+    }
+}
+
 pub fn run(app: AppHandle) {
+    if std::env::var("ABITO_PROBE_FIXED_WINDOW").as_deref() == Ok("1") {
+        sleep(Duration::from_secs(3));
+        fixed_window_evidence(&app);
+        crate::quit_clean(&app);
+        return;
+    }
     emit(&json!({
         "probe": "abito M1b geometry/state + bridge read-back",
         "pointer_input": NO_POINTER,
@@ -170,13 +194,10 @@ pub fn run(app: AppHandle) {
     }
     sleep(Duration::from_millis(100));
 
-    // 1. start: wait for the initial geometry to settle first — WebKitGTK
-    //    inflates the very first allocation and the app re-pins 304x44 right
-    //    after page load (same "wait for the WM to apply" discipline as every
-    //    later step), then read the honest getters.
+    // 1. Wait for the fixed native window to settle, then read honest getters.
     let scale0 = main_window(&app).scale_factor().unwrap_or(1.0);
-    let compact = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale0);
-    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale0);
+    let compact = geometry::scaled_size(geometry::ISLAND_WINDOW, scale0);
+    let overview = compact;
     let settled = wait_for_size(&app, compact, Duration::from_secs(6));
     if !settled {
         emit(&json!({"step": "start", "warning": "compact size did not settle within 6s"}));
@@ -201,7 +222,7 @@ pub fn run(app: AppHandle) {
     sleep(Duration::from_millis(200)); // WM applies the last move
     readback(&app, "simulated_drag_near_bottom");
 
-    // 3. release: the core decides snap (drag) — must NOT toggle.
+    // 3. A long pointer gesture cancels; it must neither move nor toggle.
     let client = {
         let (ox, oy) = io.outer_position();
         let s = io.scale();
@@ -211,21 +232,13 @@ pub fn run(app: AppHandle) {
         let mut core = state.core.lock().expect("core lock");
         core.release(&io, area, client, false)
     };
-    match &outcome {
-        ReleaseOutcome::Snapped { rect, edge } => {
-            store_requested(
-                &state,
-                &format!("snap_{:?}", edge).to_lowercase(),
-                Some((rect.x, rect.y)),
-                None,
-            );
-        }
-        other => emit(&json!({"step": "release_snap_bottom", "unexpected": format!("{other:?}") })),
+    if outcome != ReleaseOutcome::Cancelled {
+        emit(&json!({"step": "release_snap_bottom", "unexpected": format!("{outcome:?}")}));
     }
     sleep(Duration::from_millis(300));
     readback(&app, "release_snap_bottom");
 
-    // 4. expand: docked at the bottom -> must grow upward (bottom anchored).
+    // 4. Expand inside the same top-centred native window.
     let plan = {
         let mut core = state.core.lock().expect("core lock");
         core.toggle(&io, area)
@@ -238,7 +251,7 @@ pub fn run(app: AppHandle) {
         emit(&json!({"step": "expand", "warning": "window did not reach overview size within 3s"}));
     }
 
-    // 5. collapse: frontend animates first, native resize follows (~400ms).
+    // 5. Collapse changes the visible island and input shape only.
     let plan = {
         let mut core = state.core.lock().expect("core lock");
         core.toggle(&io, area)
@@ -251,7 +264,7 @@ pub fn run(app: AppHandle) {
         emit(&json!({"step": "collapse", "warning": "window did not return to compact size within 3s"}));
     }
 
-    // 6. drag to the top and release -> snaps to the top edge keeping X.
+    // 6. Another long gesture is cancelled without native placement changes.
     let area = refresh_work_area(&app, &state);
     {
         let mut core = state.core.lock().expect("core lock");
@@ -271,16 +284,8 @@ pub fn run(app: AppHandle) {
         let mut core = state.core.lock().expect("core lock");
         core.release(&io, area, client, false)
     };
-    match &outcome {
-        ReleaseOutcome::Snapped { rect, edge } => {
-            store_requested(
-                &state,
-                &format!("snap_{:?}", edge).to_lowercase(),
-                Some((rect.x, rect.y)),
-                None,
-            );
-        }
-        other => emit(&json!({"step": "drag_to_top_snap", "unexpected": format!("{other:?}") })),
+    if outcome != ReleaseOutcome::Cancelled {
+        emit(&json!({"step": "drag_to_top_snap", "unexpected": format!("{outcome:?}")}));
     }
     sleep(Duration::from_millis(300));
     readback(&app, "drag_to_top_snap");
@@ -364,7 +369,7 @@ pub fn run(app: AppHandle) {
         a11y_evidence(&app);
     }
 
-    // 11. chat (U1): overview -> chat in the SAME window (672x256 read back
+    // 11. chat (U1): overview -> chat in the SAME window (672x340 read back
     //     from the X server), one turn through the REAL `chat_action` IPC
     //     against an in-process FAKE local router (the real router and any
     //     provider are never contacted by the probe), then an unreachable
@@ -584,8 +589,8 @@ fn overview_visual_evidence(app: &AppHandle) {
     let area = refresh_work_area(app, state.inner());
     let io = TauriIo(&win);
     let scale = io.scale();
-    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
-    let compact = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
+    let overview = geometry::scaled_size(geometry::ISLAND_WINDOW, scale);
+    let compact = overview;
 
     // Expand (same core toggle the pointer uses) and let the spring settle.
     let plan = {
@@ -994,7 +999,7 @@ fn notification_scenes(app: &AppHandle) {
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let scale = io.scale();
-    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
+    let overview = geometry::scaled_size(geometry::ISLAND_WINDOW, scale);
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
     wait_for_size(app, overview, Duration::from_secs(3));
@@ -1130,7 +1135,7 @@ fn notification_scenes(app: &AppHandle) {
     emit(&json!({"step": "notification_scenes", "result": outcome.clone().unwrap_or_else(|e| json!({"error": e})), "error": outcome.err()}));
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
-    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
+    wait_for_size(app, geometry::scaled_size(geometry::ISLAND_WINDOW, scale), Duration::from_secs(3));
 }
 
 #[cfg(not(unix))]
@@ -1215,9 +1220,9 @@ fn column_transition_scenes(app: &AppHandle) {
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let scale = io.scale();
-    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
-    let column = geometry::scaled_size(geometry::chat_window(area.h, scale), scale);
-    let stage = geometry::stage_size(overview, column);
+    let overview = geometry::scaled_size(geometry::ISLAND_WINDOW, scale);
+    let column = overview;
+    let stage = overview;
     let size = || win.inner_size().map(|s| [s.width, s.height]).unwrap_or([0, 0]);
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
@@ -1260,8 +1265,8 @@ fn settings_scenes(app: &AppHandle, tag: &str) {
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let scale = io.scale();
-    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
-    let chat_size = geometry::scaled_size(geometry::chat_window(area.h, scale), scale);
+    let overview = geometry::scaled_size(geometry::ISLAND_WINDOW, scale);
+    let chat_size = overview;
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
     wait_for_size(app, overview, Duration::from_secs(3));
@@ -1326,7 +1331,7 @@ fn settings_scenes(app: &AppHandle, tag: &str) {
     wait_for_size(app, overview, Duration::from_secs(3));
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
-    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
+    wait_for_size(app, geometry::scaled_size(geometry::ISLAND_WINDOW, scale), Duration::from_secs(3));
 }
 
 /// UI contract §9.1/§9.5 «Abito alive by default»: the R6 in `idle` must be
@@ -1873,9 +1878,9 @@ fn chat_evidence(app: &AppHandle) {
     let io = TauriIo(&win);
     let scale = io.scale();
     let area = refresh_work_area(app, &state);
-    let overview = geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale);
-    let chat_size = geometry::scaled_size(geometry::chat_window(area.h, scale), scale);
-    let compact = geometry::scaled_size(geometry::LOGICAL_COMPACT, scale);
+    let overview = geometry::scaled_size(geometry::ISLAND_WINDOW, scale);
+    let chat_size = overview;
+    let compact = overview;
 
     // expand (overview), then the `open` verb of the chat lane
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
@@ -1971,7 +1976,7 @@ fn chat_evidence(app: &AppHandle) {
         "step": "chat_evidence",
         "pointer_input": "the webview drives the REAL chat_action IPC itself; no pointer events",
         "chat_visible": [geometry::chat_visible(area.h, scale).0, geometry::chat_visible(area.h, scale).1],
-        "chat_native": [geometry::chat_window(area.h, scale).0, geometry::chat_window(area.h, scale).1],
+        "chat_native": [geometry::ISLAND_WINDOW.0, geometry::ISLAND_WINDOW.1],
         "fake_local_router": fake.origin(),
         "fake_requests": seen,
         "fake_requests_detail": "the GETs before the POST are the open-chat availability check and the turn preflight; no inference besides the one POST",
@@ -2366,7 +2371,7 @@ fn a11y_evidence(app: &AppHandle) {
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
     let scale = io.scale();
-    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_OVERVIEW, scale), Duration::from_secs(3));
+    wait_for_size(app, geometry::scaled_size(geometry::ISLAND_WINDOW, scale), Duration::from_secs(3));
     sleep(Duration::from_millis(900));
     state.chat_probe.lock().expect("chat probe lock").clear();
     if let Err(e) = win.eval(A11Y_JS) {
@@ -2386,7 +2391,7 @@ fn a11y_evidence(app: &AppHandle) {
     }));
     let plan = state.core.lock().expect("core lock").toggle(&io, area);
     apply_plan(app, &state, plan);
-    wait_for_size(app, geometry::scaled_size(geometry::LOGICAL_COMPACT, scale), Duration::from_secs(3));
+    wait_for_size(app, geometry::scaled_size(geometry::ISLAND_WINDOW, scale), Duration::from_secs(3));
     sleep(Duration::from_millis(200));
 }
 

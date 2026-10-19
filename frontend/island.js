@@ -6,8 +6,8 @@
      grow = spring response 0.5s / damping 0.72, shrink = 340ms
      cubic-bezier(.45,0,.2,1), prefers-reduced-motion snaps instantly, silence.
    - Forwards raw pointer events to the Rust core handlers, which own every
-     decision (click-vs-drag threshold, edge snap keeping X, clamping, grow
-     anchoring). This file never decides geometry policy.
+     decision (click-vs-drag cancellation and fixed native placement).
+     The desktop character has its own independent pick-up path.
    - Reports frontend evidence (SVG element count, canvas absence) to Rust.
    - Reads the motion override through the window.desktop facade (M1b):
      `animateAnyway` forces motion even under prefers-reduced-motion;
@@ -43,36 +43,33 @@
   };
   reduced.addEventListener('change', applyMotion);
 
-  // Visible island geometry per state. Native windows: 288x32 compact and 672x208 overview (set by Rust, geometry.rs);
-  // margins are the difference. S10 (human L34, «Barra de Coucou»): the resting island is Coucou's BAR, 288x32 with corners
-  // 0 0 14 14 (`COMPACT_W` x `NOTCH_H`, core/layout.ts @434d6a2b), and the window is the bar itself (no margin). The character sits where
-  // Coucou puts its bot (`botPosition('compact')`: cx 40, cy 16, diameter 20 → box 20*128/112 = 23). Drag, snap and edge memory
-  // are Rust's and only ever see the native rectangle.
+  // Visible geometry inside the ONE 672x340 logical native window (geometry.rs).
+  // The resting island is Coucou's 288x32 bar, square on top, radius 14 below.
+  // The character keeps Coucou's botPosition('compact'): cx 40, cy 16, diameter 20.
   const COMPACT = { w: 288, h: 32, r: 14, gap: 0, clay: 23, clayX: 40, drop: 1 };
   // S10 (L19): Coucou's own bot placement (core/layout.ts VIEW_LAYOUTS): overview botX 68 / diameter 58,
   // approval, question, error and finished botX 62 / diameter 56, centred on the 84pt card row
   // (cy 101 from the island top). The box is diameter * 128/112 because the engine draws ~112 of 128
   // viewBox units; only scale/position change, the engine is frozen. `cy` is the visible blob centre.
   // S10 (L24, «Notch pegado arriba como Coucou»): the expanded island is stuck to the top edge of the screen (gap 0) with
-  // Coucou's corners 0 0 14 14; Rust pins the window there (geometry::pin_top_center). Compact keeps its disc.
+  // Coucou's corners 0 0 14 14; Rust pins every view with geometry::island_window_rect.
   const OVERVIEW = { w: 640, h: 160, r: 14, gap: 0, clay: 66, clayX: 68, cy: 101 };
   const RECAP_H = 184; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
-  const QUESTION_H = 200; // Coucou QUESTION_PICKER_H: the question card is taller; the window already has room (672x208)
+  const QUESTION_H = 200; // Coucou QUESTION_PICKER_H: the fixed window already has room
   const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 101 };
   const BLOB_DROP = 10 / 140; // the drawn blob sits this fraction of the box below the box centre (measured, was drop 10 at box 140)
   // The engine draws its body ~112 viewBox units wide inside its 200x160
   // canvas (measured from the captures), so a box of 128px shows a ~70px
   // character. In the overview the SVG viewBox is tightened (attribute only,
   // engine bytes untouched) so box 136 shows ~127px and box 77 shows ~72px.
-  const R6_VISIBLE_UNITS = 112;
   const BASE_VB = [0, 20, 200, 160];
   const OVERVIEW_VB = [36, 32, 128, 128];
   // #309: the chat is a vertical COLUMN of the SAME expanded island. Its size arrives from Rust
   // (geometry::chat_visible through __islandSetView; the height follows the work area); this is
-  // only the pre-first-push default and must match geometry::CHAT_COLUMN_W / CHAT_PREFERRED_H.
+  // only the pre-first-push default and must match geometry::CHAT_COLUMN_W / CHAT_MIN_H.
   // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
   // (128 units show ~112) a 46px box shows ~40px.
-  const CHAT = { w: 640, h: 640, r: 22, clay: 46, clayLeft: 52, clayTop: 3 }; // S10 #480: 640 wide like the overview (geometry::CHAT_COLUMN_W); clayLeft is replaced below
+  const CHAT = { w: 640, h: 240, r: 22, clay: 46, clayLeft: 52, clayTop: 3 }; // S10 #480: 640 wide like the overview (geometry::CHAT_COLUMN_W); clayLeft is replaced below
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -150,7 +147,7 @@
   let mode = 'idle';    // 'idle' | 'spring' | 'shrink'
   let t0 = 0, p0 = 0, last = 0, raf = 0;
   let settledPhase = null; // #439: the landed phase this animation reached (see O.viewPhase)
-  let edge = 'top';     // docked vertical edge (mirrors the Rust state)
+  const edge = 'top';   // fixed to the work area's top edge
   // U1: second channel, 0 = overview, 1 = chat (same contract motion).
   const q = { x: 0, v: 0, target: 0, mode: 'idle', t0: 0, x0: 0, last: 0 };
 
@@ -193,9 +190,34 @@
     if (key === 'viewBox') el.setAttribute(key, value); else el.style[key] = value;
   };
 
+  // Only transition boundaries cross IPC, never the animation's per-frame samples.
+  function shapeReporter(invoke) {
+    let lastTarget = '', lastSettled = '', active = false;
+    const send = (size, settled) => {
+      if (!invoke) return;
+      const payload = { w: Math.round(size[0]), h: Math.round(size[1]), settled };
+      try { invoke('island_shape', { payload }).catch(() => {}); } catch { /* optional bridge */ }
+    };
+    return (destination, rendered, settled) => {
+      const key = destination.map(Math.round).join(',');
+      if (key !== lastTarget || (!settled && !active)) {
+        send(destination, false); lastTarget = key; lastSettled = '';
+      }
+      active = !settled;
+      if (settled) {
+        const renderedKey = rendered.map(Math.round).join(',');
+        if (renderedKey !== lastSettled) { send(rendered, true); lastSettled = renderedKey; }
+      }
+    };
+  }
+  const reportShape = shapeReporter(invoke);
+
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
-    const h = lerp(COMPACT.h, lerp(recapShown ? RECAP_H : questionShown ? QUESTION_H : OVERVIEW.h, CHAT.h, q.x), p);
+    const overviewHeight = recapShown ? RECAP_H : questionShown ? QUESTION_H : OVERVIEW.h;
+    const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
+    reportShape([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
+      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target)], [w, h], mode === 'idle' && q.mode === 'idle');
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
     const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
@@ -207,15 +229,8 @@
     put(island, 'width', w + 'px');
     put(island, 'height', h + 'px');
     put(island, 'borderRadius', `${rTop}px ${rTop}px ${rBottom}px ${rBottom}px`);
-    // Anchored to the docked edge: grows downward from the top, upward from
-    // the bottom — matching the native grow anchoring done by Rust.
-    if (edge === 'top') {
-      put(island, 'top', gap + 'px');
-      put(island, 'bottom', 'auto');
-    } else {
-      put(island, 'bottom', gap + 'px');
-      put(island, 'top', 'auto');
-    }
+    put(island, 'top', gap + 'px');
+    put(island, 'bottom', 'auto');
     // R6 is only scaled and positioned (never redrawn): centred in the
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
@@ -317,8 +332,7 @@
   }
 
   // Called from Rust (WebviewWindow::eval) after every core toggle.
-  function setPhase(phase, nextEdge) {
-    if (nextEdge === 'top' || nextEdge === 'bottom') edge = nextEdge;
+  function setPhase(phase) {
     settledPhase = null; // a new transition never inherits the previous latch
     const t = phase === 'overview' ? 1 : 0;
     target = t;
@@ -351,9 +365,6 @@
     render();
     if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
     document.dispatchEvent(new CustomEvent('island:view', { detail: view === 'chat' ? 'chat' : 'overview' }));
-  };
-  window.__islandSetEdge = e => {
-    if (e === 'top' || e === 'bottom') { edge = e; render(); }
   };
 
   // ---- frontend evidence for the read-back probe -------------------------
@@ -400,9 +411,8 @@
       send('drag_press', { x: botPress.x, y: botPress.y });
       botPress = null;
     }
-    // #336 L18: a spent hover engagement cancels ONLY this release — core.rs
-    // release() applies the snap first and then skips the toggle on
-    // cancelled, so the island keeps open; every later press is legacy.
+    // #336 L18: a spent hover engagement cancels ONLY this release, so the
+    // island stays open. Later presses use the ordinary click policy.
     // Merged BEFORE the send: the native IPC arguments stay byte-identical
     // (character-states-check pins that exact line and must not change).
     cancelled = cancelled || hoverEngagePress;
@@ -416,11 +426,15 @@
   const PICKUP_THRESHOLD = 3; // Coucou DRAG_THRESHOLD
   window.addEventListener('pointerdown', e => {
     if (e.button !== 0 || !e.isPrimary) return;
-    // Interactive elements own their clicks: a press on the dismiss button
-    // must not drag or toggle the island (Rust still owns every decision).
-    // U1: so do the composer, the transcript (text selection) and links of
-    // the chat and of the sign-in flow (#421) — drag never attaches to text or composer controls.
-    if (e.target && e.target.closest && e.target.closest('button, #settings a, textarea, input, #chat-log, #chat-composer')) return;
+    // Coucou's positive state model: a collapsed bar opens on press; an
+    // expanded island leaves every control (including divs) alone. Only #clay
+    // participates in the independent desktop-character pickup/slap path.
+    if (!onCharacter(e)) {
+      if (current && current.state === 'compact' && window.desktop) {
+        window.desktop.expand().catch(err => console.error('expand', err));
+      }
+      return;
+    }
     pressed = true;
     // #336 L18: capture the engagement at PRESS time (the native release
     // happens before any click event): the module's hoverOnly state says
@@ -433,8 +447,8 @@
     try { if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId); }
     catch { /* pointer capture is best-effort; X11 has an implicit grab */ }
     // #486: a press that starts ON the character may become a drag out to the desktop (Coucou); it is held
-    // back from the island's own drag until it moves. Everywhere else, and whenever the desktop character is
-    // unavailable, the island drag is exactly as before.
+    // back from click reporting until it moves. A character click is reported
+    // to Rust, which can open a compact island but never collapse an expanded one.
     if (onCharacter(e) && desktopCharacter && desktopCharacter.canPickUp()) botPress = { x: e.clientX, y: e.clientY };
     else send('drag_press', { x: e.clientX, y: e.clientY });
   });

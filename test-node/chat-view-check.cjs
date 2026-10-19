@@ -375,9 +375,9 @@ test('column: touch targets stay >= 44px', () => {
   assert.match(rule('#chat-input'), /min-height:\s*44px/);
 });
 
-test('chat island: the old horizontal chat constants (h 240) are gone; the width is the overview\'s 640', () => {
+test('chat island: Coucou starts at 240 high inside the fixed window, at the overview width', () => {
   const island = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'island.js'), 'utf8');
-  assert.doesNotMatch(island, /const CHAT = \{ w: 640, h: 240/);
+  assert.match(island, /const CHAT = \{ w: 640, h: 240/);
   assert.match(island, /const CHAT = \{ w: 640/, 'S10 #480: the chat is as wide as the overview island');
   assert.match(island, /window\.__islandSetView = \(view, vw, vh\)/, 'the size still comes from Rust');
 });

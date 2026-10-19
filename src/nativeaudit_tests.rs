@@ -4,10 +4,9 @@ use super::expected;
 fn contract_uses_runtime_scale_for_each_view() {
     for scale in [1.0, 1.25, 2.0] {
         for (view, logical) in [
-            ("compact", (288.0, 32.0)),
-            ("overview", (672.0, 208.0)),
-            // the chat starts at Coucou's minimum (240 visible) + 16 margin
-            ("chat", (672.0, 256.0)),
+            ("compact", (672.0, 340.0)),
+            ("overview", (672.0, 340.0)),
+            ("chat", (672.0, 340.0)),
         ] {
             assert_eq!(
                 expected(view, scale, (1048.0 * scale) as i32),

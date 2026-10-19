@@ -57,14 +57,14 @@ pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()>
                 let scale = window.scale_factor().map_err(|e| e.to_string())?;
                 let (lw, lh) = logical_size(w, h, scale).map_err(str::to_string)?;
                 let gtk = window.gtk_window().map_err(|e| e.to_string())?;
-                gtk.set_size_request(lw, lh); // also update on SHRINK, never leave chat's minimum
+                gtk.set_size_request(lw, lh); // fixed main-window minimum, in logical pixels
                 window
                     .set_size(tauri::PhysicalSize::new(w as u32, h as u32))
                     .map_err(|e| e.to_string())
             };
             if let Err(error) = apply() {
-                // Failed application is not completion; compact's bounded barrier
-                // timeout degrades unless an actual current-size observation arrives.
+                // A failed request is not completion; retain the visible error
+                // rather than claiming the fixed geometry was applied.
                 eprintln!("native size({w},{h}) failed: {error}");
             }
         })

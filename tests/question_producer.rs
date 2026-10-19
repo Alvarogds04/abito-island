@@ -11,7 +11,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -20,8 +20,7 @@ struct Fixture {
     connections: Arc<AtomicU32>, notices: Arc<AtomicU32>,
 }
 impl Fixture {
-    fn new() -> Self { Self::with_native_clock(None) }
-    fn with_native_clock(clock: Option<Arc<AtomicU64>>) -> Self {
+    fn new() -> Self {
         let source = PathBuf::from(std::env::var("ABITO_PI_PRODUCER_DIR")
             .expect("opt-in test requires ABITO_PI_PRODUCER_DIR; no fake producer fallback"));
         assert!(source.is_absolute() && source.is_dir(), "explicit producer directory required");
@@ -44,7 +43,6 @@ impl Fixture {
         let options = TransportOptions::new(&runtime, &project)
             .on_connections(move |count| { c.store(count, Ordering::SeqCst); })
             .on_notice(move |_| { n.fetch_add(1, Ordering::SeqCst); });
-        let options = match clock { Some(clock) => options.native_resize_clock(move || clock.load(Ordering::SeqCst)), None => options };
         let receiver = transport::create_transport(options).unwrap();
         Self { receiver, leaf, runtime, cwd, project, connections, notices }
     }
@@ -146,44 +144,6 @@ fn real_producer_question_host_answer_and_ack() {
     assert!(f.receiver.answer(&id, 1).is_err(), "ACK does not resurrect answerability");
     assert!(!serde_json::to_string(&f.receiver.question_snapshot()).unwrap().contains("QP2_PRIVATE_QUESTION_CANARY"));
     node.finish(); wait(|| f.connections.load(Ordering::SeqCst) == 0);
-    }
-}
-
-#[test]
-#[ignore = "requires ABITO_PI_PRODUCER_DIR and Node"]
-fn real_producer_negotiated_native_busy_and_degraded_matrix() {
-    for (mode, code, time, level2) in [("native-busy","native_transition_busy",0,true),
-        ("native-degraded","native_transition_degraded",2000,true),
-        ("native-busy-level1","native_transition_busy",0,false),
-        ("native-degraded-level1","native_transition_degraded",2000,false)] {
-        let clock = Arc::new(AtomicU64::new(0)); let f = Fixture::with_native_clock(Some(clock.clone()));
-        assert!(f.receiver.compact_resize(7, (304,44), || true, || None, |_| {}));
-        clock.store(time, Ordering::SeqCst);
-        let mut node = f.start(mode); let started = node.next();
-        assert_eq!(started["phase"], "question_pending", "no capability downgrade: {}", started["status"]);
-        let ready = if level2 { "{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"busyReason\":1}\n" }
-            else { "{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1}\n" };
-        assert_eq!(started["received"], json!(["{\"v\":1,\"type\":\"ready\"}\n", ready]));
-        let hello: Value = serde_json::from_str(started["questionsHello"].as_str().unwrap()).unwrap();
-        assert_eq!(hello.get("busyReason"), level2.then(|| json!(1)).as_ref()); assert_eq!(hello["questionVersion"], 1);
-        assert_eq!(hello.as_object().unwrap().len(), if level2 {7} else {6});
-        let id = started["id"].as_str().unwrap(); let completed = node.next();
-        let expected = if level2 { json!({"status":"busy","id":id,"reasonCode":code}) }
-            else { json!({"status":"busy","id":id}) };
-        assert_eq!(completed["result"], expected);
-        let copy = completed["copy"].as_str().unwrap();
-        assert!(copy.contains("No human answer") && copy.contains("normal chat"));
-        assert_eq!(copy.contains(code), level2);
-        let busy: Value = serde_json::from_str(completed["closedReply"].as_str().unwrap()).unwrap();
-        assert_eq!(busy.as_object().unwrap().len(), if level2 {10} else {9});
-        assert_eq!(busy.get("busyReason"), level2.then(|| json!(code)).as_ref());
-        assert!(completed["ack"].is_null());
-        let types: Vec<_> = completed["types"].as_array().unwrap().iter().filter(|t| **t != json!("heartbeat")).cloned().collect();
-        assert_eq!(types, json!(["hello","questions_hello","question"]).as_array().unwrap().clone());
-        let view = f.receiver.question_snapshot();
-        assert!(view.pending.is_none() && view.deliveries.is_empty()); assert_eq!(view.ready_connections, 1);
-        assert!(!serde_json::to_string(&view).unwrap().contains("QP2_PRIVATE_QUESTION_CANARY"));
-        node.finish(); wait(|| f.connections.load(Ordering::SeqCst) == 0);
     }
 }
 

@@ -440,7 +440,7 @@ pub async fn settings_view(
         .expect("chat rate lock")
         .check(now_ms())?;
     let open = parse_settings_view(&payload).ok_or_else(|| err("invalid_schema"))?;
-    crate::chathost::switch_settings(&app, &state, open);
+    let _ = app; // Compatibility command: Settings is hosted in its own window.
     Ok(json!({"open": open}))
 }
 
