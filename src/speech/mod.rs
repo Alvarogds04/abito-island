@@ -12,6 +12,9 @@
 //! (default `~/.local/share/abito/Models`). From then on everything runs offline.
 
 pub mod audio;
+pub mod wake;
+#[cfg(test)]
+mod wake_tests;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

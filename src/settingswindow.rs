@@ -317,7 +317,7 @@ mod tests {
     /// never silently become reachable from the settings window.
     #[test]
     fn f093_the_commands_reachable_from_settings_are_pinned_exactly() {
-        const REACHABLE: [&str; 13] = [
+        const REACHABLE: [&str; 14] = [
             "agent_action",
             "daemon_action",
             "dictation_action",
@@ -331,6 +331,7 @@ mod tests {
             "settings_window_action",
             "sound_action",
             "specialists_action",
+            "voice_action",
         ];
         let needle = concat!("#[tauri", "::command]");
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");

@@ -48,7 +48,21 @@ const FlowBridge = Object.freeze({
   download: () => call({ action: "download_model" }),
   removeModels: () => call({ action: "remove_model" })
 });
+const voiceCall = (payload) => invoke ? invoke("voice_action", { payload }) : Promise.reject(new Error("No disponible todavía"));
+const VoiceBridge = Object.freeze({
+  status: async () => {
+    try {
+      return await voiceCall({ action: "status" });
+    } catch {
+      return null;
+    }
+  },
+  setPrefs: (p) => voiceCall({ action: "set_prefs", prefs: { enabled: p.enabled === true, output: p.output, gender: p.gender, sensitivity: Math.max(0, Math.min(100, Math.round(Number(p.sensitivity ?? 50)))) } }),
+  download: () => voiceCall({ action: "download_model" }),
+  remove: () => voiceCall({ action: "remove_model" })
+});
 export {
   FlowBridge,
+  VoiceBridge,
   setInvoke
 };

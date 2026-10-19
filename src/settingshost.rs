@@ -118,6 +118,27 @@ pub fn start(app: &AppHandle) {
         .and_then(|dir| AccountStore::load(dir.join("accounts.json")).ok());
 }
 
+/// #488: the same transaction `prefs_action` runs, for a voice command ("add GitHub").
+/// Returns the new prefs, or None when the command is refused or could not be saved.
+pub(crate) fn voice_prefs_command(app: &AppHandle, command: &Command) -> Option<Prefs> {
+    let state = app.state::<AppState>();
+    prefs::transact(
+        &state.settings.prefs_serial,
+        &state.settings.prefs,
+        command,
+        |p| persist_prefs(app, p),
+        |snapshot| {
+            let _ = app.emit("prefs:state", view_prefs(snapshot));
+        },
+    )
+    .ok()
+}
+
+/// The current prefs, for a voice query.
+pub(crate) fn voice_prefs_snapshot(app: &AppHandle) -> Prefs {
+    app.state::<AppState>().settings.prefs.lock().expect("prefs lock").clone()
+}
+
 fn view_prefs(p: &Prefs) -> Value {
     json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors,
         "mainPill": p.main_pill(), "declaredPills": p.declared_pills(),

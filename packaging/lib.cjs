@@ -11,7 +11,7 @@ const R6_PREFIX = '40625d7f';
 const IDENTIFIER = 'com.abitog.AbitoTauri';
 const RESERVED = ['com.abitog.Abito', 'com.abitog.Abito.Preview', 'abito-desktop', 'abito-desktop-preview'];
 const FRONTEND_FILES = ['DESIGN.md', 'avatar-colors.js', 'character-desktop-logic.js', 'character-minibots.js', 'character-motion.js', 'chat-cards.js', 'chat-markdown.css', 'chat-markdown.js', 'chat-view.js', 'chat.js', 'clay-engine.js', 'desktop-character.css', 'desktop-character.html', 'desktop-character.js', 'desktop.js', 'diff-model.js', 'diff-views.js', 'event-views.js', 'file-open.js', 'icons.js', 'index.html', 'integrations-calendar.js', 'integrations-deployments.js', 'integrations-email.js', 'integrations-finance.js', 'integrations-github.js', 'integrations-mail.js', 'integrations-n8n.js',
-  'integrations-notion.js', 'integrations-payments.js', 'integrations-view.js', 'island-integrations.js', 'island-integrations.css', 'island-header.js', 'island-github.js', 'island-desktop.js', 'island-dictation.js', 'island-plan.js', 'island-recap.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'spotify-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js', 'views-f017-f019.md'];
+  'integrations-notion.js', 'integrations-payments.js', 'integrations-view.js', 'island-integrations.js', 'island-integrations.css', 'island-header.js', 'island-github.js', 'island-desktop.js', 'island-dictation.js', 'island-voice.js', 'island-voice.css', 'island-plan.js', 'island-recap.js', 'island-interaction.js', 'island.js', 'models.js', 'notify-view.js', 'notify.js', 'overview-view.js', 'pill-catalog.js', 'pill-settings.js', 'pills-view.js', 'spotify-view.js', 'pills.js', 'sessions-ticker.js', 'settings-view.js', 'settings.js', 'sound-engine.js', 'sound-wiring.js', 'specialists-view.js', 'specialists.js', 'style.css', 'theme.js', 'views-f017-f019.md'];
 FRONTEND_FILES.push('desktop-highlight.html', 'desktop-highlight.css');
 // Every embedded vendor source, generated module and license is a closed input.
 FRONTEND_FILES.push(
@@ -54,7 +54,7 @@ FRONTEND_FILES.push(
   'vendor/coucou/hub/personalization.ts', 'vendor/coucou/hub/personalization.js',
   'vendor/coucou/hub/pages.ts', 'vendor/coucou/hub/pages.js',
   'vendor/coucou/hub/dictation-pages.ts', 'vendor/coucou/hub/dictation-pages.js',
-  'vendor/coucou/hub/data-pages.ts', 'vendor/coucou/hub/data-pages.js', 'vendor/coucou/hub/keyaccounts.ts', 'vendor/coucou/hub/keyaccounts.js',
+  'vendor/coucou/hub/data-pages.ts', 'vendor/coucou/hub/data-pages.js', 'vendor/coucou/hub/keyaccounts.ts', 'vendor/coucou/hub/keyaccounts.js', 'vendor/coucou/hub/voice-page.ts', 'vendor/coucou/hub/voice-page.js',
   'vendor/coucou/hub/notch.ts', 'vendor/coucou/hub/notch.js',
   'vendor/coucou/hub/agents.ts', 'vendor/coucou/hub/agents.js',
   'vendor/coucou/hub/chat.ts', 'vendor/coucou/hub/chat.js',

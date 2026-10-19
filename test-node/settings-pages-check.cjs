@@ -22,7 +22,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
     renderAgentSettings: fake('agent-settings'), renderChatSettings: fake('chat-settings'),
     renderIntegrations: fake('integrations'), renderShortcuts: fake('shortcuts'),
     setInvoke() {}, dictationPage: fake('dictation'), flowSettingsPage: fake('flowsettings'),
-    dictionaryPage: fake('dictionary'), snippetsPage: fake('snippets'), stylesPage: fake('styles'), insightsPage: fake('insights'),
+    dictionaryPage: fake('dictionary'), snippetsPage: fake('snippets'), stylesPage: fake('styles'), insightsPage: fake('insights'), voicePage: fake('voice'),
     renderGeneral: fake('general'), card: x => x, row: () => new Element('div'),
     startHub: async (_root, opts) => { config = opts; }, Set, Promise };
   vm.runInNewContext(source+'\nglobalThis.closedInvoke = invoke;',context);
@@ -39,6 +39,9 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       assert(!inactivePages[id], 'wired FLOW routes are no longer inactive');
       await config.flowPages[id](container, {});
       assert.deepEqual(invoked, [[id, undefined]]);
+    } else if (id === 'voice') {
+      assert(!inactivePages.voice || config.flowPages.voice !== inactivePages.voice, 'OK Abito is wired (voice-page-check.cjs covers it)');
+      continue;
     } else if (config.flowPages[id]) {
       await config.flowPages[id](container, { hero, status: { prefs: { key: 'right_ctrl' }, platform: 'linux', models: { parakeet: { state: 'missing' }, downloadMb: 670 } }, navigate() {}, set onLeave(_) {} });
       assert(all(container).some(e => e.className.includes('hub-hero')), id);
