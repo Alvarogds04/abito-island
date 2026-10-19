@@ -719,10 +719,11 @@
       opener.disabled = !NV || !NV.openPayload({ isTrusted: true }, first, 'finished');
       opener.setAttribute('aria-label', first ? `Abrir aviso: ${first.title}` : 'Sin avisos');
     }
-    // T7.3 (design isla-ov-error): with no host notice, an unreachable engine
-    // itself carries the band — red ring, one short title, no action (the
-    // facade has no verb that reconnects a Pi-session transport).
-    const view = paintBand(notices); // L37: no notice = no band; «no Pi session» is Coucou's idle, never an error band
+    // Human L39 (verbatim): «tambien en la preview dejame usar abito y soluciona lo de sin conexion».
+    // Deliberate behaviour change approved by the human: with no Pi session the island shows
+    // Coucou's idle look and a quiet «Sin motor» status line, NOT the old red «Sin conexión» band.
+    // Red stays only for a real failure (the receiver did not start). Pinned in island-notices-check.
+    const view = paintBand(notices);
     noticeBand = view;
     // #373 GD032: the strip carries the view's severity tone (error → red,
     // warning → sun); plain dataset writes below, never markup.
