@@ -329,9 +329,12 @@
       const row=()=>byId(`shortcut-${id}`), sw=()=>row().querySelector('button');
       const before=await invoke('hotkey_action',payload(id,'view'));
       await click(sw());
-      await wait(async()=>sw()?.disabled===false && (await invoke('hotkey_action',payload(id,'view'))).enabled!==before.enabled,`${id}: interruptor guardado`);
+      // XTest delivery and native config readback can precede the renderer's
+      // rebind completion. Check the current DOM AFTER the awaited IPC, never
+      // carry a pre-await "not busy" observation into the next trusted click.
+      await wait(async()=>{const next=await invoke('hotkey_action',payload(id,'view'));return next.enabled!==before.enabled && sw()?.disabled===false;},`${id}: interruptor guardado`);
       await click(sw());
-      await wait(async()=>sw()?.disabled===false && (await invoke('hotkey_action',payload(id,'view'))).enabled===before.enabled,`${id}: restaurado`);
+      await wait(async()=>{const next=await invoke('hotkey_action',payload(id,'view'));return next.enabled===before.enabled && sw()?.disabled===false;},`${id}: restaurado`);
       views[id]=await invoke('hotkey_action',payload(id,'view'));
     }
     // A rejected collision must leave BOTH configurations intact.

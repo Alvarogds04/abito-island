@@ -104,7 +104,7 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
       r.append(keycap);
       list.append(r);
     }
-    feedback.textContent = Object.values(views).some((v) => v?.status === "permission_pending") ? t("Asking your desktop to register the shortcuts. It may show its own window to confirm them.") : Object.values(views).map((hotkey) => V.generalView({ hotkey }).hotkey).flatMap((view) => [view?.backendLabel, view?.note]).filter(Boolean).join(" — ");
+    feedback.textContent = Object.values(views).some((v) => v?.status === "permission_pending") ? t("Asking your desktop to register the shortcuts. It may show its own window to confirm them.") : [...new Set(Object.values(views).map((hotkey) => V.generalView({ hotkey }).hotkey).flatMap((view) => [view?.backendLabel, view?.note]).filter(Boolean))].join(" — ");
     reset.disabled = Object.values(views).some((v) => !v) || busy;
   }
   const reset = trusted(h("button", { id: "shortcut-reset", text: t("Reset to defaults") }));

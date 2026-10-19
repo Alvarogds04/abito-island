@@ -89,7 +89,7 @@ const es: Record<string, string> = {
   "words/min": "palabras/min",
   "days in a row": "días seguidos",
   // Slice 4: Spanish entries/substrings from upstream strings.json/extra.json, brand replacement only.
-  'Pick up to {max} pills to show next to el personaje — {used}/{max} in use.': 'Elige hasta {max} pestañas para mostrar junto a el personaje — {used}/{max} en uso.',
+  'Pick up to {max} pills to show next to el personaje — {used}/{max} in use.': 'Elige hasta {max} pestañas para mostrar junto al personaje — {used}/{max} en uso.',
   'Keys are stored in the {store}.': 'Las claves se guardan en {store}.',
   'Keys stay in the system keychain.': 'Las claves se quedan en el llavero del sistema.',
   'Secret key': 'Clave secreta', 'Token': 'Token', 'Instance URL': 'URL de la instancia', 'Integration token': 'Token de integración',
@@ -105,7 +105,7 @@ const es: Record<string, string> = {
   'Open or close the island': 'Abrir o cerrar la isla', 'Open the chat': 'Abrir el chat',
   'Go to the waiting permission or question': 'Ir al permiso o la pregunta pendiente', 'Open the terminal': 'Abrir la terminal',
   'Next pill': 'Siguiente pestaña', 'Previous pill': 'Pestaña anterior',
-  'Mute or unmute Abito': 'Silenciar o activar a el personaje', 'Send Abito to the desktop': 'Enviar a el personaje al escritorio',
+  'Mute or unmute Abito': 'Silenciar o activar al personaje', 'Send Abito to the desktop': 'Enviar al personaje al escritorio',
   'Open the wardrobe': 'Abrir el guardarropa', 'Next or previous pill': 'Pestaña siguiente o anterior',
   'Go to pill 1 to 9': 'Ir a la pestaña 1 a 9', 'Navigate list items': 'Navegar por los elementos de la lista',
   'Open selected item': 'Abrir elemento seleccionado', 'Open / close current diff': 'Abrir / cerrar diff actual',
