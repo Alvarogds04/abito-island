@@ -645,3 +645,17 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 #chat-model-row { padding-left: 100px; justify-content: flex-start; }
 #chat-composer #chat-input { flex: 1 1 auto; min-width: 0; }
 #chat-history-controls { padding-left: 92px; }
+
+/* L35: Coucou's prompt view is 240 high at rest, so the chat is compact: the who-row sits ON the card's first line next to the
+   history tabs, the status strip is drawn over the card's right corner (it only has content when there is something to say), and
+   the model row + composer are the last two rows (Coucou's .model-row + .chat-bar). 44px hit areas stay; visuals are Coucou's. */
+#chat { padding: 38px 10px 8px; }
+#chat-header { position: absolute; top: 44px; left: 24px; right: 24px; min-height: 22px; padding: 0; z-index: 3; }
+#chat-status-strip { position: absolute; top: 46px; right: 70px; padding: 0; min-height: 0; z-index: 3; }
+#chat-body { padding: 24px 14px 6px; min-height: 0; }
+#chat-history-controls { min-height: 28px; margin: 0 0 -2px; padding-left: 92px; }
+#chat-history-controls .icon-btn { min-height: 44px; margin: -8px 0; }
+#chat-log { min-height: 0; padding-top: 0; padding-bottom: 2px; }
+#chat-model-row { margin-top: 2px; }
+#chat-composer { margin-top: 2px; }
+#chat-input { min-height: 36px; padding: 6px 10px; }

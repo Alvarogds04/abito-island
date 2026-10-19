@@ -74,8 +74,8 @@ export function buildStates(f) {
       abito: { label: 'settings', url: 'settings.html', run: click(i, id), settle: 1500 } });
   });
   // Chat tab of the island (Coucou: prompt view; Abito: chat column).
-  states.push({ id: 'chat', title: 'Island chat view', w: 720, h: 660,
+  states.push({ id: 'chat', title: 'Island chat view', w: 720, h: 330,
     coucou: { page: 'island', run: cAll(f) + `__vcCoucou.island.expand('prompt');` },
-    abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `window.__islandSetView('chat', 640, 640);`, settle: 2500 } });
+    abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `window.__islandSetView('chat', 640, 240);`, settle: 2500 } });
   return states;
 }

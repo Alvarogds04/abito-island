@@ -69,10 +69,20 @@ pub const OVERVIEW_VISIBLE: (i32, i32) = (640, 160);
 /// with the message count, which Rust cannot know; a real conversation needs the room). These are the VISIBLE sizes, in
 /// logical px; the native window adds the margins (see [`chat_window`]). Ajustes has its own window now: this is only the chat.
 pub const CHAT_COLUMN_W: i32 = 640;
-/// Visible height when the screen allows it.
-pub const CHAT_PREFERRED_H: i32 = 640;
-/// Never shorter than the old horizontal chat (240): small screens keep a usable chat.
+/// S10 (human L35, «Alto de Coucou, crece con los mensajes»): the chat height is Coucou's `chatPromptHeight` (windows/src/core/layout.ts
+/// @434d6a2b): `Math.min(300, 240 + messageCount * 40)`. 240 is where it starts, 300 the cap it scrolls beyond.
+pub const CHAT_MAX_H: i32 = 300;
+/// Never shorter than Coucou's prompt view (240): small screens keep a usable chat.
 pub const CHAT_MIN_H: i32 = 240;
+/// Coucou's growth per message (`messageCount * 40`).
+pub const CHAT_GROWTH_PER_MESSAGE: i32 = 40;
+
+/// `chatPromptHeight(messageCount)` of Coucou, in logical px. The page computes the same rule and reports the height it wants;
+/// Rust never trusts it (see [`clamp_chat_height`]) but pins the rule here so both sides read the same numbers.
+pub fn chat_prompt_height(messages: u32) -> i32 {
+    let grown = i64::from(CHAT_MIN_H) + i64::from(messages) * i64::from(CHAT_GROWTH_PER_MESSAGE);
+    grown.min(i64::from(CHAT_MAX_H)) as i32
+}
 /// Logical px of air left between the far end of the window and the work-area edge it grows toward.
 pub const CHAT_FAR_GAP: i32 = 40;
 
@@ -122,8 +132,25 @@ fn logical_area_h(area_h_phys: i32, scale: f64) -> i32 {
 /// Visible chat size in logical px for a work area of `area_h_phys` physical px. Rust owns this
 /// number: the frontend only ever receives it (`__islandSetView`), it never decides the height.
 pub fn chat_visible(area_h_phys: i32, scale: f64) -> (i32, i32) {
+    chat_visible_for(area_h_phys, scale, CHAT_MIN_H)
+}
+
+/// The height the page asked for, forced into Coucou's range and into the room the work area leaves. Whatever the page sends
+/// (negative, huge, a stale number) comes out between [`CHAT_MIN_H`] and [`CHAT_MAX_H`], and a screen too short for the cap wins.
+pub fn clamp_chat_height(desired: i32, area_h_phys: i32, scale: f64) -> i32 {
     let room = logical_area_h(area_h_phys, scale) - CHAT_FAR_GAP - WINDOW_MARGIN.1;
-    (CHAT_COLUMN_W, room.clamp(CHAT_MIN_H, CHAT_PREFERRED_H))
+    desired.clamp(CHAT_MIN_H, CHAT_MAX_H).min(room).max(CHAT_MIN_H)
+}
+
+/// Visible chat size for a desired height (see [`clamp_chat_height`]).
+pub fn chat_visible_for(area_h_phys: i32, scale: f64, desired: i32) -> (i32, i32) {
+    (CHAT_COLUMN_W, clamp_chat_height(desired, area_h_phys, scale))
+}
+
+/// Native chat window for a desired height: the visible size plus the margins.
+pub fn chat_window_for(area_h_phys: i32, scale: f64, desired: i32) -> (i32, i32) {
+    let (w, h) = chat_visible_for(area_h_phys, scale, desired);
+    (w + WINDOW_MARGIN.0, h + WINDOW_MARGIN.1)
 }
 
 /// #408 — while Ajustes is open the chat column grows to a comfortable working size. VISIBLE sizes,
@@ -152,8 +179,7 @@ pub fn settings_window(area_w_phys: i32, area_h_phys: i32, scale: f64) -> (i32, 
 
 /// Native chat window in logical px: the visible column plus the overview's window margins.
 pub fn chat_window(area_h_phys: i32, scale: f64) -> (i32, i32) {
-    let (w, h) = chat_visible(area_h_phys, scale);
-    (w + WINDOW_MARGIN.0, h + WINDOW_MARGIN.1)
+    chat_window_for(area_h_phys, scale, CHAT_MIN_H)
 }
 
 /// The window that holds BOTH views of a transition. Width and height move in opposite
@@ -637,27 +663,46 @@ mod tests {
         assert_eq!(chat_window(1048, 1.0).0, 672, "the same window width as the overview: nothing shifts sideways");
     }
 
+    // S10 (L35, «Alto de Coucou, crece con los mensajes»): the chat height is Coucou's `chatPromptHeight`
+    // (windows/src/core/layout.ts @434d6a2b): `Math.min(300, 240 + messageCount * 40)`.
     #[test]
-    fn chat_height_is_the_preferred_one_when_the_screen_allows_it() {
-        assert_eq!(CHAT_PREFERRED_H, 640);
-        assert_eq!(chat_visible(1048, 1.0).1, 640);
-        assert_eq!(chat_visible(2000, 1.0).1, 640, "never taller than preferred, however big the screen");
+    fn chat_height_follows_coucous_prompt_rule() {
+        assert_eq!((CHAT_MIN_H, CHAT_MAX_H), (240, 300));
+        for (messages, expected) in [(0, 240), (1, 280), (2, 300), (3, 300), (50, 300), (u32::MAX, 300)] {
+            assert_eq!(chat_prompt_height(messages), expected, "{messages} messages");
+        }
+        // at rest (no report from the page yet) the chat starts at Coucou's minimum
+        assert_eq!(chat_visible(1048, 1.0), (640, 240));
+        assert_eq!(chat_window(1048, 1.0), (672, 256));
+    }
+
+    #[test]
+    fn the_desired_chat_height_is_clamped_in_rust_to_coucous_min_and_max() {
+        for (desired, expected) in [(-5, 240), (0, 240), (239, 240), (240, 240), (270, 270), (300, 300), (301, 300), (656, 300), (i32::MAX, 300)] {
+            assert_eq!(chat_visible_for(1048, 1.0, desired), (640, expected), "desired {desired}");
+            assert_eq!(chat_window_for(1048, 1.0, desired), (672, expected + 16), "desired {desired}");
+        }
+        // a short screen still wins over the cap, and never goes under the minimum
+        assert_eq!(chat_visible_for(320, 1.0, 300).1, 264, "320 - 40 gap - 16 margin");
+        assert_eq!(chat_visible_for(100, 1.0, 300).1, 240);
+        // logical px whatever the scale
+        assert_eq!(chat_visible_for(2096, 2.0, 280), chat_visible_for(1048, 1.0, 280));
     }
 
     #[test]
     fn chat_height_shrinks_with_the_work_area_and_leaves_air_at_the_far_edge() {
-        for area_h in [900, 768, 700, 600, 500] {
-            let (_, vh) = chat_visible(area_h, 1.0);
+        for area_h in [900, 768, 700, 600, 500, 330] {
+            let (_, vh) = chat_visible_for(area_h, 1.0, CHAT_MAX_H);
             let window_h = vh + 16;
             assert!(window_h <= area_h - CHAT_FAR_GAP || vh == CHAT_MIN_H, "{area_h}: window {window_h} leaves less than {CHAT_FAR_GAP}px");
             assert!(vh >= CHAT_MIN_H);
         }
-        assert_eq!(chat_visible(600, 1.0).1, 600 - CHAT_FAR_GAP - 16, "a short screen shrinks the column");
-        assert_eq!(chat_visible(768, 1.0).1, 640, "768 still fits the preferred height");
+        assert_eq!(chat_visible_for(320, 1.0, CHAT_MAX_H).1, 320 - CHAT_FAR_GAP - 16, "a short screen shrinks the chat below the cap");
+        assert_eq!(chat_visible_for(768, 1.0, CHAT_MAX_H).1, CHAT_MAX_H, "768 still fits the cap");
         // monotonic: a taller area never gives a shorter chat
         let mut last = 0;
         for h in (300..1300).step_by(7) {
-            let v = chat_visible(h, 1.0).1;
+            let v = chat_visible_for(h, 1.0, CHAT_MAX_H).1;
             assert!(v >= last, "{h}");
             last = v;
         }
@@ -677,7 +722,7 @@ mod tests {
         // the work area arrives in PHYSICAL px; the contract is logical
         assert_eq!(chat_visible(2096, 2.0), chat_visible(1048, 1.0));
         assert_eq!(chat_visible(1310, 1.25), chat_visible(1048, 1.0));
-        assert_eq!(scaled_size(chat_window(2096, 2.0), 2.0), (1344, 1312));
+        assert_eq!(scaled_size(chat_window(2096, 2.0), 2.0), (1344, 512));
         // a broken scale degrades to 1.0, never to a zero or absurd window
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert_eq!(chat_visible(1048, bad), chat_visible(1048, 1.0), "{bad}");
@@ -703,23 +748,23 @@ mod tests {
         assert_eq!(LOGICAL_COMPACT, COMPACT_BAR);
         assert_eq!(LOGICAL_COMPACT, (288, 32), "the bar is 288 wide: Coucou's NOTCH_W 184 + 104");
         assert!(LOGICAL_COMPACT.0 < OVERVIEW_VISIBLE.0 && LOGICAL_COMPACT.1 < OVERVIEW_VISIBLE.1);
-        // the chat is as wide as the overview island and much taller
-        assert!(CHAT_COLUMN_W == OVERVIEW_VISIBLE.0 && CHAT_PREFERRED_H > OVERVIEW_VISIBLE.1);
+        // the chat is as wide as the overview island and taller than its 160 (Coucou's prompt view: 240 at least)
+        assert!(CHAT_COLUMN_W == OVERVIEW_VISIBLE.0 && CHAT_MIN_H > OVERVIEW_VISIBLE.1);
     }
 
     #[test]
     fn chat_grows_upward_when_docked_at_the_bottom_and_stays_centred() {
         let a = area();
         let size = chat_window(a.h, 1.0);
-        assert_eq!(size, (672, 656));
+        assert_eq!(size, (672, 256));
         let overview = Rect { x: 624, y: a.bottom() - 176, w: 672, h: 176 };
         let chat = anchor_toggle(Edge::Bottom, overview, size, a);
         assert_eq!(chat.bottom(), a.bottom());
         // the window centre does not move: same width, same x
-        assert_eq!((chat.x + chat.w / 2, chat.w, chat.h), (624 + 336, 672, 656));
+        assert_eq!((chat.x + chat.w / 2, chat.w, chat.h), (624 + 336, 672, 256));
         let top = Rect { x: 624, y: a.y, w: 672, h: 176 };
         let chat = anchor_toggle(Edge::Top, top, size, a);
-        assert_eq!((chat.y, chat.h), (a.y, 656));
+        assert_eq!((chat.y, chat.h), (a.y, 256));
     }
 
     #[test]

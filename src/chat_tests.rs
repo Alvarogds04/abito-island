@@ -627,3 +627,26 @@ fn tool_events_after_a_terminal_turn_are_refused() {
     c.apply(&t, 2, Event::Complete(FinishReason::Stop)).unwrap();
     assert_eq!(c.apply(&t, 3, call("c1", "read", ToolState::Done, None)), Err(Reject::AfterTerminal));
 }
+
+// --- S10 (L35): the page reports the chat height it wants (Coucou's growing prompt) ------------------------------------
+
+#[test]
+fn the_height_verb_is_exact_closed_and_integer_only() {
+    assert_eq!(parse_command(&json!({"action": "height", "height": 280})).unwrap(), Command::Height { height: 280 });
+    // the numbers are NOT trusted here either: out-of-range ones parse (Rust clamps them to Coucou's 240..300 later), but only integers
+    assert_eq!(parse_command(&json!({"action": "height", "height": -5})).unwrap(), Command::Height { height: -5 });
+    assert_eq!(parse_command(&json!({"action": "height", "height": 100000})).unwrap(), Command::Height { height: 100000 });
+    for bad in [
+        json!({"action": "height"}),
+        json!({"action": "height", "height": "280"}),
+        json!({"action": "height", "height": 280.5}),
+        json!({"action": "height", "height": null}),
+        json!({"action": "height", "height": true}),
+        json!({"action": "height", "height": 280, "width": 640}),
+        json!({"action": "height", "h": 280}),
+        json!({"action": "height", "height": 4_294_967_296_i64}),
+        json!({"action": "height", "height": [280]}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad} must be refused");
+    }
+}

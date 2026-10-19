@@ -92,10 +92,11 @@ test('chat top bar: visible title «Abito» before the gear/back buttons (design
   assert.equal(t['font-size'], 'var(--fs-body)');
   assert.equal(t['font-weight'], '600');
 });
-test('chat «Conectado» chip sits in flow under the header, left aligned (design isla-chat-*)', () => {
+test('chat status chip (S10 L35): drawn over the card\'s top-right corner on Coucou\'s 240px chat, still never moving the log (it takes no flow room)', () => {
   const o = decls('#chat-status-strip');
-  assert.equal(o.position, 'static', 'in flow, above the body card (was an absolute centred pill)');
-  assert.equal(o.transform, 'none');
+  assert.equal(o.position, 'absolute', 'out of flow: a chip that appears and disappears never pushes the history');
+  assert.equal(o['min-height'], '0');
+  assert.equal(o.right, '70px');
 });
 test('chat body top row: «+» and history left-aligned, then the label «Conversación nueva» (existing verbs only)', () => {
   const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');

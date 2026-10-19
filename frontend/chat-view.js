@@ -500,5 +500,20 @@
     return `${oneDecimal(n / (1024 * 1024))} MB`;
   }
 
-  return { mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  // S10 (human L35, «Alto de Coucou, crece con los mensajes»): Coucou's `chatPromptHeight(messageCount)` (windows/src/core/layout.ts
+  // @434d6a2b, used as `chatPromptHeight(State.chatHistory.length)` in island.ts): `Math.min(300, 240 + messageCount * 40)`.
+  // A message is what the log shows as a bubble: the human's text and the agent's reply (a turn with no reply yet counts one).
+  const CHAT_MIN_H = 240, CHAT_MAX_H = 300, CHAT_GROWTH = 40;
+  function messageCount(view) {
+    if (!view || !Array.isArray(view.turns)) return 0;
+    let n = 0;
+    for (const t of view.turns) {
+      if (!t || typeof t !== 'object') continue;
+      n += 1; // the human's message
+      if (typeof t.reply === 'string' && t.reply.length > 0) n += 1;
+    }
+    return n;
+  }
+  function chatHeight(view) { return Math.min(CHAT_MAX_H, CHAT_MIN_H + messageCount(view) * CHAT_GROWTH); }
+  return { messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

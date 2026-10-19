@@ -158,12 +158,12 @@ fn questioncmd_native_resize_known_size_never_bypasses_unsettled_generation() {
 fn questioncmd_native_recovery_only_accepts_current_plan_physical_size() {
     // the chat column follows the work area height (physical px): 1048 -> 672x656, 2096@2x -> same logical
     for (expanded, chat, expected) in [(false,false,(288,32)),(false,true,(288,32)),
-                                     (true,false,(672,208)),(true,true,(672,656))] {
+                                     (true,false,(672,208)),(true,true,(672,256))] {
         assert_eq!(desired_native_size(expanded, chat, 1.0, 1048), expected);
         assert_eq!(desired_native_size(expanded, chat, 2.0, 2096), (expected.0*2, expected.1*2));
     }
     // a shorter screen gets a shorter column, and only the chat depends on it
-    assert_eq!(desired_native_size(true, true, 1.0, 600), (672, 600 - 40));
+    assert_eq!(desired_native_size(true, true, 1.0, 600), (672, 256));
     assert_eq!(desired_native_size(true, false, 1.0, 600), (672, 208));
     for timed_out in [false,true] {
         let mut barrier = NativeResizeBarrier::default();
@@ -219,4 +219,15 @@ fn questioncmd_budget_literal_escaping_validation_and_privacy() {
     let v = serde_json::to_string(&text_budget(&slot, ID, "secret", NOW).unwrap()).unwrap();
     for secret in ["secret","session-1","private-a","project","source"] { assert!(!v.contains(secret)); }
     assert!(slot.active().is_some());
+}
+
+#[test]
+fn the_desired_native_size_follows_the_chat_height_the_page_asked_for() {
+    // S10 (L35): a growing chat is a bigger native window, so the recovery check must expect that one, not the 256 at rest
+    for (asked, window_h) in [(240, 256), (280, 296), (300, 316), (999, 316), (0, 256)] {
+        assert_eq!(desired_native_size_for(true, true, 1.0, 1048, asked), (672, window_h), "asked {asked}");
+    }
+    assert_eq!(desired_native_size_for(true, false, 1.0, 1048, 300), (672, 208), "the overview never takes the chat height");
+    assert_eq!(desired_native_size_for(false, true, 1.0, 1048, 300), (288, 32));
+    assert_eq!(desired_native_size_for(true, true, 2.0, 2096, 300), (1344, 632));
 }

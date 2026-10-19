@@ -648,3 +648,24 @@ test('F024 markup: the row sits between «Respuesta nueva» and the composer, wi
 });
 
 console.log(`chat-view-check: ${passed} passed`);
+
+// ---- S10 (human L35): Coucou's growing chat height -----------------------------------------------------------------
+test('chat height: Coucou\'s chatPromptHeight (240 + 40 per message, capped at 300), counted on what the log shows', () => {
+  assert.deepEqual([V.CHAT_MIN_H, V.CHAT_MAX_H], [240, 300]);
+  const turn = (reply) => ({ turn_id: 't-1', user_text: 'hola', reply });
+  assert.equal(V.chatHeight(null), 240); assert.equal(V.chatHeight({}), 240); assert.equal(V.chatHeight({ turns: [] }), 240);
+  assert.equal(V.chatHeight({ turns: [turn('')] }), 280, 'a human message with no reply yet: 1 message');
+  assert.equal(V.chatHeight({ turns: [turn('ok')] }), 300, 'human + reply = 2 messages: 240 + 80 = 320 → capped at 300');
+  assert.equal(V.chatHeight({ turns: Array.from({ length: 50 }, () => turn('x')) }), 300, 'the cap, scrolling beyond');
+  assert.equal(V.messageCount({ turns: [turn('a'), null, 5, turn('')] }), 3, 'garbage rows are not messages');
+  assert.equal(V.messageCount({ turns: 'x' }), 0);
+});
+
+test('chat height wiring: the page reports it through the closed `height` verb, only in the chat view, only when it changed, once at a time', () => {
+  const chat = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  assert.match(chat, /action\(\{ action: 'height', height: wanted \}\)/);
+  assert.match(chat, /if \(capsule\.dataset\.view !== 'chat' \|\| reporting\) return;/);
+  assert.match(chat, /if \(wanted === reportedHeight\) return;/);
+  assert.match(chat, /view = next;\s*reportHeight\(\);/, 'every new conversation view is measured');
+  assert.match(chat, /island:view[^\n]*reportedHeight = 0/, 'opening the chat measures it again');
+});
