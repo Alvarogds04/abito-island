@@ -776,40 +776,44 @@ test('#304 wiring: the page decides motion itself (data-motion on <html>), start
   assert.match(islandSrc, /AbitoClay\.setForced\(!honorSystem\)/);
 });
 
-test('#302 round dot: the compact island is Coucou\'s 32px pill height (S10), in step with the native 44x44 window; it takes less room than the pill', () => {
+test('L34 Coucou\'s bar: the collapsed island is 288x32 with corners 0 0 14 14, in step with the native 288x32 window, the character where Coucou puts its bot', () => {
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
-  const diameter = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
-  assert.equal(diameter, 32);
-  assert.match(geo, /LOGICAL_COMPACT: \(i32, i32\) = \(DOT_DIAMETER \+ 12, DOT_DIAMETER \+ 12\)/);
-  const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), drop: (\d+) \}/.exec(islandSrc);
+  assert.match(geo, /pub const COMPACT_BAR: \(i32, i32\) = \(288, 32\);/);
+  assert.match(geo, /pub const LOGICAL_COMPACT: \(i32, i32\) = COMPACT_BAR;/);
+  assert.doesNotMatch(geo, /pub const DOT_DIAMETER/, 'the disc is gone');
+  const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), clayX: (\d+), drop: (\d+) \}/.exec(islandSrc);
   assert.ok(m, 'COMPACT constant');
-  const [w, h, r, gap, clay] = m.slice(1, 6).map(Number);
-  assert.deepEqual([w, h], [diameter, diameter], 'a circle: width = height = the measured diameter');
-  assert.equal(r, diameter / 2, 'fully round');
-  assert.equal(gap, 6, 'the same edge gap the pill had: the transparent margin is (44-32)/2');
-  assert.equal(w + 2 * gap, 44, 'visible dot + margins = the native compact window');
-  assert.ok(w * h < 288 * 32, 'less area than the old pill');
-  assert.ok(clay >= 24 && clay <= diameter, 'the character box fits the disc');
+  const [w, h, r, gap, clay, clayX] = m.slice(1, 7).map(Number);
+  assert.deepEqual([w, h, r, gap], [288, 32, 14, 0], 'the visible bar is the native window: no margin');
+  assert.equal(clayX, 40, 'Coucou botPosition(compact): cx 40');
   const vbx = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   const visible = clay * 112 / vbx[2];
-  assert.ok(visible >= 20 && visible <= diameter - 6, `the visible character (${visible.toFixed(1)}px) sits inside the disc with a clear rim`);
+  assert.ok(Math.abs(visible - 20) <= 1, `the visible character (${visible.toFixed(1)}px) is Coucou's 20px bot`);
+  assert.ok(clayX - clay / 2 >= 0 && clay <= h, 'the character box sits inside the bar');
+  assert.match(islandSrc, /const rTop = 0, rBottom = lerp\(COMPACT\.r, OVERVIEW\.r, p\);/);
 });
 
-test('#302 the dot keeps the badge/contour vocabulary: T7.3 design isla-compacta-sun/red puts the badge at x58-67,y8-16 of the 78px window (over the rim); sun contour only in compact', () => {
-  // T7.3 (D11, design wins): was «badge centre on the rim, INSIDE the disc» (dist <= 33). The design
-  // draws it over the rim: centre (62.5, 12) in window coordinates = 35.8px from the dot centre.
+test('L34 the bar keeps the badge/contour vocabulary: the sun badge rides the character, the contour is inside the bar (no window margin to draw outside)', () => {
   const flag = /#compact-flag \{([^}]*)\}/.exec(css)[1];
   const left = Number(/left:\s*(\d+)px/.exec(flag)[1]), top = Number(/top:\s*(\d+)px/.exec(flag)[1]), size = Number(/width:\s*(\d+)px/.exec(flag)[1]);
   const cx = left + size / 2, cy = top + size / 2;
-  // S10: the disc shrank 66 -> 32 in a 44px window; the badge keeps the design's angle over the rim (same ratio 16/33).
-  const k = 16 / 33, ex = 22 + (62.5 - 39) * k, ey = 22 + (12 - 39) * k;
-  assert.ok(Math.abs(cx - ex) <= 1 && Math.abs(cy - ey) <= 1, `badge centre (${cx}, ${cy}) matches the scaled design (${ex.toFixed(1)}, ${ey.toFixed(1)})`);
-  // outside #island (overflow: hidden clips the rim), inside #capsule, so the overhang is drawn
+  assert.ok(Math.abs(cx - 47) <= 1.5 && Math.abs(cy - 8) <= 1.5, `badge centre (${cx}, ${cy}) rides the top-right of the character (47, 8)`);
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   const chat = html.indexOf('id="chat-live"'); // last element inside #island
   assert.ok(html.indexOf('id="compact-flag"') > chat, 'the badge is after the last #island child');
   assert.match(html.slice(chat, html.indexOf('id="compact-flag"')), /<\/section>\s*<\/div>/, '#island closes before the badge');
   assert.match(css, /#capsule\[data-card-tone="sun"\] #island \{ box-shadow: inset 0 0 0 2px var\(--sun\)/);
+  const isl = fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
+  assert.match(isl, /\[data-dictation\] #island \{ box-shadow: inset 0 0 0 2px/, 'the dictation ring is inset: the window has no margin');
+});
+
+test('L34 mini grid: up to four small characters on the bar, 13px cells 3px apart at x233.5 (Coucou #mini-grid), shown only while collapsed', () => {
+  const isl = fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
+  assert.match(isl, /#mini-grid \{[^}]*left: 233\.5px; top: 1\.5px; width: 29px; height: 29px;[^}]*grid-template-columns: 13px 13px; grid-auto-rows: 13px; gap: 3px;/);
+  assert.match(isl, /#capsule\[data-phase="compact"\] #mini-grid\[data-count\]:not\(\[data-count="0"\]\) \{ display: grid; \}/);
+  const t = fs.readFileSync(path.join(frontend, 'sessions-ticker.js'), 'utf8');
+  assert.match(t, /view\.rows\.slice\(0, 4\)/); assert.match(t, /AbitoClay\.create\(svg/);
+  assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /<div id="mini-grid" aria-hidden="true"><\/div>/);
 });
 
 test('#302 drag/snap/edge memory are untouched: the native window is still a plain rectangle and nothing in the frontend decides docking', () => {
@@ -844,9 +848,9 @@ test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = 
     assert.fail(`tauri.conf.json unreadable: ${error}`);
   }
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
-  const dot = Number(/pub const DOT_DIAMETER: i32 = (\d+);/.exec(geo)[1]);
-  assert.deepEqual([conf.width, conf.height], [dot + 12, dot + 12]);
-  assert.deepEqual([conf.width, conf.height], [44, 44]);
+  const bar = /pub const COMPACT_BAR: \(i32, i32\) = \((\d+), (\d+)\);/.exec(geo).slice(1).map(Number);
+  assert.deepEqual([conf.width, conf.height], bar, 'L34: the window is the bar');
+  assert.deepEqual([conf.width, conf.height], [288, 32]);
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
   assert.doesNotMatch(readme, /All sizes land exactly 304x44/, 'README must not document the old compact size as the contract');
 });

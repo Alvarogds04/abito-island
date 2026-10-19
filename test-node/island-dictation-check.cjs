@@ -60,13 +60,43 @@ test('wiring: closed events and verbs only; trusted clicks; inert in the setting
   for (const verb of src.match(/payload: \{ action: [^}]+\}/g) || []) assert.match(verb, /action: (verb|api\.VERBS\.status)/, verb);
   assert.match(src, /e\.isTrusted !== true\) return; e\.stopPropagation\(\)/);
   assert.match(src, /label === 'settings'\) return/);
-  assert.doesNotMatch(src, /desktop\.expand|desktop\.close|set_prefs|download_model|remove_model|getUserMedia|innerHTML/);
+  assert.doesNotMatch(src, /set_prefs|download_model|remove_model|getUserMedia|innerHTML/);
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   assert.equal((html.match(/src="island-dictation\.js"/g) || []).length, 1);
   const css = fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
   assert.match(css, /\.dcapsule \{[^}]*border-radius: 999px/); assert.match(css, /\.dcapsule\.handsfree \{ box-shadow: inset 0 0 0 1\.5px rgba\(249, 115, 22, 0\.85\)/);
   assert.match(css, /\.dpill \.bars i \{ width: 3\.4px; height: 3\.4px/); assert.match(css, /\.dpill \.pbtn::after \{ content: ""; position: absolute; inset: -8px; \}/, '44px hit around the 28px button');
   assert.match(css, /#capsule\[data-phase="compact"\]\[data-dictation="locked"\] #island/, 'the folded dot shows a live dictation');
+});
+
+// ---- #479: dictation opens a folded island, and only gives it back if WE opened it ------------------------------------
+test('reveal: a live dictation expands a folded or hidden island, never one that is already open or busy', () => {
+  for (const phase of ['listening', 'locked']) assert.equal(D.revealPlan({ phase, was: 'idle', enabled: true, island: { phase: 'compact', state: 'compact' } }), 'expand', phase);
+  assert.equal(D.revealPlan({ phase: 'listening', was: 'idle', enabled: true, island: { phase: 'compact', state: 'hidden' } }), 'expand', 'a hidden island is revealed too');
+  assert.equal(D.revealPlan({ phase: 'listening', was: 'idle', enabled: true, island: { phase: 'expanded', state: 'expanded' } }), 'none', 'already open');
+  assert.equal(D.revealPlan({ phase: 'locked', was: 'listening', enabled: true, island: { phase: 'compact', state: 'compact' } }), 'none', 'only the START of a dictation opens it, not hands-free after listening');
+  assert.equal(D.revealPlan({ phase: 'thinking', was: 'idle', enabled: true, island: { phase: 'compact', state: 'compact' } }), 'none');
+  for (const phase of ['idle', 'copied', 'failed']) assert.equal(D.revealPlan({ phase, was: 'idle', enabled: true, island: { phase: 'compact', state: 'compact' } }), 'none', phase);
+  assert.equal(D.revealPlan({ phase: 'listening', was: 'idle', enabled: false, island: { phase: 'compact', state: 'compact' } }), 'none', 'dictation off: no pill, no reveal');
+  assert.equal(D.revealPlan({ phase: 'listening', was: 'idle', enabled: true, island: null }), 'none');
+});
+
+test('restore: it collapses only when WE expanded it, the dictation ended and the human has not taken the island', () => {
+  const base = { phase: 'idle', was: 'copied', weExpanded: true, touched: false, island: { phase: 'expanded', view: 'overview' } };
+  assert.equal(D.restorePlan(base), 'collapse');
+  for (const was of ['listening', 'locked', 'thinking']) assert.equal(D.restorePlan({ ...base, phase: 'idle', was }), 'collapse', 'ends straight from ' + was + ' (cancelled)');
+  assert.equal(D.restorePlan({ ...base, weExpanded: false }), 'none', 'it was already open: leave it');
+  assert.equal(D.restorePlan({ ...base, touched: true }), 'none', 'the human clicked the island: it is theirs now');
+  for (const phase of ['listening', 'locked', 'thinking', 'copied', 'failed']) assert.equal(D.restorePlan({ ...base, phase }), 'none', 'still ' + phase);
+  for (const island of [{ phase: 'expanded', view: 'chat' }, { phase: 'expanded', view: 'overview', card: 'pending' }, { phase: 'expanded', view: 'overview', question: 'pending' }, { phase: 'expanded', view: 'overview', settings: 'open' }, { phase: 'compact', view: 'overview' }, null])
+    assert.equal(D.restorePlan({ ...base, island }), 'none', JSON.stringify(island));
+});
+
+test('reveal wiring: the host verbs expand / close (same closed verbs as the notice reveal), one call at a time, trusted pointer = the human took it', () => {
+  assert.match(src, /hostCall\('expand'/); assert.match(src, /hostCall\('close'\)/); assert.match(src, /d\[verb\]\(\)/);
+  assert.match(src, /revealPlan\(\{ phase: next, was: phase,/); assert.match(src, /restorePlan\(\{ phase: next, was: phase,/);
+  assert.match(src, /pointerdown', e => \{ if \(e\.isTrusted === true\) touched = true; \}/);
+  assert.match(src, /if \(flight\) return;/, 'one host call at a time');
 });
 
 if (failed) process.exit(1);

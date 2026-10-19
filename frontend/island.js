@@ -43,12 +43,12 @@
   };
   reduced.addEventListener('change', applyMotion);
 
-  // Visible island geometry per state. Native windows: 44x44 compact (the dot plus
-  // a 6px transparent margin) and 672x176 overview (set by Rust); margins are the
-  // difference. #302: the resting island is gentle-dot's ROUND DOT, a 32px disc (S10, Coucou's pill height)
-  // (geometry::DOT_DIAMETER); the character fills it. Drag, snap and edge memory
+  // Visible island geometry per state. Native windows: 288x32 compact and 672x208 overview (set by Rust, geometry.rs);
+  // margins are the difference. S10 (human L34, «Barra de Coucou»): the resting island is Coucou's BAR, 288x32 with corners
+  // 0 0 14 14 (`COMPACT_W` x `NOTCH_H`, core/layout.ts @434d6a2b), and the window is the bar itself (no margin). The character sits where
+  // Coucou puts its bot (`botPosition('compact')`: cx 40, cy 16, diameter 20 → box 20*128/112 = 23). Drag, snap and edge memory
   // are Rust's and only ever see the native rectangle.
-  const COMPACT = { w: 32, h: 32, r: 16, gap: 6, clay: 26, drop: 1 };
+  const COMPACT = { w: 288, h: 32, r: 14, gap: 0, clay: 23, clayX: 40, drop: 1 };
   // S10 (L19): Coucou's own bot placement (core/layout.ts VIEW_LAYOUTS): overview botX 68 / diameter 58,
   // approval, question, error and finished botX 62 / diameter 56, centred on the 84pt card row
   // (cy 101 from the island top). The box is diameter * 128/112 because the engine draws ~112 of 128
@@ -178,8 +178,8 @@
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
     const h = lerp(COMPACT.h, lerp(recapShown ? RECAP_H : questionShown ? QUESTION_H : OVERVIEW.h, CHAT.h, q.x), p);
-    // corners: the disc is round; the notch is square on top (it meets the screen edge) and r14 below
-    const rTop = lerp(COMPACT.r, 0, p), rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
+    // corners: square on top (the bar and the notch meet the screen edge), r14 below
+    const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
     // the question card is 148 high (200 island): the character centres on it, 15px lower than on the 108 cards
     const ovBase = recapShown ? { ...OVERVIEW_CARD, cy: 42 + (RECAP_H - 52) / 2 } : questionShown ? { ...OVERVIEW_CARD, cy: OVERVIEW_CARD.cy + (QUESTION_H - OVERVIEW.h) / 2 } : cardShown ? OVERVIEW_CARD : OVERVIEW;
@@ -206,7 +206,7 @@
     clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';
-    clayEl.style.left = lerp(lerp(w / 2, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
+    clayEl.style.left = lerp(lerp(COMPACT.clayX, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
     // Coucou companion follows the live composer, not a demo success pose.
     clayEl.style.top = lerp(overviewTop, CHAT.h - 76, q.x) + 'px';
     // Coucou's badge sits on the character's top-left (core/layout.ts botPosition: centre - (20, 21)); 16px circle.
