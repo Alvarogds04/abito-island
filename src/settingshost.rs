@@ -217,6 +217,27 @@ pub fn save_position(app: &AppHandle, x: i32, y: i32) -> bool {
     .is_ok()
 }
 
+/// #486: the desktop character's saved state (Coucou `desktopMochi`), read-only.
+pub fn desktop_character(app: &AppHandle) -> Option<prefs::DesktopCharacter> {
+    let state = app.state::<AppState>();
+    let saved = state.settings.prefs.lock().expect("prefs lock").desktop_character;
+    saved
+}
+
+/// #486: commit where the desktop character lives, through the same gate and atomic writer
+/// as every other preference. No publication: the page never sees it.
+pub fn save_desktop_character(app: &AppHandle, on: bool, spot: Option<(i32, i32)>) -> bool {
+    let state = app.state::<AppState>();
+    prefs::transact(
+        &state.settings.prefs_serial,
+        &state.settings.prefs,
+        &prefs::Command::SetDesktopCharacter { on, spot },
+        |p| persist_prefs(app, p),
+        |_| {},
+    )
+    .is_ok()
+}
+
 /// T6.2: commit the size the human resized the own Ajustes window to, through
 /// the SAME `prefs::transact` gate, file and atomic writer as every other
 /// preference — so a settings change after a resize can never drop this, and

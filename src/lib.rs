@@ -22,6 +22,7 @@ pub mod agentconn;
 pub mod approval;
 pub mod bridge;
 pub mod card;
+pub mod characterwin;
 pub mod chat;
 pub mod chatlane;
 pub mod conversations;

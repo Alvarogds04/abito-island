@@ -302,6 +302,32 @@ pub settings_window: Option<bool>,
     /// #487: opt-in to read the previous window's app and title for the chat (NotchBuddy feature 8).
     /// `None` means off and is never written.
     pub window_context: Option<bool>,
+    /// #486 W2 (Coucou `desktopMochi`): the character lives on the desktop and where it
+    /// sits, physical px. `None` = lives in the island (off) and is never written.
+    pub desktop_character: Option<DesktopCharacter>,
+}
+
+/// #486 W2: the saved state of the desktop character. Written by the native drop path
+/// only (see [`Command::SetDesktopCharacter`]), never from the WebView.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DesktopCharacter {
+    pub on: bool,
+    pub spot: Option<(i32, i32)>,
+}
+
+const DESKTOP_CHARACTER: &str = "desktop_character";
+
+/// A closed shape: `{"on":bool}` plus an optional bounded `{"x","y"}` spot; anything else
+/// reads as absent (the character stays in the island).
+fn desktop_character_from(value: Option<&Value>) -> Option<DesktopCharacter> {
+    let map = value?.as_object()?;
+    if map.keys().any(|k| k != "on" && k != "spot") { return None; }
+    let on = map.get("on")?.as_bool()?;
+    let spot = match map.get("spot") {
+        None => None,
+        some => Some(position_from(some)?),
+    };
+    Some(DesktopCharacter { on, spot })
 }
 
 impl Default for Prefs {
@@ -329,6 +355,7 @@ impl Default for Prefs {
             show_plan_in_notch: None,
             show_codex_plan_in_notch: None,
             window_context: None,
+            desktop_character: None,
         }
     }
 }
@@ -596,6 +623,7 @@ impl Prefs {
             show_plan_in_notch: v.get("show_plan_in_notch").and_then(Value::as_bool),
             show_codex_plan_in_notch: v.get("show_codex_plan_in_notch").and_then(Value::as_bool),
             window_context: v.get("window_context").and_then(Value::as_bool),
+            desktop_character: desktop_character_from(v.get(DESKTOP_CHARACTER)),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -668,6 +696,12 @@ impl Prefs {
         if let Some(on) = self.window_context {
             v["window_context"] = json!(on);
         }
+        if let Some(c) = self.desktop_character.filter(|c| c.spot.is_none_or(|(x, y)| valid_position(x, y))) {
+            v[DESKTOP_CHARACTER] = match c.spot {
+                Some((x, y)) => json!({"on": c.on, "spot": {"x": x, "y": y}}),
+                None => json!({"on": c.on}),
+            };
+        }
         v.to_string()
     }
 }
@@ -736,6 +770,10 @@ pub enum Command {
     /// S10 (L30): show or hide the Codex plan-usage pill (an opt-in to `codex app-server`). `false` stores no key.
     SetShowCodexPlanInNotch(bool),
     SetWindowContext(bool),
+    /// #486 W2: the desktop character left or returned to the island, and the spot it sits
+    /// at. Deliberately NOT produced by [`parse_command`]: only the native drop path saves
+    /// it. `on:false` with no spot is the default and stores no key.
+    SetDesktopCharacter { on: bool, spot: Option<(i32, i32)> },
     /// T6.2: the remembered inner size of the own Ajustes window (logical px).
     /// Deliberately NOT produced by [`parse_command`]: the WebView can read
     /// neither the size nor the fact that one is stored — the size comes from
@@ -1118,6 +1156,10 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::SetShowPlanInNotch(on) => next.show_plan_in_notch = on.then_some(true),
         Command::SetShowCodexPlanInNotch(on) => next.show_codex_plan_in_notch = on.then_some(true),
         Command::SetWindowContext(on) => next.window_context = on.then_some(true),
+        Command::SetDesktopCharacter { on, spot } => {
+            if spot.is_some_and(|(x, y)| !valid_position(x, y)) { return Err(CommandError); }
+            next.desktop_character = (*on || spot.is_some()).then_some(DesktopCharacter { on: *on, spot: *spot });
+        }
         // T6.2: the value gate ran nowhere else — apply is the ONLY boundary for
         // this Rust-side command, so the bounds check runs here for every caller.
         Command::SetSettingsWindowSize(w, h) => {

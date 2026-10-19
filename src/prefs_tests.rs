@@ -1233,6 +1233,7 @@ mod chosen_models {
             show_plan_in_notch: Some(true),
             show_codex_plan_in_notch: Some(true),
             window_context: Some(true),
+            desktop_character: Some(DesktopCharacter { on: true, spot: Some((5, -6)) }),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
@@ -2169,4 +2170,56 @@ fn window_context_is_off_by_default_persists_and_false_drops_the_key() {
 #[test]
 fn window_context_failed_save_changes_nothing() {
     assert!(update(&Prefs::default(), &Command::SetWindowContext(true), |_| false).is_err());
+}
+
+// ---- #486 W2: the desktop character's saved state (Coucou's `desktopMochi`) ----
+
+/// Absent, or any malformed shape, reads as "lives in the island" (off); an untouched
+/// file keeps its bytes. The default is OFF: the character only leaves the island when
+/// the human drags it out (S1).
+#[test]
+fn w2_desktop_character_defaults_off_and_malformed_reads_as_absent() {
+    assert_eq!(Prefs::default().desktop_character, None);
+    for bad in [
+        None, Some(""), Some("{}"), Some(r#"{"v":1,"desktop_character":true}"#),
+        Some(r#"{"v":1,"desktop_character":{"on":"yes"}}"#),
+        Some(r#"{"v":1,"desktop_character":{"on":true,"extra":1}}"#),
+        Some(r#"{"v":1,"desktop_character":{"on":true,"spot":{"x":1}}}"#),
+        Some(r#"{"v":1,"desktop_character":{"on":true,"spot":{"x":1.5,"y":2}}}"#),
+        Some(r#"{"v":1,"desktop_character":{"on":true,"spot":{"x":99999999,"y":2}}}"#),
+    ] {
+        let p = Prefs::from_text(bad);
+        assert_eq!(p.desktop_character, None, "{bad:?}");
+        assert!(!p.to_text().contains("desktop_character"), "{bad:?} leaves no key behind");
+    }
+    let untouched = Prefs::from_text(Some(r#"{"v":1,"sound":true}"#));
+    assert_eq!(untouched.to_text(), r#"{"sound":true,"v":1}"#);
+}
+
+/// The state round-trips through the v1 file; negative coordinates (a monitor left of
+/// the primary) are legal; a spot is optional.
+#[test]
+fn w2_desktop_character_round_trips_with_and_without_a_spot() {
+    let set = |on, spot| apply(&Prefs::default(), &Command::SetDesktopCharacter { on, spot }).unwrap();
+    let p = set(true, Some((-1500, 320)));
+    assert_eq!(p.desktop_character, Some(DesktopCharacter { on: true, spot: Some((-1500, 320)) }));
+    let back = Prefs::from_text(Some(&p.to_text()));
+    assert_eq!(back.desktop_character, p.desktop_character);
+    let home = set(false, None);
+    assert_eq!(home.desktop_character, None, "home with no spot stores nothing");
+    assert!(!home.to_text().contains("desktop_character"));
+    let away_no_spot = set(true, None);
+    assert_eq!(Prefs::from_text(Some(&away_no_spot.to_text())).desktop_character, away_no_spot.desktop_character);
+    assert!(apply(&Prefs::default(), &Command::SetDesktopCharacter { on: true, spot: Some((2_000_000, 0)) }).is_err());
+}
+
+/// Home keeps the last spot (Coucou `fly_home(forget)` forgets it; plain retract keeps it).
+#[test]
+fn w2_desktop_character_page_never_supplies_it() {
+    for bad in [
+        json!({"action":"set_desktop_character","on":true}),
+        json!({"action":"set_desktop_character","on":true,"spot":{"x":1,"y":2}}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}: only Rust saves the spot");
+    }
 }

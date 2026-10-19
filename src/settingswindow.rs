@@ -365,7 +365,7 @@ mod tests {
                     .to_string();
                 let window = lines[i + 1..(i + 16).min(lines.len())].join("\n");
                 all.insert(fname.clone());
-                if !window.contains("main_window_only(") {
+                if !window.contains("main_window_only(") && !window.contains("from_character(") {
                     ungated.insert(fname);
                 }
             }

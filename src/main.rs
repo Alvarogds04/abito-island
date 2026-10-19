@@ -25,6 +25,7 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 mod autostart;
+mod characterhost;
 mod chathost;
 #[cfg(unix)]
 mod hotkeyhost;
@@ -1937,6 +1938,13 @@ fn main() {
             drag_release,
             desktop_action,
             open_chat_url,
+            characterhost::character_info,
+            characterhost::character_fly_out,
+            characterhost::character_fly_home,
+            characterhost::character_drag_begin,
+            characterhost::character_drag_move,
+            characterhost::character_drag_end,
+            characterhost::character_home,
             chathost::chat_action,
             chathost::chat_attach,
             chathost::chat_attach_data,
@@ -2036,6 +2044,8 @@ fn main() {
             // prefs.json/accounts.json; it has no window dependency).
             settingshost::start(&handle);
             dictationhost::start(&handle);
+            characterhost::manage(&handle);
+            characterhost::restore_on_launch(&handle);
             let wa = workarea::current(&win);
             let scale = win.scale_factor().unwrap_or(1.0);
             store_scale(scale); // #431: seed the off-main scale cache

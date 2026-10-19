@@ -1,0 +1,138 @@
+use super::*;
+
+// Mirrors Coucou's desktop.rs tests (isOverBody, clampOrigin, spots, flights).
+
+#[test]
+fn is_over_body() {
+    let s = 120.0;
+    let r = s * BODY_RADIUS_FRACTION;
+    assert!(super::is_over_body((60.0, 60.0), s));
+    assert!(super::is_over_body((60.0 + r - 0.5, 60.0), s));
+    assert!(!super::is_over_body((60.0 + r + 0.5, 60.0), s));
+    assert!(!super::is_over_body((0.0, 0.0), s));
+}
+
+#[test]
+fn clamp_origin_keeps_it_inside_the_work_area() {
+    let work = Rect { x: 0.0, y: 0.0, w: 1440.0, h: 860.0 };
+    let (s, m) = (120.0, 24.0);
+    assert_eq!(clamp_origin((600.0, 400.0), s, work, m), (600.0, 400.0));
+    assert_eq!(clamp_origin((-50.0, 400.0), s, work, m).0, m);
+    assert_eq!(clamp_origin((2000.0, 400.0), s, work, m).0, 1440.0 - s - m);
+    assert_eq!(clamp_origin((400.0, -50.0), s, work, m).1, m);
+    assert_eq!(clamp_origin((400.0, 2000.0), s, work, m).1, 860.0 - s - m);
+}
+
+fn two_displays() -> Vec<Display> {
+    let a = Rect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 };
+    let b = Rect { x: 1920.0, y: -200.0, w: 3840.0, h: 2160.0 };
+    vec![
+        Display { frame: a, work: Rect { h: 1032.0, ..a }, scale: 1.0 },
+        Display { frame: b, work: Rect { h: 2064.0, ..b }, scale: 2.0 },
+    ]
+}
+
+#[test]
+fn a_spot_on_a_connected_display_is_kept() {
+    let d = two_displays();
+    assert_eq!(restore_spot((800.0, 600.0), &d, 120.0, 24.0), Some((800.0, 600.0)));
+    assert_eq!(restore_spot((3000.0, 1000.0), &d, 120.0, 24.0), Some((3000.0, 1000.0)));
+}
+
+#[test]
+fn a_spot_on_a_display_that_is_gone_brings_it_home() {
+    let d = two_displays();
+    assert_eq!(restore_spot((-1500.0, 300.0), &d, 120.0, 24.0), None);
+    assert_eq!(restore_spot((800.0, 600.0), &[], 120.0, 24.0), None);
+    assert_eq!(restore_spot((3000.0, 1000.0), &d[..1], 120.0, 24.0), None);
+}
+
+#[test]
+fn a_spot_that_a_taller_panel_now_covers_moves_up() {
+    let d = two_displays();
+    let (x, y) = restore_spot((800.0, 1000.0), &d, 120.0, 24.0).unwrap();
+    assert_eq!((x, y), (800.0, 1032.0 - 120.0 - 24.0));
+    let (_, y) = restore_spot((3000.0, 1700.0), &d, 120.0, 24.0).unwrap();
+    assert_eq!(y, -200.0 + 2064.0 - 240.0 - 48.0);
+}
+
+#[test]
+fn a_drop_settles_on_the_display_under_it() {
+    let d = two_displays();
+    assert_eq!(settle((1800.0, 500.0), &d, 120.0, 24.0), (1920.0 - 120.0 - 24.0, 500.0));
+    assert_eq!(settle((1870.0, 500.0), &d, 120.0, 24.0), (1920.0 + 48.0, 500.0));
+    assert_eq!(settle((1000.0, -150.0), &d, 120.0, 24.0), (1000.0, 24.0));
+}
+
+#[test]
+fn first_visit_is_the_bottom_right_corner() {
+    let d = two_displays();
+    assert_eq!(default_spot(&d[0], 120.0, 24.0), (1920.0 - 144.0, 1032.0 - 144.0));
+    assert_eq!(default_spot(&d[1], 120.0, 24.0), (1920.0 + 3840.0 - 288.0, -200.0 + 2064.0 - 288.0));
+}
+
+#[test]
+fn dropping_on_the_island_is_home() {
+    let island = Rect { x: 816.0, y: 0.0, w: 288.0, h: 32.0 };
+    assert!(is_home_drop((900.0, 10.0), island));
+    assert!(!is_home_drop((900.0, 40.0), island));
+    assert!(!is_home_drop((100.0, 10.0), island));
+}
+
+#[test]
+fn it_leaves_and_returns_under_the_top_centre() {
+    assert_eq!(island_spot(960.0, 0.0, 120.0, 1.0), (900.0, 0.0));
+    assert_eq!(island_spot(2880.0, -200.0, 120.0, 2.0), (2760.0, -200.0));
+}
+
+#[test]
+fn flights_start_and_end_where_asked() {
+    for ease in [ease_in_out as fn(f64) -> f64, ease_out_back] {
+        assert!(ease(0.0).abs() < 1e-9);
+        assert!((ease(1.0) - 1.0).abs() < 1e-9);
+    }
+    assert!(ease_out_back(0.7) > 1.0, "the landing overshoots a little");
+    assert_eq!(lerp((0.0, 10.0), (100.0, 20.0), 0.5), (50.0, 15.0));
+}
+
+#[test]
+fn constants_are_coucous() {
+    assert_eq!((SIZE, TICK_MS, FLIGHT_MS, SNAP_MS), (120.0, 16, 450, 250));
+}
+
+#[test]
+fn a_drag_moves_in_physical_pixels() {
+    assert_eq!(drag_top_left((100.0, 200.0), (510.0, 320.0), (500.0, 300.0), 2.0), (120.0, 240.0));
+}
+
+#[test]
+fn only_the_exact_character_page_and_label_may_call_the_drag_verbs() {
+    assert!(character_sender_ok("character", "tauri://localhost/desktop-character.html").is_ok());
+    for (label, url) in [
+        ("main", "tauri://localhost/desktop-character.html"),
+        ("settings", "tauri://localhost/desktop-character.html"),
+        ("character", "tauri://localhost/index.html"),
+        ("character", "tauri://localhost/desktop-character.html?x=1"),
+        ("character", "tauri://localhost/desktop-character.html#a"),
+        ("character", "https://evil.example/desktop-character.html"),
+        ("Character", "tauri://localhost/desktop-character.html"),
+        ("character ", "tauri://localhost/desktop-character.html"),
+        ("", ""),
+    ] {
+        assert!(character_sender_ok(label, url).is_err(), "{label:?} {url:?}");
+    }
+}
+
+#[test]
+fn only_finite_bounded_points_are_accepted() {
+    assert_eq!(valid_point(10.5, -20.0), Some((10.5, -20.0)));
+    for (x, y) in [(f64::NAN, 0.0), (0.0, f64::INFINITY), (1e9, 0.0), (0.0, -1e9)] {
+        assert_eq!(valid_point(x, y), None, "{x} {y}");
+    }
+}
+
+#[test]
+fn a_saved_spot_is_rounded_to_whole_physical_pixels() {
+    assert_eq!(spot_to_pref((1500.4, -300.6)), (1500, -301));
+    assert_eq!(pref_to_spot((7, -9)), (7.0, -9.0));
+}
