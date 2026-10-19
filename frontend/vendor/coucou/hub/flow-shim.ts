@@ -54,11 +54,11 @@ export const FlowBridge = Object.freeze({
 });
 
 // #488: the one closed voice command (OK Abito).
-export interface VoicePrefs { enabled: boolean; output: 'system' | 'elevenlabs' | 'off'; gender: 'female' | 'male' }
+export interface VoicePrefs { enabled: boolean; output: 'system' | 'elevenlabs' | 'off'; gender: 'female' | 'male'; sensitivity: number }
 const voiceCall = (payload: any) => invoke ? invoke('voice_action', { payload }) : Promise.reject(new Error('No disponible todavía'));
 export const VoiceBridge = Object.freeze({
   status: async (): Promise<any | null> => { try { return await voiceCall({action:'status'}); } catch { return null; } },
-  setPrefs: (p: VoicePrefs) => voiceCall({action:'set_prefs', prefs:{enabled:p.enabled === true, output:p.output, gender:p.gender}}),
+  setPrefs: (p: VoicePrefs) => voiceCall({action:'set_prefs', prefs:{enabled:p.enabled === true, output:p.output, gender:p.gender, sensitivity:Math.max(0, Math.min(100, Math.round(Number(p.sensitivity ?? 50))))}}),
   download: () => voiceCall({action:'download_model'}),
   remove: () => voiceCall({action:'remove_model'}),
 });

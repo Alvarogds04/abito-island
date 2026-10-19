@@ -46,11 +46,14 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
     if (!st) { box.append(card(row(t('Dictation is off'), 'No disponible'))); return; }
     const output = segmented([['system', t('System voice')], ['elevenlabs', 'ElevenLabs'], ['off', t('Text only')]] as any, st.prefs.output, (v: any) => void save(p => { p.output = v; }));
     trusted(output);
+    const sensitivity = trusted(h('input', { type: 'range', min: '0', max: '100', step: '5', value: String(st.prefs.sensitivity ?? 50), class: 'hub-range', 'aria-label': t('Wake-word sensitivity') })) as HTMLInputElement;
+    sensitivity.addEventListener('change', () => void save(p => { p.sensitivity = Math.max(0, Math.min(100, Math.round(Number(sensitivity.value)))); }));
     box.append(
       label(t('Listening')),
       card(row(t('Listen for « OK Abito »'), t('The microphone stays open; only what follows « OK Abito » goes further.'), trusted(toggle(st.prefs.enabled, on => void save(p => { p.enabled = on; })))), divider(),
         row(t('Parakeet, on your computer'), t('Hears « OK Abito » here, without the internet.'), modelControl())),
       label(t('Answers')), card(row(t('Abito answers out loud'), null, output)),
+      label(t('Sensitivity')), card(row(t('Wake-word sensitivity'), t('Higher hears « OK Abito » more easily, and mishears more.'), sensitivity)),
       label(t('Privacy')), card(
         h('div', { class: 'hub-note', text: t('Your voice never leaves this computer: Parakeet turns it into text here. Only the words after « OK Abito » go to Anthropic with your Claude key, and to ElevenLabs if you picked it for the answers.') }), divider(),
         h('div', { class: 'hub-note', text: t('An email is never sent by Abito: your mail app opens with it written, and you send it.') })),

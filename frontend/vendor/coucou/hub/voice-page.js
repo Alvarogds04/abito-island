@@ -65,6 +65,10 @@ async function voicePage(page, ctx) {
       p.output = v;
     }));
     trusted(output);
+    const sensitivity = trusted(h("input", { type: "range", min: "0", max: "100", step: "5", value: String(st.prefs.sensitivity ?? 50), class: "hub-range", "aria-label": t("Wake-word sensitivity") }));
+    sensitivity.addEventListener("change", () => void save((p) => {
+      p.sensitivity = Math.max(0, Math.min(100, Math.round(Number(sensitivity.value))));
+    }));
     box.append(
       label(t("Listening")),
       card(
@@ -76,6 +80,8 @@ async function voicePage(page, ctx) {
       ),
       label(t("Answers")),
       card(row(t("Abito answers out loud"), null, output)),
+      label(t("Sensitivity")),
+      card(row(t("Wake-word sensitivity"), t("Higher hears « OK Abito » more easily, and mishears more."), sensitivity)),
       label(t("Privacy")),
       card(
         h("div", { class: "hub-note", text: t("Your voice never leaves this computer: Parakeet turns it into text here. Only the words after « OK Abito » go to Anthropic with your Claude key, and to ElevenLabs if you picked it for the answers.") }),

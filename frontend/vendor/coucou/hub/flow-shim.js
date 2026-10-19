@@ -57,7 +57,7 @@ const VoiceBridge = Object.freeze({
       return null;
     }
   },
-  setPrefs: (p) => voiceCall({ action: "set_prefs", prefs: { enabled: p.enabled === true, output: p.output, gender: p.gender } }),
+  setPrefs: (p) => voiceCall({ action: "set_prefs", prefs: { enabled: p.enabled === true, output: p.output, gender: p.gender, sensitivity: Math.max(0, Math.min(100, Math.round(Number(p.sensitivity ?? 50)))) } }),
   download: () => voiceCall({ action: "download_model" }),
   remove: () => voiceCall({ action: "remove_model" })
 });

@@ -519,6 +519,12 @@ impl<S: Spotter> WakeLoop<S> {
         Self { spotter, vad: EnergyVad::new(), pending: Vec::new(), mode: Mode::Idle }
     }
 
+    /// Listens for a command right away, with no wake phrase (a follow-up answer).
+    pub fn arm_command(&mut self) {
+        self.vad.reset_activity();
+        self.mode = Mode::Command { samples: Vec::new(), frames: 0, speech: false, tail: false, waited: 0 };
+    }
+
     pub fn feed(&mut self, samples: &[f32]) -> Vec<LoopEvent> {
         self.pending.extend_from_slice(samples);
         let mut events = Vec::new();
@@ -598,7 +604,7 @@ pub struct SherpaSpotter {
 }
 
 impl SherpaSpotter {
-    pub fn load() -> Option<Self> {
+    pub fn load(threshold: f32) -> Option<Self> {
         if !KWS.is_present() {
             return None;
         }
@@ -614,7 +620,7 @@ impl SherpaSpotter {
         c.model_config.num_threads = 1;
         c.keywords_file = Some(p("keywords.txt"));
         c.keywords_score = 2.0;
-        c.keywords_threshold = 0.2;
+        c.keywords_threshold = threshold;
         let kws = sherpa_onnx::KeywordSpotter::create(&c)?;
         let stream = kws.create_stream();
         Some(Self { kws, stream })

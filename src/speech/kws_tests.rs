@@ -267,3 +267,14 @@ fn live_probe() {
         println!("{} -> {}", p.file_name().unwrap().to_string_lossy(), hit);
     }
 }
+
+#[test]
+fn arming_the_loop_takes_the_next_phrase_as_a_command_without_a_wake() {
+    let (mut l, _) = calibrated(vec![]);
+    l.arm_command();
+    let mut frames = vec![quiet(); 2];
+    frames.extend(vec![loud(); 8]);
+    frames.extend(vec![quiet(); 12]);
+    let ev = feed_all(&mut l, &frames);
+    assert!(matches!(ev.as_slice(), [LoopEvent::Command(s)] if s.len() >= 8 * FRAME), "{ev:?}");
+}

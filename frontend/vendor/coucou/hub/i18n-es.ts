@@ -111,6 +111,7 @@ const es: Record<string, string> = {
   'Open selected item': 'Abrir elemento seleccionado', 'Open / close current diff': 'Abrir / cerrar diff actual',
   'Send the message': 'Enviar el mensaje', 'Start a new chat': 'Empezar un chat nuevo',
   'Open Settings': 'Abrir Ajustes', 'Keep the island open': 'Mantener la isla abierta', 'Close the island': 'Cerrar la isla',
+  'Sensitivity': 'Sensibilidad', 'Wake-word sensitivity': 'Sensibilidad de « OK Abito »', 'Higher hears « OK Abito » more easily, and mishears more.': 'Más alta oye « OK Abito » con más facilidad, y se equivoca más.',
   'Listening': 'Escucha', 'Listen for « OK Abito »': 'Escuchar « OK Abito »',
   'The microphone stays open; only what follows « OK Abito » goes further.': 'El micrófono sigue abierto; solo lo que va después de « OK Abito » llega más lejos.',
   'Parakeet, on your computer': 'Parakeet, en tu ordenador', 'Hears « OK Abito » here, without the internet.': 'Oye « OK Abito » aquí, sin internet.',

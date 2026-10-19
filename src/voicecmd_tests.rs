@@ -20,10 +20,10 @@ fn the_closed_parser_accepts_only_the_known_shapes() {
     assert_eq!(parse_command(&json!({"action":"status"})), Some(Command::Status));
     assert_eq!(parse_command(&json!({"action":"download_model"})), Some(Command::Download));
     assert_eq!(parse_command(&json!({"action":"remove_model"})), Some(Command::Remove));
-    let prefs = json!({"enabled":true,"output":"elevenlabs","gender":"male"});
+    let prefs = json!({"enabled":true,"output":"elevenlabs","gender":"male","sensitivity":70});
     assert_eq!(
         parse_command(&json!({"action":"set_prefs","prefs":prefs})),
-        Some(Command::SetPrefs(VoicePrefs { enabled: true, output: Output::ElevenLabs, gender: Gender::Male }))
+        Some(Command::SetPrefs(VoicePrefs { enabled: true, output: Output::ElevenLabs, gender: Gender::Male, sensitivity: 70 }))
     );
 }
 
@@ -33,10 +33,10 @@ fn anything_else_is_rejected() {
         json!({"action":"status","x":1}),
         json!({"action":"nope"}),
         json!({"action":"set_prefs"}),
-        json!({"action":"set_prefs","prefs":{"enabled":true,"output":"loud","gender":"male"}}),
-        json!({"action":"set_prefs","prefs":{"enabled":"yes","output":"off","gender":"male"}}),
-        json!({"action":"set_prefs","prefs":{"enabled":true,"output":"off","gender":"male","extra":1}}),
-        json!({"action":"set_prefs","prefs":{"enabled":true,"output":"off"}}),
+        json!({"action":"set_prefs","prefs":{"enabled":true,"output":"loud","gender":"male","sensitivity":50}}),
+        json!({"action":"set_prefs","prefs":{"enabled":"yes","output":"off","gender":"male","sensitivity":50}}),
+        json!({"action":"set_prefs","prefs":{"enabled":true,"output":"off","gender":"male","sensitivity":50,"extra":1}}),
+        json!({"action":"set_prefs","prefs":{"enabled":true,"output":"off","gender":"male"}}),
         json!([]),
         json!("status"),
     ] {
@@ -47,7 +47,7 @@ fn anything_else_is_rejected() {
 #[test]
 fn prefs_round_trip_and_a_corrupt_file_falls_back_to_off() {
     let d = dir("prefs");
-    let p = VoicePrefs { enabled: true, output: Output::Off, gender: Gender::Male };
+    let p = VoicePrefs { enabled: true, output: Output::Off, gender: Gender::Male, sensitivity: 20 };
     save_prefs_in(&d, &p).unwrap();
     assert_eq!(load_prefs_in(&d), p);
     std::fs::write(d.join("voice.json"), "{not json").unwrap();
@@ -61,4 +61,33 @@ fn the_wake_phrase_is_split_from_the_command() {
     assert_eq!(split_wake("ok abito"), Some(String::new()));
     assert_eq!(split_wake("abito pon música"), None);
     assert_eq!(split_wake("hola qué tal"), None);
+}
+
+#[test]
+fn sensitivity_defaults_to_the_middle_and_is_clamped() {
+    assert_eq!(VoicePrefs::default().sensitivity, 50);
+    let c = |v: serde_json::Value| parse_command(&json!({"action":"set_prefs","prefs":{"enabled":false,"output":"off","gender":"male","sensitivity":v}}));
+    assert!(matches!(c(json!(0)), Some(Command::SetPrefs(p)) if p.sensitivity == 0));
+    assert!(matches!(c(json!(100)), Some(Command::SetPrefs(p)) if p.sensitivity == 100));
+    assert!(matches!(c(json!(250)), Some(Command::SetPrefs(p)) if p.sensitivity == 100), "clamped, not rejected");
+    assert_eq!(c(json!(-1)), None);
+    assert_eq!(c(json!(1.5)), None);
+    assert_eq!(c(json!("50")), None);
+}
+
+#[test]
+fn a_higher_sensitivity_lowers_the_detection_threshold() {
+    assert!(threshold_for(100) < threshold_for(50));
+    assert!(threshold_for(50) < threshold_for(0));
+    assert!(threshold_for(0) <= 0.5 && threshold_for(100) >= 0.05);
+}
+
+#[test]
+fn an_old_prefs_file_without_sensitivity_still_loads_with_the_default() {
+    let d = dir("old");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("voice.json"), r#"{"enabled":true,"output":"off","gender":"male"}"#).unwrap();
+    let p = load_prefs_in(&d);
+    assert!(p.enabled);
+    assert_eq!(p.sensitivity, 50);
 }

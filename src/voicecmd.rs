@@ -25,12 +25,25 @@ pub enum Gender {
 }
 
 /// Off by default, exactly as in Coucou.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct VoicePrefs {
     pub enabled: bool,
     pub output: Output,
     pub gender: Gender,
+    /// 0..=100 wake-word sensitivity: higher hears «OK Abito» more easily (and mishears more).
+    pub sensitivity: u8,
+}
+
+impl Default for VoicePrefs {
+    fn default() -> Self {
+        Self { enabled: false, output: Output::System, gender: Gender::Female, sensitivity: 50 }
+    }
+}
+
+/// Detection threshold handed to the keyword spotter: 0.45 (strict) down to 0.10 (loose).
+pub fn threshold_for(sensitivity: u8) -> f32 {
+    0.45 - 0.35 * (sensitivity.min(100) as f32 / 100.0)
 }
 
 #[derive(Debug, PartialEq)]
@@ -49,11 +62,17 @@ pub fn parse_command(payload: &Value) -> Option<Command> {
         "remove_model" if o.len() == 1 => Some(Command::Remove),
         "set_prefs" if o.len() == 2 => {
             let p = o.get("prefs")?.as_object()?;
-            if p.len() != 3 || !p.contains_key("enabled") || !p.contains_key("output") || !p.contains_key("gender") {
+            if p.len() != 4 || !["enabled", "output", "gender", "sensitivity"].iter().all(|k| p.contains_key(*k)) {
                 return None;
             }
             p.get("enabled")?.as_bool()?;
-            serde_json::from_value(Value::Object(p.clone())).ok().map(Command::SetPrefs)
+            // An integer, clamped to 0..=100 (a negative or fractional value is rejected).
+            let n = p.get("sensitivity")?.as_u64()?;
+            let mut prefs: VoicePrefs = serde_json::from_value(Value::Object(
+                p.iter().filter(|(k, _)| k.as_str() != "sensitivity").map(|(k, v)| (k.clone(), v.clone())).collect(),
+            )).ok()?;
+            prefs.sensitivity = n.min(100) as u8;
+            Some(Command::SetPrefs(prefs))
         }
         _ => None,
     }
