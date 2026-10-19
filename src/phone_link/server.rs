@@ -28,6 +28,7 @@ use tokio_rustls::TlsAcceptor;
 
 use super::admission::{Admission, Ticket};
 use super::constant_eq;
+use super::hub::Hub;
 use super::pairing::Identity;
 
 pub const PROTOCOL: u64 = 1;
@@ -50,6 +51,7 @@ pub enum Out {
 
 /// What a connection needs to know about the desktop.
 pub struct Shared {
+    pub hub: Arc<Hub>,
     /// Replaced when the user pairs again; read for every `hello`.
     pub token: Mutex<String>,
     pub name: String,
@@ -58,8 +60,8 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(token: String, name: String, features: Arc<dyn Features>) -> Arc<Shared> {
-        Arc::new(Shared { token: Mutex::new(token), name, features, admission: Admission::new() })
+    pub fn with_hub(hub: Arc<Hub>, token: String, name: String, features: Arc<dyn Features>) -> Arc<Shared> {
+        Arc::new(Shared { hub, token: Mutex::new(token), name, features, admission: Admission::new() })
     }
 }
 
@@ -199,6 +201,8 @@ where
     }
     let _ = &shared.features;
     let _ = say(json!({ "type": "welcome", "v": PROTOCOL, "desktop": shared.name, "os": std::env::consts::OS })).await;
+    // The first line after the welcome is the current sessions; later changes arrive through the hub.
+    let (id, evicted) = shared.hub.subscribe(tx.clone(), now_ms());
 
     // 2. the conversation
     loop {
@@ -211,6 +215,11 @@ where
             _ => break, // closed, failed or silent for too long
         };
         let Ok(msg) = serde_json::from_slice::<serde_json::Value>(&line) else { break };
+        // The hub stopped sending to this phone because it could not keep up: close, and the phone reconnects
+        // to a fresh picture (it pings every 20 s).
+        if evicted.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
         match msg["type"].as_str() {
             Some("ping") => {
                 let _ = say(json!({ "type": "pong" })).await;
@@ -219,6 +228,11 @@ where
             _ => {} // unknown types are ignored
         }
     }
+    shared.hub.unsubscribe(id);
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 enum Next {

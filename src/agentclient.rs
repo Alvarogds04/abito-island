@@ -398,6 +398,11 @@ impl ClientState {
             hooks: Value::Null,
         }
     }
+    /// #490: the closed live-sessions view (`{rows, truncated}`, `Null` until the engine answers). The ONE
+    /// accessor the phone link reads, so what the island shows and what the phone gets cannot drift apart.
+    pub fn sessions_view(&self) -> &Value {
+        &self.sessions
+    }
     pub fn connected() -> ClientState {
         ClientState::new("connected")
     }

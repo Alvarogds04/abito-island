@@ -1,6 +1,6 @@
 //! Slice A: identity/token/link (pairing), admission bookkeeping and the TLS hello. The client side
 //! of the tests pins the certificate by SHA-256 exactly as the phone does, over real TLS on loopback.
-use super::ids;
+use super::{hub, ids, source};
 use super::pairing::{self, SecretStore};
 use super::server::{self, Features, Shared, PROTOCOL};
 use serde_json::{json, Value};
@@ -162,6 +162,7 @@ mod admission {
 struct Off;
 impl Features for Off {}
 
+
 /// A client verifier that accepts exactly one certificate, by SHA-256: what the phone does.
 #[derive(Debug)]
 struct Pin(String);
@@ -193,6 +194,7 @@ struct Rig {
     fingerprint: String,
     token: String,
     handle: Option<server::Handle>,
+    hub: Arc<hub::Hub>,
 }
 
 async fn start() -> Rig {
@@ -201,9 +203,10 @@ async fn start() -> Rig {
     let token = pairing::token(&store).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let shared = Shared::new(token.clone(), "Test PC".into(), Arc::new(Off));
+    let hub = hub::Hub::new();
+    let shared = Shared::with_hub(hub.clone(), token.clone(), "Test PC".into(), Arc::new(Off));
     let handle = server::serve(listener, server::tls_acceptor(&id).unwrap(), shared);
-    Rig { port, fingerprint: id.fingerprint, token, handle: Some(handle) }
+    Rig { port, fingerprint: id.fingerprint, token, handle: Some(handle), hub }
 }
 
 type Client = (BufReader<tokio::io::ReadHalf<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>>, tokio::io::WriteHalf<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>);
@@ -243,6 +246,7 @@ fn a_paired_phone_gets_welcome_and_pong_and_bye_closes() {
         assert_eq!(welcome["type"], "welcome");
         assert_eq!((welcome["v"].as_u64(), welcome["desktop"].as_str(), welcome["os"].as_str()), (Some(1), Some("Test PC"), Some(std::env::consts::OS)));
         assert!(welcome.get("caps").is_none(), "no capability is offered to a phone that asked for none");
+        assert_eq!(recv(&mut r).await.unwrap()["type"], "sessions", "the current sessions follow the welcome");
         send(&mut w, json!({"type":"ping"})).await;
         assert_eq!(recv(&mut r).await.unwrap()["type"], "pong");
         send(&mut w, json!({"type":"future-thing"})).await;
@@ -292,6 +296,7 @@ fn a_line_over_64_kib_closes_and_exactly_64_kib_is_accepted() {
         let (mut r, mut w) = connect(rig.port, &rig.fingerprint).await.unwrap();
         send(&mut w, json!({"type":"hello","v":PROTOCOL,"token":rig.token})).await;
         assert_eq!(recv(&mut r).await.unwrap()["type"], "welcome");
+        assert_eq!(recv(&mut r).await.unwrap()["type"], "sessions");
         let mut line = br#"{"type":"ping","pad":""#.to_vec();
         let tail = br#""}"#;
         line.resize(server::MAX_LINE - tail.len(), b'a');
@@ -348,4 +353,154 @@ fn the_phone_link_keys_are_internal_only_never_reachable_from_the_page() {
         assert!(crate::secrets::parse_command(&json!({"action":"present","key":k})).is_none());
         assert!(crate::secrets::parse_command(&json!({"action":"set","key":k,"value":"v"})).is_none());
     }
+}
+
+// ---- slice B: the hub and the session source ----------------------------------------------------------
+
+fn sess(pill: &str, state: &str) -> hub::SessionIn {
+    hub::SessionIn { pill_id: pill.into(), agent: pill.into(), state: state.into(), ..hub::SessionIn::default() }
+}
+
+async fn paired(rig: &Rig) -> Client {
+    let (mut r, mut w) = connect(rig.port, &rig.fingerprint).await.unwrap();
+    send(&mut w, json!({"type":"hello","v":PROTOCOL,"token":rig.token})).await;
+    assert_eq!(recv(&mut r).await.unwrap()["type"], "welcome");
+    (r, w)
+}
+
+#[test]
+fn a_phone_gets_the_current_sessions_on_connect_and_every_change_after() {
+    run(async {
+        let rig = start().await;
+        rig.hub.publish_sessions(vec![sess("integration_claude", "working")], 1_000);
+        let (mut r, _w) = paired(&rig).await;
+        let first = recv(&mut r).await.unwrap();
+        assert_eq!(first["type"], "sessions");
+        assert_eq!(first["sessions"][0]["pillId"], "integration_claude");
+        assert_eq!(first["sessions"][0]["state"], "working");
+        assert_eq!(first["sessions"][0]["updatedAt"], 1_000);
+        assert_eq!(first["sessions"][0].as_object().unwrap().len(), 7, "the v1 session has exactly its seven fields: {first}");
+        rig.hub.publish_sessions(vec![sess("integration_claude", "thinking"), sess("agent_codex", "idle")], 2_000);
+        let next = recv(&mut r).await.unwrap();
+        assert_eq!(next["sessions"].as_array().unwrap().len(), 2);
+        assert_eq!(next["sessions"][0]["state"], "thinking");
+    });
+}
+
+#[test]
+fn an_unchanged_picture_sends_nothing_and_updated_at_only_moves_when_the_content_does() {
+    run(async {
+        let rig = start().await;
+        let (mut r, _w) = paired(&rig).await;
+        assert_eq!(recv(&mut r).await.unwrap()["sessions"].as_array().unwrap().len(), 0, "an empty list on connect");
+        rig.hub.publish_sessions(vec![sess("integration_claude", "working"), sess("agent_codex", "idle")], 1_000);
+        recv(&mut r).await.unwrap();
+        rig.hub.publish_sessions(vec![sess("integration_claude", "working"), sess("agent_codex", "idle")], 5_000);
+        rig.hub.publish_sessions(vec![sess("integration_claude", "working"), sess("agent_codex", "working")], 6_000);
+        let v = recv(&mut r).await.unwrap();
+        assert_eq!((v["sessions"][0]["updatedAt"].as_u64(), v["sessions"][1]["updatedAt"].as_u64()), (Some(1_000), Some(6_000)), "{v}");
+    });
+}
+
+#[test]
+fn what_reaches_the_phone_is_bounded_and_cleaned() {
+    let hub = hub::Hub::new();
+    let many: Vec<_> = (0..40).map(|n| sess(&format!("agent_{n}"), "working")).collect();
+    let mut odd = sess("agent_x", "levitating");
+    odd.agent = "é".repeat(100);
+    odd.status_text = format!("{}\u{0}", "z".repeat(500));
+    odd.project = Some("/home/me/secret-work/".into());
+    let mut v = many;
+    v.insert(0, odd);
+    v.insert(1, sess("", "idle"));
+    hub.publish_sessions(v, 1);
+    let lines = hub.sessions_json();
+    assert_eq!(lines.as_array().unwrap().len(), 16, "at most 16 sessions, and the one without a pill is gone");
+    let first = &lines[0];
+    assert_eq!(first["state"], "idle", "an unknown state is shown as idle");
+    assert_eq!(first["agent"].as_str().unwrap().chars().count(), 64);
+    assert!(first["statusText"].as_str().unwrap().chars().count() <= 200);
+    assert!(!first.to_string().contains("secret-work"), "the v1 line never carries the folder");
+}
+
+#[test]
+fn a_hub_with_nobody_listening_costs_nothing_and_kick_all_closes_everyone() {
+    run(async {
+        let rig = start().await;
+        assert_eq!(rig.hub.clients(), 0);
+        rig.hub.publish_sessions(vec![sess("integration_claude", "working")], 1);
+        let (mut r, _w) = paired(&rig).await;
+        recv(&mut r).await.unwrap();
+        assert_eq!(rig.hub.clients(), 1);
+        rig.hub.kick_all("closed", "the phone link was turned off");
+        let e = recv(&mut r).await.unwrap();
+        assert_eq!((e["type"].as_str(), e["code"].as_str()), (Some("error"), Some("closed")));
+        assert!(recv(&mut r).await.is_none());
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(rig.hub.clients(), 0, "a closed link is unsubscribed");
+    });
+}
+
+#[test]
+fn a_phone_that_cannot_keep_up_is_dropped_not_waited_for() {
+    run(async {
+        let hub = hub::Hub::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel::<server::Out>(2);
+        let (_id, evicted) = hub.subscribe(tx, 0);
+        for n in 0..10 {
+            hub.publish_sessions(vec![sess("integration_claude", if n % 2 == 0 { "working" } else { "idle" })], n);
+        }
+        assert!(evicted.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(hub.clients(), 0);
+    });
+}
+
+fn rows(v: serde_json::Value) -> serde_json::Value {
+    json!({"rows": v, "truncated": false})
+}
+
+#[test]
+fn the_islands_session_rows_become_one_phone_session_per_agent() {
+    let view = rows(json!([
+        {"id":"s-0000000a","kind":"claude-code","cwd":"proj-a","state":"sleeping","origin":"terminal"},
+        {"id":"s-0000000b","kind":"claude-code","cwd":"proj-b","state":"running","origin":null},
+        {"id":"s-0000000c","kind":"codex","cwd":null,"state":"stopped","origin":null},
+        {"id":"s-0000000d","kind":"gemini","cwd":"g","state":"zombie","origin":null},
+        {"id":"s-0000000e","kind":"opencode","cwd":"o","state":"unknown","origin":null},
+        {"id":"s-0000000f","kind":"pi","cwd":"p","state":"running","origin":null}
+    ]));
+    let got = source::sessions_from_view(&view);
+    let by = |p: &str| got.iter().find(|s| s.pill_id == p).unwrap_or_else(|| panic!("{p} in {got:?}"));
+    assert_eq!(by("integration_claude").state, "working", "the busiest row of an agent speaks for it");
+    assert_eq!(by("integration_claude").project.as_deref(), Some("proj-b"));
+    assert_eq!(by("integration_claude").status_text, "2 sessions");
+    assert_eq!(by("agent_codex").state, "finished");
+    assert_eq!(by("agent_gemini").state, "dizzy");
+    assert_eq!(by("agent_opencode").state, "idle");
+    assert_eq!(by("agent_codex").status_text, "");
+    assert!(got.iter().all(|s| s.pill_id != "agent_pi" && !s.pill_id.is_empty()), "an agent with no pill is not invented: {got:?}");
+    assert_eq!(got.len(), 4);
+}
+
+#[test]
+fn a_missing_or_malformed_snapshot_is_an_empty_list_and_publishing_it_clears_the_phone() {
+    for bad in [serde_json::Value::Null, json!({}), json!({"rows":"x"}), json!({"rows":[1,2,{"kind":5}]})] {
+        assert!(source::sessions_from_view(&bad).is_empty(), "{bad}");
+    }
+    let hub = hub::Hub::new();
+    source::publish(&hub, &rows(json!([{"id":"s-0000000a","kind":"codex","cwd":null,"state":"running","origin":null}])), 10);
+    assert_eq!(hub.sessions_json().as_array().unwrap().len(), 1);
+    source::publish(&hub, &serde_json::Value::Null, 20);
+    assert_eq!(hub.sessions_json().as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn the_session_source_is_the_one_accessor_of_the_agent_client_state() {
+    let mut st = crate::agentclient::ClientState::connected();
+    assert_eq!(st.sessions_view(), &serde_json::Value::Null);
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":false,"sessions":[
+        {"id":"s-0000000a","kind":"codex","state":"running","cwd":"x","origin":null}]})).unwrap();
+    let got = source::sessions_from_view(st.sessions_view());
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].pill_id, "agent_codex");
 }

@@ -4,9 +4,11 @@
 //! Slice A: wire identifiers (`ids`), pairing (certificate + token + link + QR), admission bookkeeping
 //! and the TLS server's way in. While the link is off nothing listens, nothing is announced and no timer runs.
 pub mod admission;
+pub mod hub;
 pub mod ids;
 pub mod pairing;
 pub mod server;
+pub mod source;
 
 use ring::digest;
 
