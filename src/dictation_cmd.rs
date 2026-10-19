@@ -16,13 +16,14 @@ pub enum Command {
     Styles,
     SetStyles(Vec<AppStyle>),
     Status,
+    RunningApps,
     SetPrefs(Prefs),
     Download,
     Remove,
     Key(flow::KeyEvent),
 }
 
-pub fn parse_command(payload: &Value, devices: &[String]) -> Option<Command> {
+pub fn parse_command(payload: &Value, devices: &[String], claude_key_present: bool) -> Option<Command> {
     let o = payload.as_object()?;
     match o.get("action")?.as_str()? {
         "history" if o.len() == 1 => Some(Command::History),
@@ -61,6 +62,7 @@ pub fn parse_command(payload: &Value, devices: &[String]) -> Option<Command> {
             if !rows(v, 100, &[("id",80),("name",80),("style",8)]) { return None; }
             Some(Command::SetStyles(serde_json::from_value(v.clone()).ok()?))
         }
+        "running_apps" if o.len() == 1 => Some(Command::RunningApps),
         "status" if o.len() == 1 => Some(Command::Status),
         "download_model" if o.len() == 1 => Some(Command::Download),
         "remove_model" if o.len() == 1 => Some(Command::Remove),
@@ -75,7 +77,7 @@ pub fn parse_command(payload: &Value, devices: &[String]) -> Option<Command> {
                 return None;
             }
             let prefs: Prefs = serde_json::from_value(value.clone()).ok()?;
-            if prefs.cleanup || ![0, 7, 30, 365, -1].contains(&prefs.keep_days)
+            if (prefs.cleanup && !claude_key_present) || ![0, 7, 30, 365, -1].contains(&prefs.keep_days)
                 || prefs.mic.len() > 200
                 || (!prefs.mic.is_empty() && !devices.contains(&prefs.mic))
             {
@@ -137,7 +139,11 @@ pub fn data_action(command: Command, store: &mut Store, today: Day) -> Value {
     json!({"ok":true})
 }
 
-pub fn status_json(prefs: &Prefs, models: ModelsStatus, key: KeyStatus, mics: Vec<InputDevice>) -> Value {
+pub fn running_apps_json(apps: Vec<(String, String)>) -> Value {
+    json!(apps.into_iter().map(|(id, name)| json!({"id":id,"name":name})).collect::<Vec<_>>())
+}
+
+pub fn status_json(prefs: &Prefs, models: ModelsStatus, key: KeyStatus, mics: Vec<InputDevice>, claude_key_present: bool) -> Value {
     let mut p = serde_json::to_value(prefs).expect("serializable prefs");
     for (k, v) in [("summaryEngine", json!("off")), ("openAtLaunch", json!(false)),
         ("voice", json!(false)), ("voiceOutput", json!("off")), ("voiceGender", json!("female"))] {
@@ -147,7 +153,7 @@ pub fn status_json(prefs: &Prefs, models: ModelsStatus, key: KeyStatus, mics: Ve
         KeyStatus::Active => "ok", KeyStatus::Pending => "pending",
         KeyStatus::Denied => "denied", KeyStatus::Unsupported => "unsupported",
     }};
-    json!({"prefs":p,"models":models,"keys":keys,"hasClaudeKey":false,
+    json!({"prefs":p,"models":models,"keys":keys,"hasClaudeKey":claude_key_present,
         "mics":mics,"platform":"linux","autostarted":false})
 }
 

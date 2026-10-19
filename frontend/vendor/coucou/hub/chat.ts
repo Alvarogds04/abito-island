@@ -6,6 +6,7 @@ import { providerDef, urlExposure } from '../core/providers.js';
 import { notchSection as section, notchRow as row, notchHint as hint } from './notch.js';
 import { session, trusted } from './runtime.js';
 import { t } from './i18n-es.js';
+import { keyAccountCommand } from './keyaccounts.js';
 const UNAVAILABLE = 'No disponible todavía';
 const STORE = 'Secret Service (GNOME Keyring, KWallet)';
 const CLOUD = [
@@ -45,6 +46,11 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
         present[id] = result.present;
         if (primary) feedback.append(h('div', { class: 'notice ok', text: action === 'set' ? t('Key saved in the {store}.', {store: STORE}) : t('Key removed.') }));
         refresh();
+        // The key also becomes (or stops being) a provider account the chat can use. The value only lives in this closure
+        // until the one account command is sent; it is never rendered, logged or kept.
+        const account = keyAccountCommand(id, action as 'set' | 'clear', value, V.ownedAccounts(state?.ownedAccounts));
+        if (account) work(() => call('agent_action', account), next => { state = { ...state, ...next }; drawModels(); },
+          () => feedback.append(h('div', { class: 'notice err', text: 'La clave quedó guardada, pero no se pudo crear la cuenta del chat. Créala en Cuentas.' })));
       }, error => {
         dot.style.setProperty('background', '#f5a524');
         feedback.append(h('div', { class: 'notice err', text: V.keyError(error) }));
@@ -90,7 +96,7 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
   const providers = h('div', { style:'display:flex;flex-direction:column;gap:8px' });
   for (const [id,name,placeholder,site] of CLOUD) {
     const k = keyRow(providerDef(id).key!, name, placeholder);
-    providers.append(k.r, h('div', { class: 'hint', style: 'margin:-4px 0 0 144px', text: t('Key from {site}', {site}) }));
+    providers.append(k.r, h('div', { class: 'hint', style: 'margin:-4px 0 0 144px', text: t('Key from {site}', {site}) }), k.feedback);
   }
   const locals = h('div', { style:'display:flex;flex-direction:column;gap:14px' });
   for (const [id,name,usual] of [['ollama','Ollama','http://127.0.0.1:11434'],['lmstudio','LM Studio','http://127.0.0.1:1234'],['custom','OpenAI-compatible','']]) {

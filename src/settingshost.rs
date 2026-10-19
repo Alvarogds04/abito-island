@@ -47,6 +47,11 @@ impl Default for SettingsHost {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn with_test_prefs(prefs: Prefs) -> SettingsHost {
+    SettingsHost { prefs: Mutex::new(prefs), ..SettingsHost::default() }
+}
+
 fn err(code: &str) -> BridgeError {
     BridgeError {
         code: code.into(),
@@ -137,6 +142,11 @@ pub fn pill_declared(host: &SettingsHost, id: &str) -> bool {
 /// Only the already loaded, explicitly selected local preference reaches chat.
 pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()
+}
+
+/// Read the principal's already loaded response preferences once for an immutable turn.
+pub fn abito_instructions(host: &SettingsHost) -> Option<String> {
+    host.prefs.lock().expect("prefs lock").abito_instructions.clone()
 }
 
 /// #366 F093: the effective Ajustes placement, read by the settings window host

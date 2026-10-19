@@ -20,12 +20,13 @@ const tick = () => new Promise(r => setImmediate(r));
   const reset = () => { data = {words:{words:[],replacements:[]}, snippets:[], styles:[{id:'editor',name:'Editor',style:'natural'}],
     history:[{id:'today',date:Date.now(),text:'Hello today',app:'Editor',words:2,seconds:1},{id:'old',date:Date.now()-86400000,text:'Yesterday words',app:null,words:2,seconds:1}],
     stats:{week:totals(7),month:totals(30),all:totals(3000),streak:4,daily:Array.from({length:30},(_,i)=>[`2026-06-${String(i+1).padStart(2,'0')}`,i]),apps:{Editor:30,Terminal:10}},
-    status:{prefs:{enabled:true,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:false,defaultStyle:'natural',summaryEngine:'off'},models:{parakeet:{state:'ready'},downloadMb:612},keys:'ok',platform:'linux',hasClaudeKey:false,mics:[]}}; calls=[]; };
+    status:{prefs:{enabled:true,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:false,defaultStyle:'natural',summaryEngine:'off'},models:{parakeet:{state:'ready'},downloadMb:612},keys:'ok',platform:'linux',hasClaudeKey:false,mics:[]},running:[{id:'slack',name:'Slack'},{id:'editor',name:'Editor'},{id:'kitty',name:'kitty'}]}; calls=[]; };
   reset();
   setInvoke(async (cmd,{payload:p}) => {
     assert.equal(cmd,'dictation_action'); calls.push(structuredClone(p));
     if (p.action === fail) throw Error('test failure');
     if (p.action === refuse) return {ok:false};
+    if (p.action==='running_apps') return structuredClone(data.running);
     if (p.action==='set_prefs') {data.status.prefs={...data.status.prefs,...p.prefs};return p.prefs;}
     if (p.action.startsWith('set_')) {const key=p.action.slice(4); data[key]=structuredClone(p[key]); return {ok:true};}
     if (p.action==='delete_entry') {data.history=data.history.filter(e=>e.id!==p.id);return {ok:true};}
@@ -62,7 +63,21 @@ const tick = () => new Promise(r => setImmediate(r));
   for(const [tr,tx] of [['x'.repeat(81),'text'],['ok','x'.repeat(4001)],['   ','text']]){trigger.value=tr;content.value=tx;calls=[];click(root,'Guardar');await tick();assert.deepEqual(calls,[]);}
   data.snippets=Array.from({length:200},(_,i)=>({id:`s${i}`,trigger:`trigger${i}`,text:'text'}));root=await mount('snippetsPage');inputs(root)[0].value='extra';all(root).find(e=>e.tagName==='textarea').value='text';calls=[];click(root,'Guardar');await tick();assert.deepEqual(calls,[]);
   root=await mount('stylesPage');assert.equal(all(root).filter(e=>e.className==='hub-card').length,2);assert(text(root).includes('La limpieza usa tu clave'));calls=[];
+  // L32b: without a saved Claude key the clean-up switch is disabled and the warning shows; with one it is a real switch.
+  const sw = r => all(r).find(e=>e.tagName==='button'&&String(e.className).includes('switch'));
+  assert(sw(root).disabled,'no Claude key: switch disabled');
   for(const e of all(root).filter(e=>e.disabled)){e.fire('click');e.fire('change');}await tick();assert.deepEqual(calls,[]);
+  data.status.hasClaudeKey=true;root=await mount('stylesPage');calls=[];
+  assert(!sw(root).disabled,'Claude key saved: switch enabled');
+  assert.equal(all(root).find(e=>String(e.className).includes('hub-warn')).hidden,true,'warning hidden once the key is saved');
+  sw(root).fire('click',false);await tick();assert.deepEqual(calls,[]);
+  sw(root).fire('click');await tick();assert.deepEqual(writes().at(-1),{action:'set_prefs',prefs:{enabled:true,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:true,defaultStyle:'natural'}});
+  // Add an app: the open apps not already styled come from running_apps and are added with the default style.
+  const add = all(root).find(e=>e.tagName==='select'&&e.children.some(o=>String(o.textContent).includes('Añadir una app')));
+  assert(add&&!add.disabled,'add-an-app is real now');
+  add.fire('focus');await tick();assert(calls.some(p=>p.action==='running_apps'));
+  assert.deepEqual(add.children.map(o=>o.attrs.value).filter(Boolean),['slack\nSlack','kitty\nkitty'].filter(Boolean).concat([]).slice(0,2),'editor already has a style');
+  data.status.hasClaudeKey=false;data.status.prefs.cleanup=false;root=await mount('stylesPage');calls=[];
   const selects=all(root).filter(e=>e.tagName==='select');selects[0].value='polished';selects[0].fire('change',false);await tick();assert.deepEqual(calls,[]);selects[0].fire('change');await tick();assert.deepEqual(writes().at(-1),{action:'set_prefs',prefs:{enabled:true,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:false,defaultStyle:'polished'}});
   selects[2].value='verbatim';selects[2].fire('change');await tick();assert.deepEqual(writes().at(-1),{action:'set_styles',styles:[{id:'editor',name:'Editor',style:'verbatim'}]});
   fail='set_styles';click(root,'Eliminar');await tick();assert.equal(calls.at(-1).action,'styles');assert(text(root).includes('Editor'));assert(text(root).includes('No se pudo completar'));fail='';click(root,'Eliminar');await tick();assert.deepEqual(data.styles,[]);
@@ -92,10 +107,11 @@ const tick = () => new Promise(r => setImmediate(r));
   vm.runInNewContext(entry+'\nglobalThis.closedInvoke=invoke;',context);
   const good=[...['history','stats','words','snippets','styles'].map(action=>({action})),{action:'delete_entry',id:'a_-9'},{action:'clear_history',everything:false},{action:'set_words',words:{words:['Word'],replacements:[{id:'r',from:'a',to:'b'}]}},{action:'set_snippets',snippets:[{id:'s',trigger:'a',text:'b'}]},{action:'set_styles',styles:[{id:'a',name:'App',style:'natural'}]}];
   for(const payload of good){await context.closedInvoke('dictation_action',{payload});assert.deepEqual(forwarded.pop(),payload);await assert.rejects(context.closedInvoke('dictation_action',{payload:{...payload,extra:1}}));}
-  const bad=[...['hands_free','finish','cancel','copy','running_apps'].map(action=>({action})),{action:'delete_entry',id:''},{action:'delete_entry',id:'a'.repeat(65)},{action:'delete_entry',id:'é'},{action:'delete_entry',id:'a b'},{action:'clear_history',everything:0},{action:'set_words',words:{words:[],replacements:[{id:'r',from:'a',to:'b',extra:0}]}},{action:'set_words',words:{words:[7],replacements:[]}},{action:'set_words',words:{words:[]}},{action:'set_snippets',snippets:[{id:'s',trigger:'a',text:7}]},{action:'set_styles',styles:[{id:'a',name:'App',style:'natural',extra:0}]}];
+  const bad=[...['hands_free','finish','cancel','copy'].map(action=>({action})),{action:'delete_entry',id:''},{action:'delete_entry',id:'a'.repeat(65)},{action:'delete_entry',id:'é'},{action:'delete_entry',id:'a b'},{action:'clear_history',everything:0},{action:'set_words',words:{words:[],replacements:[{id:'r',from:'a',to:'b',extra:0}]}},{action:'set_words',words:{words:[7],replacements:[]}},{action:'set_words',words:{words:[]}},{action:'set_snippets',snippets:[{id:'s',trigger:'a',text:7}]},{action:'set_styles',styles:[{id:'a',name:'App',style:'natural',extra:0}]}];
   bad.push({action:'delete_entry',id:'id\n'},{action:'set_words',words:{words:new Array(1),replacements:[]}},{action:'set_snippets',snippets:new Array(1)},{action:'set_styles',styles:new Array(1)});
   for(const payload of bad)await assert.rejects(context.closedInvoke('dictation_action',{payload}));assert.deepEqual(forwarded,[]);
-  assert.deepEqual(await FlowBridge.runningApps(),[]);assert.equal(FlowBridge.copy,undefined);
+  await context.closedInvoke('dictation_action',{payload:{action:'running_apps'}});assert.deepEqual(forwarded.pop(),{action:'running_apps'});await assert.rejects(context.closedInvoke('dictation_action',{payload:{action:'running_apps',extra:1}}));
+  assert.equal(FlowBridge.copy,undefined);
   setInvoke(async (_cmd,{payload}) => {if(payload.action===fail)throw Error('test failure');return {ok:true};});
   for(const name of ['setWords','setSnippets','setStyles','deleteEntry','clear']){fail={setWords:'set_words',setSnippets:'set_snippets',setStyles:'set_styles',deleteEntry:'delete_entry',clear:'clear_history'}[name];await assert.rejects(FlowBridge[name]({}));}fail='';
   for(const file of ['data-pages.ts','dictation-pages.ts'])assert(!/innerHTML|setAttribute\(['"]style/.test(fs.readFileSync(path.join(base,file),'utf8')));

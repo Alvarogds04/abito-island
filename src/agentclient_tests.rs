@@ -526,3 +526,27 @@ fn a_connection_that_drops_forgets_the_sessions() {
     assert_eq!(serde_json::to_value(&st).unwrap()["sessions"]["rows"].as_array().unwrap().len(), 1);
     assert_eq!(serde_json::to_value(ClientState::disconnected(Reason::Lost)).unwrap()["sessions"], json!(null));
 }
+
+/// L32e: the two notify-only Claude Code integrations (weekly recap hooks, status-line relay) are installable from the
+/// UI with the same closed flow, and their state reaches the page. Only their exact ids; nothing else widens.
+#[test]
+fn recap_and_statusline_are_closed_agent_ids_with_the_same_flow() {
+    for id in ["recap", "statusline"] {
+        match parse_ui_command(&json!({"action":"agent_connect","agentId":id,"plan_hash":HASH})) {
+            Ok(UiCommand::Wire(w)) => assert_eq!(w, format!("{{\"type\":\"agent_connect\",\"agentId\":\"{id}\",\"plan_hash\":\"{HASH}\"}}\n")),
+            _ => panic!("{id} connect must be accepted with its plan hash"),
+        }
+        assert!(parse_ui_command(&json!({"action":"agent_disconnect","agentId":id})).is_ok(), "{id} disconnect");
+    }
+    for bad in ["Recap", "recap ", "statusLine", "status-line", "claude", "../recap"] {
+        assert!(parse_ui_command(&json!({"action":"agent_connect","agentId":bad})).is_err(), "must refuse {bad}");
+    }
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"agents","agents":[
+        {"id":"recap","state":"not_connected","backup":false,"plan_hash":HASH,"summary":"Adds notify-only hooks.","reviewable":true},
+        {"id":"statusline","state":"connected","backup":true}, {"id":"evil","state":"connected","backup":false}]})).unwrap();
+    let v = serde_json::to_value(&st).unwrap();
+    assert_eq!(v["agents"].as_array().unwrap().len(), 2, "only the closed ids reach the page");
+    assert_eq!(v["agents"][0]["id"], "recap");
+    assert_eq!(v["agents"][1]["state"], "connected");
+}

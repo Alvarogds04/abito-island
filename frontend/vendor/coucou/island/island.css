@@ -225,6 +225,7 @@ html[data-theme="light"] {
 .np-flag[aria-pressed="true"] { color: #1db954; }
 .np-controls .grow { min-width: 8px; flex: 1 1 auto; }
 .np-volume { display: flex; align-items: center; gap: 5px; }
+.np-vol-icon { width: 13px; display: flex; justify-content: flex-end; color: var(--dim-3); }
 .np-volume .np-bar { flex: 0 0 44px; width: 44px; }
 .np-controls { display: flex; align-items: center; padding-top: 4px; }
 .np-buttons { display: flex; align-items: center; gap: 10px; }
@@ -480,6 +481,8 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 .gh-mini i, .gh-cell { width: 7px; height: 7px; border-radius: 1.5px; flex: 0 0 auto; }
 .int-stats.gh-rows { gap: 4px; padding-top: 6px; }
 .gh-stat { position: relative; border: 0; padding: 0; background: transparent; width: 100%; text-align: left; cursor: pointer; }
+#overview-view .int-stat-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#overview-view .int-stat-value { white-space: nowrap; }
 .gh-stat::after, .gh-spark::after, .gh-back::after { content: ""; position: absolute; inset: -5px -4px; } /* hit area around the 14px rows */
 .gh-spark, .gh-back { position: relative; }
 .gh-detail-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -504,7 +507,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 /* ── Weekly recap (style.css "Weekly recap" @434d6a2b): a wash'd card in the same box as the approval card ── */
 
 #recap-card {
-  position: absolute; left: calc(50% - 310px); width: 620px; top: 42px; height: 108px; z-index: 4; display: flex; flex-direction: column;
+  position: absolute; left: calc(50% - 310px); width: 620px; top: 42px; height: 132px; z-index: 3; display: flex; flex-direction: column;
   justify-content: center; overflow: hidden; border-radius: 20px; background: var(--card); border: 1px solid var(--hairline);
 }
 #recap-card[hidden] { display: none; }
@@ -572,5 +575,63 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 @keyframes dpop { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
 html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html[data-motion="reduce"] .dbubble { transition: none; animation: none; }
 /* the folded dot wears a ring while a dictation is live: orange for hands-free, white while it listens or thinks */
-#capsule[data-phase="compact"][data-dictation] #island { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
-#capsule[data-phase="compact"][data-dictation="locked"] #island { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.9); }
+#capsule[data-phase="compact"][data-dictation] #island { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55); }
+#capsule[data-phase="compact"][data-dictation="locked"] #island { box-shadow: inset 0 0 0 2px rgba(249, 115, 22, 0.9); }
+
+/* ── The collapsed bar's mini grid (style.css "#mini-grid" @434d6a2b): up to four small characters, one per running session ── */
+#mini-grid { position: absolute; left: 233.5px; top: 1.5px; width: 29px; height: 29px; display: none; grid-template-columns: 13px 13px; grid-auto-rows: 13px; gap: 3px; pointer-events: none; z-index: 2; }
+#capsule[data-phase="compact"] #mini-grid[data-count]:not([data-count="0"]) { display: grid; }
+#mini-grid .mini { position: relative; display: inline-block; width: 13px; height: 13px; }
+#mini-grid .mini svg { position: absolute; left: 50%; top: 50%; width: 15px; height: 15px; transform: translate(-50%, -50%); overflow: visible; }
+
+/* ── The chat in the island's own visual language (human L32 #480: «el chat es diferente visualmente a la isla») ──
+   Coucou has no chat view, so this is derived from its island components (@434d6a2b): the island header stays on top (home /
+   chat / «+», gear / mute), the status line is the who-row (dot + name + dim label), the body is a `.card` (--card, r20, hairline),
+   the controls are the 30x22 tabs and the 16px round buttons in a 44px hit area, the bubbles and the input are Coucou's (above).
+   Every chat id, verb and behaviour is unchanged: only presentation. */
+
+/* the shared header stays in the chat view, at the chat column's width, with the chat tab lit */
+#capsule[data-phase="expanded"][data-view="chat"] #island-header {
+  opacity: 1; visibility: visible; pointer-events: auto; left: calc(50% - 200px); width: 400px; right: auto;
+}
+#capsule[data-phase="expanded"][data-view="chat"] .plan-pills, #capsule[data-phase="expanded"][data-view="chat"] .dpill { display: none; }
+#chat { padding: 42px 10px 10px; }
+
+/* header row = Coucou's who-row: white dot, bold name, dim label, then the two quiet round buttons */
+#chat-header { min-height: 28px; gap: 6px; padding: 0 6px 0 8px; position: relative; }
+#chat-title { margin: 0; padding: 0; font: 600 12px var(--font); color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+#chat-title::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff; flex: 0 0 8px; }
+#chat-target-chip, #chat-specialist { min-height: 0; font: 400 11px var(--font); color: var(--dim-2); gap: 4px; }
+#chat-target-chip .ico svg, #chat-specialist .ico svg { width: 11px; height: 11px; }
+#chat-header .icon-btn { position: relative; min-width: 44px; min-height: 44px; margin: -8px -14px; border: 0; background: transparent; color: var(--dim-4); }
+#chat-header .icon-btn:first-of-type { margin-left: auto; }
+#capsule #chat-header .icon-btn::after { inset: 14px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.07); }
+#chat-header .icon-btn .ico svg { width: 8px; height: 8px; }
+
+/* the body is a card: --card, r20, hairline; text on Coucou's inks */
+#chat-body { background: var(--card); border: 1px solid var(--hairline); border-radius: 20px; padding: 10px 14px 12px; }
+#chat-status-strip { padding: 0 4px 2px; min-height: 18px; }
+#chat-state { font: 400 11px var(--font); color: var(--dim-2); min-height: 0; }
+#chat-state .ico svg { width: 12px; height: 12px; }
+#chat-log { font: 400 12.5px/1.45 var(--font); color: #b0b5be; }
+#chat-log li.empty .empty-greeting { font: 600 13px/1.35 var(--font); color: var(--ink); }
+#chat-log li.note, #chat-log li.error { font: 600 12px/1.2 var(--font); }
+#chat-history-label { font: 400 11px var(--font); color: var(--dim-2); }
+
+/* «+» and the history clock = Coucou's .tab (30x22, r11, dim-2; hover rgba .07), 44px hit area */
+#chat-history-controls { min-height: 44px; gap: 1px; }
+#chat-history-controls .icon-btn { position: relative; min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--dim-2); }
+#capsule #chat-history-controls .icon-btn::after { inset: 11px 7px; border: 0; border-radius: 11px; background: transparent; }
+#capsule #chat-history-controls .icon-btn:hover::after { background: rgba(255, 255, 255, 0.07); }
+#chat-history-controls .icon-btn[aria-expanded="true"] { color: var(--ink); }
+#capsule #chat-history-controls .icon-btn[aria-expanded="true"]::after { background: var(--tab-on); }
+#chat-history-controls .icon-btn .ico svg { width: 13px; height: 13px; }
+
+/* composer: Coucou's .chat-bar input and .send-btn (28px disc) inside 44px hit areas; attach/cancel are the quiet twins */
+#chat-composer { gap: 8px; align-items: center; }
+#chat-composer .round { position: relative; width: 44px; height: 44px; min-width: 44px; border: 0; background: transparent; color: var(--dim-2); }
+#chat-composer .round::after { inset: 8px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.09); }
+#chat-send { background: transparent !important; border-color: transparent !important; color: #0b0c0e !important; }
+#chat-composer #chat-send::after { background: var(--ink); border: 0; }
+#chat-send:disabled::after { opacity: 0.4; }
+#chat-composer .round .ico svg { width: 14px; height: 14px; }

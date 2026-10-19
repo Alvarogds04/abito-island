@@ -32,14 +32,15 @@
       case 'dictation_action': {
         const zero = { words: 0, seconds: 0, dictations: 0, wordsPerMinute: 0, minutesSaved: 0 };
         switch (p.action) {
-          case 'status': return { prefs: { enabled: false, key: 'right_ctrl', edge: 'bottom', mic: '', keepDays: 30, cleanup: false, defaultStyle: 'natural', summaryEngine: 'off', openAtLaunch: false, voice: false, voiceOutput: 'off', voiceGender: 'female' }, models: { parakeet: { state: 'missing' }, downloadMb: 700 }, keys: 'ok', hasClaudeKey: false, mics: [], platform: 'linux', autostarted: false };
+          case 'status': return { prefs: { enabled: window.__VC_DICTATION === true, key: 'right_ctrl', edge: 'bottom', mic: '', keepDays: 30, cleanup: false, defaultStyle: 'natural', summaryEngine: 'off', openAtLaunch: false, voice: false, voiceOutput: 'off', voiceGender: 'female' }, models: { parakeet: { state: 'missing' }, downloadMb: 700 }, keys: 'ok', hasClaudeKey: false, mics: [], platform: 'linux', autostarted: false };
           case 'history': case 'snippets': case 'styles': return [];
           case 'words': return { words: [], replacements: [] };
           case 'stats': return { week: zero, month: zero, all: zero, daily: [], apps: {}, streak: 0 };
           default: return { ok: true };
         }
       }
-      case 'recap_action': return p.action === 'prefs' ? { enabled: true } : { ok: true };
+      case 'recap_action': return p.action === 'prefs' ? { enabled: window.__VC_RECAP_AUTO === true, hideProjects: false, lastShownWeek: '' } : p.action === 'view' ? window.__vcRecapHistory() : { ok: true };
+      case 'github_action': { const g = window.__vcGithub(); return p.section === 'activity' ? { available: true, fetched: true, activity: g.activity } : { available: true, fetched: true, pulse: g.pulse }; }
       case 'plan_action': return p.action === 'claude'
         ? { available: true, updatedAt: Date.now(), fiveHour: { usedPct: 42, resetsAt: Date.now() + 3600e3 }, sevenDay: { usedPct: 61, resetsAt: Date.now() + 86400e3 } }
         : { available: true, rateLimits: { primary: { usedPercent: 7, resetsAt: Math.floor(Date.now() / 1000) + 3600, windowDurationMins: 300 }, secondary: { usedPercent: 33, resetsAt: Math.floor(Date.now() / 1000) + 86400, windowDurationMins: 10080 } } };

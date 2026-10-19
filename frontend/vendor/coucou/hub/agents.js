@@ -65,12 +65,16 @@ async function renderAgentSettings({ invoke, V, listen, timers }) {
       redraw();
     })));
   }
-  function agentBlock(id, name, approvals, claude = false) {
+  function agentBlock(id, name, approvals, claude = false, integration = false) {
     const r = V.agentsView(state, { timedOut: true }).rows?.find((a) => a.id === id);
     const installed = r?.state === "connected" || r?.state === "outdated";
     const dot = () => !r || r.state === "unknown" ? unknownDot() : statusDot(installed);
     const body = flex(claude ? 12 : 10), head = h("div", { class: "row" });
-    const block = claude ? section("Claude Code", body) : flex(8);
+    const stable = (n) => {
+      if (integration) n.setAttribute("id", `agent-integration-${id}`);
+      return n;
+    };
+    const block = stable(claude ? section("Claude Code", body) : flex(8));
     if (claude) {
       const heading = block.children[0];
       heading.prepend(dot());
@@ -99,12 +103,12 @@ async function renderAgentSettings({ invoke, V, listen, timers }) {
       } else {
         head.append(
           h("div", { style: "display:flex;align-items:center;gap:8px;min-width:132px" }, dot(), h("span", { style: "font-size:12.5px", text: name })),
-          hint(t(approvals ? "Sessions, and Allow / Deny from the island" : "Sessions — approvals stay in the agent")),
+          hint(integration ? t(id === "recap" ? "Counts your Claude Code activity for the weekly recap; keeps no commands, paths or prompts." : "Shows your plan usage in the island; your own status line keeps working.") : t(approvals ? "Sessions, and Allow / Deny from the island" : "Sessions — approvals stay in the agent")),
           h("span", { class: "spacer" }),
           install
         );
         if (remove) head.append(remove);
-        body.append(h("span", { class: "path", text: UNAVAILABLE }));
+        if (!integration) body.append(h("span", { class: "path", text: UNAVAILABLE }));
       }
       if (r?.note) body.append(hint(r.note));
     };
@@ -141,13 +145,7 @@ async function renderAgentSettings({ invoke, V, listen, timers }) {
       hint(t("Shows your Claude plan usage (5-hour and weekly limits) in the island's header. Abito adds a status line relay in ~/.claude/settings.json. If you already have a status line, it keeps working as before. Pro and Max plans only.")),
       hint(t("The numbers come from the Claude Code command-line tool. The Claude desktop app does not report them, so the gauge stays empty if you only use the desktop app.")),
       row(t("Show in notch"), sw(prefs.showPlanInNotch === true, "set_show_plan_in_notch", "show_plan_in_notch")),
-      row(
-        t("Relay"),
-        statusDot(claudeUp),
-        hint(t(claudeUp ? "installed" : "not installed")),
-        claudeUp ? null : button("Install relay…", () => {
-        }, "primary", true)
-      ),
+      agentBlock("statusline", t("Relay"), false, false, true),
       hint(t("Shows your Codex plan usage (weekly limit and free resets left) in the island's header. Abito asks the Codex CLI (codex app-server) when the pill shows; nothing is installed. Codex must be signed in with ChatGPT.")),
       row(t("Show Codex plan in the notch"), sw(prefs.showCodexPlanInNotch === true, "set_show_codex_plan_in_notch", "show_codex_plan_in_notch"))
     );
@@ -155,6 +153,7 @@ async function renderAgentSettings({ invoke, V, listen, timers }) {
       agentBlock("claude-code", "Claude Code", true, true),
       section(t("Agents"), hint(t("Show other coding agents in the island. Abito adds its entries to each agent's own config: you see the exact change and where the backup goes before anything is written, and uninstalling removes only what Abito added.")), list, ...catalogue.children.length ? [unavailable] : []),
       section(t("Plan usage"), planBody),
+      section(t("Weekly recap"), agentBlock("recap", t("Weekly recap"), false, false, true)),
       s.message
     );
   }

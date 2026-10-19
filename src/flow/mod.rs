@@ -15,6 +15,7 @@
 //! sleeps on its channel while nothing happens.
 
 pub mod cleanup;
+pub mod claude;
 pub mod logic;
 pub mod paste;
 pub mod portal;
@@ -85,6 +86,7 @@ pub trait Recording: Send {
 
 /// Everything the thread needs from the machine; fakes in the tests.
 pub trait Backend: Send + Sync + 'static {
+    fn foreground_app(&self) -> Option<(String, String)> { None }
     fn model_ready(&self) -> bool;
     fn record(&self, mic: &str) -> Result<Box<dyn Recording>, String>;
     fn transcribe(&self, samples: &[f32]) -> Option<String>;
@@ -141,6 +143,60 @@ impl Backend for System {
     fn deliver(&self, text: &str) -> paste::Outcome {
         paste::copy(text)
     }
+    fn foreground_app(&self) -> Option<(String, String)> {
+        x11_apps(true).into_iter().next()
+    }
+}
+
+/// System services plus the opt-in provider; building this never accesses the keychain.
+pub struct ClaudeSystem;
+impl Backend for ClaudeSystem {
+    fn model_ready(&self) -> bool { System.model_ready() }
+    fn record(&self, mic: &str) -> Result<Box<dyn Recording>, String> { System.record(mic) }
+    fn transcribe(&self, samples: &[f32]) -> Option<String> { System.transcribe(samples) }
+    fn deliver(&self, text: &str) -> paste::Outcome { System.deliver(text) }
+    fn foreground_app(&self) -> Option<(String, String)> { System.foreground_app() }
+    fn cleanup_provider(&self) -> Option<&dyn cleanup::CleanupProvider> { Some(&claude::AnthropicCleanup) }
+}
+
+pub fn running_apps() -> Vec<(String, String)> { x11_apps(false) }
+
+#[cfg(not(target_os = "linux"))]
+fn x11_apps(_foreground: bool) -> Vec<(String, String)> { Vec::new() }
+
+// Adapted from Coucou flow/os_linux.rs (MIT, Louis Raillé): class, never window title.
+#[cfg(target_os = "linux")]
+fn x11_apps(foreground: bool) -> Vec<(String, String)> {
+    use x11rb::{connection::Connection, protocol::xproto::{AtomEnum, ConnectionExt}};
+    let read = || -> Option<Vec<(String, String)>> {
+        if std::env::var("XDG_SESSION_TYPE").ok().as_deref() == Some("wayland") { return None; }
+        let (conn, screen) = x11rb::connect(None).ok()?;
+        let root = conn.setup().roots[screen].root;
+        let name = if foreground { "_NET_ACTIVE_WINDOW" } else { "_NET_CLIENT_LIST" };
+        let atom = conn.intern_atom(false, name.as_bytes()).ok()?.reply().ok()?.atom;
+        let windows = conn.get_property(false, root, atom, AtomEnum::WINDOW, 0, if foreground { 1 } else { 1024 }).ok()?.reply().ok()?;
+        let mut out: Vec<(String, String)> = Vec::new();
+        for window in windows.value32()? {
+            if window == 0 { continue; }
+            let Ok(cookie) = conn.get_property(false, window, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256) else { continue };
+            let Ok(class) = cookie.reply() else { continue };
+            if let Some(app) = app_class(&class.value) {
+                if !out.iter().any(|(id, _)| *id == app.0) { out.push(app); }
+                if out.len() == 64 { break; }
+            }
+        }
+        Some(out)
+    };
+    read().unwrap_or_default()
+}
+fn app_class(bytes: &[u8]) -> Option<(String, String)> {
+    let class = bytes.split(|b| *b == 0).filter(|p| !p.is_empty()).next_back()?;
+    let class = String::from_utf8_lossy(class);
+    let id = class.to_lowercase();
+    if id == "abito" { return None; }
+    let name = store::default_app_styles().into_iter().find(|s| s.id == id).map(|s| s.name)
+        .unwrap_or_else(|| { let mut chars = class.chars(); chars.next().unwrap().to_uppercase().chain(chars).collect() });
+    Some((id, name))
 }
 
 /// A running dictation. Dropping it (or `stop`) ends the thread.
@@ -181,6 +237,7 @@ impl Drop for Dictation {
 struct Listening {
     rec: Box<dyn Recording>,
     started: Instant,
+    app: Option<(String, String)>,
 }
 
 fn run<B: Backend>(store: Arc<Mutex<Store>>, backend: B, notify: Notify, rx: mpsc::Receiver<(KeyEvent, Instant)>) {
@@ -272,11 +329,12 @@ fn begin(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify) -> Option
         notify(Update::Note(Note::NeedModel));
         return None;
     }
+    let app = backend.foreground_app();
     let mic = store.lock().unwrap_or_else(|e| e.into_inner()).prefs.mic.clone();
     match backend.record(&mic) {
         Ok(rec) => {
             notify(Update::Phase(Phase::Listening));
-            Some(Listening { rec, started: Instant::now() })
+            Some(Listening { rec, started: Instant::now(), app })
         }
         Err(err) => {
             eprintln!("abito dictation: microphone: {err}");
@@ -299,13 +357,13 @@ fn finish<B: Backend>(backend: &Arc<B>, store: &Arc<Mutex<Store>>, notify: &Noti
     }
     notify(Update::Phase(Phase::Thinking));
     let (backend, store, notify) = (backend.clone(), store.clone(), notify.clone());
-    let worker = std::thread::Builder::new().name("abito-dictation-job".into()).spawn(move || process(&*backend, &store, &notify, &samples, seconds));
+    let worker = std::thread::Builder::new().name("abito-dictation-job".into()).spawn(move || process(&*backend, &store, &notify, &samples, seconds, l.app.as_ref()));
     if worker.is_err() {
         eprintln!("abito dictation: could not start the worker");
     }
 }
 
-pub fn process(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify, samples: &[f32], seconds: f64) {
+pub fn process(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify, samples: &[f32], seconds: f64, app: Option<&(String, String)>) {
     let raw = backend.transcribe(samples).unwrap_or_default().trim().to_string();
     if raw.is_empty() {
         notify(Update::Phase(Phase::Idle));
@@ -313,10 +371,10 @@ pub fn process(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify, sam
     }
     let (prepared, style, enabled, words) = {
         let st = store.lock().unwrap_or_else(|e| e.into_inner());
-        (st.prepare(&raw), st.style_for(None), st.prefs.cleanup, st.words.words.clone())
+        (st.prepare(&raw), st.style_for(app.map(|a| a.0.as_str())), st.prefs.cleanup, st.words.words.clone())
     };
     let mut written = prepared.text.clone();
-    let cleaned = cleanup::clean(backend.cleanup_provider(), enabled, &prepared.text, style, None, &words);
+    let cleaned = cleanup::clean(backend.cleanup_provider(), enabled, &prepared.text, style, app.map(|a| a.1.as_str()), &words);
     // A clean-up that lost a snippet mark is dropped: the words stay as heard.
     if text::keeps_marks(&cleaned, &prepared.snippets) {
         written = cleaned;
@@ -328,7 +386,7 @@ pub fn process(backend: &dyn Backend, store: &Mutex<Store>, notify: &Notify, sam
             notify(Update::Note(Note::ClipboardRefused));
         }
         outcome => {
-            store.lock().unwrap_or_else(|e| e.into_inner()).record(&final_text, None, seconds, store::today(), store::now_ms());
+            store.lock().unwrap_or_else(|e| e.into_inner()).record(&final_text, app.map(|a| a.1.as_str()), seconds, store::today(), store::now_ms());
             notify(Update::Phase(if outcome == paste::Outcome::Copied { Phase::Copied } else { Phase::Idle }));
         }
     }

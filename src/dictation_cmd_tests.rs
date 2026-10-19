@@ -7,16 +7,16 @@ fn dictation_closed_actions_and_key_mapping() {
     for (name, expected) in [("status", Command::Status), ("download_model", Command::Download),
         ("remove_model", Command::Remove), ("hands_free", Command::Key(flow::KeyEvent::HandsFree)),
         ("finish", Command::Key(flow::KeyEvent::Finish)), ("cancel", Command::Key(flow::KeyEvent::Cancel))] {
-        assert_eq!(parse_command(&json!({"action":name}), &[]), Some(expected));
-        assert!(parse_command(&json!({"action":name,"extra":0}), &[]).is_none());
+        assert_eq!(parse_command(&json!({"action":name}), &[], false), Some(expected));
+        assert!(parse_command(&json!({"action":name,"extra":0}), &[], false).is_none());
     }
     for bad in [json!(null), json!([]), json!({}), json!({"action":1}), json!({"action":"other"})] {
-        assert!(parse_command(&bad, &[]).is_none());
+        assert!(parse_command(&bad, &[], false).is_none());
     }
 }
 #[test]
 fn dictation_prefs_are_exact_and_device_names_injected() {
-    let parse = |p| parse_command(&json!({"action":"set_prefs","prefs":p}), &["Mic".into()]);
+    let parse = |p| parse_command(&json!({"action":"set_prefs","prefs":p}), &["Mic".into()], false);
     assert_eq!(parse(prefs()), Some(Command::SetPrefs(Prefs::default())));
     for days in [0,7,30,365,-1] { let mut p=prefs(); p["keepDays"]=json!(days); assert!(parse(p).is_some()); }
     for (field, values) in [("key", vec![json!("right_ctrl"),json!("right_alt"),json!("right_shift"),json!("left_ctrl_super")]),
@@ -38,19 +38,19 @@ fn dictation_prefs_are_exact_and_device_names_injected() {
     for field in prefs().as_object().unwrap().keys() {
         let mut p=prefs(); p.as_object_mut().unwrap().remove(field); assert!(parse(p).is_none());
     }
-    assert!(parse_command(&json!({"action":"set_prefs","prefs":prefs(),"extra":0}), &[]).is_none());
+    assert!(parse_command(&json!({"action":"set_prefs","prefs":prefs(),"extra":0}), &[], false).is_none());
 }
 #[test]
 fn dictation_status_shape_and_key_states() {
     let mut p=Prefs::default();
-    let v=status_json(&p, models(ModelState::Missing), KeyStatus::Denied, vec![]);
+    let v=status_json(&p, models(ModelState::Missing), KeyStatus::Denied, vec![], false);
     assert_eq!(v, json!({"prefs":{"enabled":false,"key":"right_ctrl","edge":"bottom","mic":"",
         "keepDays":30,"cleanup":false,"defaultStyle":"natural","summaryEngine":"off","openAtLaunch":false,
         "voice":false,"voiceOutput":"off","voiceGender":"female"},"models":{"parakeet":{"state":"missing"},
         "downloadMb":670},"keys":"ok","hasClaudeKey":false,"mics":[],"platform":"linux","autostarted":false}));
     p.enabled=true;
     for (key, name) in [(KeyStatus::Active,"ok"),(KeyStatus::Pending,"pending"),(KeyStatus::Denied,"denied"),(KeyStatus::Unsupported,"unsupported")] {
-        let v=status_json(&p, models(ModelState::Ready), key, vec![InputDevice{name:"Mic".into(),default:true}]);
+        let v=status_json(&p, models(ModelState::Ready), key, vec![InputDevice{name:"Mic".into(),default:true}], false);
         assert_eq!(v["keys"], name); assert_eq!(v["mics"],json!([{"name":"Mic","default":true}]));
     }
 }
@@ -110,21 +110,21 @@ fn dictation_data_schemas_are_closed() {
         json!({"action":"set_snippets","snippets":[{"id":"s","trigger":"signature","text":"Hi"}]}),
         json!({"action":"set_styles","styles":[{"id":"app","name":"App","style":"natural"}]})];
     for v in &valid {
-        assert!(parse_command(v, &[]).is_some(), "{v}");
+        assert!(parse_command(v, &[], false).is_some(), "{v}");
         let mut extra = v.clone(); extra["extra"] = json!(true);
-        assert!(parse_command(&extra, &[]).is_none());
+        assert!(parse_command(&extra, &[], false).is_none());
         for key in v.as_object().unwrap().keys().filter(|k| *k != "action") {
             let mut missing = v.clone(); missing.as_object_mut().unwrap().remove(key);
-            assert!(parse_command(&missing, &[]).is_none());
+            assert!(parse_command(&missing, &[], false).is_none());
             let mut wrong = v.clone(); wrong[key] = json!(null);
-            assert!(parse_command(&wrong, &[]).is_none());
+            assert!(parse_command(&wrong, &[], false).is_none());
         }
     }
     for id in ["".into(), "x".repeat(65), "../file".into(), "é".into()] {
-        assert!(parse_command(&json!({"action":"delete_entry","id":id}), &[]).is_none());
+        assert!(parse_command(&json!({"action":"delete_entry","id":id}), &[], false).is_none());
     }
     for value in [json!(0), json!("false"), json!(null)] {
-        assert!(parse_command(&json!({"action":"clear_history","everything":value}), &[]).is_none());
+        assert!(parse_command(&json!({"action":"clear_history","everything":value}), &[], false).is_none());
     }
     for (action, field, item, limits) in [
         ("set_words", "replacements", json!({"id":"r","from":"a","to":"b"}), vec![("id",64),("from",200),("to",200)]),
@@ -135,39 +135,39 @@ fn dictation_data_schemas_are_closed() {
         } else { json!({"action":action,field:items}) };
         for (key, limit) in limits {
             let mut boundary = item.clone(); boundary[key] = json!("x".repeat(limit));
-            assert!(parse_command(&wrap(json!([boundary.clone()])), &[]).is_some());
+            assert!(parse_command(&wrap(json!([boundary.clone()])), &[], false).is_some());
             boundary[key] = json!("x".repeat(limit+1));
-            assert!(parse_command(&wrap(json!([boundary])), &[]).is_none());
+            assert!(parse_command(&wrap(json!([boundary])), &[], false).is_none());
         }
         for key in item.as_object().unwrap().keys() {
             let mut missing = item.clone(); missing.as_object_mut().unwrap().remove(key);
-            assert!(parse_command(&wrap(json!([missing])), &[]).is_none());
+            assert!(parse_command(&wrap(json!([missing])), &[], false).is_none());
             let mut wrong = item.clone(); wrong[key] = json!(false);
-            assert!(parse_command(&wrap(json!([wrong])), &[]).is_none());
+            assert!(parse_command(&wrap(json!([wrong])), &[], false).is_none());
         }
         let mut extra = item.clone(); extra["extra"] = json!(0);
-        assert!(parse_command(&wrap(json!([extra])), &[]).is_none());
-        assert!(parse_command(&wrap(json!([null])), &[]).is_none());
+        assert!(parse_command(&wrap(json!([extra])), &[], false).is_none());
+        assert!(parse_command(&wrap(json!([null])), &[], false).is_none());
         let max = if field == "replacements" { 500 } else if field == "snippets" { 200 } else { 100 };
         let items: Vec<_> = (0..max).map(|i| { let mut v=item.clone();
             if field == "snippets" { v["trigger"]=json!(format!("trigger {i}")); } v }).collect();
-        assert!(parse_command(&wrap(json!(items)), &[]).is_some());
+        assert!(parse_command(&wrap(json!(items)), &[], false).is_some());
         let mut too_many=items; too_many.push(item);
-        assert!(parse_command(&wrap(json!(too_many)), &[]).is_none());
+        assert!(parse_command(&wrap(json!(too_many)), &[], false).is_none());
     }
     for words in [json!(["x".repeat(81)]), json!(["C++"]), json!([1]), json!(vec!["ok";501])] {
-        assert!(parse_command(&json!({"action":"set_words","words":{"words":words,"replacements":[]}}), &[]).is_none());
+        assert!(parse_command(&json!({"action":"set_words","words":{"words":words,"replacements":[]}}), &[], false).is_none());
     }
     for words in [json!({"words":[],"replacements":[],"extra":0}), json!({"words":[]})] {
-        assert!(parse_command(&json!({"action":"set_words","words":words}), &[]).is_none());
+        assert!(parse_command(&json!({"action":"set_words","words":words}), &[], false).is_none());
     }
-    assert!(parse_command(&json!({"action":"set_words","words":{"words":vec!["é".repeat(80);500],"replacements":[]}}), &[]).is_some());
+    assert!(parse_command(&json!({"action":"set_words","words":{"words":vec!["é".repeat(80);500],"replacements":[]}}), &[], false).is_some());
     for snippets in [json!([{"id":"s","trigger":"","text":""}]),
         json!([{"id":"s","trigger":"hello","text":""},{"id":"t","trigger":"hello","text":""}])] {
-        assert!(parse_command(&json!({"action":"set_snippets","snippets":snippets}), &[]).is_none());
+        assert!(parse_command(&json!({"action":"set_snippets","snippets":snippets}), &[], false).is_none());
     }
     for style in ["verbatim","natural","polished","bad"] {
-        assert_eq!(parse_command(&json!({"action":"set_styles","styles":[{"id":"a","name":"A","style":style}]}), &[]).is_some(), style != "bad");
+        assert_eq!(parse_command(&json!({"action":"set_styles","styles":[{"id":"a","name":"A","style":style}]}), &[], false).is_some(), style != "bad");
     }
 }
 
@@ -197,7 +197,7 @@ fn dictation_data_views_and_mutations() {
     s.prefs.keep_days = 0;
     assert_eq!(history_json(&s), json!([]));
     s.prefs.keep_days = -1;
-    let run = |s: &mut flow::store::Store, p: Value| data_action(parse_command(&p, &[]).unwrap(), s, today);
+    let run = |s: &mut flow::store::Store, p: Value| data_action(parse_command(&p, &[], false).unwrap(), s, today);
     assert_eq!(run(&mut s, json!({"action":"delete_entry","id":"300"})), json!({"ok":true}));
     assert_eq!(s.history[0].id, "299");
     for (set, get, field, value) in [
@@ -218,4 +218,23 @@ fn dictation_data_views_and_mutations() {
     assert_eq!(empty["streak"], 0);
     assert!(empty["daily"].as_array().unwrap().iter().all(|d| d[1] == 0));
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dictation_cleanup_requires_key_and_running_apps_is_closed() {
+    for present in [false, true] {
+        for enabled in [false, true] {
+            let mut p = prefs(); p["cleanup"] = json!(enabled);
+            assert_eq!(parse_command(&json!({"action":"set_prefs","prefs":p}), &[], present).is_some(), !enabled || present);
+        }
+        for bad in [json!(null), json!(1), json!("true")] {
+            let mut p = prefs(); p["cleanup"] = bad;
+            assert!(parse_command(&json!({"action":"set_prefs","prefs":p}), &[], present).is_none());
+        }
+        assert_eq!(status_json(&Prefs::default(), models(ModelState::Missing), KeyStatus::Active, vec![], present)["hasClaudeKey"], present);
+    }
+    assert_eq!(running_apps_json(vec![]), json!([]));
+    assert_eq!(running_apps_json(vec![("slack".into(), "Slack".into())]), json!([{"id":"slack","name":"Slack"}]));
+    assert_eq!(parse_command(&json!({"action":"running_apps"}), &[], false), Some(Command::RunningApps));
+    assert!(parse_command(&json!({"action":"running_apps","extra":true}), &[], false).is_none());
 }

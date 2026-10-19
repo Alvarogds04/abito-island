@@ -45,7 +45,7 @@ const messages = {
   Repositories: "Repositorios",
   "My PRs": "Mis PRs",
   "To review": "Por revisar",
-  "Default branch CI": "CI de la rama principal",
+  "Default branch CI": "CI de la rama",
   Activity: "Actividad",
   "Nothing here": "Nada por aquí",
   "Loading…": "Cargando…",
