@@ -195,5 +195,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(calls.every(([cmd]) => ['prefs_action','hotkey_action','recap_action','monitor_action','sound_action'].includes(cmd)));
   assert(entry.includes("command === 'monitor_action'") && entry.includes("command === 'sound_action'"), '5a closed guards');
   assert(!/action: 'read'|'read'/.test(fs.readFileSync(path.join(base,'general.ts'),'utf8')), 'general never reads sound bytes');
+  const abitoCss = fs.readFileSync(path.join(base, 'abito.css'), 'utf8');
+  assert(/\.hub-empty svg\s*\{[^}]*width:\s*64px[^}]*height:\s*64px/.test(abitoCss), 'D2: the empty-state character is sized like Coucou\'s canvas (64px)');
   console.log('PASS settings-hub: sidebar parity, CSP, page gate, trusted gestures, bridge payloads, volume commit, unavailable motion');
 })().catch(e => { console.error(e); process.exitCode = 1; });
