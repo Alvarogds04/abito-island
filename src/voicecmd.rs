@@ -41,11 +41,6 @@ impl Default for VoicePrefs {
     }
 }
 
-/// Detection threshold handed to the keyword spotter: 0.45 (strict) down to 0.10 (loose).
-pub fn threshold_for(sensitivity: u8) -> f32 {
-    0.45 - 0.35 * (sensitivity.min(100) as f32 / 100.0)
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Status,

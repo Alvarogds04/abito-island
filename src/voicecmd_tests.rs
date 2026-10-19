@@ -76,13 +76,6 @@ fn sensitivity_defaults_to_the_middle_and_is_clamped() {
 }
 
 #[test]
-fn a_higher_sensitivity_lowers_the_detection_threshold() {
-    assert!(threshold_for(100) < threshold_for(50));
-    assert!(threshold_for(50) < threshold_for(0));
-    assert!(threshold_for(0) <= 0.5 && threshold_for(100) >= 0.05);
-}
-
-#[test]
 fn an_old_prefs_file_without_sensitivity_still_loads_with_the_default() {
     let d = dir("old");
     std::fs::create_dir_all(&d).unwrap();

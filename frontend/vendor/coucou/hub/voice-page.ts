@@ -21,8 +21,8 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
   page.append(ctx.hero('voice', 'OK Abito', t('Say « OK Abito », then ask anything: add a pill, play music, the weather, an email to prepare.')), box);
   function modelControl(): HTMLElement {
     const el = h('div', { style: 'display:flex;align-items:center;gap:8px' });
-    const k = st?.kws?.state ?? 'missing', p = st?.parakeet?.state ?? 'missing';
-    const fraction = k === 'downloading' ? st!.kws.fraction : p === 'downloading' ? st!.parakeet.fraction : 0;
+    const k = st?.vad?.state ?? 'missing', p = st?.parakeet?.state ?? 'missing';
+    const fraction = k === 'downloading' ? st!.vad.fraction : p === 'downloading' ? st!.parakeet.fraction : 0;
     if (k === 'downloading' || p === 'downloading') {
       const percent = Math.round(Math.max(0, Math.min(1, fraction ?? 0)) * 100);
       el.append(h('div', { class: 'hub-progress' }, h('i', { style: `width:${percent}%` })), h('span', { class: 'hub-note', text: `${percent} %` }));
@@ -30,7 +30,7 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
       el.append(h('span', { class: 'hub-note', style: 'color:var(--hub-green)', text: `✓ ${t('Installed')}` }),
         trusted(button(t('Remove the models'), () => void work(VoiceBridge.remove), '', true)));
     } else {
-      const err = st?.kws?.error ?? st?.parakeet?.error;
+      const err = st?.vad?.error ?? st?.parakeet?.error;
       if (err) el.append(h('span', { class: 'hub-note', text: err, title: err, style: 'max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }));
       el.append(trusted(button(err ? t('Retry') : t('Download'), () => void work(async () => {
         const next = await VoiceBridge.download();

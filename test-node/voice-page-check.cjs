@@ -16,12 +16,12 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const { hero } = await import(pathToFileURL(path.join(base, 'hero.js')));
   const events = new Map(), calls = [];
   global.window = { __TAURI__: { event: { listen: async (name, fn) => { const l = events.get(name) || new Set(); events.set(name, l); l.add(fn); return () => l.delete(fn); } } } };
-  let st = { prefs: { enabled: false, output: 'system', gender: 'female', sensitivity: 50 }, kws: { state: 'missing' }, downloadMb: 17, parakeet: { state: 'missing' }, listening: false, error: null };
+  let st = { prefs: { enabled: false, output: 'system', gender: 'female', sensitivity: 50 }, vad: { state: 'missing' }, downloadMb: 1, parakeet: { state: 'missing' }, listening: false, error: null };
   setInvoke(async (cmd, { payload: p }) => {
     calls.push([cmd, structuredClone(p)]);
     if (cmd === 'voice_action') {
       if (p.action === 'set_prefs') st = { ...st, prefs: { ...p.prefs } };
-      if (p.action === 'download_model') st = { ...st, kws: { state: 'downloading', fraction: 0 } };
+      if (p.action === 'download_model') st = { ...st, vad: { state: 'downloading', fraction: 0 } };
       return structuredClone(st);
     }
     return { parakeet: { state: 'downloading', fraction: 0 }, downloadMb: 700 };

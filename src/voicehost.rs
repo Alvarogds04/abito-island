@@ -8,7 +8,7 @@
 //! said after it (or `voice-timeout` {} when nothing was).
 use crate::{now_ms, AppState};
 use abito_island::bridge::{self, BridgeError};
-use abito_island::speech::{self, audio, kws};
+use abito_island::speech::{self, audio, wake};
 use abito_island::prefs::Command as PrefsCommand;
 use abito_island::voicecmd::{self, Command, VoicePrefs};
 use abito_island::voiceintent::{self, Effect, Hands, MusicOp, Outcome, Session, World};
@@ -141,13 +141,13 @@ impl Voices for RealVoices {
 
 struct Listener {
     capture: Option<audio::Capture>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    threads: Vec<std::thread::JoinHandle<()>>,
 }
 impl Drop for Listener {
     fn drop(&mut self) {
         // Closing the device drops the sender, which ends the worker.
         self.capture.take();
-        if let Some(t) = self.thread.take() {
+        for t in self.threads.drain(..) {
             let _ = t.join();
         }
     }
@@ -167,63 +167,98 @@ fn err(code: &str) -> BridgeError {
     BridgeError { code: code.into(), message: "No se pudo completar la acción de voz.".into() }
 }
 
+fn command_reply(handle: &AppHandle, session: &mut Session, hands: &AppHands, text: &str, speaking: &AtomicBool, segments: &mpsc::Receiver<Vec<f32>>) -> bool {
+    let _ = handle.emit("voice-command", json!({ "text": text }));
+    let reply = session.handle(text, hands);
+    let outcome = match &reply.outcome {
+        Outcome::Success => "success",
+        Outcome::Failure => "failure",
+        Outcome::Question(_) => "question",
+    };
+    let _ = handle.emit("voice-result", json!({ "outcome": outcome, "message": reply.message, "lang": if reply.lang == voiceintent::Lang::En { "en" } else { "es" } }));
+    let prefs = slot_prefs(handle);
+    let engine = {
+        use abito_island::secrets::{Keychain, SecretStore};
+        let has_key = Keychain.read(voicespeak::KEY_NAME).ok().flatten().is_some_and(|k| !k.is_empty());
+        voicespeak::engine_for(prefs.output, has_key)
+    };
+    if engine != Engine::None {
+        speaking.store(true, Ordering::Relaxed);
+        voicespeak::speak(&RealVoices, &reply.message, reply.lang, prefs.gender, engine);
+        // A short gap, then drop what the room echoed while it talked.
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        while segments.try_recv().is_ok() {}
+        speaking.store(false, Ordering::Relaxed);
+    }
+    reply.rearm
+}
+
+/// Two threads: the first runs the voice-activity detector over the microphone and offers
+/// each finished speech segment; the second owns the recognizer, drops nothing it is given
+/// but is only given one segment at a time (a busy recognizer means the segment is dropped).
 fn start_listener(app: &AppHandle, sensitivity: u8) -> Result<Listener, String> {
-    let spotter = kws::SherpaSpotter::load(voicecmd::threshold_for(sensitivity)).ok_or("the wake-word model could not be loaded")?;
+    let params = wake::params(sensitivity);
+    let mut gate_vad = wake::SileroGate::create(&wake::VAD.path(), params).ok_or("the voice detector could not be loaded")?;
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
+    let (seg_tx, seg_rx) = mpsc::sync_channel::<Vec<f32>>(1);
     // The microphone is ignored while Abito speaks, so it never hears itself.
     let speaking = Arc::new(AtomicBool::new(false));
     let gate = speaking.clone();
     let handle = app.clone();
-    let thread = std::thread::Builder::new()
+    let vad_thread = std::thread::Builder::new()
+        .name("abito-vad".into())
+        .spawn(move || {
+            while let Ok(chunk) = rx.recv() {
+                for seg in gate_vad.feed(&chunk) {
+                    if !wake::offer(&seg_tx, seg) {
+                        eprintln!("abito voice: recognizer busy, segment dropped");
+                    }
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    let recognizer_thread = std::thread::Builder::new()
         .name("abito-wake".into())
         .spawn(move || {
-            let mut wake = kws::WakeLoop::new(spotter);
+            let mut flow = wake::WakeFlow::new();
             let hands = AppHands { app: handle.clone() };
             let mut session = Session::default();
-            while let Ok(chunk) = rx.recv() {
-                for event in wake.feed(&chunk) {
-                    match event {
-                        kws::LoopEvent::Wake => {
-                            let _ = handle.emit("voice-wake", json!({}));
-                        }
-                        kws::LoopEvent::Timeout => {
-                            session.timeout();
-                            let _ = handle.emit("voice-timeout", json!({}));
-                        }
-                        kws::LoopEvent::Command(samples) => {
-                            let text = speech::transcribe(&samples).unwrap_or_default();
-                            let text = voicecmd::split_wake(&text).unwrap_or(text);
-                            let text = text.trim().to_string();
-                            let _ = handle.emit("voice-command", json!({ "text": text }));
-                            if text.is_empty() {
+            let mut last = std::time::Instant::now();
+            loop {
+                match seg_rx.recv_timeout(std::time::Duration::from_millis(250)) {
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let samples = (last.elapsed().as_secs_f64() * speech::SAMPLE_RATE as f64) as usize;
+                        last = std::time::Instant::now();
+                        for ev in flow.advance(samples) {
+                            if ev == wake::FlowEvent::Timeout {
                                 session.timeout();
-                                continue;
-                            }
-                            let reply = session.handle(&text, &hands);
-                            let outcome = match &reply.outcome {
-                                Outcome::Success => "success",
-                                Outcome::Failure => "failure",
-                                Outcome::Question(_) => "question",
-                            };
-                            let _ = handle.emit("voice-result", json!({ "outcome": outcome, "message": reply.message, "lang": if reply.lang == voiceintent::Lang::En { "en" } else { "es" } }));
-                            let prefs = slot_prefs(&handle);
-                            let engine = {
-                                use abito_island::secrets::{Keychain, SecretStore};
-                                let has_key = Keychain.read(voicespeak::KEY_NAME).ok().flatten().is_some_and(|k| !k.is_empty());
-                                voicespeak::engine_for(prefs.output, has_key)
-                            };
-                            if engine != Engine::None {
-                                speaking.store(true, Ordering::Relaxed);
-                                voicespeak::speak(&RealVoices, &reply.message, reply.lang, prefs.gender, engine);
-                                // A short gap, then drop what the room echoed while it talked.
-                                std::thread::sleep(std::time::Duration::from_millis(250));
-                                while rx.try_recv().is_ok() {}
-                                speaking.store(false, Ordering::Relaxed);
-                            }
-                            if reply.rearm {
-                                wake.arm_command();
+                                let _ = handle.emit("voice-timeout", json!({}));
                             }
                         }
+                    }
+                    Ok(seg) => {
+                        let started = std::time::Instant::now();
+                        let text = speech::transcribe(wake::clip(&seg)).unwrap_or_default();
+                        eprintln!("abito voice: {:.1}s segment transcribed in {:?}", seg.len() as f32 / speech::SAMPLE_RATE as f32, started.elapsed());
+                        let tolerance = wake::params(slot_prefs(&handle).sensitivity).tolerance;
+                        for ev in flow.on_transcript(&text, tolerance) {
+                            match ev {
+                                wake::FlowEvent::Wake => {
+                                    let _ = handle.emit("voice-wake", json!({}));
+                                }
+                                wake::FlowEvent::Timeout => {
+                                    session.timeout();
+                                    let _ = handle.emit("voice-timeout", json!({}));
+                                }
+                                wake::FlowEvent::Command(cmd) => {
+                                    if command_reply(&handle, &mut session, &hands, &cmd, &speaking, &seg_rx) {
+                                        flow.arm();
+                                    }
+                                }
+                            }
+                        }
+                        last = std::time::Instant::now();
                     }
                 }
             }
@@ -234,7 +269,7 @@ fn start_listener(app: &AppHandle, sensitivity: u8) -> Result<Listener, String> 
             let _ = tx.send(s.to_vec());
         }
     })?;
-    Ok(Listener { capture: Some(capture), thread: Some(thread) })
+    Ok(Listener { capture: Some(capture), threads: vec![vad_thread, recognizer_thread] })
 }
 
 /// Applies the preference and the model state: decide under the lock, open/close outside it.
@@ -242,7 +277,7 @@ fn sync(app: &AppHandle) {
     let slot = app.state::<Mutex<Host>>();
     let (want, running) = {
         let h = slot.lock().expect("voice host");
-        (h.prefs.enabled && kws::KWS.is_present() && speech::is_ready(), h.listener.is_some())
+        (h.prefs.enabled && wake::VAD.is_present() && speech::is_ready(), h.listener.is_some())
     };
     if want && !running {
         let sens = slot.lock().expect("voice host").prefs.sensitivity;
@@ -276,8 +311,8 @@ fn status_json(app: &AppHandle) -> Value {
     let h = h.lock().expect("voice host");
     json!({
         "prefs": h.prefs,
-        "kws": kws::status(),
-        "downloadMb": kws::download_mb(),
+        "vad": wake::status(),
+        "downloadMb": 1,
         "parakeet": speech::status().parakeet,
         "listening": h.listener.is_some(),
         "error": h.last_error,
@@ -313,7 +348,7 @@ pub async fn voice_action(
         }
         Command::Download => {
             let a = app.clone();
-            kws::download(move |_| {
+            wake::download(move |_| {
                 let _ = a.emit("voice-model", status_json(&a));
                 sync(&a);
             });
@@ -322,7 +357,7 @@ pub async fn voice_action(
         Command::Remove => {
             let old = app.state::<Mutex<Host>>().lock().expect("voice host").listener.take();
             drop(old);
-            kws::remove();
+            wake::remove();
             Ok(status_json(&app))
         }
     })
