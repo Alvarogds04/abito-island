@@ -342,10 +342,10 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn temp_store() -> (Store, PathBuf) {
+    pub(crate) fn temp_store() -> (Store, PathBuf) {
         let dir = std::env::temp_dir().join(format!("abito-flow-{}-{}", std::process::id(), new_id()));
         (Store::load_from(dir.clone()), dir)
     }
@@ -373,6 +373,18 @@ mod tests {
         // Saved on disk and read back.
         let again = Store::load_from(dir.clone());
         assert_eq!(again.stats.days["2026-10-14"].dictations, 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dictation_set_words_round_trip() {
+        let (mut s, dir) = temp_store();
+        let payload = serde_json::json!({"action":"set_words","words":{
+            "words":["Claude Code"],"replacements":[{"id":"r","from":"cloud code","to":"Claude Code"}]}});
+        let command = crate::dictation_cmd::parse_command(&payload, &[]).unwrap();
+        assert_eq!(crate::dictation_cmd::data_action(command, &mut s, today()), serde_json::json!({"ok":true}));
+        let loaded = Store::load_from(dir.clone());
+        assert_eq!(serde_json::to_value(loaded.words).unwrap(), payload["words"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 

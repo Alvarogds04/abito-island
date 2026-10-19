@@ -10,10 +10,23 @@ export interface FlowStatus {
   prefs: FlowPrefs; models: ModelsStatus; keys: string; hasClaudeKey: boolean; mics: {name: string; default: boolean}[];
   platform: 'windows' | 'linux'; autostarted: boolean;
 }
+export type Style = 'verbatim' | 'natural' | 'polished';
+export interface Replacement { id: string; from: string; to: string }
+export interface Snippet { id: string; trigger: string; text: string }
+export interface AppStyle { id: string; name: string; style: Style }
+export interface FlowEntry { id: string; date: number; text: string; app?: string | null; words: number; seconds: number }
+export interface Totals { words: number; seconds: number; dictations: number; wordsPerMinute: number; minutesSaved: number }
+export interface FlowStats { week: Totals; month: Totals; all: Totals; daily: [string, number][]; apps: Record<string, number>; streak: number }
+export interface Words { words: string[]; replacements: Replacement[] }
 let invoke: ((command: string, args: any) => Promise<any>) | undefined;
 let hasStatus = false;
 export function setInvoke(fn: typeof invoke) { invoke = fn; hasStatus = false; }
 const call = (payload: any) => invoke ? invoke('dictation_action', { payload }) : Promise.reject(new Error('No disponible todavía'));
+async function mutation(payload: any): Promise<{ok: true}> {
+  const reply = await call(payload);
+  if (reply?.ok !== true) throw new Error('No se pudo completar');
+  return reply;
+}
 export const FlowBridge = Object.freeze({
   status: async (): Promise<FlowStatus | null> => {
     try { const status = await call({action:'status'}); hasStatus = !!status; return status; }
@@ -25,6 +38,17 @@ export const FlowBridge = Object.freeze({
       enabled:p.enabled, key:p.key, edge:p.edge, mic:p.mic, keepDays:p.keepDays, cleanup:false, defaultStyle:p.defaultStyle,
     } });
   },
+  history: (): Promise<FlowEntry[]> => call({action:'history'}),
+  deleteEntry: (id: string) => mutation({action:'delete_entry', id}),
+  clear: (everything: boolean) => mutation({action:'clear_history', everything}),
+  stats: (): Promise<FlowStats> => call({action:'stats'}),
+  words: (): Promise<Words> => call({action:'words'}),
+  setWords: (words: Words) => mutation({action:'set_words', words}),
+  snippets: (): Promise<Snippet[]> => call({action:'snippets'}),
+  setSnippets: (snippets: Snippet[]) => mutation({action:'set_snippets', snippets}),
+  styles: (): Promise<AppStyle[]> => call({action:'styles'}),
+  setStyles: (styles: AppStyle[]) => mutation({action:'set_styles', styles}),
+  runningApps: async (): Promise<{id: string; name: string}[]> => [],
   download: (): Promise<ModelsStatus> => call({action:'download_model'}),
   removeModels: (): Promise<ModelsStatus> => call({action:'remove_model'}),
 });

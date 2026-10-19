@@ -1,10 +1,20 @@
 //! Closed dictation contract; no device access or Tauri dependencies.
-use crate::flow::{self, portal::KeyStatus, store::Prefs};
+use crate::flow::{self, portal::KeyStatus, store::{AppStyle, Prefs, Store}, text::{self, Day, Replacement, Snippet}};
 use crate::speech::{audio::InputDevice, ModelsStatus};
 use serde_json::{json, Value};
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
+    History,
+    DeleteEntry(String),
+    ClearHistory(bool),
+    Stats,
+    Words,
+    SetWords(Vec<String>, Vec<Replacement>),
+    Snippets,
+    SetSnippets(Vec<Snippet>),
+    Styles,
+    SetStyles(Vec<AppStyle>),
     Status,
     SetPrefs(Prefs),
     Download,
@@ -15,6 +25,42 @@ pub enum Command {
 pub fn parse_command(payload: &Value, devices: &[String]) -> Option<Command> {
     let o = payload.as_object()?;
     match o.get("action")?.as_str()? {
+        "history" if o.len() == 1 => Some(Command::History),
+        "stats" if o.len() == 1 => Some(Command::Stats),
+        "words" if o.len() == 1 => Some(Command::Words),
+        "snippets" if o.len() == 1 => Some(Command::Snippets),
+        "styles" if o.len() == 1 => Some(Command::Styles),
+        "delete_entry" if o.len() == 2 => {
+            let id = o.get("id")?.as_str()?;
+            (!id.is_empty() && id.len() <= 64
+                && id.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')))
+                .then(|| Command::DeleteEntry(id.into()))
+        }
+        "clear_history" if o.len() == 2 => Some(Command::ClearHistory(o.get("everything")?.as_bool()?)),
+        "set_words" if o.len() == 2 => {
+            let v = o.get("words")?;
+            let w = v.as_object()?;
+            if w.len() != 2 { return None; }
+            let words = w.get("words")?.as_array()?;
+            if words.len() > 500 || !words.iter().all(|v| v.as_str().is_some_and(|s|
+                s.chars().count() <= 80 && text::is_plain_word(s))) { return None; }
+            if !rows(w.get("replacements")?, 500, &[("id",64),("from",200),("to",200)]) { return None; }
+            let words: flow::store::Words = serde_json::from_value(v.clone()).ok()?;
+            Some(Command::SetWords(words.words, words.replacements))
+        }
+        "set_snippets" if o.len() == 2 => {
+            let v = o.get("snippets")?;
+            if !rows(v, 200, &[("id",64),("trigger",80),("text",4000)]) { return None; }
+            let snippets: Vec<Snippet> = serde_json::from_value(v.clone()).ok()?;
+            let mut triggers = std::collections::HashSet::new();
+            if snippets.iter().any(|s| s.trigger.trim().is_empty() || !triggers.insert(&s.trigger)) { return None; }
+            Some(Command::SetSnippets(snippets))
+        }
+        "set_styles" if o.len() == 2 => {
+            let v = o.get("styles")?;
+            if !rows(v, 100, &[("id",80),("name",80),("style",8)]) { return None; }
+            Some(Command::SetStyles(serde_json::from_value(v.clone()).ok()?))
+        }
         "status" if o.len() == 1 => Some(Command::Status),
         "download_model" if o.len() == 1 => Some(Command::Download),
         "remove_model" if o.len() == 1 => Some(Command::Remove),
@@ -39,6 +85,56 @@ pub fn parse_command(payload: &Value, devices: &[String]) -> Option<Command> {
         }
         _ => None,
     }
+}
+
+/// Exact nested keys and string types, measured in Unicode scalar values.
+fn rows(value: &Value, max: usize, fields: &[(&str, usize)]) -> bool {
+    value.as_array().is_some_and(|items| items.len() <= max && items.iter().all(|v|
+        v.as_object().is_some_and(|o| o.len() == fields.len() && fields.iter().all(|(key, limit)|
+            o.get(*key).and_then(Value::as_str).is_some_and(|s| s.chars().count() <= *limit)))))
+}
+
+pub fn history_json(store: &Store) -> Value {
+    if store.prefs.keep_days == 0 { json!([]) } else { json!(store.history.iter().take(300).collect::<Vec<_>>()) }
+}
+
+/// Mirrors Coucou's inclusive 7/30-day windows and oldest-first 30-day chart.
+pub fn stats_json(store: &Store, today: Day) -> Value {
+    let totals = |from| {
+        let (words, seconds, dictations) = store.totals(from);
+        json!({"words":words,"seconds":seconds,"dictations":dictations,
+            "wordsPerMinute":text::words_per_minute(words, seconds),
+            "minutesSaved":text::minutes_saved(words, seconds)})
+    };
+    let daily: Vec<_> = (0..30).rev().map(|back| {
+        let key = today.minus(back).key();
+        let words = store.stats.days.get(&key).map(|d| d.words).unwrap_or(0);
+        (key, words)
+    }).collect();
+    json!({"week":totals(Some(today.minus(6))),"month":totals(Some(today.minus(29))),
+        "all":totals(None),"daily":daily,"apps":store.stats.apps,"streak":store.streak(today)})
+}
+
+/// Call with the store mutex only: persistence must never hold the host mutex.
+pub fn data_action(command: Command, store: &mut Store, today: Day) -> Value {
+    match command {
+        Command::History => return history_json(store),
+        Command::Stats => return stats_json(store, today),
+        Command::Words => return json!(store.words),
+        Command::Snippets => return json!(store.snippets),
+        Command::Styles => return json!(store.app_styles),
+        Command::DeleteEntry(id) => store.delete(&id),
+        Command::ClearHistory(true) => store.clear_everything(),
+        Command::ClearHistory(false) => store.clear_history(),
+        Command::SetWords(words, replacements) => {
+            store.words = flow::store::Words { words, replacements };
+            store.save_words();
+        }
+        Command::SetSnippets(snippets) => { store.snippets = snippets; store.save_snippets(); }
+        Command::SetStyles(styles) => { store.app_styles = styles; store.save_styles(); }
+        _ => unreachable!("not a data action"),
+    }
+    json!({"ok":true})
 }
 
 pub fn status_json(prefs: &Prefs, models: ModelsStatus, key: KeyStatus, mics: Vec<InputDevice>) -> Value {

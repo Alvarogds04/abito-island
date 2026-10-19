@@ -15,6 +15,7 @@ import { renderPills } from './vendor/coucou/hub/personalization.js';
 import { startHub } from './vendor/coucou/hub/shell.js';
 import { setInvoke } from './vendor/coucou/hub/flow-shim.js';
 import { dictationPage, flowSettingsPage } from './vendor/coucou/hub/dictation-pages.js';
+import { dictionaryPage, snippetsPage, stylesPage, insightsPage } from './vendor/coucou/hub/data-pages.js';
 import { inactivePages, renderUnavailable } from './vendor/coucou/hub/pages.js';
 import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
@@ -40,8 +41,15 @@ const invoke = (command, args) => {
   if (command === 'dictation_action') {
     const p = args?.payload, keys = ['enabled', 'key', 'edge', 'mic', 'keepDays', 'cleanup', 'defaultStyle'];
     const exact = (v, fields) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(k => Object.hasOwn(v, k));
+    const strings = (v, fields) => exact(v, fields) && fields.every(k => typeof v[k] === 'string');
+    const list = (v, fields) => Array.isArray(v) && Array.from(v).every(x => strings(x, fields));
     if (!exact(args, ['payload']) || !p ||
-      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model'].includes(p.action)) ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'history', 'stats', 'words', 'snippets', 'styles'].includes(p.action)) ||
+        (exact(p, ['action', 'id']) && p.action === 'delete_entry' && typeof p.id === 'string' && p.id.length >= 1 && p.id.length <= 64 && !/[^A-Za-z0-9_-]/.test(p.id)) ||
+        (exact(p, ['action', 'everything']) && p.action === 'clear_history' && typeof p.everything === 'boolean') ||
+        (exact(p, ['action', 'words']) && p.action === 'set_words' && exact(p.words, ['words', 'replacements']) && Array.isArray(p.words.words) && Array.from(p.words.words).every(w => typeof w === 'string') && list(p.words.replacements, ['id', 'from', 'to'])) ||
+        (exact(p, ['action', 'snippets']) && p.action === 'set_snippets' && list(p.snippets, ['id', 'trigger', 'text'])) ||
+        (exact(p, ['action', 'styles']) && p.action === 'set_styles' && list(p.styles, ['id', 'name', 'style'])) ||
         (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, keys) &&
           typeof p.prefs.enabled === 'boolean' && ['right_ctrl', 'right_alt', 'right_shift', 'left_ctrl_super'].includes(p.prefs.key) &&
           ['bottom', 'left', 'right'].includes(p.prefs.edge) && typeof p.prefs.mic === 'string' && new TextEncoder().encode(p.prefs.mic).length <= 200 &&
@@ -56,7 +64,7 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
-  version: '0.1.0', flowPages: { ...inactivePages, dictation: dictationPage, flowsettings: flowSettingsPage },
+  version: '0.1.0', flowPages: { ...inactivePages, dictation: dictationPage, flowsettings: flowSettingsPage, dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
   async renderNotch(page, container) {
     if (page === 'general') {
       try {

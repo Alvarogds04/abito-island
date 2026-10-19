@@ -99,3 +99,123 @@ fn dictation_plan_never_asks_the_host_to_start_or_stop_under_its_lock() {
     assert!(e.running.is_none());
     assert!(matches!(e.plan(false, true), Plan::Keep), "disabling during a start: nothing running to stop yet");
 }
+
+#[test]
+fn dictation_data_schemas_are_closed() {
+    let valid = vec![json!({"action":"history"}), json!({"action":"stats"}),
+        json!({"action":"words"}), json!({"action":"snippets"}), json!({"action":"styles"}),
+        json!({"action":"delete_entry","id":"abc_12-3"}),
+        json!({"action":"clear_history","everything":false}),
+        json!({"action":"set_words","words":{"words":["Claude Code"],"replacements":[{"id":"r","from":"a","to":"b"}]}}),
+        json!({"action":"set_snippets","snippets":[{"id":"s","trigger":"signature","text":"Hi"}]}),
+        json!({"action":"set_styles","styles":[{"id":"app","name":"App","style":"natural"}]})];
+    for v in &valid {
+        assert!(parse_command(v, &[]).is_some(), "{v}");
+        let mut extra = v.clone(); extra["extra"] = json!(true);
+        assert!(parse_command(&extra, &[]).is_none());
+        for key in v.as_object().unwrap().keys().filter(|k| *k != "action") {
+            let mut missing = v.clone(); missing.as_object_mut().unwrap().remove(key);
+            assert!(parse_command(&missing, &[]).is_none());
+            let mut wrong = v.clone(); wrong[key] = json!(null);
+            assert!(parse_command(&wrong, &[]).is_none());
+        }
+    }
+    for id in ["".into(), "x".repeat(65), "../file".into(), "é".into()] {
+        assert!(parse_command(&json!({"action":"delete_entry","id":id}), &[]).is_none());
+    }
+    for value in [json!(0), json!("false"), json!(null)] {
+        assert!(parse_command(&json!({"action":"clear_history","everything":value}), &[]).is_none());
+    }
+    for (action, field, item, limits) in [
+        ("set_words", "replacements", json!({"id":"r","from":"a","to":"b"}), vec![("id",64),("from",200),("to",200)]),
+        ("set_snippets", "snippets", json!({"id":"s","trigger":"hello","text":"hi"}), vec![("id",64),("trigger",80),("text",4000)]),
+        ("set_styles", "styles", json!({"id":"a","name":"App","style":"verbatim"}), vec![("id",80),("name",80)])] {
+        let wrap = |items: Value| if action == "set_words" {
+            json!({"action":action,"words":{"words":[],"replacements":items}})
+        } else { json!({"action":action,field:items}) };
+        for (key, limit) in limits {
+            let mut boundary = item.clone(); boundary[key] = json!("x".repeat(limit));
+            assert!(parse_command(&wrap(json!([boundary.clone()])), &[]).is_some());
+            boundary[key] = json!("x".repeat(limit+1));
+            assert!(parse_command(&wrap(json!([boundary])), &[]).is_none());
+        }
+        for key in item.as_object().unwrap().keys() {
+            let mut missing = item.clone(); missing.as_object_mut().unwrap().remove(key);
+            assert!(parse_command(&wrap(json!([missing])), &[]).is_none());
+            let mut wrong = item.clone(); wrong[key] = json!(false);
+            assert!(parse_command(&wrap(json!([wrong])), &[]).is_none());
+        }
+        let mut extra = item.clone(); extra["extra"] = json!(0);
+        assert!(parse_command(&wrap(json!([extra])), &[]).is_none());
+        assert!(parse_command(&wrap(json!([null])), &[]).is_none());
+        let max = if field == "replacements" { 500 } else if field == "snippets" { 200 } else { 100 };
+        let items: Vec<_> = (0..max).map(|i| { let mut v=item.clone();
+            if field == "snippets" { v["trigger"]=json!(format!("trigger {i}")); } v }).collect();
+        assert!(parse_command(&wrap(json!(items)), &[]).is_some());
+        let mut too_many=items; too_many.push(item);
+        assert!(parse_command(&wrap(json!(too_many)), &[]).is_none());
+    }
+    for words in [json!(["x".repeat(81)]), json!(["C++"]), json!([1]), json!(vec!["ok";501])] {
+        assert!(parse_command(&json!({"action":"set_words","words":{"words":words,"replacements":[]}}), &[]).is_none());
+    }
+    for words in [json!({"words":[],"replacements":[],"extra":0}), json!({"words":[]})] {
+        assert!(parse_command(&json!({"action":"set_words","words":words}), &[]).is_none());
+    }
+    assert!(parse_command(&json!({"action":"set_words","words":{"words":vec!["é".repeat(80);500],"replacements":[]}}), &[]).is_some());
+    for snippets in [json!([{"id":"s","trigger":"","text":""}]),
+        json!([{"id":"s","trigger":"hello","text":""},{"id":"t","trigger":"hello","text":""}])] {
+        assert!(parse_command(&json!({"action":"set_snippets","snippets":snippets}), &[]).is_none());
+    }
+    for style in ["verbatim","natural","polished","bad"] {
+        assert_eq!(parse_command(&json!({"action":"set_styles","styles":[{"id":"a","name":"A","style":style}]}), &[]).is_some(), style != "bad");
+    }
+}
+
+#[test]
+fn dictation_data_views_and_mutations() {
+    use flow::{store::{tests::temp_store, DayStats, Entry}, text::Day};
+    let (mut s, dir) = temp_store();
+    let today = Day { year: 2026, month: 3, day: 1 };
+    for (back, words) in [(0,90),(1,45),(6,45),(7,90),(29,180),(30,450)] {
+        s.stats.days.insert(today.minus(back).key(), DayStats { words, seconds:60.0, dictations:1 });
+    }
+    s.stats.apps.insert("editor".into(), 900);
+    let stats = stats_json(&s, today);
+    let total = |words, seconds, dictations| json!({"words":words,"seconds":seconds,
+        "dictations":dictations,"wordsPerMinute":text::words_per_minute(words, seconds),
+        "minutesSaved":text::minutes_saved(words, seconds)});
+    let daily: Vec<_> = (0..30).rev().map(|back| (today.minus(back).key(), match back {
+        0 | 7 => 90, 1 | 6 => 45, 29 => 180, _ => 0 })).collect();
+    assert_eq!(stats, json!({"week":total(180,180.0,3),"month":total(450,300.0,5),
+        "all":total(900,360.0,6),"daily":daily,"apps":{"editor":900},"streak":2}));
+    s.history = (0..301).rev().map(|n| Entry { id:n.to_string(),date:n,text:format!("text {n}"),
+        app:None,words:2,seconds:1.0 }).collect();
+    let history = history_json(&s);
+    assert_eq!(history.as_array().unwrap().len(), 300);
+    assert_eq!(history[0], json!({"id":"300","date":300,"text":"text 300","app":null,"words":2,"seconds":1.0}));
+    assert_eq!(history[299]["id"], "1");
+    s.prefs.keep_days = 0;
+    assert_eq!(history_json(&s), json!([]));
+    s.prefs.keep_days = -1;
+    let run = |s: &mut flow::store::Store, p: Value| data_action(parse_command(&p, &[]).unwrap(), s, today);
+    assert_eq!(run(&mut s, json!({"action":"delete_entry","id":"300"})), json!({"ok":true}));
+    assert_eq!(s.history[0].id, "299");
+    for (set, get, field, value) in [
+        ("set_snippets","snippets","snippets",json!([{"id":"s","trigger":"hi","text":"Hello"}])),
+        ("set_styles","styles","styles",json!([{"id":"a","name":"App","style":"polished"}])),
+        ("set_words","words","words",json!({"words":["Hello"],"replacements":[]}))] {
+        assert_eq!(run(&mut s, json!({"action":set,field:value})), json!({"ok":true}));
+        assert_eq!(run(&mut s, json!({"action":get})), value);
+    }
+    assert_eq!(run(&mut s, json!({"action":"clear_history","everything":false})), json!({"ok":true}));
+    assert!(s.history.is_empty());
+    assert_eq!(s.totals(None).0, 900);
+    assert_eq!(run(&mut s, json!({"action":"clear_history","everything":true})), json!({"ok":true}));
+    assert_eq!(s.totals(None), (0,0.0,0));
+    assert!(s.stats.apps.is_empty());
+    let empty = stats_json(&s, today);
+    assert_eq!(empty["week"], total(0,0.0,0));
+    assert_eq!(empty["streak"], 0);
+    assert!(empty["daily"].as_array().unwrap().iter().all(|d| d[1] == 0));
+    let _ = std::fs::remove_dir_all(dir);
+}

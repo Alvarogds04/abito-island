@@ -75,6 +75,42 @@ Unknown actions, extra/missing fields, and wrong types are rejected.
   user click. A user-held portal shortcut may also open it. Status, setup, preference
   changes, finish and cancel never initiate capture. Delivery is clipboard-only (Ctrl+V).
 
+### Local data actions (same gate and rate limiter)
+
+All objects below require exactly the listed keys, including nested objects. Arrays
+must contain only the documented element type. Limits count Unicode scalar values
+(characters), except deletion IDs, which are ASCII. No data action copies, pastes,
+opens a microphone, downloads, or accesses the network. Mutations return `{ok:true}`.
+
+- `{action:"history"}` returns `[{id,date,text,app,words,seconds}]`: newest first,
+  preserving Store insertion order, capped at 300. `date` is epoch milliseconds;
+  `app` is a string or null. Returns `[]` whenever `prefs.keepDays == 0`.
+- `{action:"delete_entry",id}`: non-empty ASCII `[A-Za-z0-9_-]` ID, at most 64
+  characters. Missing IDs are a successful no-op.
+- `{action:"clear_history",everything}`: strict boolean; false clears history only,
+  true clears history and statistics (not dictionary, snippets, styles or prefs).
+- `{action:"stats"}` returns `{week,month,all,daily,apps,streak}`. Each totals object
+  is `{words,seconds,dictations,wordsPerMinute,minutesSaved}` using the shared text
+  helpers. Week starts today minus 6 days, month today minus 29; all has no cutoff.
+  `daily` has exactly 30 `["YYYY-MM-DD",words]` pairs, oldest first, zero-filled.
+  `apps` maps app names to word counts; `streak` uses Store's today/yesterday rule.
+- `{action:"words"}` returns `{words:[string],replacements:[{id,from,to}]}`.
+  `{action:"set_words",words:{words,replacements}}` replaces both lists: at most
+  500 words, each at most 80 characters and accepted by `text::is_plain_word`
+  (at least two alphanumeric characters; only alphanumerics, spaces, hyphens and
+  straight/curly apostrophes). At most 500 replacements; `id` ≤64, `from`/`to` ≤200.
+- `{action:"snippets"}` returns `[{id,trigger,text}]`.
+  `{action:"set_snippets",snippets:[{id,trigger,text}]}` replaces all snippets:
+  at most 200; `id` ≤64, `trigger` ≤80, `text` ≤4000. Triggers must not be empty or
+  whitespace-only and must be unique by exact string equality.
+- `{action:"styles"}` returns `[{id,name,style}]`.
+  `{action:"set_styles",styles:[{id,name,style}]}` replaces all styles: at most
+  100; `id`/`name` ≤80; `style` is exactly `verbatim|natural|polished`.
+
+Persistence calls run under the shared store mutex only, after releasing the host
+mutex. Store saves currently log disk errors rather than returning them; `{ok:true}`
+acknowledges the in-memory mutation, not guaranteed durable storage.
+
 Events (emitted with `app.emit`, payload is the object itself, not a wrapper):
 
 | Name | Exact payload | When |

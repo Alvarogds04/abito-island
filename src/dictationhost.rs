@@ -102,13 +102,21 @@ pub async fn dictation_action(
             }
             Command::SetPrefs(prefs) => {
                 {
-                    let host = slot.lock().expect("dictation host");
-                    let mut store = host.store.lock().expect("dictation store");
+                    let shared = slot.lock().expect("dictation host").store.clone();
+                    let mut store = shared.lock().expect("dictation store");
                     store.prefs = prefs.clone();
                     store.save_prefs();
                 }
                 sync(&app);
                 Ok(json!(prefs))
+            }
+            data @ (Command::History | Command::Stats | Command::Words | Command::Snippets
+                | Command::Styles | Command::DeleteEntry(_) | Command::ClearHistory(_)
+                | Command::SetWords(..) | Command::SetSnippets(_) | Command::SetStyles(_)) => {
+                let shared = slot.lock().expect("dictation host").store.clone();
+                let today = flow::store::today();
+                let mut store = shared.lock().expect("dictation store");
+                Ok(cmd::data_action(data, &mut store, today))
             }
             Command::Download => {
                 let app = app.clone();
