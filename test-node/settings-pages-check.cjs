@@ -42,7 +42,23 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
     } else if (config.flowPages[id]) {
       await config.flowPages[id](container, { hero, status: { prefs: { key: 'right_ctrl' }, platform: 'linux' } });
       assert(all(container).some(e => e.className.includes('hub-hero')), id);
-      assert(text(container).includes('pendiente de conectar'), id);
+      assert(text(container).includes(id === 'notes' ? 'No disponible todavía' : 'pendiente de conectar'), id);
+      if (id === 'notes') {
+        // D4: Coucou's Notetaker layout, disabled: compact band, the one-download card, calls list + detail.
+        assert(all(container).some(e => e.className === 'hub-hero compact'), 'compact band');
+        assert(all(container).some(e => e.className === 'hub-glow'), 'one-download glow card');
+        assert(text(container).includes('Una descarga y luego sin conexión'));
+        assert(text(container).includes('Abito escribe tus llamadas en este ordenador'));
+        const split = all(container).find(e => e.className === 'hub-notes');
+        assert(split, 'two-column calls layout');
+        assert.deepEqual(split.children.map(e => e.className), ['hub-notes-list', 'hub-note-detail']);
+        assert(text(split).includes('Grabar una llamada'));
+        assert(text(split).includes('Tus llamadas aparecerán aquí'));
+        assert(text(split).includes('Todo se queda en este ordenador'));
+        const buttons = all(container).filter(e => e.tagName === 'button');
+        assert(buttons.length >= 2 && buttons.every(b => b.disabled), 'every control disabled: no backend');
+        assert(text(container).includes('No disponible todavía'));
+      }
       if (id === 'voice') {
         assert.deepEqual(all(container).filter(e=>e.className==='hub-label').map(text),['Escucha','Respuestas','Privacidad']);
         assert.equal(all(container).filter(e=>e.className==='hub-card').length,3);
