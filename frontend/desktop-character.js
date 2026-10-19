@@ -40,5 +40,26 @@
   svg.addEventListener('pointerup', release);
   svg.addEventListener('pointercancel', release);
   svg.addEventListener('dblclick', () => call('character_home', {}));
+  // The island tells the page what to draw (state, emotes); Rust feeds the pointer for the eyes.
+  const listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  if (listen) {
+    const L = window.AbitoCharacterDesktop;
+    listen('desktop-character-state', e => {
+      const next = e && e.payload && e.payload.state;
+      if (clay && typeof next === 'string' && clay.state !== next) clay.setState(next);
+    });
+    listen('desktop-character-emote', e => {
+      const name = e && e.payload && e.payload.emote;
+      if (clay && typeof name === 'string') clay.triggerEmote(name);
+    });
+    listen('desktop-character-cursor', e => {
+      const p = e && e.payload;
+      if (!clay || !L || !p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+      const g = L.gaze({ x: L.PANEL_SIZE / 2, y: L.PANEL_SIZE / 2 }, { x: p.x, y: p.y });
+      // Coucou lookY is up-positive; the clay engine's gazeT.y is down-positive.
+      clay.S.gazeT = { x: g.lookX, y: -g.lookY };
+      clay.S.nextGaze = clay.S.t + 1.2;
+    });
+  }
   window.addEventListener('beforeunload', () => { try { if (clay) clay.destroy(); } catch { /* ignore */ } });
 })();

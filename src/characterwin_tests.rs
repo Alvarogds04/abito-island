@@ -136,3 +136,21 @@ fn a_saved_spot_is_rounded_to_whole_physical_pixels() {
     assert_eq!(spot_to_pref((1500.4, -300.6)), (1500, -301));
     assert_eq!(pref_to_spot((7, -9)), (7.0, -9.0));
 }
+
+#[test]
+fn the_cursor_reaches_the_page_in_window_local_logical_pixels() {
+    // window at (1000, 500) physical, scale 2: a cursor 120 physical px right and 60 down is (60, 30) css.
+    assert_eq!(cursor_local((1120.0, 560.0), (1000.0, 500.0), 2.0), (60.0, 30.0));
+    assert_eq!(cursor_local((10.0, 10.0), (0.0, 0.0), 0.0), (10.0, 10.0), "a bad scale reads as 1");
+}
+
+#[test]
+fn a_pick_up_centres_the_window_on_the_pointer() {
+    assert_eq!(centred_on((500.0, 400.0), 120.0, 1.0), (440.0, 340.0));
+    assert_eq!(centred_on((500.0, 400.0), 120.0, 2.0), (380.0, 280.0));
+}
+
+#[test]
+fn island_client_points_map_to_screen_physical_pixels() {
+    assert_eq!(client_to_screen((10.0, 5.0), (800.0, 0.0), 2.0), (820.0, 10.0));
+}

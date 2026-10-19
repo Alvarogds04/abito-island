@@ -140,3 +140,20 @@ pub fn spot_to_pref(spot: (f64, f64)) -> (i32, i32) {
 pub fn pref_to_spot(spot: (i32, i32)) -> (f64, f64) {
     (spot.0 as f64, spot.1 as f64)
 }
+
+/// Cursor (screen, physical) → window-local css px, for the page's gaze.
+pub fn cursor_local(cursor: (f64, f64), window: (f64, f64), scale: f64) -> (f64, f64) {
+    let k = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    ((cursor.0 - window.0) / k, (cursor.1 - window.1) / k)
+}
+
+/// Top-left of a window of `size` logical px centred on `center` (physical px).
+pub fn centred_on(center: (f64, f64), size: f64, scale: f64) -> (f64, f64) {
+    let half = size * scale / 2.0;
+    (center.0 - half, center.1 - half)
+}
+
+/// A point in the island window (css px) → screen physical px.
+pub fn client_to_screen(client: (f64, f64), island_origin: (f64, f64), scale: f64) -> (f64, f64) {
+    (island_origin.0 + client.0 * scale, island_origin.1 + client.1 * scale)
+}
