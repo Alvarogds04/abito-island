@@ -12,6 +12,9 @@
 //! (default `~/.local/share/abito/Models`). From then on everything runs offline.
 
 pub mod audio;
+pub mod kws;
+#[cfg(test)]
+mod kws_tests;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
