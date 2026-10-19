@@ -1232,6 +1232,7 @@ mod chosen_models {
             abito_instructions: Some("Ordena mis notas.".into()),
             show_plan_in_notch: Some(true),
             show_codex_plan_in_notch: Some(true),
+            window_context: Some(true),
         };
         let text = full.to_text();
         let re = Prefs::from_text(Some(&text));
@@ -2129,4 +2130,43 @@ fn an_old_prefs_file_never_opts_into_codex_and_a_hostile_value_is_dropped() {
         assert!(!Prefs::from_text(Some(&text)).show_codex_plan_in_notch(), "{hostile}");
     }
     assert!(Prefs::from_text(Some(r#"{"v":1,"show_codex_plan_in_notch":true}"#)).show_codex_plan_in_notch());
+}
+
+// ---- #487: `windowContext`, the opt-in to read the previous window's app and title ----------------
+#[test]
+fn window_context_is_an_exact_closed_two_key_command() {
+    assert_eq!(parse_command(&json!({"action":"set_window_context","window_context":true})), Ok(Command::SetWindowContext(true)));
+    assert_eq!(parse_command(&json!({"action":"set_window_context","window_context":false})), Ok(Command::SetWindowContext(false)));
+    for bad in [
+        json!({"action":"set_window_context"}),
+        json!({"action":"set_window_context","window_context":"true"}),
+        json!({"action":"set_window_context","window_context":1}),
+        json!({"action":"set_window_context","window_context":null}),
+        json!({"action":"set_window_context","window_context":true,"x":1}),
+        json!({"action":"set_window_context","show_plan_in_notch":true}),
+    ] {
+        assert_eq!(parse_command(&bad), Err(CommandError), "{bad}");
+    }
+}
+
+#[test]
+fn window_context_is_off_by_default_persists_and_false_drops_the_key() {
+    assert!(!Prefs::default().window_context(), "off by default");
+    let on = update(&Prefs::default(), &Command::SetWindowContext(true), |_| true).unwrap();
+    assert!(on.window_context());
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&on.to_text()).unwrap()["window_context"], json!(true));
+    assert!(Prefs::from_text(Some(&on.to_text())).window_context());
+    let off = update(&on, &Command::SetWindowContext(false), |_| true).unwrap();
+    assert_eq!(off.window_context, None);
+    assert!(!off.to_text().contains("window_context"), "the default writes no key");
+    assert!(!on.show_plan_in_notch() && !on.show_codex_plan_in_notch(), "independent of the plan pills");
+    for hostile in ["1", "\"true\"", "null", "[true]"] {
+        let text = format!(r#"{{"v":1,"window_context":{hostile}}}"#);
+        assert!(!Prefs::from_text(Some(&text)).window_context(), "{hostile}");
+    }
+}
+
+#[test]
+fn window_context_failed_save_changes_nothing() {
+    assert!(update(&Prefs::default(), &Command::SetWindowContext(true), |_| false).is_err());
 }

@@ -126,7 +126,13 @@ fn view_prefs(p: &Prefs) -> Value {
         "monitor": p.monitor,
         "showPlanInNotch": p.show_plan_in_notch(),
         "showCodexPlanInNotch": p.show_codex_plan_in_notch(),
+        "windowContext": p.window_context(),
         "settingsWindow": true})
+}
+
+/// #487: the explicit opt-in to read the previous window's app and title (off by default).
+pub fn window_context(host: &SettingsHost) -> bool {
+    host.prefs.lock().expect("prefs lock").window_context()
 }
 
 /// Only the already loaded, explicitly selected local preference reaches chat.

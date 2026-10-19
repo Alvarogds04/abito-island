@@ -3,6 +3,7 @@ import { h, clear } from "../views/dom.js";
 import { statusDot } from "../settings/parts.js";
 import { providerDef, urlExposure } from "../core/providers.js";
 import { notchSection as section, notchRow as row, notchHint as hint } from "./notch.js";
+import { toggle } from "./ui.js";
 import { session, trusted } from "./runtime.js";
 import { t } from "./i18n-es.js";
 const UNAVAILABLE = "No disponible todavía";
@@ -143,10 +144,24 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     showExposure();
     locals.append(block);
   }
+  const ctxBody = h("div", { style: "display:flex;flex-direction:column;gap:8px" });
+  const paintContext = () => {
+    clear(ctxBody);
+    const sw = trusted(toggle(prefs.windowContext === true, (value) => {
+      work(() => call("prefs_action", { action: "set_window_context", window_context: value }), (next) => {
+        prefs = next;
+        paintContext();
+      }, () => paintContext());
+    }));
+    sw.disabled = typeof prefs.windowContext !== "boolean";
+    ctxBody.append(row(t("Active window context"), sw));
+  };
+  paintContext();
   root.append(
     apiSection,
     section(t("Chat providers"), hint(t("Chat with Google AI, OpenAI or OpenRouter instead of Claude: add a key here, then click the model name above the chat box to switch provider and model. Keys stay in the system keychain. These providers get no web search and no tools: they can answer, never act on this computer.")), providers),
     section(t("Local models"), hint(t("Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.")), locals),
+    section(t("Active window context"), hint(t("When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.")), ctxBody),
     s.message
   );
   drawModels();
@@ -157,6 +172,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
   watch("prefs:state", (next) => {
     prefs = next;
     drawModels();
+    paintContext();
   });
   for (const key of ["anthropic-api-key", ...CLOUD.map(([id]) => providerDef(id).key)]) work(() => call("secret_action", V.keyPayload("present", key)), (result) => {
     present[key] = result?.present === true;
@@ -169,6 +185,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
   work(() => call("prefs_action", { action: "view" }), (next) => {
     prefs = next;
     drawModels();
+    paintContext();
   });
   return s.finish();
 }

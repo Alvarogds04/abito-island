@@ -299,6 +299,9 @@ pub settings_window: Option<bool>,
     /// S10 (L30): whether the Codex plan-usage pill shows. Turning it on lets the island ask the user's own
     /// `codex app-server` for its rate limits, so it is an explicit opt-in. `None` means off and is never written.
     pub show_codex_plan_in_notch: Option<bool>,
+    /// #487: opt-in to read the previous window's app and title for the chat (NotchBuddy feature 8).
+    /// `None` means off and is never written.
+    pub window_context: Option<bool>,
 }
 
 impl Default for Prefs {
@@ -325,6 +328,7 @@ impl Default for Prefs {
             abito_instructions: None,
             show_plan_in_notch: None,
             show_codex_plan_in_notch: None,
+            window_context: None,
         }
     }
 }
@@ -550,6 +554,7 @@ impl Prefs {
     pub fn show_plan_in_notch(&self) -> bool { self.show_plan_in_notch.unwrap_or(false) }
     /// S10 (L30): the effective Codex pill policy — absent means off (no `codex app-server` is ever started).
     pub fn show_codex_plan_in_notch(&self) -> bool { self.show_codex_plan_in_notch.unwrap_or(false) }
+    pub fn window_context(&self) -> bool { self.window_context.unwrap_or(false) }
 
     /// #366 F093: the effective Ajustes placement — absent means in-island (#408).
     pub fn settings_window_on(&self) -> bool { self.settings_window.unwrap_or(false) }
@@ -590,6 +595,7 @@ impl Prefs {
                 .and_then(|text| clean_instructions(text).ok()).flatten(),
             show_plan_in_notch: v.get("show_plan_in_notch").and_then(Value::as_bool),
             show_codex_plan_in_notch: v.get("show_codex_plan_in_notch").and_then(Value::as_bool),
+            window_context: v.get("window_context").and_then(Value::as_bool),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
         // A map whose every entry was dropped reads as absent: an untouched file keeps its bytes.
@@ -659,6 +665,9 @@ impl Prefs {
         if let Some(on) = self.show_codex_plan_in_notch {
             v["show_codex_plan_in_notch"] = json!(on);
         }
+        if let Some(on) = self.window_context {
+            v["window_context"] = json!(on);
+        }
         v.to_string()
     }
 }
@@ -726,6 +735,7 @@ pub enum Command {
     SetShowPlanInNotch(bool),
     /// S10 (L30): show or hide the Codex plan-usage pill (an opt-in to `codex app-server`). `false` stores no key.
     SetShowCodexPlanInNotch(bool),
+    SetWindowContext(bool),
     /// T6.2: the remembered inner size of the own Ajustes window (logical px).
     /// Deliberately NOT produced by [`parse_command`]: the WebView can read
     /// neither the size nor the fact that one is stored — the size comes from
@@ -917,6 +927,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             let on = map.get("show_codex_plan_in_notch").and_then(Value::as_bool).ok_or(CommandError)?;
             Ok(Command::SetShowCodexPlanInNotch(on))
         }
+        // #487: exactly action + window_context (a bool); no coercion.
+        Some("set_window_context") if map.len() == 2 => {
+            let on = map.get("window_context").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(Command::SetWindowContext(on))
+        }
         // #442 T7.4: exactly action + order (≤3 unique well-shaped ids).
         Some("set_island_agents") if map.len() == 2 => {
             let order = ordered_strings(map.get("order"))?;
@@ -1102,6 +1117,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::SetSettingsWindow(on) => next.settings_window = on.then_some(true),
         Command::SetShowPlanInNotch(on) => next.show_plan_in_notch = on.then_some(true),
         Command::SetShowCodexPlanInNotch(on) => next.show_codex_plan_in_notch = on.then_some(true),
+        Command::SetWindowContext(on) => next.window_context = on.then_some(true),
         // T6.2: the value gate ran nowhere else — apply is the ONLY boundary for
         // this Rust-side command, so the bounds check runs here for every caller.
         Command::SetSettingsWindowSize(w, h) => {

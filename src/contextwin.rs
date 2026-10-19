@@ -182,6 +182,43 @@ pub fn capture(bus_address: Option<&str>, display: Option<&str>) -> Option<Activ
     x11::recent_windows(display).as_deref().and_then(pick_external)
 }
 
+/// The chat's attach point (NotchBuddy `promptContext`): captured once when the chat opens and
+/// nothing is held, attached to the FIRST message of a conversation and kept for that
+/// conversation (the first message stays in `conversationMessages`). Pure state; the caller
+/// supplies the read, so nothing here touches D-Bus or X11.
+#[derive(Debug, Default)]
+pub struct ChatContext {
+    captured: Option<String>,
+    attached: Option<(String, String)>, // (conversation id, text)
+}
+
+impl ChatContext {
+    /// Chat opened. Switch off: forget everything and read NOTHING. On: read only if none held.
+    pub fn on_chat_open(&mut self, enabled: bool, read: impl FnOnce() -> Option<ActiveWindow>) {
+        if !enabled {
+            self.captured = None;
+            self.attached = None;
+            return;
+        }
+        if self.captured.is_none() {
+            self.captured = read().map(|w| format_context(&w));
+        }
+    }
+
+    /// Text to add to the model's context for a turn of `conversation`; `first` = no message yet.
+    pub fn for_turn(&mut self, enabled: bool, conversation: &str, first: bool) -> Option<String> {
+        if !enabled {
+            return None;
+        }
+        if first {
+            if let Some(text) = &self.captured {
+                self.attached = Some((conversation.to_string(), text.clone()));
+            }
+        }
+        self.attached.as_ref().filter(|(id, _)| id == conversation).map(|(_, text)| text.clone())
+    }
+}
+
 #[cfg(test)]
 #[path = "contextwin_tests.rs"]
 mod tests;

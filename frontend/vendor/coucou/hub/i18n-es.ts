@@ -3,6 +3,8 @@
 // Copyright (c) 2026 Louis Raillé, MIT; brand names replaced.
 const es: Record<string, string> = {
   // J2: Spanish values from the same upstream tables, brand substitutions only.
+  'Active window context': 'Contexto de la ventana activa',
+  'When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.': 'Al abrir el chat, Abito lee el nombre de la app y el título de la ventana que estabas usando y los adjunta a tu primer mensaje. Apagado de fábrica; mientras está apagado no se lee nada. El título llega al modelo con el que chateas.',
   'Add': 'Añadir', 'Add a word, e.g. Supabase': 'Añade una palabra, p. ej. Supabase',
   'Add an app': 'Añadir una app', 'All': 'Todo', 'As said': 'Tal cual',
   'Clean up with Claude': 'Limpiar con Claude', 'Copy': 'Copiar', 'Delete': 'Eliminar',

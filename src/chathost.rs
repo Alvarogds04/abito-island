@@ -166,6 +166,7 @@ pub fn switch_view(app: &AppHandle, state: &AppState, chat: bool) {
     }
     publish_chat(app);
     if opened {
+        capture_window_context(app);
         if current_target(state).is_none() {
             state.chat.lock().expect("chat lane lock").availability = chatlane::Availability {
                 state: "blocked",
@@ -183,6 +184,23 @@ pub fn switch_view(app: &AppHandle, state: &AppState, chat: bool) {
             });
         }
     }
+}
+
+/// #487 (NotchBuddy feature 8): when the chat opens with the opt-in ON, read the previous window
+/// once (off the UI thread). With the switch off nothing is read at all.
+fn capture_window_context(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if !crate::settingshost::window_context(&state.settings) {
+        state.chat_context.lock().expect("chat context lock").on_chat_open(false, || None);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let enabled = crate::settingshost::window_context(&state.settings);
+        let mut cx = state.chat_context.lock().expect("chat context lock");
+        cx.on_chat_open(enabled, || abito_island::contextwin::capture(None, None));
+    });
 }
 
 /// #408: give the chat column the Settings size while Ajustes is open (`open`) and take it back on close.
@@ -218,6 +236,19 @@ pub fn submit(
     let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
     let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
+    // #487: NotchBuddy puts the window context in the first message; it rides in the turn's system
+    // text (never in the stored user text or the history) for that conversation only.
+    let system = {
+        let (conversation, first) = {
+            let l = lane.lock().expect("chat lane lock");
+            (l.convo.id().to_owned(), l.convo.is_empty())
+        };
+        let enabled = crate::settingshost::window_context(&state.settings);
+        match state.chat_context.lock().expect("chat context lock").for_turn(enabled, &conversation, first) {
+            Some(context) => format!("{system}\n\n{context}"),
+            None => system,
+        }
+    };
     let gate = crate::model_gate(state, &target);
     if let Err(e) = gate {
         return Err(chat_error(e));

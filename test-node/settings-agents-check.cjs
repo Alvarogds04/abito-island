@@ -90,7 +90,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   assert(!text(ui.children[0].children[1]).includes('No disponible todavía No disponible todavía'));
   ui.dispose();
   ui=await renderChatSettings(opts);await ui.settled();
-  assert.deepEqual(heads(),['Claude','Proveedores de chat','Modelos locales']);
+  assert.deepEqual(heads(),['Claude','Proveedores de chat','Modelos locales','Contexto de la ventana activa']);
   assert.deepEqual(calls.filter(([c,p])=>c==='secret_action'&&p.action==='present').map(([,p])=>p.key),['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key']);
   for(const id of ['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key']) {
     const input=all(ui).find(e=>e.attrs.id===`chat-key-${id}`);assert.equal(input.type,'password');

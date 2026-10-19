@@ -342,6 +342,8 @@ struct AppState {
     specialists: specialistshost::SpecialistsHost,
     /// U1: per-turn deadlines (the probe shortens them for its fake).
     chat_deadlines: Mutex<abito_island::localmodel::Deadlines>,
+    /// #487: the previous window's context for the chat (empty unless the opt-in is on).
+    chat_context: Mutex<abito_island::contextwin::ChatContext>,
     /// U1 probe only: evidence lines the webview reports for the chat step.
     chat_probe: Mutex<Vec<Value>>,
     /// U2: the verified local registry in force. Production: exactly
@@ -1903,6 +1905,7 @@ fn main() {
         settings: settingshost::SettingsHost::default(),
         specialists: specialistshost::SpecialistsHost::default(),
         chat_deadlines: Mutex::new(chathost::default_deadlines()),
+        chat_context: Mutex::new(Default::default()),
         chat_probe: Mutex::new(Vec::new()),
         models_registry: Mutex::new(abito_island::models::REGISTRY.to_vec()),
         models_last: Mutex::new(Value::Null),
