@@ -38,6 +38,8 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   let status=structuredClone(state), leave;
   const ctx={get status(){return status;},hero,navigate(){},refresh:async()=>{status=await FlowBridge.status();return status;},setPrefs:async change=>{const p={...status.prefs};change(p);await FlowBridge.setPrefs(p);status={...status,prefs:p};},set onLeave(fn){leave=fn;}};
   const page = new Element('div'); await flowSettingsPage(page,ctx); await Promise.resolve(); await Promise.resolve();
+  assert(text(page).includes('Ctrl+V'), 'Flow settings must explain manual clipboard paste');
+  assert(!text(page).includes('si Abito puede escribir por ti'), 'Abito never asks to type automatically');
   assert(String(page.children[0].className).includes('hub-hero'), 'D3: the hero is the first thing on the page; the feedback line must not sit above it');
   const labels = all(page).filter(e=>e.className==='hub-label').map(e=>e.textContent);
   assert.deepEqual(labels,['Teclas','Micrófono','Reconocimiento','Notetaker','App','Privacidad'], 'upstream section order');

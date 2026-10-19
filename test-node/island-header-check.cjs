@@ -83,7 +83,7 @@ test('question: <asker> pregunta with a white dot, plain pill options (no key ba
   assert.match(isl, /\.q-key \{ display: none; \}/, 'the key badge is hidden; the number still drives aria-keyshortcuts');
   assert.match(isl, /#question-skip \{[^}]*font: 500 11px var\(--font\)/);
   const src = read('island.js');
-  assert.match(src, /\[\$\('card-fold'\), \$\('question-fold'\)\]\.filter\(Boolean\)\) foldButton\.addEventListener/, 'both chevrons are the same host collapse');
+  assert.match(src, /\[\$\('header-fold'\), \$\('card-fold'\), \$\('question-fold'\)\]\.filter\(Boolean\)\) foldButton\.addEventListener/, 'both chevrons are the same host collapse');
   const N = require(path.join(frontend, 'notify-view.js'));
   assert.equal(N.askerName(N.fromPending({ id: '3f2b8a40-1c2d-4e5f-8a6b-7c8d9e0f1a2b', kind: 'question', agent: 'claude-code', agent_label: 'Claude Code', text: 'x', options: [{ index: 0, label: 'a', description: '' }], expires_at: Date.now() + 1e5 })), 'Claude Code');
   assert.equal(N.askedBy(N.fromPending({ id: '3f2b8a40-1c2d-4e5f-8a6b-7c8d9e0f1a2b', kind: 'question', agent: 'claude-code', agent_label: 'Claude Code', text: 'x', options: [{ index: 0, label: 'a', description: '' }], expires_at: Date.now() + 1e5 })), 'Claude Code pregunta');

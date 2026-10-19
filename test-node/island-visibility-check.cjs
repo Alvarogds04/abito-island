@@ -43,6 +43,28 @@ test('B1 reproduction: expand then collapse settles the visible island and input
   assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['island_shape', { payload: { w: 288, h: 32, settled: true } }]);
 });
 
+test('B1 click: a named header fold control collapses through the guarded host verb, never an arbitrary control press', async () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  assert.match(html, /id="header-fold"[^>]*aria-label="Minimizar Abito"/);
+  const source = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  const start = source.indexOf('  for (const foldButton of');
+  const end = source.indexOf('\n  });', start) + '\n  });'.length;
+  const handlers = {};
+  let closes = 0;
+  const context = vm.createContext({
+    $: id => ({ addEventListener: (_name, fn) => { handlers[id] = fn; } }),
+    current: { state: 'expanded' }, focusAfterPhase: null, syncToggle() {},
+    window: { desktop: { close: async () => { closes++; return { state: 'compact' }; } } },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(typeof handlers['header-fold'], 'function');
+  handlers['header-fold']({ isTrusted: false }); assert.equal(closes, 0);
+  handlers['header-fold']({ isTrusted: true }); await Promise.resolve();
+  assert.equal(closes, 1);
+  assert.equal(context.current.state, 'compact');
+  assert.equal(handlers['open-chat'], undefined, 'chat/settings/other controls are not fold targets');
+});
+
 test('B2: enabled dictation stays hidden at boot and after idle; live and pending results appear', async () => {
   const capsule = new Element(), header = new Element(), events = {};
   capsule.dataset = { phase: 'expanded', view: 'overview' };
@@ -51,17 +73,36 @@ test('B2: enabled dictation stays hidden at boot and after idle; live and pendin
     createElement: () => new Element(), createElementNS: () => new Element(),
     documentElement: { dataset: {} }, addEventListener() {},
   };
-  const window = { __TAURI__: {
+  let expands = 0, closes = 0;
+  const window = { desktop: {
+    expand: async () => { expands++; capsule.dataset.phase = 'expanded'; return { state: 'expanded' }; },
+    close: async () => { closes++; capsule.dataset.phase = 'compact'; return { state: 'compact' }; },
+  }, __TAURI__: {
     core: { invoke: () => Promise.resolve({ prefs: { enabled: true } }) },
     event: { listen: (name, fn) => { events[name] = fn; return Promise.resolve(); } },
   } };
-  const context = vm.createContext({ document, window, self: window, setTimeout, clearTimeout,
+  let expireNote;
+  const context = vm.createContext({ document, window, self: window, setTimeout: fn => { expireNote = fn; return 1; }, clearTimeout() {},
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, queueMicrotask() {}, performance: { now: () => 0 } });
   vm.runInContext(fs.readFileSync(path.join(frontend, 'island-dictation.js'), 'utf8'), context);
   await Promise.resolve();
   const pill = header.children[0];
   console.log('B2 rendered at boot: .dpill hidden =', pill.hidden, 'children =', pill.children.length);
   assert.equal(pill.hidden, true, 'enabled is permission to dictate, not an active dictation');
+  events['dictation:note']({ payload: { note: 'needModel' } });
+  assert.equal(pill.hidden, false, 'missing-model feedback must remain visible even though recording never left idle');
+  assert.equal(header.children[1].textContent, 'Falta el modelo de voz: descargalo en Ajustes.');
+  expireNote();
+  assert.equal(pill.hidden, true, 'expired feedback restores the empty idle header');
+  capsule.dataset.phase = 'compact';
+  events['dictation:note']({ payload: { note: 'needModel' } });
+  await Promise.resolve();
+  assert.equal(expands, 1, 'a missing model must also reveal feedback on a folded island');
+  assert.equal(pill.hidden, false);
+  expireNote();
+  await Promise.resolve();
+  assert.equal(closes, 1, 'temporary error feedback gives back the island it opened');
+  capsule.dataset.phase = 'expanded';
   for (const phase of ['listening', 'locked', 'thinking', 'copied', 'failed', 'idle']) {
     events['dictation:phase']({ payload: { phase } });
     assert.equal(pill.hidden, phase === 'idle', phase);

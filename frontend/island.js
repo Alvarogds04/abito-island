@@ -1166,7 +1166,8 @@
   // keeps the card, the request keeps waiting (the compact sun flag carries
   // it), and reopening the island shows the same card again.
   // S10 (L22): Coucou's question card carries the same fold chevron; it is the same host collapse, nothing is answered.
-  for (const foldButton of [$('card-fold'), $('question-fold')].filter(Boolean)) foldButton.addEventListener('click', event => {
+  // The header exposes that same explicit fold action while the overview is empty, too.
+  for (const foldButton of [$('header-fold'), $('card-fold'), $('question-fold')].filter(Boolean)) foldButton.addEventListener('click', event => {
     if (event.isTrusted !== true || !window.desktop || !current || current.state !== 'expanded') return;
     focusAfterPhase = 'island-toggle'; // folding moves focus with the view, like Escape
     window.desktop.close().then(snap => {

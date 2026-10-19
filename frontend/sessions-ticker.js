@@ -75,6 +75,19 @@
     return 'Sesiones no disponibles';
   }
 
+  // agent_action sends asynchronously: its return value is a cached snapshot, not
+  // the response to this scan. Open the lazy connection before sending and let
+  // the next poll collect the answer. Null while connected means pending.
+  async function requestSessions(invoke) {
+    await invoke('agent_action', { payload: { action: 'view' } });
+    const state = await invoke('agent_action', { payload: { action: 'sessions_list' } });
+    const sessions = state && state.sessions;
+    if (sessions && Array.isArray(sessions.rows)) {
+      return sessionsView({ type: 'sessions', schema: SCHEMA, sessions: sessions.rows, truncated: sessions.truncated === true }) || { state: 'error' };
+    }
+    return { state: state && state.connection === 'connected' ? 'pending' : 'error' };
+  }
+
   // ---- render (the only DOM work; textContent only, theme tokens only) ---------
   // Theme tokens: --ink (rows) and --muted (footer) resolve on light AND dark
   // (style.css redefines them under html[data-theme="light"]). No raw colors here.
@@ -117,6 +130,7 @@
   const LOG_CAP = 20; // Coucou caps steps at 20 too (core/state.ts)
   const newMemory = () => ({ log: [], seq: 0, prev: new Set(), error: false, bounded: false, focus: null });
   function feed(memory, view) {
+    if (view && view.state === 'pending') return { active: false, task: null, who: null };
     if (!view || view.state !== 'ready') {
       if (!memory.error) { memory.error = true; memory.log.push(errorText()); memory.seq++; }
     } else {
@@ -140,7 +154,7 @@
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
   }
 
-  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed };
+  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -167,11 +181,6 @@ function mount(V) {
   const frame = now => { raf = 0; if (ticker) { ticker.tick(now); if (ticker.animating && !document.hidden) raf = requestAnimationFrame(frame); } };
   import('./vendor/coucou/views/ticker.js').then(mod => { ticker = new mod.Ticker(); ticker.el.hidden = true; leftCard.append(ticker.el); }).catch(() => {});
 
-  // The Rust host folds the `sessions` frame into ClientState.sessions
-  // ({rows, truncated}); rebuild OUR closed frame shape for the pure view.
-  const toFrame = state => (state && Array.isArray(state.rows))
-    ? { type: 'sessions', schema: V.SCHEMA, sessions: state.rows, truncated: state.truncated === true }
-    : null;
   // Coucou's collapsed bar draws up to four small characters (#mini-grid), one per running agent. Abito: one clay per running session.
   const grid = document.getElementById('mini-grid');
   let gridKey = '', minis = [];
@@ -208,8 +217,7 @@ function mount(V) {
     if (inFlight) return;
     inFlight = true;
     try {
-      const state = await invoke('agent_action', { payload: { action: 'sessions_list' } });
-      show(V.sessionsView(toFrame(state && state.sessions)) || { state: 'error' });
+      show(await V.requestSessions(invoke));
     } catch {
       show({ state: 'error' }); // one honest muted line; rows return on the next good answer
     } finally {

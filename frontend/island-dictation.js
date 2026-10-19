@@ -77,9 +77,9 @@
   }
   /** #479: should this phase change give the island back? Only when WE opened it, the dictation is over (`idle`), the human has
       not touched the island since, and it still shows the plain overview (no chat, card, question or open settings). */
-  function restorePlan({ phase, was, weExpanded, touched, island }) {
+  function restorePlan({ phase, was, weExpanded, touched, island, noteEnded = false }) {
     if (!weExpanded || touched || phase !== 'idle' || !isObject(island)) return 'none';
-    if (!LIVE.includes(was) && was !== 'copied' && was !== 'failed') return 'none';
+    if (!LIVE.includes(was) && was !== 'copied' && was !== 'failed' && !noteEnded) return 'none';
     const calm = island.phase === 'expanded' && island.view === 'overview' && !island.card && island.settings !== 'open' && !['pending', 'expired', 'outcome'].includes(island.question);
     return calm ? 'collapse' : 'none';
   }
@@ -124,7 +124,7 @@ function mount(api) {
   const say = verb => invoke('dictation_action', { payload: { action: verb } }).catch(() => {});
   // Enabling the shortcut does not start a dictation. Keep the header empty
   // until a host phase announces recording or a pending result; idle hides it again.
-  const shown = () => enabled && phase !== 'idle' && capsuleEl.dataset.phase === 'expanded' && capsuleEl.dataset.view !== 'chat';
+  const shown = () => enabled && (phase !== 'idle' || note !== null) && capsuleEl.dataset.phase === 'expanded' && capsuleEl.dataset.view !== 'chat';
   function pbtn(icon, name, action, opts = {}) {
     const b = el('button', ['pbtn', opts.small ? 'small' : '', opts.filled ? 'filled' : ''].filter(Boolean).join(' '));
     b.type = 'button'; b.setAttribute('aria-label', name); b.title = name; b.append(svgIcon(icon));
@@ -177,7 +177,18 @@ function mount(api) {
     clearTimeout(noteTimer); noteTimer = null;
     note = text ? { text, icon: icon || 'mic' } : null;
     live.textContent = text || '';
-    if (text) noteTimer = setTimeout(() => setNote(null), api.NOTE_MS);
+    if (text) {
+      noteTimer = setTimeout(() => setNote(null), api.NOTE_MS);
+      // A missing model emits only a note, never a listening phase. Reveal that
+      // feedback too, without making the idle microphone toolbar permanent.
+      if (enabled && (island().phase === 'compact' || island().state === 'hidden')) {
+        touched = false;
+        hostCall('expand', ok => { if (ok) weExpanded = true; render(); });
+      }
+    } else if (api.restorePlan({ phase, was: phase, weExpanded, touched, island: island(), noteEnded: true }) === 'collapse') {
+      weExpanded = false;
+      hostCall('close');
+    }
     render();
   }
   function tick(now) {
@@ -203,13 +214,16 @@ function mount(api) {
   let weExpanded = false, touched = false, flight = false, current = null;
   const island = () => ({ phase: capsuleEl.dataset.phase, view: capsuleEl.dataset.view, card: capsuleEl.dataset.card, question: capsuleEl.dataset.question, settings: capsuleEl.dataset.settings, state: current && current.state });
   const desktop = () => root.desktop;
-  try { desktop() && desktop().snapshot && desktop().snapshot().then(s => { current = s; }, () => {}); desktop() && desktop().onState && desktop().onState(s => { current = s; }); } catch { /* the facade is optional */ }
+  try {
+    if (desktop()?.snapshot) desktop().snapshot().then(s => { current = s; }, () => {});
+    if (desktop()?.onState) desktop().onState(s => { current = s; });
+  } catch { /* the facade is optional */ }
   capsuleEl.addEventListener('pointerdown', e => { if (e.isTrusted === true) touched = true; }, true);
   function hostCall(verb, done) {
     if (flight) return; const d = desktop();
     if (!d || typeof d[verb] !== 'function') return;
     flight = true;
-    d[verb]().then(snap => { if (snap) current = snap; flight = false; done && done(true); }, () => { flight = false; done && done(false); });
+    d[verb]().then(snap => { if (snap) current = snap; flight = false; if (done) done(true); }, () => { flight = false; if (done) done(false); });
   }
   listen('dictation:phase', e => {
     const next = api.phaseOf(e && e.payload);

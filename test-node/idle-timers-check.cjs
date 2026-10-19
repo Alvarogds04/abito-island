@@ -43,7 +43,7 @@ test('sessions polling pauses hidden/compact and resumes without overlap', () =>
   let changed, asks = 0;
   const document = { hidden: false, getElementById: () => capsule, addEventListener: (n, f) => { events[n] = f; } };
   class Observer { constructor(f) { changed = f; } observe() {} }
-  new Function('document', 'MutationObserver', 'setInterval', 'clearInterval', 'invoke', 'show', 'V', 'toFrame', 'POLL_MS', body)(document, Observer, c.setInterval, c.clearInterval, () => { asks++; return new Promise(() => {}); }, () => {}, {}, () => {}, 2000);
+  new Function('document', 'MutationObserver', 'setInterval', 'clearInterval', 'invoke', 'show', 'V', 'toFrame', 'POLL_MS', body)(document, Observer, c.setInterval, c.clearInterval, () => { asks++; return new Promise(() => {}); }, () => {}, { requestSessions: invoke => invoke('agent_action', { payload: { action: 'view' } }) }, () => {}, 2000);
   assert.equal(c.jobs.size, 0, 'compact boot must not poll'); assert.equal(asks, 0);
   capsule.dataset.phase = 'expanded'; changed(); assert.equal(c.jobs.size, 1); assert.equal(asks, 1);
   changed(); [...c.jobs.values()][0].fn(); assert.equal(asks, 1, 'only one in flight');

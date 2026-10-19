@@ -127,5 +127,24 @@ test('wiring: the mount feeds Coucou\'s Ticker through a dynamic import of the v
   assert.doesNotMatch(src, /position:fixed/);
 });
 
+test('poll opens the lazy connection and treats an unanswered scan as pending, not unavailable', async () => {
+  const calls = [];
+  let sessions = null;
+  const invoke = async (command, { payload }) => {
+    assert.equal(command, 'agent_action');
+    calls.push(payload.action);
+    if (payload.action === 'sessions_list') assert.equal(calls.at(-2), 'view');
+    return { connection: 'connected', sessions };
+  };
+  const pending = await T.requestSessions(invoke);
+  assert.equal(pending.state, 'pending');
+  assert.equal(T.feed(T.newMemory(), pending).active, false);
+  sessions = { rows: [row()], truncated: false };
+  assert.equal((await T.requestSessions(invoke)).rows[0].cwd, 'mi-proyecto');
+  sessions = { rows: [], truncated: false };
+  assert.equal(T.feed(T.newMemory(), await T.requestSessions(invoke)).active, false);
+  assert.deepEqual(await T.requestSessions(async () => ({ connection: 'disconnected', sessions: null })), { state: 'error' });
+});
+
 // ---- tiny harness result (functions defined above) -----------------------------
 Promise.all(async).then(() => { console.log(`sessions-ticker-view-check: ${passed} checks ok`); process.exit(0); }, (e) => { console.error(e); process.exit(1); });
