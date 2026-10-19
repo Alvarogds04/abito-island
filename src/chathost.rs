@@ -236,23 +236,12 @@ pub fn submit(
     let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
     let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
-    // #487: NotchBuddy puts the window context in the first message; it rides in the turn's system
-    // text (never in the stored user text or the history) for that conversation only.
-    let system = {
-        let (conversation, first) = {
-            let l = lane.lock().expect("chat lane lock");
-            (l.convo.id().to_owned(), l.convo.is_empty())
-        };
-        let enabled = crate::settingshost::window_context(&state.settings);
-        match state.chat_context.lock().expect("chat context lock").for_turn(enabled, &conversation, first) {
-            Some(context) => format!("{system}\n\n{context}"),
-            None => system,
-        }
-    };
-    let gate = crate::model_gate(state, &target);
-    if let Err(e) = gate {
-        return Err(chat_error(e));
-    }
+    // #487: NotchBuddy prefixes the FIRST user message with the window context. It is held for the
+    // conversation in memory and added to the prompt only: never to the stored or shown text.
+    let first = lane.lock().expect("chat lane lock").convo.is_empty();
+    let window_context = crate::settingshost::window_context(&state.settings)
+        .then(|| state.chat_context.lock().expect("chat context lock").for_turn(true, first))
+        .flatten();
     // #343: attachment ids are resolved ONLY against the island's uploads
     // directory — the page never sends names, sizes, MIME types or paths.
     // A chat without attachments never touches the island: no resolution,
@@ -271,6 +260,9 @@ pub fn submit(
     let (accepted, conversation_id) = {
         let mut l = lane.lock().expect("chat lane lock");
         let accepted = l.submit_with_attachments(text, client_request_id, &target.profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
+        if let Some(text) = &window_context {
+            l.convo.attach_context(&accepted.turn_id, text);
+        }
         (accepted, l.convo.id().to_owned())
     };
     publish_chat(app);

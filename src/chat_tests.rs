@@ -627,3 +627,38 @@ fn tool_events_after_a_terminal_turn_are_refused() {
     c.apply(&t, 2, Event::Complete(FinishReason::Stop)).unwrap();
     assert_eq!(c.apply(&t, 3, call("c1", "read", ToolState::Done, None)), Err(Reject::AfterTerminal));
 }
+
+// ---- #487: the window context rides with the FIRST user message, in every later prompt of that conversation ----
+
+#[test]
+fn context_prefixes_the_first_user_message_in_its_prompt_and_all_later_ones_but_not_the_stored_text() {
+    let mut c = convo();
+    let a = c.submit("hola", "req-0000000001", &profile()).unwrap();
+    c.attach_context(&a.turn_id, "Context — App: Firefox, Window: Docs");
+    let p = c.prompt_for(&a.turn_id, "SYS", 4096, 512).unwrap();
+    assert_eq!(p.messages[1].content, "Context — App: Firefox, Window: Docs\n\nhola");
+    c.apply(&a.turn_id, 1, Event::Delta("ok".into())).unwrap();
+    c.apply(&a.turn_id, 2, Event::Complete(FinishReason::Stop)).unwrap();
+    let b = c.submit("y ahora", "req-0000000002", &profile()).unwrap();
+    let p = c.prompt_for(&b.turn_id, "SYS", 4096, 512).unwrap();
+    assert_eq!(p.messages[0].content, "SYS", "the system text is untouched");
+    assert_eq!(p.messages[1].content, "Context — App: Firefox, Window: Docs\n\nhola", "stays in the history like conversationMessages");
+    assert_eq!(p.messages[3].content, "y ahora");
+    assert_eq!(c.view()["turns"][0]["user_text"], "hola", "the stored and shown text has no context");
+}
+
+#[test]
+fn a_conversation_without_context_prompts_exactly_as_before() {
+    let mut c = convo();
+    let a = c.submit("hola", "req-0000000001", &profile()).unwrap();
+    assert_eq!(c.prompt_for(&a.turn_id, "SYS", 4096, 512).unwrap().messages[1].content, "hola");
+}
+
+#[test]
+fn the_context_counts_against_the_token_budget() {
+    let mut c = convo();
+    let a = c.submit("hola", "req-0000000001", &profile()).unwrap();
+    let plain = c.prompt_for(&a.turn_id, "SYS", 4096, 512).unwrap().estimated_tokens;
+    c.attach_context(&a.turn_id, &"x".repeat(400));
+    assert!(c.prompt_for(&a.turn_id, "SYS", 4096, 512).unwrap().estimated_tokens > plain + 50);
+}

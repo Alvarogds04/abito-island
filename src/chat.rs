@@ -416,6 +416,22 @@ fn content_for(turn: &Turn, resolve: &ResolveAttachment) -> (Value, usize) {
     (Value::Array(parts), cost)
 }
 
+/// #487: `text\n\n` before a message's text (a plain string, or the first text part).
+fn prefixed(content: Value, text: &str) -> Value {
+    match content {
+        Value::String(s) => Value::String(format!("{text}\n\n{s}")),
+        Value::Array(mut parts) => {
+            if let Some(first) = parts.first_mut() {
+                if let Some(s) = first.get("text").and_then(Value::as_str) {
+                    first["text"] = Value::String(format!("{text}\n\n{s}"));
+                }
+            }
+            Value::Array(parts)
+        }
+        other => other,
+    }
+}
+
 /// The bounded active context of one conversation. #341 stores history separately.
 #[derive(Debug)]
 pub struct Conversation {
@@ -423,6 +439,9 @@ pub struct Conversation {
     turns: VecDeque<Turn>,
     next: u64,
     evicted: usize,
+    /// #487: the window context of this live conversation: (turn id it rides with, text). Memory only,
+    /// never stored, shown or sent back to the page; NotchBuddy prefixes the FIRST user message with it.
+    context: Option<(String, String)>,
 }
 
 impl Conversation {
@@ -432,20 +451,26 @@ impl Conversation {
             turns: VecDeque::new(),
             next: 0,
             evicted: 0,
+            context: None,
         }
+    }
+
+    /// #487: attach the window context to `turn_id`'s user message (prompt only).
+    pub fn attach_context(&mut self, turn_id: &str, text: &str) {
+        self.context = Some((turn_id.to_string(), text.to_string()));
     }
 
     /// Restore the newest page; older presentation pages never enlarge model context.
     pub fn restore(id: &str, turns: Vec<Turn>) -> Self {
         let next = turns.iter().filter_map(|t| t.turn_id.strip_prefix("t-")?.parse::<u64>().ok()).max().unwrap_or(0);
-        let mut convo = Self { id: id.into(), turns: turns.into(), next, evicted: 0 };
+        let mut convo = Self { id: id.into(), turns: turns.into(), next, evicted: 0, context: None };
         convo.enforce_cache();
         convo
     }
 
     /// Project a bounded disk page without applying the active model-context cache.
     pub fn project_history(id: &str, turns: Vec<Turn>) -> Value {
-        Self { id: id.into(), turns: turns.into(), next: 0, evicted: 0 }.view()
+        Self { id: id.into(), turns: turns.into(), next: 0, evicted: 0, context: None }.view()
     }
 
     pub fn id(&self) -> &str {
@@ -706,7 +731,15 @@ impl Conversation {
                                                 .position(|t| t.turn_id == turn_id)
                                                 .ok_or_else(ChatError::profile_missing)?;
                                 let budget = context_limit.saturating_sub(max_output);
-                                let (user_content, user_cost) = content_for(&self.turns[index], resolve);
+                                let ctx = self.context.clone();
+                                let with_ctx = |t: &Turn| {
+                                                let (content, cost) = content_for(t, resolve);
+                                                match &ctx {
+                                                                Some((id, text)) if *id == t.turn_id => (prefixed(content, text), cost + estimate_tokens(text)),
+                                                                _ => (content, cost),
+                                                }
+                                };
+                                let (user_content, user_cost) = with_ctx(&self.turns[index]);
                                 let mut used = estimate_tokens(system) + user_cost;
                                 if used > budget {
                                                 return Err(ChatError::context_limit());
@@ -722,7 +755,7 @@ impl Conversation {
                                                 .collect();
                                 let mut kept: Vec<&Turn> = Vec::new();
                                 for t in eligible.iter().rev() {
-                                                let (_, content_cost) = content_for(t, resolve);
+                                                let (_, content_cost) = with_ctx(t);
                                                 let cost = content_cost + estimate_tokens(&t.reply);
                                                 if used + cost > budget {
                                                                 break;
@@ -733,7 +766,7 @@ impl Conversation {
                                 let trimmed = eligible.len() - kept.len();
                                 let mut messages = vec![Message::text("system", system)];
                                 for t in kept.iter().rev() {
-                                                let (content, _) = content_for(t, resolve);
+                                                let (content, _) = with_ctx(t);
                                                 messages.push(Message { role: "user", content });
                                                 messages.push(Message::text("assistant", t.reply.clone()));
                                 }

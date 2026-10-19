@@ -231,6 +231,7 @@ fn principal_test_state(instructions: &str) -> AppState {
         settings: settingshost::with_test_prefs(prefs),
         specialists: SpecialistsHost::default(),
         chat_deadlines: Mutex::new(chathost::default_deadlines()),
+        chat_context: Mutex::new(Default::default()),
         chat_probe: Mutex::new(Vec::new()),
         models_registry: Mutex::new(models::REGISTRY.to_vec()),
         models_last: Mutex::new(Value::Null),

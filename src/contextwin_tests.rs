@@ -62,8 +62,8 @@ fn switch_off_reads_nothing_and_attaches_nothing() {
     let mut reads = 0;
     cx.on_chat_open(false, || { reads += 1; Some(win("Firefox")) });
     assert_eq!(reads, 0, "no D-Bus/X11 call while off");
-    assert_eq!(cx.for_turn(false, "c1", true), None);
-    assert_eq!(cx.for_turn(true, "c1", true), None, "nothing was captured");
+    assert_eq!(cx.for_turn(false, true), None);
+    assert_eq!(cx.for_turn(true, true), None, "nothing was captured");
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn captured_once_like_promptcontext_nil() {
     cx.on_chat_open(true, || { reads += 1; Some(win("Firefox")) });
     cx.on_chat_open(true, || { reads += 1; Some(win("Code")) });
     assert_eq!(reads, 1, "a second open does not read again once a context is held");
-    assert_eq!(cx.for_turn(true, "c1", true), Some("Context — App: Firefox, Window: T".to_string()));
+    assert_eq!(cx.for_turn(true, true), Some("Context — App: Firefox, Window: T".to_string()));
 }
 
 #[test]
@@ -81,18 +81,16 @@ fn a_failed_read_is_retried_on_the_next_open() {
     let mut cx = ChatContext::default();
     cx.on_chat_open(true, || None);
     cx.on_chat_open(true, || Some(win("Code")));
-    assert_eq!(cx.for_turn(true, "c1", true).unwrap(), "Context — App: Code, Window: T");
+    assert_eq!(cx.for_turn(true, true).unwrap(), "Context — App: Code, Window: T");
 }
 
 #[test]
-fn injected_in_the_first_message_and_stays_in_that_conversation_only() {
+fn only_the_first_message_of_a_conversation_is_offered_the_context() {
     let mut cx = ChatContext::default();
     cx.on_chat_open(true, || Some(win("Firefox")));
-    assert!(cx.for_turn(true, "c1", true).is_some(), "first message of c1");
-    assert!(cx.for_turn(true, "c1", false).is_some(), "later turns still see it, as the first message stays in the history");
-    assert_eq!(cx.for_turn(true, "c2", false), None, "a conversation that began without it never gets it");
-    assert!(cx.for_turn(true, "c2", true).is_some(), "a new conversation's first message gets it again (conversationMessages empty)");
-    assert_eq!(cx.for_turn(true, "c1", false), None, "c1 is no longer the attached conversation");
+    assert_eq!(cx.for_turn(true, true), Some("Context — App: Firefox, Window: T".to_string()));
+    assert_eq!(cx.for_turn(true, false), None, "NotchBuddy: `conversationMessages.isEmpty` only");
+    assert!(cx.for_turn(true, true).is_some(), "a new conversation's first message gets it again");
 }
 
 #[test]
@@ -100,5 +98,5 @@ fn turning_the_switch_off_drops_the_captured_window() {
     let mut cx = ChatContext::default();
     cx.on_chat_open(true, || Some(win("Firefox")));
     cx.on_chat_open(false, || Some(win("never")));
-    assert_eq!(cx.for_turn(true, "c1", true), None);
+    assert_eq!(cx.for_turn(true, true), None);
 }
