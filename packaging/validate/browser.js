@@ -185,12 +185,22 @@
       const live=await wait(async()=>{const p=await invoke('prefs_action',{action:'view'});return p.gain===.005 && p;},'volumen por teclado real');
       if(byId('hub-motion') || !root.textContent.includes('El movimiento no se puede configurar en Abito.')) throw new Error('control de movimiento inerte o explicación ausente');
       await invoke('prefs_action',{action:'set_sound_gain',gain});
-      effect={liveGain:live.gain,motion:'sin interruptor inerte',input:'XTest sobre rango real'};
+      const startup=()=>byId('hub-autostart');
+      await click(startup());
+      await wait(async()=> (await invoke('prefs_action',{action:'autostart_view'})).enabled===true,'autoinicio instalado desde General');
+      await wait(()=>startup().getAttribute('aria-pressed')==='true','autoinicio reflejado');
+      await click(startup());
+      await wait(async()=> (await invoke('prefs_action',{action:'autostart_view'})).enabled===false,'autoinicio retirado desde General');
+      effect={liveGain:live.gain,motion:'sin interruptor inerte',autostart:'on/off mediante UI',input:'XTest sobre controles reales'};
     } else if(page==='styles'||page==='flowsettings') {
       // Keyboard navigation on a real select produces trusted change events.
       const selects=[...root.querySelectorAll('select')].filter(s=>!s.disabled && s.options.length>1);
       const select=page==='flowsettings'?selects.at(-1):selects[0];
       await click(select); await key('Down'); await key('Return'); effect=await assertChanged();
+      if(page==='flowsettings') {
+        await click(byId('hub-open-at-launch'));
+        await wait(async()=> (await invoke('prefs_action',{action:'view'})).openSettingsAtLaunch===true,'abrir ajustes al iniciar persistido');
+      }
     } else {
       const selector=page==='general'?'#hub-sound':page==='shortcuts'?'#shortcut-desktopToggle .switch':'.switch:not(:disabled)';
       const control=root.querySelector(selector);
@@ -198,6 +208,14 @@
       await click(control);
       if(page==='shortcuts') effect=await wait(async()=>{const h=await invoke('hotkey_action',{action:'view',id:'desktopToggle'});return h.enabled===false && h;},'atajo desactivado');
       else effect=await assertChanged();
+      if(page==='agents') {
+        const instructions=byId('abito-instructions');
+        if(!instructions || !root.textContent.includes('Se aplican a los próximos mensajes del chat de Abito.')) throw new Error('instrucciones con explicación falsa o ausente');
+        instructions.value='Responde en español neutro.';
+        await click(buttonByText('Guardar instrucciones'));
+        await wait(async()=> (await invoke('prefs_action',{action:'view'})).abitoInstructions===instructions.value,'instrucciones guardadas');
+        effect={...effect,instructions:'guardadas para próximos mensajes'};
+      }
     }
     return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
   }

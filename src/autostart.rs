@@ -60,7 +60,7 @@ pub fn desktop_entry(exe: &Path) -> Option<String> {
          Type=Application\n\
          Name=Abito\n\
          Comment=Abito\n\
-         Exec={exec}\n\
+         Exec={exec} --autostart\n\
          Icon={icon}\n\
          Terminal=false\n\
          Categories=Utility;\n\

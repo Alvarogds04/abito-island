@@ -1979,6 +1979,7 @@ fn main() {
             // plus one bounded, off-thread first connection attempt so the icon
             // reflects the daemon without waiting for the first Settings open.
             trayhost::start(&handle);
+            settingswindow::open_on_launch(&handle, std::env::args().any(|arg| arg == "--autostart"));
             // M3: approval lane — install the publish/context/log hooks,
             // then start the bridge (mode 'jar', mint, first poll, 10 s
             // cadence) exactly where main.cjs `startBridge` runs: after the

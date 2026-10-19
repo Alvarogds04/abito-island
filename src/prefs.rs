@@ -282,6 +282,8 @@ pub struct Prefs {
 /// `None` means the default (in-island, #408) and is never written, so an untouched
 /// file keeps its bytes.
 pub settings_window: Option<bool>,
+    /// Open Settings on manual launch only; login autostart stays quiet.
+    pub open_settings_at_launch: Option<bool>,
     /// T6.2: the remembered inner size of the own Ajustes window, in LOGICAL px
     /// (as `inner_size`/`min_inner_size` take them). Absent from a file nobody
     /// resized the window in, so an untouched `prefs.json` keeps its bytes; a
@@ -349,6 +351,7 @@ impl Default for Prefs {
             custom_blobs: None,
             monitor: None,
             settings_window: None,
+            open_settings_at_launch: None,
             settings_window_size: None,
             island_agents: None,
             abito_instructions: None,
@@ -585,6 +588,7 @@ impl Prefs {
 
     /// #366 F093: the effective Ajustes placement — absent means in-island (#408).
     pub fn settings_window_on(&self) -> bool { self.settings_window.unwrap_or(false) }
+    pub fn open_settings_at_launch(&self) -> bool { self.open_settings_at_launch.unwrap_or(false) }
 
     pub fn from_text(text: Option<&str>) -> Prefs {
         let v = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
@@ -616,6 +620,7 @@ impl Prefs {
             monitor: v.get(MONITOR).and_then(Value::as_str)
                 .filter(|key| valid_monitor_key(key)).map(str::to_owned),
             settings_window: v.get("settings_window").and_then(Value::as_bool),
+            open_settings_at_launch: v.get("open_settings_at_launch").and_then(Value::as_bool).filter(|on| *on),
             settings_window_size: settings_window_size_from(v.get(SETTINGS_WINDOW_SIZE)),
             island_agents: island_agents_from(v.get(ISLAND_AGENTS)),
             abito_instructions: v.get(ABITO_INSTRUCTIONS).and_then(Value::as_str)
@@ -678,6 +683,7 @@ impl Prefs {
         if let Some(on) = self.settings_window {
             v["settings_window"] = json!(on);
         }
+        if self.open_settings_at_launch() { v["open_settings_at_launch"] = json!(true); }
         if let Some((w, h)) = self.settings_window_size.filter(|(w, h)| valid_settings_window_size(*w, *h)) {
             v[SETTINGS_WINDOW_SIZE] = json!({"w": w, "h": h});
         }
@@ -765,6 +771,10 @@ pub enum Command {
     /// #366 F093: whether Ajustes opens in its own window (opt-in). `false`
     /// stores the default (in-island) as no key at all.
     SetSettingsWindow(bool),
+    SetOpenSettingsAtLaunch(bool),
+    // Host-only filesystem effects, never copied into prefs.json.
+    AutostartView,
+    SetAutostart(bool),
     /// S10 (L30): show or hide the Claude plan-usage pill in the island header. `false` stores no key.
     SetShowPlanInNotch(bool),
     /// S10 (L30): show or hide the Codex plan-usage pill (an opt-in to `codex app-server`). `false` stores no key.
@@ -815,6 +825,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
     let map = payload.as_object().ok_or(CommandError)?;
     match map.get("action").and_then(Value::as_str) {
         Some("view") if map.len() == 1 => Ok(Command::View),
+        Some("autostart_view") if map.len() == 1 => Ok(Command::AutostartView),
+        Some(action @ ("set_open_settings_at_launch" | "set_autostart")) if map.len() == 2 => {
+            let on = map.get("enabled").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(if action == "set_autostart" { Command::SetAutostart(on) } else { Command::SetOpenSettingsAtLaunch(on) })
+        }
         Some("sound_on") if map.len() == 1 => Ok(Command::SoundOn),
         Some("sound_off") if map.len() == 1 => Ok(Command::SoundOff),
         Some("set_sound_gain") if map.len() == 2 => {
@@ -997,6 +1012,8 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
     let mut next = current.clone();
     match command {
         Command::View => {}
+        Command::AutostartView | Command::SetAutostart(_) => return Err(CommandError),
+        Command::SetOpenSettingsAtLaunch(on) => next.open_settings_at_launch = on.then_some(true),
         Command::SoundOn => next.sound = true,
         Command::SoundOff => next.sound = false,
         Command::SetSoundGain(gain) => {

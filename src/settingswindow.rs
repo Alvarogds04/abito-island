@@ -154,6 +154,13 @@ pub(crate) fn parse_settings_window_action(payload: &Value) -> Option<&'static s
     }
 }
 
+/// Called once during main-thread setup. Login startup never steals focus.
+pub(crate) fn open_on_launch(app: &AppHandle, autostarted: bool) {
+    if !autostarted && crate::settingshost::voice_prefs_snapshot(app).open_settings_at_launch() {
+        if let Err(error) = open_window(app) { eprintln!("settings launch failed: {error}"); }
+    }
+}
+
 /// The window, created or shown by Rust only. A repeat `open` shows and
 /// focuses the existing window instead of building a second one. The URL is
 /// the dedicated `settings.html` page (the closed settings-label entry); the window is

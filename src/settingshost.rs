@@ -153,6 +153,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "showPlanInNotch": p.show_plan_in_notch(),
         "showCodexPlanInNotch": p.show_codex_plan_in_notch(),
         "windowContext": p.window_context(),
+        "openSettingsAtLaunch": p.open_settings_at_launch(),
         "settingsWindow": true})
 }
 
@@ -297,6 +298,14 @@ pub async fn prefs_action(
         .lock()
         .expect("chat rate lock")
         .check(now_ms())?;
+    // Same sender/rate/serialization gates; no shadow copy in prefs.json.
+    if matches!(command, Command::AutostartView | Command::SetAutostart(_)) {
+        let _serial = state.settings.prefs_serial.lock().expect("prefs transaction lock");
+        if let Command::SetAutostart(enabled) = command {
+            crate::trayhost::set_autostart(&app, enabled).map_err(|_| err("save_failed"))?;
+        }
+        return Ok(json!({"enabled": crate::trayhost::autostart_enabled()}));
+    }
     let mut attempted_write = false;
     let next = prefs::transact(
         &state.settings.prefs_serial,
@@ -304,6 +313,11 @@ pub async fn prefs_action(
         &command,
         |p| {
             attempted_write = true;
+            // Upgrade an already-enabled legacy login entry before opting into
+            // manual-launch Settings. Otherwise old entries lack --autostart.
+            if matches!(command, Command::SetOpenSettingsAtLaunch(true))
+                && crate::trayhost::autostart_enabled() == Some(true)
+                && crate::trayhost::set_autostart(&app, true).is_err() { return false; }
             persist_prefs(&app, p)
         },
         |snapshot| {

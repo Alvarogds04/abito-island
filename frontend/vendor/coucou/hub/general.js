@@ -43,6 +43,7 @@ async function renderGeneral({ invoke, V }) {
   };
   await countCustom();
   let prefs = await invoke("prefs_action", { payload: { action: "view" } });
+  let autostart = await invoke("prefs_action", { payload: { action: "autostart_view" } });
   let hotkey = await invoke("hotkey_action", { payload: { action: "view" } });
   const recap = await renderRecapRows({ invoke });
   let queue = Promise.resolve(), issue = "", nameDraft = null, capturing = false;
@@ -60,6 +61,7 @@ async function renderGeneral({ invoke, V }) {
           settings = await bridge.boot();
           prefs = await send("prefs_action", { action: "view" });
           hotkey = await send("hotkey_action", { action: "view" });
+          autostart = await send("prefs_action", { action: "autostart_view" });
         } catch {
         }
       }
@@ -180,8 +182,14 @@ async function renderGeneral({ invoke, V }) {
       row(t("Auto-close"), seconds, h("span", { class: "hint", text: t("seconds after you leave the island") })),
       row(t("Island lives on"), screen),
       row(t("Theme"), themeSelect),
-      row(t("Launch at startup"), unavailable(toggle(false, () => {
-      }), "hub-autostart"), h("span", { class: "hint", text: "No disponible todavía" })),
+      row(t("Launch at startup"), (() => {
+        const control = identify(trusted(toggle(autostart.enabled === true, (enabled2) => run(async () => {
+          autostart = await send("prefs_action", { action: "set_autostart", enabled: enabled2 });
+        }))), "hub-autostart");
+        control.setAttribute("aria-pressed", String(autostart.enabled === true));
+        control.disabled = typeof autostart.enabled !== "boolean";
+        return control;
+      })()),
       recap,
       row(t("Language"), language, h("span", { class: "hint", text: "No disponible todavía" })),
       row("Nombre visible", name, save),

@@ -31,6 +31,7 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
   const countCustom = async () => { try { customCount = ((await invoke('sound_action', { payload: { action: 'list' } }))?.names ?? []).length; } catch { customCount = 0; } };
   await countCustom();
   let prefs = await invoke('prefs_action', { payload: { action: 'view' } });
+  let autostart = await invoke('prefs_action', { payload: { action: 'autostart_view' } });
   let hotkey = await invoke('hotkey_action', { payload: { action: 'view' } });
   const recap = await renderRecapRows({ invoke });
   let queue = Promise.resolve(), issue = '', nameDraft: string | null = null, capturing = false;
@@ -42,7 +43,7 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       try { await work(); issue = ''; }
       catch { issue = failure;
         // a failed SAVE re-reads the real values; a folder that did not open changed nothing, so there is nothing to re-read
-        if (failure === DEFAULT_FAILURE) try { settings = await bridge.boot(); prefs = await send('prefs_action', { action: 'view' }); hotkey = await send('hotkey_action', { action: 'view' }); } catch { /* Keep error visible, never claim success. */ }
+        if (failure === DEFAULT_FAILURE) try { settings = await bridge.boot(); prefs = await send('prefs_action', { action: 'view' }); hotkey = await send('hotkey_action', { action: 'view' }); autostart = await send('prefs_action', { action: 'autostart_view' }); } catch { /* Keep error visible, never claim success. */ }
       }
       if (repaint || issue) paint();
     });
@@ -119,7 +120,14 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       hint(t('Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.')),
       row(t('Auto-close'), seconds, h('span', { class: 'hint', text: t('seconds after you leave the island') })),
       row(t('Island lives on'), screen), row(t('Theme'), themeSelect),
-      row(t('Launch at startup'), unavailable(toggle(false, () => {}), 'hub-autostart'), h('span', { class: 'hint', text: 'No disponible todavía' })),
+      row(t('Launch at startup'), (() => {
+        const control = identify(trusted(toggle(autostart.enabled === true, enabled => run(async () => {
+          autostart = await send('prefs_action', { action: 'set_autostart', enabled });
+        }))), 'hub-autostart') as HTMLButtonElement;
+        control.setAttribute('aria-pressed', String(autostart.enabled === true));
+        control.disabled = typeof autostart.enabled !== 'boolean';
+        return control;
+      })()),
       recap,
       row(t('Language'), language, h('span', { class: 'hint', text: 'No disponible todavía' })),
       row('Nombre visible', name, save), nameIssue,

@@ -165,6 +165,23 @@ fn fixed_window_evidence(app: &AppHandle) {
 }
 
 pub fn run(app: AppHandle) {
+    let launch_mode = std::env::var("ABITO_PROBE_VALIDATE").unwrap_or_default();
+    if launch_mode == "island" || launch_mode.starts_with("startup-") {
+        sleep(Duration::from_millis(900));
+        let name = match launch_mode.as_str() {
+            "startup-manual" => "ajustes-arranque-manual",
+            "startup-login" => "ajustes-arranque-login",
+            _ => "ajustes-arranque-apagado",
+        };
+        let visible = app.get_webview_window("settings").is_some_and(|w| w.is_visible().unwrap_or(false));
+        let enabled = crate::settingshost::voice_prefs_snapshot(&app).open_settings_at_launch();
+        let expected = launch_mode == "startup-manual";
+        capture_visual(&app, name);
+        emit(&json!({"step":"validation_observation","name":name,"observation":{
+            "ok":visible == expected && enabled == (launch_mode != "island"),
+            "visible":visible,"enabled":enabled,"expected":expected,"reason":"ventana de ajustes al arrancar"}}));
+        if launch_mode.starts_with("startup-") { crate::quit_clean(&app); return; }
+    }
     if std::env::var("ABITO_PROBE_VALIDATE").as_deref() == Ok("island") {
         island_validation(&app);
         crate::quit_clean(&app);
@@ -2829,7 +2846,7 @@ fn feature_validation(app: &AppHandle) {
     let text=std::fs::read_to_string(&entry).unwrap_or_default();
     let off=tray("autostart");
     sleep(Duration::from_millis(350));
-    record("autoinicio",json!({"ok":on["ok"]==true && off["ok"]==true && text.lines().any(|s|s=="Name=Abito") && !entry.exists(),"written":text,"removed":!entry.exists(),"on":on,"off":off}));
+    record("autoinicio",json!({"ok":on["ok"]==true && off["ok"]==true && text.lines().any(|s|s=="Name=Abito") && text.contains(" --autostart") && !entry.exists(),"written":text,"removed":!entry.exists(),"on":on,"off":off}));
     let mut character=run(&win,"AbitoValidate.character(true)");
     sleep(Duration::from_millis(250));
     let mapped=app.get_webview_window("character").map(|w|w.is_visible().unwrap_or(false) && w.is_always_on_top().unwrap_or(false)).unwrap_or(false);
@@ -2857,7 +2874,18 @@ fn feature_validation(app: &AppHandle) {
         let catalog:serde_json::Value=serde_json::from_str(include_str!("../packaging/validate/pages.json")).expect("page catalog");
         for (index,id) in catalog.as_array().expect("pages").iter().enumerate() {
             let id=id.as_str().expect("page id");
-            record(&format!("ajustes-{id}"),run(&page,&format!("AbitoValidate.hub({index},{id:?})")));
+            if id == "flowsettings" {
+                let legacy=crate::autostart::desktop_entry(&std::env::current_exe().unwrap()).unwrap().replace(" --autostart", "");
+                std::fs::write(&entry,legacy).expect("private legacy autostart fixture");
+            }
+            let mut observation=run(&page,&format!("AbitoValidate.hub({index},{id:?})"));
+            if id == "flowsettings" {
+                let migrated=std::fs::read_to_string(&entry).unwrap_or_default().contains(" --autostart");
+                observation["legacyAutostartUpgraded"]=json!(migrated);
+                observation["ok"]=json!(observation["ok"]==true && migrated);
+                let _=crate::trayhost::set_autostart(app,false);
+            }
+            record(&format!("ajustes-{id}"),observation);
         }
         record("dictado-sin-modelo",run(&page,"AbitoValidate.noModel('dictation')"));
         record("voz-sin-modelo",run(&page,"AbitoValidate.noModel('voice')"));

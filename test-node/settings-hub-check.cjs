@@ -87,6 +87,11 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     {action:'set_prefs',prefs:Object.fromEntries(Object.entries(seven).filter(([k])=>k!=='mic'))}, {action:'set_prefs',prefs:[]}, {action:'set_prefs',prefs:seven,extra:0}]) await assert.rejects(guardContext.closedInvoke('dictation_action',{payload}));
   for (const args of [undefined, {}, {payload:{action:'status'},extra:1}, {payload:null}, {payload:[]}]) await assert.rejects(guardContext.closedInvoke('dictation_action',args));
   assert.deepEqual(guardCalls, [], 'dictation guard rejects extras, malformed preferences and capture actions before IPC');
+  for(const payload of [{action:'autostart_view'},{action:'set_autostart',enabled:true},{action:'set_open_settings_at_launch',enabled:false}]) {
+    await guardContext.closedInvoke('prefs_action',{payload});assert.deepEqual(guardCalls.pop(),['prefs_action',{payload}]);
+  }
+  for(const payload of [{action:'autostart_view',enabled:false},{action:'set_autostart',enabled:'yes'},{action:'set_autostart',enabled:true,extra:1},{action:'set_open_settings_at_launch',enabled:null}]) await assert.rejects(guardContext.closedInvoke('prefs_action',{payload}));
+  assert.deepEqual(guardCalls,[],'startup malformed payloads never cross IPC');
   assert(entry.includes("command === 'recap_action'"), 'closed recap guard');
   assert(entry.includes("['claude', 'codex'].includes(args.payload.action)"), 'plan_action payload guard');
   assert(entry.includes('set_show_plan_in_notch') && entry.includes('set_show_codex_plan_in_notch'), 'exact plan-in-notch pref guards');
@@ -101,9 +106,11 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(native.includes('WebviewUrl::App(std::path::PathBuf::from("settings.html"))'));
   const V = require('../frontend/settings-view.js');
   let prefs = { sound: true, gain: .12, autoCloseSeconds: 15, openOnHover: false, declaredPills: [], pillColors: {}, mainPill: 'integration_claude', theme: 'system', displayName: '', monitor: 'DP-1' };
-  const calls = []; let rejectGain = false; let rejectReveal = false; let customSounds = ['finish', 'greet'];
+  const calls = []; let autostart = false; let rejectAutostart = false; let rejectGain = false; let rejectReveal = false; let customSounds = ['finish', 'greet'];
   const invoke = async (cmd, { payload: p }) => {
     calls.push([cmd, p]);
+    if (cmd === 'prefs_action' && p.action === 'autostart_view') return {enabled:autostart};
+    if (cmd === 'prefs_action' && p.action === 'set_autostart') { if(rejectAutostart) throw Error('write refused'); autostart=p.enabled; return {enabled:autostart}; }
     if (cmd === 'recap_action') return p.action === 'prefs' ? {enabled:true} : {ok:true};
     if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1', x: 0, y: 0, width: 1920, height: 1080 }, { key: 'HDMI-1', x: 1920, y: 0, width: 1280, height: 720 }] };
     if (cmd === 'sound_action' && p.action === 'reveal' && rejectReveal) throw Error('xdg-open failed');
@@ -128,7 +135,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' General']);
   assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Atajo global']);
   assert(!all(ui).some(e => e.className === 'hub-segmented'));
-  for (const id of ['hub-autostart','hub-language']) {
+  for (const id of ['hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);
     el.fire(el.tagName === 'select' ? 'change' : 'click'); await ui.settled(); assert.deepEqual(calls, []);
   }
@@ -136,6 +143,16 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(!text(ui).includes('0 means never'), 'D6: Coucou shows no such line under Auto-close');
   assert.equal(all(ui).find(e=>e.attrs.id==='hub-language').children.length,11);
   const field = id => all(ui).find(e => e.attrs.id === id);
+  assert(!field('hub-autostart').disabled, 'startup toggle is usable');
+  field('hub-autostart').fire('click', false); await ui.settled(); assert.equal(autostart,false);
+  field('hub-autostart').fire('click'); await ui.settled(); assert.equal(autostart,true);
+  assert.equal(field('hub-autostart').attrs['aria-pressed'],'true');
+  rejectAutostart=true; field('hub-autostart').fire('click'); await ui.settled();
+  assert.equal(autostart,true); assert.equal(field('hub-autostart').attrs['aria-pressed'],'true');
+  assert(text(ui).includes('No se pudo guardar')); rejectAutostart=false;
+  field('hub-autostart').fire('click'); await ui.settled(); assert.equal(autostart,false);
+  const reopened=await renderGeneral({invoke,V}); await reopened.settled();
+  assert.equal(all(reopened).find(e=>e.attrs.id==='hub-autostart').attrs['aria-pressed'],'false'); reopened.dispose(); calls.length=0;
   // 5a: real display list and custom sounds on the existing closed hosts.
   assert.deepEqual(field('hub-screen').children.map(e => e.attrs.value), ['primary', 'cursor', 'DP-1', 'HDMI-1'], 'monitor_action list feeds the select');
   assert(field('hub-screen').children[1].disabled, 'cursor-following stays unavailable');

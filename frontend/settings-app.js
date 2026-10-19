@@ -33,6 +33,10 @@ const invoke = (command, args) => {
       !((['prefs', 'clear'].includes(p.action) && fields.length === 1) ||
         (p.action === 'set_enabled' && fields.length === 2 && typeof p.enabled === 'boolean'))) return Promise.reject(new Error('No disponible'));
   }
+  if (command === 'prefs_action' && ['autostart_view', 'set_autostart', 'set_open_settings_at_launch'].includes(args?.payload?.action)) {
+    const p = args.payload, fields = Object.keys(p);
+    if (Object.keys(args).length !== 1 || (p.action === 'autostart_view' ? fields.length !== 1 : fields.length !== 2 || typeof p.enabled !== 'boolean')) return Promise.reject(new Error('No disponible'));
+  }
   if (command === 'prefs_action' && ['set_show_plan_in_notch', 'set_show_codex_plan_in_notch'].includes(args?.payload?.action)) {
     const p = args.payload, key = p.action === 'set_show_plan_in_notch' ? 'show_plan_in_notch' : 'show_codex_plan_in_notch';
     if (Object.keys(args).length !== 1 || Object.keys(p).length !== 2 || typeof p[key] !== 'boolean') return Promise.reject(new Error('No disponible'));
@@ -75,7 +79,7 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
-  version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, dictation: dictationPage, flowsettings: flowSettingsPage, dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
+  version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
   async renderNotch(page, container) {
     if (page === 'general') {
       try {

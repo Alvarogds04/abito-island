@@ -163,6 +163,17 @@ async function main(args = process.argv.slice(2)) {
       if (app.exitCode !== 0) throw new Error(`Abito terminó con ${app.exitCode ?? app.signalCode}`);
       // exit may precede the final pipe data; close means all evidence is drained.
       await until(() => app.stdout.readableEnded, 3000, 'JSONL final');
+      // Reopen the same private persisted configuration, not a simulated startup handler.
+      for (const mode of ['manual', 'login']) {
+        const args = mode === 'login' ? ['--probe', '--autostart'] : ['--probe'];
+        const startup = launch(candidate, args, {...env, ABITO_PROBE_VALIDATE:`startup-${mode}`}, `startup-${mode}.stderr.log`);
+        startup.stdout.on('data', onData);
+        try {
+          await until(() => {if(startup.launchError) throw startup.launchError; return exited(startup);}, 30000, `arranque ${mode}`);
+          if(startup.exitCode !== 0) throw new Error(`arranque ${mode}: ${startup.exitCode}`);
+          await until(() => startup.stdout.readableEnded, 3000, `JSONL ${mode}`);
+        } finally {startup.stdout.off('data',onData);startup.stdout.resume();}
+      }
     } finally {
       // On timeout the app can still emit while teardown is in progress.
       // Detach before closing the log, otherwise EBADF could abort cleanup.

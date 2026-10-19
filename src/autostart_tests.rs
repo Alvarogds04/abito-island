@@ -29,7 +29,7 @@ fn entry_is_the_closed_template() {
         "Type=Application",
         "Name=Abito",
         "Comment=Abito",
-        "Exec=\"/opt/abito/bin/abito-island\"",
+        "Exec=\"/opt/abito/bin/abito-island\" --autostart",
         "Icon=/opt/abito/bin/abito-island.png",
         "Terminal=false",
         "Categories=Utility;",
@@ -162,4 +162,10 @@ fn the_visible_app_name_is_abito() {
     assert!(text.contains("\nName=Abito\n"), "{text}");
     assert!(text.contains("\nComment=Abito\n"), "{text}");
     assert!(!text.contains("Tauri"), "{text}");
+}
+
+#[test]
+fn login_entry_identifies_itself_so_settings_stays_closed_at_login() {
+    let text = desktop_entry(std::path::Path::new("/private/Abito")).unwrap();
+    assert!(text.lines().any(|line| line == "Exec=\"/private/Abito\" --autostart"));
 }

@@ -54,6 +54,8 @@ const {all, text, dom, Element} = require('./settings-accounts-check.cjs');
   click('Activar');await ui.settled();assert.deepEqual(calls.pop(),['prefs_action',{action:'set_island_agents',order:['esp-one']}]);
   click('Editar');find('specialist-name').value='Nuevo nombre';find('specialist-instructions').value='Ayuda nueva';click('Guardar agente');await ui.settled();
   assert.deepEqual(calls.pop(),['specialists_action',{action:'update',id:'esp-one',name:'Nuevo nombre',instructions:'Ayuda nueva',model:null,space:null,spaces:[],permissions:['read']}]);
+  assert(text(ui).includes('Se aplican a los próximos mensajes del chat de Abito.'));
+  assert(!text(ui).includes('Declarativo: todavía no se aplica'),'instructions are already wired to the principal prompt');
   find('abito-instructions').value='Instrucciones propias';click('Guardar instrucciones',false);await ui.settled();assert.deepEqual(calls,[]);
   click('Guardar instrucciones');await ui.settled();assert.deepEqual(calls.pop(),['prefs_action',{action:'set_abito_instructions',text:'Instrucciones propias'}]);
   click('Eliminar'); assert.deepEqual(calls,[]); click('Confirmar eliminación');await ui.settled();assert.deepEqual(calls.pop(),['specialists_action',{action:'delete',id:'esp-one'}]);

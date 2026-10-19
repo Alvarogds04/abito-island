@@ -58,7 +58,7 @@ export function modelsControl(ctx: HubContext, life: ReturnType<typeof mount>, o
   });
   return el;
 }
-export async function flowSettingsPage(page: HTMLElement, ctx: HubContext) {
+export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invoke?: (cmd: string, args: any) => Promise<any>) {
   const life = mount(page, ctx);
   const status = await ctx.refresh();
   if (!life.alive()) return;
@@ -118,9 +118,28 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext) {
 
   // ── App ──
   page.append(label(t("App")));
-  page.append(card(
-    row(t("Open this window when you open Abito"), t("Not when Abito starts with the computer."), unavailable(toggle(false, () => {}))),
-  ));
+  const launchPrefs = invoke ? await life.work(() => invoke('prefs_action', {payload:{action:'view'}})) : null;
+  if (!life.alive()) return;
+  let launchEnabled = launchPrefs?.openSettingsAtLaunch === true;
+  const launch = trusted(toggle(launchEnabled, enabled => {
+    if (!invoke || typeof launchPrefs?.openSettingsAtLaunch !== 'boolean') return;
+    (launch as HTMLButtonElement).disabled = true;
+    void life.work(async () => {
+      try {
+        const next = await invoke('prefs_action', {payload:{action:'set_open_settings_at_launch',enabled}});
+        if (typeof next.openSettingsAtLaunch !== 'boolean') throw new Error('No disponible');
+        launchEnabled = next.openSettingsAtLaunch;
+      } finally {
+        if (life.alive()) {
+          launch.classList.toggle('on', launchEnabled); launch.setAttribute('aria-pressed', String(launchEnabled));
+          (launch as HTMLButtonElement).disabled = false;
+        }
+      }
+    });
+  }));
+  launch.setAttribute('aria-pressed', String(launchEnabled));
+  launch.setAttribute('id', 'hub-open-at-launch'); (launch as HTMLButtonElement).disabled = typeof launchPrefs?.openSettingsAtLaunch !== 'boolean';
+  page.append(card(row(t("Open this window when you open Abito"), t("Not when Abito starts with the computer."), launch)));
 
   // ── Privacy ──
   page.append(label(t("Privacy")));

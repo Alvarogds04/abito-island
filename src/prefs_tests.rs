@@ -1227,6 +1227,7 @@ mod chosen_models {
             custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("#2DD4BF".into()) }]),
             monitor: Some("DP-1".into()),
             settings_window: None,
+            open_settings_at_launch: Some(true),
             settings_window_size: Some((960, 640)),
             island_agents: Some(vec!["esp-a1".into(), "esp-b2".into()]),
             abito_instructions: Some("Ordena mis notas.".into()),
@@ -2222,4 +2223,23 @@ fn w2_desktop_character_page_never_supplies_it() {
     ] {
         assert_eq!(parse_command(&bad), Err(CommandError), "{bad}: only Rust saves the spot");
     }
+}
+
+#[test]
+fn launch_settings_is_a_closed_persisted_opt_in() {
+    let on = parse_command(&json!({"action":"set_open_settings_at_launch","enabled":true}));
+    assert!(on.is_ok(), "launch setting is reachable through prefs_action");
+    let initial = Prefs::default();
+    let next = update(&initial, &on.unwrap(), |_| true).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&next.to_text()).unwrap()["open_settings_at_launch"], true);
+    let restored = Prefs::from_text(Some(&next.to_text()));
+    assert_eq!(restored, next);
+    let off = parse_command(&json!({"action":"set_open_settings_at_launch","enabled":false})).unwrap();
+    assert_eq!(update(&restored, &off, |_| true).unwrap(), initial);
+    assert!(update(&initial, &parse_command(&json!({"action":"set_open_settings_at_launch","enabled":true})).unwrap(), |_| false).is_err());
+    for bad in [json!({"action":"set_open_settings_at_launch","enabled":1}),json!({"action":"set_open_settings_at_launch","enabled":true,"extra":0}),json!({"action":"set_autostart","enabled":"yes"}),json!({"action":"autostart_view","extra":0})] {
+        assert!(parse_command(&bad).is_err(), "{bad}");
+    }
+    assert!(parse_command(&json!({"action":"autostart_view"})).is_ok());
+    assert!(parse_command(&json!({"action":"set_autostart","enabled":true})).is_ok());
 }

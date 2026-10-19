@@ -92,7 +92,7 @@ function modelsControl(ctx, life, onReady) {
   });
   return el;
 }
-async function flowSettingsPage(page, ctx) {
+async function flowSettingsPage(page, ctx, invoke) {
   const life = mount(page, ctx);
   const status = await ctx.refresh();
   if (!life.alive()) return;
@@ -143,10 +143,30 @@ async function flowSettingsPage(page, ctx) {
   ));
   page.append(h("div", { class: "hub-note", text: "No disponible todavía" }));
   page.append(label(t("App")));
-  page.append(card(
-    row(t("Open this window when you open Abito"), t("Not when Abito starts with the computer."), unavailable(toggle(false, () => {
-    })))
-  ));
+  const launchPrefs = invoke ? await life.work(() => invoke("prefs_action", { payload: { action: "view" } })) : null;
+  if (!life.alive()) return;
+  let launchEnabled = launchPrefs?.openSettingsAtLaunch === true;
+  const launch = trusted(toggle(launchEnabled, (enabled) => {
+    if (!invoke || typeof launchPrefs?.openSettingsAtLaunch !== "boolean") return;
+    launch.disabled = true;
+    void life.work(async () => {
+      try {
+        const next = await invoke("prefs_action", { payload: { action: "set_open_settings_at_launch", enabled } });
+        if (typeof next.openSettingsAtLaunch !== "boolean") throw new Error("No disponible");
+        launchEnabled = next.openSettingsAtLaunch;
+      } finally {
+        if (life.alive()) {
+          launch.classList.toggle("on", launchEnabled);
+          launch.setAttribute("aria-pressed", String(launchEnabled));
+          launch.disabled = false;
+        }
+      }
+    });
+  }));
+  launch.setAttribute("aria-pressed", String(launchEnabled));
+  launch.setAttribute("id", "hub-open-at-launch");
+  launch.disabled = typeof launchPrefs?.openSettingsAtLaunch !== "boolean";
+  page.append(card(row(t("Open this window when you open Abito"), t("Not when Abito starts with the computer."), launch)));
   page.append(label(t("Privacy")));
   const keep = [["0", t("Don't keep")], ["7", t("7 days")], ["30", t("30 days")], ["365", t("1 year")], ["-1", t("Forever")]];
   const confirmRow = h("div", { class: "hub-row" });

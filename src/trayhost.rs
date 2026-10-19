@@ -142,28 +142,32 @@ fn sync_autostart_check(app: &AppHandle, on: bool) {
     let _ = app; // TrayIcon has no menu getter; the handle is what matters
 }
 
+/// Shared by the tray and prefs_action; the entry file remains the only state.
+pub(crate) fn autostart_enabled() -> Option<bool> {
+    #[cfg(unix)] { autostart_entry().map(|p| crate::autostart::is_enabled_at(&p)) }
+    #[cfg(not(unix))] { None }
+}
+
+pub(crate) fn set_autostart(app: &AppHandle, enabled: bool) -> Result<bool, crate::autostart::AutostartError> {
+    #[cfg(unix)] {
+        use crate::autostart::{self, AutostartError};
+        let path = autostart_entry().ok_or(AutostartError::InvalidPath)?;
+        let exe = std::env::current_exe().map_err(AutostartError::Io)?;
+        let result = autostart::set_enabled_at(&path, enabled, &exe);
+        let actual = autostart::is_enabled_at(&path);
+        sync_autostart_check(app, actual);
+        result.map(|_| actual)
+    }
+    #[cfg(not(unix))] { let _ = (app, enabled); Err(crate::autostart::AutostartError::Unsupported) }
+}
+
 /// The toggle: the entry file IS the state (Coucou T02 semantics). A failed
 /// change leaves the check mark synced to the file system, never to the wish.
 #[cfg(unix)]
 fn toggle_autostart(app: &AppHandle) {
-    let Some(entry) = autostart_entry() else {
-        eprintln!("tray: no usable autostart directory; toggle unchanged");
-        sync_autostart_check(app, false);
-        return;
-    };
-    let on = crate::autostart::is_enabled_at(&entry);
-    let exe = match std::env::current_exe() {
-        Ok(exe) => exe,
-        Err(e) => {
-            eprintln!("tray: cannot resolve the island binary: {e}");
-            sync_autostart_check(app, on);
-            return;
-        }
-    };
-    if let Err(e) = crate::autostart::set_enabled_at(&entry, !on, &exe) {
-        eprintln!("tray: autostart change failed: {e}");
+    if let Err(error) = set_autostart(app, !autostart_enabled().unwrap_or(false)) {
+        eprintln!("tray: {error}");
     }
-    sync_autostart_check(app, crate::autostart::is_enabled_at(&entry));
 }
 
 #[cfg(unix)]

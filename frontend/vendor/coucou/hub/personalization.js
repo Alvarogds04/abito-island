@@ -319,7 +319,7 @@ async function renderPills({ invoke, listen, V, S, A, P, C, page = "all" }) {
       if (page !== "pills") root.append(section("Servicios", ...C.available().filter((d) => d.category === "service").map(pillRow)));
     }
     if (!instructionsDraft) principalInstructions.value = prefs.abitoInstructions || "";
-    const principal = section("Abito", row("Instrucciones", "Declarativo: todavía no se aplica", principalInstructions, action("Guardar instrucciones", () => {
+    const principal = section("Abito", row("Instrucciones", "Se aplican a los próximos mensajes del chat de Abito.", principalInstructions, action("Guardar instrucciones", () => {
       run({ type: "set_abito_instructions", text: principalInstructions.value });
     })));
     principalInstructions.maxLength = S.MAX_INSTRUCTIONS;
