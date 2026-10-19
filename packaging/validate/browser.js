@@ -203,7 +203,11 @@
     catch {return {ok:false,reason:'GitHub devuelve datos del gh falso pero la pill declarada no aparece en la isla',data,prefs:await invoke('prefs_action',{action:'view'})};}
     await click(pill);
     const card=await wait(()=>{const c=document.querySelector('.gh-card');return visible(c) && c.textContent.includes('GitHub') && !c.textContent.includes('Cargando') && c;},'tarjeta GitHub desde gh falso');
-    return {ok:data.available===true && data.activity.total===17,text:card.textContent,data};
+    const text=card.textContent;
+    // Leave the shared left card free for later scenes using real trusted input.
+    await click(byId('pill-choice-abito'));
+    await wait(()=>!visible(card),'tarjeta GitHub desenfocada');
+    return {ok:data.available===true && data.activity.total===17,text,data};
   }
   async function mail() {
     const answer=await invoke('mail_action',{action:'inbox'});

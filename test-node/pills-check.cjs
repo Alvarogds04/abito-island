@@ -14,7 +14,7 @@ const clone = value => {
 };
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-function boot({ prefs = {}, failView = false, deferView = false, store = null, specs = [], extraPrefs = {}, settingsLabel = 'settings' } = {}) {
+function boot({ prefs = {}, failView = false, deferView = false, store = null, specs = [], extraPrefs = {}, settingsLabel = 'settings', github = false } = {}) {
   const nodes = new Map(), events = {}, native = {}, calls = [], observers = [], frames = new Map();
   let frameAt = 0, nextFrame = 1;
   let doc;
@@ -60,6 +60,11 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
   const window = { addEventListener() {}, __TAURI__: {
     core: { invoke(cmd, { payload }) {
       calls.push({ cmd, payload: clone(payload) });
+      if (cmd === 'github_action' && github) {
+        const answer = backend.githubAvailable === false ? { available: false, reason: 'gh_not_signed_in' } : { available: true,
+          pulse: { login: 'me', myPRs: [], toReview: [], mainCI: [] }, activity: { weeks: [], total: 17 } };
+        return Promise.resolve(clone(answer));
+      }
       if (cmd === 'prefs_action') {
         if (payload.action === 'view') {
           if (deferView) return new Promise(resolve => { backend.pendingView = resolve; });
@@ -115,20 +120,27 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     } },
     event: { listen(name, fn) { (native[name] ||= []).push(fn); return Promise.resolve(() => {}); } },
   } };
-  const ctx = vm.createContext({ MutationObserver: class { constructor(fn) { this.fn = fn; } observe(target) { observers.push({ target, fn: this.fn }); } }, matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => frameAt }, cancelAnimationFrame(id) { frames.delete(id); }, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
+  const intervals = new Map(); let nextInterval = 1;
+  const leftCard = new Element();
+  get('overview-view').querySelector = selector => selector === '.card-left' ? leftCard : null;
+  window.testGithubView = { hooks: {}, githubPulseCard: (_p, _e, activity) => {
+    const card = new Element(); card.textContent = 'GitHub ' + (activity?.total ?? ''); return card;
+  } };
+  const ctx = vm.createContext({ setInterval(fn) { const id = nextInterval++; intervals.set(id, fn); return id; }, clearInterval(id) { intervals.delete(id); }, MutationObserver: class { constructor(fn) { this.fn = fn; } observe(target) { observers.push({ target, fn: this.fn }); } }, matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, performance: { now: () => frameAt }, cancelAnimationFrame(id) { frames.delete(id); }, window, self: window, document: doc, navigator: { userAgent: 'Linux' },
     DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } },
     crypto: require('node:crypto').webcrypto, requestAnimationFrame: fn => { const id = nextFrame++; if (fn.name === 'frame') frames.set(id, fn); else fn(frameAt); return id; }, setTimeout: () => 1, clearTimeout() {}, queueMicrotask,
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     Event: class { constructor(type) { this.type = type; } }, console });
   const load = file => {
     if (file === 'settings.js') window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: settingsLabel } } };
-    return vm.runInContext(read(file), ctx, { filename: file });
+    const source = file === 'island-github.js' ? read(file).replace("import('./vendor/coucou/views/github.js')", 'Promise.resolve(window.testGithubView)') : read(file);
+    return vm.runInContext(source, ctx, { filename: file });
   };
   for (const file of ['clay-engine.js', 'pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js', 'specialists-view.js']) load(file);
   vm.runInContext(`const testedClays = []; const realCreate = AbitoClay.create; AbitoClay.create = (...args) => { const instance = realCreate(...args); testedClays.push(instance); const destroy = instance.destroy; instance.destroy = () => { instance.testDestroyed = true; destroy(); }; return instance; };`, ctx);
   get('capsule').dataset = { phase: 'expanded', view: 'overview' };
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
-  return { advanceFrames(n = 1) { for (let i = 0; i < n; i++) { frameAt += 17; const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(frameAt); } }, mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); if (id === 'open-screen-settings') doc.dispatchEvent({ type: 'abito:settings-select', detail: 'open' }); else get(id).fire('click', fields); } };
+  return { leftCard, intervals, advanceFrames(n = 1) { for (let i = 0; i < n; i++) { frameAt += 17; const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(frameAt); } }, mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); if (id === 'open-screen-settings') doc.dispatchEvent({ type: 'abito:settings-select', detail: 'open' }); else get(id).fire('click', fields); } };
 }
 
 test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
@@ -1045,7 +1057,7 @@ test('#489 declared integration pills with a live poller show with their colour;
   const b = boot({ specs: SPECS, prefs: { declaredPills: ['integration_n8n', 'integration_vercel', 'integration_github'], pillColors: { integration_n8n: 'orange' } } }); b.load('specialists.js'); await flush();
   const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
   const base = ids(); assert.deepEqual(base, ['abito', 'esp-a', 'esp-b'], 'no poller answer yet: specialists only (unchanged)');
-  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_github', '__proto__'] } });
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', '__proto__'] } });
   assert.deepEqual(ids(), [...base, 'integration_n8n'], 'only declared + card-capable + answered');
   const n8n = b.get('pill-choices').children[3];
   assert.equal(n8n.dataset.color, 'orange');
@@ -1062,6 +1074,62 @@ test('#489 declared integration pills with a live poller show with their colour;
   b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: [] } });
   assert.equal(focus.at(-1), null, 'a vanished service releases the card');
   assert.deepEqual(ids(), base);
+});
+
+test('GitHub declared + connected shows a pill; trusted focus opens its card without changing the chat target', async () => {
+  const b = boot({ github: true, prefs: { declaredPills: ['integration_github', 'integration_n8n'] } });
+  b.load('island-github.js'); await flush();
+  const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
+  const card = b.leftCard.children[0];
+  assert.deepEqual(ids(), ['abito', 'integration_github'], 'a gh pulse discovers the declared integration without mainPill');
+  assert.equal(card.hidden, true, 'discovery does not focus');
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n'] } });
+  assert.deepEqual(ids(), ['abito', 'integration_github', 'integration_n8n'], 'the other poller snapshot must not erase GitHub');
+  b.click('pill-choice-integration_github', { isTrusted: false }); assert.equal(card.hidden, true);
+  b.click('pill-choice-integration_github'); await flush();
+  assert.equal(card.hidden, false); assert.match(card.textContent, /GitHub 17/);
+  assert.equal(b.get('overview-view').dataset.github, 'on');
+  assert.deepEqual(ids(), ['abito', 'integration_n8n'], 'focused pill is the left card');
+  assert.equal(b.backend.specCalls.length, 0); assert.equal(b.backend.writes, 0);
+  b.click('pill-choice-integration_n8n'); assert.equal(card.hidden, true, 'focusing another integration hides GitHub');
+  b.click('pill-choice-integration_github');
+  b.get('capsule').dataset.view = 'chat'; b.mutate(b.get('capsule')); assert.equal(card.hidden, true);
+  b.get('capsule').dataset.view = 'overview'; b.mutate(b.get('capsule')); await flush();
+  assert.equal(card.hidden, false);
+  b.click('pill-choice-abito'); await flush(); assert.equal(card.hidden, true, 'chat target releases focus');
+  b.click('pill-choice-integration_github'); b.backend.githubAvailable = false;
+  for (const refresh of [...b.intervals.values()]) refresh(); await flush();
+  assert.equal(card.hidden, true, 'lost gh connection releases the focused card');
+  assert.deepEqual(ids(), ['abito', 'integration_n8n'], 'disconnect only removes GitHub');
+  b.backend.githubAvailable = true;
+  for (const refresh of [...b.intervals.values()]) refresh(); await flush();
+  assert.ok(ids().includes('integration_github'), 'polling discovers reconnection');
+  b.click('pill-choice-integration_github');
+  b.emit({ declaredPills: ['integration_n8n'] }); await flush();
+  assert.equal(card.hidden, true, 'undeclaring hides the card');
+  assert.deepEqual(ids(), ['abito', 'integration_n8n']);
+  assert.equal(b.intervals.size, 0, 'undeclared GitHub stops polling');
+  assert.ok(b.calls.filter(c => c.cmd === 'github_action').every(c => c.payload.action === 'refresh' && ['pulse', 'activity'].includes(c.payload.section)));
+});
+
+test('GitHub without a declaration or a successful gh answer never enters the grid', async () => {
+  for (const declared of [false, true]) {
+    const b = boot({ github: true, prefs: { declaredPills: declared ? ['integration_github'] : [] } });
+    b.backend.githubAvailable = false; b.load('island-github.js'); await flush();
+    assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito']);
+    assert.equal(b.leftCard.children[0].hidden, true);
+    if (!declared) assert.equal(b.calls.filter(c => c.cmd === 'github_action').length, 0);
+  }
+});
+
+test('GitHub obeys the Coucou four-cell grid cap when its focused pill moves to the card', async () => {
+  const b = boot({ github: true, specs: SPECS, prefs: { declaredPills: ['integration_github', 'integration_n8n', 'integration_vercel'] } });
+  b.load('specialists.js'); b.load('island-github.js'); await flush();
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_vercel'] } });
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_github']);
+  b.click('pill-choice-integration_github');
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_n8n']);
+  assert.equal(b.leftCard.children[0].hidden, false, 'four grid cells plus the focused card, never more');
 });
 
 test('#489 an unseen event puts a badge on an unfocused integration pill; focusing clears it', async () => {

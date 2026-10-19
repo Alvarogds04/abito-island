@@ -47,8 +47,8 @@
   // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
   const MAX_PILLS = 4;
   const gridRows = all => all.filter(r => r.id !== focused).slice(0, MAX_PILLS);
-  const CARD_PILLS = Object.freeze({ integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
-  let focused = null; const badges = new Set(), connected = new Set();
+  const CARD_PILLS = Object.freeze({ integration_github: 'GitHub', integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
+  let focused = null; const badges = new Set(), connected = new Set(), seenBySource = new Map();
   const integrationRows = () => {
     const ids = [prefs.mainPill, ...(Array.isArray(prefs.declaredPills) ? prefs.declaredPills : [])];
     const colors = prefs.pillColors && typeof prefs.pillColors === 'object' ? prefs.pillColors : {};
@@ -116,10 +116,29 @@
     }
     if (focusedEl) (get(focusedEl) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
   }
-  function apply(raw) { prefs = raw && typeof raw === 'object' ? raw : {}; paint(); }
+  function apply(raw) {
+    prefs = raw && typeof raw === 'object' ? raw : {};
+    if (focused && !integrationRows().some(row => row.id === focused)) {
+      focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
+    }
+    paint();
+  }
   doc.addEventListener('abito:specialists-changed', paint);
   // A service shows its pill once its poller answered (declared + key saved on the host); a pill with no key never appears.
-  doc.addEventListener('abito:integration-seen', e => { const ids = e && e.detail && Array.isArray(e.detail.ids) ? e.detail.ids : []; const next = new Set(ids.filter(id => typeof id === 'string' && Object.prototype.hasOwnProperty.call(CARD_PILLS, id))); if (next.size !== connected.size || [...next].some(id => !connected.has(id))) { connected.clear(); next.forEach(id => connected.add(id)); if (focused && !connected.has(focused)) { focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } })); } paint(); } });
+  doc.addEventListener('abito:integration-seen', e => {
+    const ids = Array.isArray(e?.detail?.ids) ? e.detail.ids : [];
+    // GitHub uses its existing gh poller, independently of integration_action's snapshot.
+    const source = e?.detail?.source === 'github' ? 'github' : 'integrations';
+    seenBySource.set(source, ids.filter(id => typeof id === 'string' && Object.prototype.hasOwnProperty.call(CARD_PILLS, id)));
+    const next = new Set([...seenBySource.values()].flat());
+    if (next.size !== connected.size || [...next].some(id => !connected.has(id))) {
+      connected.clear(); next.forEach(id => connected.add(id));
+      if (focused && !connected.has(focused)) {
+        focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
+      }
+      paint();
+    }
+  });
   doc.addEventListener('abito:integration-badge', e => { const id = e && e.detail && e.detail.id; if (typeof id === 'string' && id !== focused) { badges.add(id); paint(); } });
   doc.addEventListener('visibilitychange', syncVisibility);
   if (typeof MutationObserver !== 'undefined') {

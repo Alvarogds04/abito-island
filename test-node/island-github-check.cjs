@@ -25,7 +25,8 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
 (async () => {
   // ---- Abito's feed ----------------------------------------------------------------------------------------
   assert.equal(G.wanted({ mainPill: 'integration_github' }), true);
-  for (const p of [null, {}, [], 'x', { mainPill: 'integration_claude' }, { declaredPills: ['integration_github'] }, { mainPill: ['integration_github'] }]) assert.equal(G.wanted(p), false, JSON.stringify(p));
+  assert.equal(G.wanted({ mainPill: 'integration_claude', declaredPills: ['integration_github'] }), true);
+  for (const p of [null, {}, [], 'x', { mainPill: 'integration_claude' }, { declaredPills: 'integration_github' }, { declaredPills: ['integration_n8n'] }, { mainPill: ['integration_github'] }]) assert.equal(G.wanted(p), false, JSON.stringify(p));
   const pulse = { login: 'me', myPRs: [{ id: 'o/r#1', title: 'Fix', url: 'https://github.com/o/r/pull/1', repo: 'o/r', number: 1, isDraft: false, ci: 'failure', review: 'pending', headSha: null }, { id: 'o/r#2', title: 'Draft', url: 'https://github.com/o/r/pull/2', repo: 'o/r', number: 2, isDraft: true, ci: 'success', review: 'pending', headSha: null }],
     toReview: [{ id: 'o/x#9', title: 'Review me', url: 'https://github.com/o/x/pull/9', repo: 'o/x', number: 9, isDraft: false, ci: 'pending', review: 'pending', headSha: null }],
     mainCI: [{ repo: 'o/r', url: 'https://github.com/o/r', branch: 'main', ci: 'success', headSha: null }], fetchedAt: 1 };
