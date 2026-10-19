@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="chat-markdown.css">
   <!-- S10: Coucou island geometry (MIT, adapted), after the base styles so it wins at equal specificity. -->
   <link rel="stylesheet" href="vendor/coucou/island/island.css">
+  <link rel="stylesheet" href="island-integrations.css">
   <!-- MIT settings/frame styling; enabled only by the settings window label. -->
   <link rel="stylesheet" id="coucou-settings-style" href="vendor/coucou/settings/settings.css" media="not all">
   <!-- R7 clay character (sha256 40625d7f…): Abito's own SVG-DOM, no reserved assets. -->
@@ -47,6 +48,7 @@
   <script defer src="island-plan.js"></script>
   <!-- S10 (L30): GitHub card (Coucou views/github), fed by github_action; shown only for the main pill integration_github. -->
   <script defer src="island-github.js"></script>
+  <script defer src="island-integrations.js"></script>
   <!-- S10 (L30): weekly recap card (Coucou views/recap), fed by recap_action; opens on its own once a week (Monday, calm island). -->
   <script defer src="island-recap.js"></script>
   <!-- S10 (L30): the dictation pill (Coucou pill/main.ts) in the expanded header, fed by dictation:* events and dictation_action. -->

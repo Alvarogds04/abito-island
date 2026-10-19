@@ -129,6 +129,11 @@ fn view_prefs(p: &Prefs) -> Value {
         "settingsWindow": true})
 }
 
+/// #489: whether the human put this integration pill on the island (main or declared).
+pub fn pill_declared(host: &SettingsHost, id: &str) -> bool {
+    abito_island::integrations::declared(&host.prefs.lock().expect("prefs lock"), id)
+}
+
 /// Only the already loaded, explicitly selected local preference reaches chat.
 pub fn display_name(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").display_name.clone()

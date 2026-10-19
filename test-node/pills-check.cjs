@@ -1040,3 +1040,35 @@ test('S13 Blobs disposes real instances on Models and Connections exits and remo
     assert.ok(resumed[0].sample().t > before.t); assert.notEqual(resumed[0].sample().d, before.d);
   }
 });
+
+test('#489 declared integration pills with a live poller show with their colour; click focuses the card and never selects a target', async () => {
+  const b = boot({ specs: SPECS, prefs: { declaredPills: ['integration_n8n', 'integration_vercel', 'integration_stripe'], pillColors: { integration_n8n: 'orange' } } }); b.load('specialists.js'); await flush();
+  const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
+  const base = ids(); assert.deepEqual(base, ['abito', 'esp-a', 'esp-b'], 'no poller answer yet: specialists only (unchanged)');
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_stripe', '__proto__'] } });
+  assert.deepEqual(ids(), [...base, 'integration_n8n'], 'only declared + card-capable + answered');
+  const n8n = b.get('pill-choices').children[3];
+  assert.equal(n8n.dataset.color, 'orange');
+  const focus = []; b.events['abito:integration-focus'] = [e => focus.push(e.detail.id)];
+  n8n.fire('click', { isTrusted: false }); assert.deepEqual(focus, []);
+  n8n.fire('click'); assert.deepEqual(focus, ['integration_n8n']);
+  assert.equal(b.get('pill-choices').children[3], n8n, 'same node survives a repaint');
+  assert.equal(n8n.getAttribute('aria-pressed'), 'true');
+  assert.equal(b.backend.specCalls.length, 0, 'never a chat target');
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: [] } });
+  assert.deepEqual(focus, ['integration_n8n', null], 'a vanished service releases the card');
+  assert.deepEqual(ids(), base);
+});
+
+test('#489 an unseen event puts a badge on an unfocused integration pill; focusing clears it', async () => {
+  const b = boot({ prefs: { declaredPills: ['integration_vercel'] } }); await flush();
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_vercel'] } });
+  const pill = () => b.get('pill-choices').children[1];
+  assert.equal(pill().dataset.badge, 'false');
+  b.doc.dispatchEvent({ type: 'abito:integration-badge', detail: { id: 'integration_vercel' } });
+  assert.equal(pill().dataset.badge, 'true');
+  assert.match(pill().getAttribute('aria-label'), /con novedades/);
+  pill().fire('click');
+  assert.equal(pill().dataset.badge, 'false');
+});

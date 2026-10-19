@@ -47,6 +47,7 @@ pub mod handoff;
 pub mod hotkey;
 pub mod http;
 pub mod identity;
+pub mod integrations;
 pub mod localmodel;
 pub mod models;
 pub mod monitors;
