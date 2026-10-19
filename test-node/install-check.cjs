@@ -32,6 +32,12 @@ function stage() {
     fs.copyFileSync(path.join(__dirname, '..', '..', 'desktop-daemon', n), file);
     fs.chmodSync(file, 0o644);
   }
+  for (const n of L.HARNESS_FILES) {
+    const file = path.join(dir, 'desktop-harness', n);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+    fs.copyFileSync(path.join(__dirname, '..', '..', 'desktop-harness', n), file);
+    fs.chmodSync(file, 0o644);
+  }
   const files = {};
   for (const n of L.STAGED) files[n] = sha(fs.readFileSync(path.join(dir, n)));
   fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, version: '0.1.0', r6_sha256: L.checkR6(path.join(__dirname, '..')),
