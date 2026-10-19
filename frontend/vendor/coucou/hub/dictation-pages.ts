@@ -10,7 +10,7 @@ import { button, card, divider, keyKeycap, keycap, label, number, row, segmented
 import { trusted } from './runtime.js';
 import { emptyState, glowCard } from './hero.js';
 const unavailable = <T extends HTMLElement>(el: T): T => { (el as any).disabled = true; el.title = 'No disponible todavía'; return el; };
-function mount(page: HTMLElement, ctx: HubContext) {
+export function mount(page: HTMLElement, ctx: HubContext) {
   let alive = true;
   const cleanups: (() => void)[] = [];
   const message = h('div', {class:'hub-note', role:'status'});

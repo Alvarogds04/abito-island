@@ -17,8 +17,8 @@ const test = (_name, fn) => { const r = fn(); if (r && typeof r.then === 'functi
 
 test('vendored: frontend/sound-engine.js is the engine\'s source, byte for byte (sha256)', () => {
   assert.ok(fs.existsSync(source), 'the source module exists in this checkout');
-  // #467: optional injected sample overrides; both copies intentionally repinned.
-  assert.equal(sha(source), 'e08e0cd90146a94836abf921db5c1a95e1a4831b20d0154c7c6200068cfd6b32');
+  // #467: seven original interaction cues; both copies intentionally repinned.
+  assert.equal(sha(source), '8521340fadb326a50ec1a027bb070d7e1f63bd73282d6db7b2c35b036338068f');
   assert.equal(sha(path.join(frontend, 'sound-engine.js')), sha(source));
 });
 
@@ -29,6 +29,11 @@ test('loaded: <script defer src="sound-engine.js"> comes BEFORE island.js and th
   assert.ok(at('sound-engine.js') < at('island.js'), 'the engine before island.js (the module contract)');
   assert.ok(at('sound-engine.js') < at('sound-wiring.js'));
   assert.ok(at('sound-wiring.js') < at('notify.js') || at('sound-wiring.js') > -1);
+});
+
+test('settings window does not load sound engine or wiring', () => {
+  const html = fs.readFileSync(path.join(frontend, 'settings.html'), 'utf8');
+  assert.doesNotMatch(html, /<script[^>]*src=["'][^"']*sound-(?:engine|wiring)\.js["']/);
 });
 
 test('packaged: both files are in the closed frontend list the packager hashes', () => {
@@ -384,6 +389,112 @@ test('custom sounds: no invoke or audio capability means no sample listener or I
     await w.samplesLoaded();
     assert.ok(!events.includes('sounds:changed'));
   }
+});
+
+test('custom samples: all seven new closed stems use their matching cue ids', async () => {
+  const names = ['open', 'close', 'peek', 'hover', 'pop', 'tick', 'love'];
+  const reads = [], installed = [];
+  const w = Wiring.wire({ engine: { clearSamples() {}, setSample: id => installed.push(id) },
+    invoke: async (_cmd, { payload }) => {
+      if (payload.action === 'list') return { names: [...names, '../open', 'unknown'] };
+      reads.push(payload.name); return { data: 'AQID' };
+    }, getAudioContext: () => ({ decodeAudioData: async () => ({}) }),
+    decodeBase64: s => Buffer.from(s, 'base64').toString('binary') });
+  await w.samplesLoaded(); assert.deepEqual(reads, names); assert.deepEqual(installed, names.map(n => 'snd.' + n));
+  w.dispose();
+});
+
+test('dispose handles late-resolving Tauri unlisteners without leaving callbacks active', async () => {
+  const resolves = [], callbacks = []; let off = 0, played = 0;
+  const w = Wiring.wire({ engine: { play() { played++; } },
+    listen: (_n, f) => { callbacks.push(f); return new Promise(resolve => resolves.push(resolve)); } });
+  w.dispose(); for (const resolve of resolves) resolve(() => { off++; }); await Promise.resolve();
+  for (const fn of callbacks) fn({ payload: { state: 'expanded' } });
+  assert.equal(off, resolves.length); assert.equal(played, 0);
+});
+
+// Deterministic adapter fixture: real engine + disposable fake DOM/Tauri subscriptions.
+function interactionRig({ clay = true, hovered = false, sound = true } = {}) {
+  const time = soft.createFakeTime(), listeners = new Map(), observers = [], results = [], ctxs = [];
+  const engine = Engine.createSoundEngine({ enabled: sound, now: time.now, setTimer: time.setTimer,
+    clearTimer: time.clearTimer, createContext: () => { const c = soft.createSoftContext(); ctxs.push(c); return c; } });
+  engine.ready();
+  const on = (n, f) => { if (!listeners.has(n)) listeners.set(n, new Set()); listeners.get(n).add(f); return () => listeners.get(n).delete(f); };
+  const fire = (n, e) => { for (const f of listeners.get(n) || []) f(e); };
+  const el = { style: { getPropertyValue: () => hovered ? '1.06' : '1' } };
+  class Observer {
+    constructor(fn) { this.fn = fn; observers.push(this); }
+    observe(target, opts) { assert.equal(target, el); assert.deepEqual(opts, { attributes: true, attributeFilter: ['style'] }); this.active = true; }
+    disconnect() { this.active = false; }
+  }
+  const doc = { getElementById: id => { assert.equal(id, 'clay'); return clay ? el : null; },
+    addEventListener: on, removeEventListener: (n, f) => listeners.get(n)?.delete(f), visibilityState: 'visible' };
+  const w = Wiring.wire({ engine: { ...engine, play: id => { const p = engine.play(id); results.push(p); return p; } },
+    document: doc, listen: (n, f) => Promise.resolve(on(n, f)), MutationObserver: Observer,
+    now: time.now, setTimer: time.setTimer, clearTimer: time.clearTimer });
+  return { time, engine, ctxs, observers, doc, w, results, fire,
+    state: state => fire('desktop:state', { payload: { state } }),
+    hover: value => { hovered = value; for (const o of observers) if (o.active) o.fn([]); },
+    verdicts: async () => { time.advance(30); const rs = await Promise.all(results.splice(0)); return rs; } };
+}
+
+test('desktop:state full transition matrix, baseline, repeats and malformed payloads', async () => {
+  const expected = { 'compact:expanded': 'open', 'expanded:compact': 'close', 'expanded:hidden': 'close',
+    'hidden:compact': 'peek', 'hidden:expanded': 'peek' };
+  for (const from of ['compact', 'expanded', 'hidden']) for (const to of ['compact', 'expanded', 'hidden']) {
+    const r = interactionRig(); r.state(from); assert.deepEqual(await r.verdicts(), []);
+    for (const payload of [null, [], {}, { state: 'expanding' }, { state: 1 }, { view: 'expanded' }]) r.fire('desktop:state', { payload });
+    r.state(to); const rs = await r.verdicts(), id = expected[from + ':' + to];
+    assert.deepEqual(rs.map(v => [v.id, v.reason]), id ? [['snd.' + id, 'played']] : []);
+    r.state(to); assert.deepEqual(await r.verdicts(), []); r.w.dispose(); r.engine.close();
+  }
+});
+
+test('desktop and DOM cues respect off, gain, quiet reconnect and resume; peek loses to notice', async () => {
+  const off = interactionRig({ sound: false }); off.state('compact'); off.state('expanded');
+  off.hover(true); off.time.advance(1900);
+  off.fire('abito:cue', { detail: 'snd.pop' }); off.fire('abito:cue', { detail: 'snd.tick' });
+  assert.ok((await off.verdicts()).every(v => v.reason === 'disabled')); assert.equal(off.ctxs.length, 0);
+  const r = interactionRig(); r.w.applyPrefs({ sound: true, gain: 0.05 });
+  assert.equal(r.engine.state().gain, 0.05);
+  r.state('hidden'); r.state('expanded'); r.fire('abito:cue', { detail: 'snd.notice' });
+  assert.deepEqual((await r.verdicts()).map(v => v.reason), ['outranked', 'played']);
+  assert.equal(r.ctxs[0].gains[0].gain.events.find(e => e.type === 'lin').v, 0.05 * Engine.CUES['snd.notice'].level);
+  for (const reset of [() => r.w.reconnected(), () => r.fire('visibilitychange', {})]) {
+    reset(); r.state('hidden'); assert.deepEqual(await r.verdicts(), []);
+    r.state('compact'); assert.equal((await r.verdicts())[0].reason, 'quiet');
+    r.hover(false); r.hover(true); r.time.advance(1900);
+    assert.ok((await r.verdicts()).every(v => v.reason === 'quiet'));
+    r.time.advance(3100); assert.deepEqual(await r.verdicts(), []);
+  }
+  off.w.dispose(); r.w.dispose(); off.engine.close(); r.engine.close();
+});
+
+test('hover edges, love dwell/cooldown, rapid reentry and cancellation use injected timers', async () => {
+  const r = interactionRig(); r.hover(true); r.hover(true);
+  assert.deepEqual((await r.verdicts()).map(v => v.id), ['snd.hover']);
+  r.time.advance(1869); assert.deepEqual(r.results, []); r.time.advance(1);
+  assert.deepEqual((await r.verdicts()).map(v => [v.id, v.reason]), [['snd.love', 'played']]);
+  r.time.advance(10000); assert.deepEqual(await r.verdicts(), [], 'one love per entry');
+  r.hover(false); r.hover(true); await r.verdicts(); r.time.advance(1900);
+  assert.equal((await r.verdicts())[0].id, 'snd.love');
+  r.hover(false); r.hover(true); r.hover(false); r.hover(true);
+  assert.ok((await r.verdicts()).every(v => !v.played), 'engine suppresses quick hover reentries');
+  r.time.advance(1900); assert.deepEqual(await r.verdicts(), [], 'love cooldown suppresses repeat');
+  r.time.advance(6000); r.hover(false); r.hover(true); await r.verdicts();
+  r.time.advance(1800); r.hover(false); r.time.advance(500); assert.deepEqual(await r.verdicts(), []);
+  r.w.dispose(); r.engine.close();
+});
+
+test('hover baseline is silent, missing clay is inert, dispose removes observers/timers/subscriptions', async () => {
+  const missing = interactionRig({ clay: false }); assert.equal(missing.observers.length, 0); assert.equal(missing.time.pending(), 0);
+  const initial = interactionRig({ hovered: true }); initial.time.advance(3000); assert.deepEqual(await initial.verdicts(), []);
+  const r = interactionRig(); r.hover(true); await r.verdicts(); r.engine.close();
+  await Promise.resolve(); r.w.dispose(); r.w.dispose(); assert.equal(r.time.pending(), 0);
+  assert.equal(r.observers[0].active, false);
+  r.hover(false); r.hover(true); r.state('compact'); r.state('expanded'); r.fire('abito:cue', { detail: 'snd.pop' });
+  r.time.advance(10000); assert.deepEqual(await r.verdicts(), []);
+  missing.w.dispose(); initial.w.dispose(); initial.engine.close();
 });
 
 Promise.all(pending).then(() => console.log(`sound-wiring-check: ${passed} passed`), e => { console.error(e); process.exit(1); });

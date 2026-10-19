@@ -52,6 +52,21 @@
     durationMs: Math.round(Math.max(...notes.map((n) => n.t + n.dur)) * 1000),
   });
   const CUES = deepFreeze({
+    'snd.open': cue('snd.open', 'Abrir', 'La isla se expande desde compact', 0.22, [
+      note(0, 480, 0.08, 'sine', 1, 0.005, 0.05), note(0.08, 720, 0.08, 'sine', 1, 0.005, 0.05)]),
+    'snd.close': cue('snd.close', 'Cerrar', 'La isla expandida se contrae u oculta', 0.22, [
+      note(0, 720, 0.08, 'sine', 1, 0.005, 0.05), note(0.08, 480, 0.08, 'sine', 1, 0.005, 0.05)]),
+    'snd.peek': cue('snd.peek', 'Asomar', 'La isla reaparece desde hidden', 0.16, [
+      note(0, 280, 0.1, 'sine', 1, 0.01, 0.07)]),
+    'snd.hover': cue('snd.hover', 'Rozar', 'El puntero entra en el personaje', 0.08, [
+      note(0, 1560, 0.08, 'sine', 1, 0.005, 0.07)]),
+    'snd.pop': cue('snd.pop', 'Elegir', 'Selección de opción mediante abito:cue', 0.28, [
+      note(0, 580, 0.1, 'sine', 1, 0.005, 0.07, 1160)]),
+    'snd.tick': cue('snd.tick', 'Paso', 'Progreso de adjunto mediante abito:cue', 0.1, [
+      note(0, 3000, 0.08, 'triangle', 1, 0.005, 0.07)]),
+    'snd.love': cue('snd.love', 'Cariño', 'El puntero permanece 1900 ms sobre el personaje', 0.2, [
+      note(0, 600, 0.09, 'sine', 1, 0.01, 0.06), note(0.1, 750, 0.09, 'sine', 1, 0.01, 0.06),
+      note(0.2, 900, 0.09, 'sine', 1, 0.01, 0.06)]),
     'snd.notice': cue('snd.notice', 'Aviso', 'Aviso nuevo del transporte (settled)', 0.6, [
       note(0, 880, 0.12, 'sine', 1, 0.008, 0.06), note(0.13, 660, 0.12, 'sine', 1, 0.008, 0.07)]),
     'snd.attention': cue('snd.attention', 'Atención', 'Tarjeta de aprobación pendiente o pregunta nueva', 1, [
@@ -75,6 +90,8 @@
   });
   const CUE_IDS = deepFreeze(Object.keys(CUES));
   const PRIORITY = deepFreeze({
+    'snd.open': -2, 'snd.close': -2, 'snd.peek': -2, 'snd.hover': -2,
+    'snd.tick': -2, 'snd.love': -2, 'snd.pop': -1,
     'snd.error': 5, 'snd.attention': 4, 'snd.confirm': 3, 'snd.reject': 3,
     'snd.notice': 2, 'snd.expired': 2, 'snd.sent': 1, 'snd.think': 0, 'snd.reply': 0, 'snd.listen': 0,
   });

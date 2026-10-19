@@ -36,11 +36,13 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
   let queue = Promise.resolve(), issue = '', nameDraft: string | null = null, capturing = false;
   const root = h('div', {});
   const send = (cmd: string, payload: any) => invoke(cmd, { payload });
-  const run = (work: () => Promise<void>) => {
+  const DEFAULT_FAILURE = 'No se pudo guardar. Revisa el valor e inténtalo de nuevo.';
+  const run = (work: () => Promise<void>, failure = DEFAULT_FAILURE) => {
     queue = queue.then(async () => {
       try { await work(); issue = ''; }
-      catch { issue = 'No se pudo guardar. Revisa el valor e inténtalo de nuevo.';
-        try { settings = await bridge.boot(); prefs = await send('prefs_action', { action: 'view' }); hotkey = await send('hotkey_action', { action: 'view' }); } catch { /* Keep error visible, never claim success. */ }
+      catch { issue = failure;
+        // a failed SAVE re-reads the real values; a folder that did not open changed nothing, so there is nothing to re-read
+        if (failure === DEFAULT_FAILURE) try { settings = await bridge.boot(); prefs = await send('prefs_action', { action: 'view' }); hotkey = await send('hotkey_action', { action: 'view' }); } catch { /* Keep error visible, never claim success. */ }
       }
       paint();
     });
@@ -107,7 +109,7 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       }));
     screen.className = ''; screen.setAttribute('aria-label', t('Island lives on')); screen.setAttribute('id', 'hub-screen');
     const cursor = screen.children[1] as HTMLOptionElement; cursor.disabled = true; cursor.title = 'No disponible todavía';
-    const soundsFolder = identify(trusted(h('button', { text: t('Open sounds folder'), onclick: () => { run(async () => { await send('sound_action', { action: 'reveal' }); }); } })), 'hub-sounds-folder');
+    const soundsFolder = identify(trusted(h('button', { text: t('Open sounds folder'), onclick: () => { run(async () => { await send('sound_action', { action: 'reveal' }); }, 'No se pudo abrir la carpeta de sonidos (el administrador de archivos no respondió). Ábrela a mano: la carpeta «sounds» dentro de la carpeta de configuración de Abito.'); } })), 'hub-sounds-folder');
     const soundsReload = identify(trusted(h('button', { text: t('Reload sounds'), onclick: () => { run(async () => { await send('sound_action', { action: 'reload' }); await countCustom(); }); } })), 'hub-sounds-reload');
     const language = unavailable(select([['', t('System')], ...LANGUAGES], '', () => {}), 'hub-language'); language.className = '';
     root.append(notchSection(t('General'),

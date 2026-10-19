@@ -125,6 +125,7 @@ function hashTree() {
   execFileSync(process.execPath, [path.join(__dirname, 'settings-pages-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-dictation-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-data-pages-check.cjs')], { stdio: 'inherit' });
+  execFileSync(process.execPath, [path.join(__dirname, 'settings-model-rows-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-agents-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-integrations-check.cjs')], { stdio: 'inherit' });
   let colors = {}, picks = 0;

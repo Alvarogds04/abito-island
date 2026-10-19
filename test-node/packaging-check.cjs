@@ -140,11 +140,36 @@ function fakeStage({ crateDir: _crateDir = crate } = {}) {
     fs.copyFileSync(path.join(crate, '..', 'desktop-daemon', n), file);
     fs.chmodSync(file, 0o644);
   }
+  for (const n of L.HARNESS_FILES) {
+    const file = path.join(dir, 'desktop-harness', n);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+    fs.copyFileSync(path.join(crate, '..', 'desktop-harness', n), file);
+    fs.chmodSync(file, 0o644);
+  }
   const files = {};
   for (const n of L.STAGED) files[n] = L.sha256File(path.join(dir, n));
   fs.writeFileSync(path.join(dir, 'receipt.json'), JSON.stringify({ identifier: L.IDENTIFIER, r6_sha256: L.checkR6(crate), provenance: { head: 'a'.repeat(40), clean: true }, files }), { mode: 0o644 });
   return dir;
 }
+test('L42 F1: the package ships the hook installer and everything it requires, and the staged daemon resolves it', () => {
+  assert(Array.isArray(L.HARNESS_FILES) && L.HARNESS_FILES.includes('bin/abito-hook.cjs'), 'the installer is a shipped file');
+  // closed under require(): every relative require of a shipped harness file is shipped too
+  for (const rel of L.HARNESS_FILES.filter(f => f.endsWith('.cjs'))) {
+    const src = fs.readFileSync(path.join(crate, '..', 'desktop-harness', rel), 'utf8');
+    for (const m of src.matchAll(/require\(['"](\.{1,2}\/[^'"]+)['"]\)/g)) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[1]));
+      assert(L.HARNESS_FILES.includes(target), `${rel} requires ${m[1]} (${target}) which is not shipped`);
+    }
+  }
+  assert(L.STAGED.includes('desktop-harness/bin/abito-hook.cjs'));
+  assert(L.STAGED_DIRS.includes('desktop-harness') && L.STAGED_DIRS.includes('desktop-harness/bin') && L.STAGED_DIRS.includes('desktop-harness/src'));
+  const d = fakeStage();
+  const { packagedInstallerBin } = require(path.join(d, 'desktop-daemon/src/cli.cjs'));
+  assert.equal(packagedInstallerBin(path.join(d, 'desktop-daemon/src')), path.join(d, 'desktop-harness/bin/abito-hook.cjs'), 'the staged daemon finds the staged installer');
+  assert.deepEqual(L.verifyStage(d, { sourceCrate: crate }), []);
+  fs.rmSync(path.join(d, 'desktop-harness/src/install-ui.cjs'));
+  assert(L.verifyStage(d, { sourceCrate: crate }).length > 0, 'a missing harness file fails verification');
+});
 test('verify: a pristine stage passes; tampering is caught without launching anything', () => {
   const d = fakeStage();
   assert.deepEqual(L.verifyStage(d, { sourceCrate: crate }), []);

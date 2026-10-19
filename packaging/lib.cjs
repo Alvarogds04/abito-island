@@ -182,9 +182,16 @@ const DAEMON_FILES = ['package.json', 'identity.md', 'THIRD-PARTY-NOTICES.md',
   'src/daemon.cjs', 'src/interrupt.cjs', 'src/isolation.cjs', 'src/mcp-import.cjs', 'src/profiles.cjs',
   'src/protocol.cjs', 'src/rotation.cjs', 'src/runtime.cjs', 'src/sdk-helper.mjs', 'src/server.cjs',
   'src/sessions.cjs', 'src/spaces.cjs'];
+// L42 F1: the hook installer (apps/desktop-harness) ships NEXT TO the daemon: the daemon derives
+// <package>/desktop-harness/bin/abito-hook.cjs from its own location (src/cli.cjs packagedInstallerBin), so Ajustes can
+// install the Claude/Codex/recap/status-line hooks. Closed under require(): packaging-check pins that.
+const HARNESS_FILES = ['bin/abito-hook.cjs', 'bin/abito-recap-hook.cjs', 'bin/abito-statusline.cjs', 'package.json',
+  'src/claude.cjs', 'src/client.cjs', 'src/codex.cjs', 'src/config.cjs', 'src/deadline.cjs', 'src/hook-common.cjs', 'src/identity.cjs',
+  'src/install-claude.cjs', 'src/install-codex.cjs', 'src/install-recap.cjs', 'src/install-statusline.cjs', 'src/install-ui.cjs',
+  'src/projection.cjs', 'src/recap-hook.cjs', 'src/redact.cjs', 'src/security.cjs', 'src/statusline.cjs'];
 const STAGED = ['abito-island', 'abito-island-launcher', 'abito-island.png', `${IDENTIFIER}.desktop`,
-  ...DAEMON_FILES.map(f => `desktop-daemon/${f}`)];
-const STAGED_DIRS = ['desktop-daemon', 'desktop-daemon/src'];
+  ...DAEMON_FILES.map(f => `desktop-daemon/${f}`), ...HARNESS_FILES.map(f => `desktop-harness/${f}`)];
+const STAGED_DIRS = ['desktop-daemon', 'desktop-daemon/src', 'desktop-harness', 'desktop-harness/bin', 'desktop-harness/src'];
 // Enumerate the complete tree without following links, including empty directories.
 function stageEntries(dir, problems, prefix = '') {
   const files = [], dirs = [];
@@ -277,5 +284,5 @@ function requireClean(crate) {
   return p;
 }
 
-module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, ALLOWED_ABITO, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, DAEMON_FILES, STAGED, STAGED_DIRS, checkInstalledLayout, sha256, sha256File,
+module.exports = { provenance, requireClean, FORBIDDEN_ENV_PATTERN, ALLOWED_ABITO, R6_PREFIX, IDENTIFIER, FRONTEND_FILES, EXPECTED_PERMISSIONS, DAEMON_FILES, HARNESS_FILES, STAGED, STAGED_DIRS, checkInstalledLayout, sha256, sha256File,
   checkR6, checkFrontend, checkConfig, launcherText, desktopText, verifyStage };

@@ -40,7 +40,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       await config.flowPages[id](container, {});
       assert.deepEqual(invoked, [[id, undefined]]);
     } else if (config.flowPages[id]) {
-      await config.flowPages[id](container, { hero, status: { prefs: { key: 'right_ctrl' }, platform: 'linux' } });
+      await config.flowPages[id](container, { hero, status: { prefs: { key: 'right_ctrl' }, platform: 'linux', models: { parakeet: { state: 'missing' }, downloadMb: 670 } }, navigate() {}, set onLeave(_) {} });
       assert(all(container).some(e => e.className.includes('hub-hero')), id);
       assert(text(container).includes(id === 'notes' ? 'No disponible todavía' : 'pendiente de conectar'), id);
       if (id === 'notes') {
@@ -55,8 +55,9 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
         assert(text(split).includes('Grabar una llamada'));
         assert(text(split).includes('Tus llamadas aparecerán aquí'));
         assert(text(split).includes('Todo se queda en este ordenador'));
-        const buttons = all(container).filter(e => e.tagName === 'button');
-        assert(buttons.length >= 2 && buttons.every(b => b.disabled), 'every control disabled: no backend');
+        // L42: the voice-model row is the real control (download/progress/installed, see settings-model-rows-check); every other control stays disabled
+        const buttons = all(container).filter(e => e.tagName === 'button' && String(e.textContent || '').trim() !== 'Descargar');
+        assert(buttons.length >= 1 && buttons.every(b => b.disabled), 'every other control disabled: no backend');
         assert(text(container).includes('No disponible todavía'));
       }
       if (id === 'voice') {
@@ -81,7 +82,8 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
         }
       }
     }
-    for (const e of all(container).filter(e => ['button','input','select','textarea'].includes(e.tagName))) assert.equal(e.disabled, true, id);
+    // L42: the voice-model control (Notetaker, OK Abito) is live; everything else is disabled
+    for (const e of all(container).filter(e => ['button','input','select','textarea'].includes(e.tagName) && !(['notes','voice'].includes(id) && String(e.textContent || '').trim() === 'Descargar'))) assert.equal(e.disabled, true, id);
   }
   assert(source.includes("page === 'pills' || page === 'agents'"), 'pills and agents retain the existing closed planner');
   assert(disposed.includes('agent-settings') && disposed.includes('chat-settings'), 'new page adapters are disposed');
