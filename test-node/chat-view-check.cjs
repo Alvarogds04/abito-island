@@ -647,6 +647,19 @@ test('F024 markup: the row sits between «Respuesta nueva» and the composer, wi
   assert.match(/id="chat-model-picker"[^>]*/.exec(html)[0], /hidden/, 'the picker starts closed');
 });
 
+test('B4: snapshot ordering uses per-turn sequence, never a global sequence across conversations', () => {
+  const snap = (seq, state = 'thinking', conversation_id = 'c1') => ({ conversation_id, turns: [{ turn_id: 't-1', seq, state }] });
+  for (const state of ['thinking', 'streaming', 'completed', 'cancelled', 'error']) {
+    assert.equal(V.staleSnapshot(snap(3, state), snap(1)), true, state + ' never goes backwards');
+    assert.equal(V.staleSnapshot(snap(3, state), snap(3, state)), false, 'duplicate is accepted');
+    assert.equal(V.staleSnapshot(snap(3, state), snap(4)), false, 'newer is accepted');
+  }
+  assert.equal(V.staleSnapshot(snap(3), snap(0, 'queued', 'c2')), false, 'new conversation may start at zero');
+  assert.equal(V.staleSnapshot(null, snap(1)), false, 'initial snapshot');
+  assert.equal(V.staleSnapshot(snap(3), { conversation_id: 'c1', turns: [] }), false, 'no comparable turns');
+  assert.equal(V.staleSnapshot(snap(3), { conversation_id: 'c1', turns: [{ turn_id: 't-2', seq: 0 }] }), false, 'a new turn has its own sequence');
+});
+
 console.log(`chat-view-check: ${passed} passed`);
 
 // ---- S10 (human L35): Coucou's growing chat height -----------------------------------------------------------------

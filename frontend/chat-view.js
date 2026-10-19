@@ -40,6 +40,17 @@
     return draftProblem(draft) === null;
   }
 
+  // Rust increments a turn's seq for every accepted event. A delayed view
+  // response or publisher must not undo an event already rendered. Turn ids
+  // are scoped to the conversation, so switching conversations is never stale.
+  function staleSnapshot(before, next) {
+    if (!before || !next || !before.conversation_id || before.conversation_id !== next.conversation_id ||
+        !Array.isArray(before.turns) || !Array.isArray(next.turns)) return false;
+    const sequences = new Map(before.turns.map(t => [t.turn_id, t.seq]));
+    return next.turns.some(t => Number.isSafeInteger(t.seq) &&
+      Number.isSafeInteger(sequences.get(t.turn_id)) && t.seq < sequences.get(t.turn_id));
+  }
+
   function activeTurn(view) {
     if (!view || !view.active_turn || !Array.isArray(view.turns)) return null;
     return view.turns.find(t => t.turn_id === view.active_turn) || null;
@@ -515,5 +526,5 @@
     return n;
   }
   function chatHeight(view) { return Math.min(CHAT_MAX_H, CHAT_MIN_H + messageCount(view) * CHAT_GROWTH); }
-  return { messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

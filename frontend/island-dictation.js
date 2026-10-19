@@ -122,7 +122,9 @@ function mount(api) {
   let capsule = null, lastKey = '', bars = null, clay = null;
 
   const say = verb => invoke('dictation_action', { payload: { action: verb } }).catch(() => {});
-  const shown = () => enabled && capsuleEl.dataset.phase === 'expanded' && capsuleEl.dataset.view !== 'chat';
+  // Enabling the shortcut does not start a dictation. Keep the header empty
+  // until a host phase announces recording or a pending result; idle hides it again.
+  const shown = () => enabled && phase !== 'idle' && capsuleEl.dataset.phase === 'expanded' && capsuleEl.dataset.view !== 'chat';
   function pbtn(icon, name, action, opts = {}) {
     const b = el('button', ['pbtn', opts.small ? 'small' : '', opts.filled ? 'filled' : ''].filter(Boolean).join(' '));
     b.type = 'button'; b.setAttribute('aria-label', name); b.title = name; b.append(svgIcon(icon));
@@ -161,7 +163,7 @@ function mount(api) {
       if (capsule) { next.style.width = capsule.style.width; next.style.height = capsule.style.height; }
       capsule?.remove(); capsule = next;
       host.replaceChildren(...(note ? [bubble()] : []), capsule);
-    } else if (!!host.querySelector('.dbubble') !== !!note) host.replaceChildren(...(note ? [bubble()] : []), capsule);
+    } else if (Boolean(host.querySelector('.dbubble')) !== Boolean(note)) host.replaceChildren(...(note ? [bubble()] : []), capsule);
     capsule.classList.toggle('open', open); capsule.classList.toggle('handsfree', look === 'handsFree');
     requestAnimationFrame(() => { if (capsule) { capsule.style.width = api.lengthOf(look, api.messageOf(phase)) + 'px'; capsule.style.height = (open ? 34 : 8) + 'px'; } });
     wake();

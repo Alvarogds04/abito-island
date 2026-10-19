@@ -140,10 +140,20 @@ async function loadPage(overrides) {
     active_turn: null, queue_note: null, turns: [],
   }, overrides || {});
   const snapshot = () => JSON.parse(JSON.stringify(state));
+  let deferView = false, releaseView = null;
+  const deferNextView = () => {
+    deferView = true;
+    return () => { assert.ok(releaseView, 'the view RPC was captured'); releaseView(); };
+  };
 
   const invoke = (cmd, args) => {
     const payload = args && args.payload;
     invocations.push({ cmd, payload });
+    if (cmd === 'chat_action' && payload.action === 'view' && deferView) {
+      deferView = false;
+      const captured = snapshot();
+      return new Promise(resolve => { releaseView = () => resolve(captured); });
+    }
     return Promise.resolve(snapshot());
   };
   const listen = (name, cb) => {
@@ -193,7 +203,7 @@ async function loadPage(overrides) {
     await settle();
   };
 
-  return { dom, input, invocations, sends, settle, type, key, composition, pushState };
+  return { dom, input, invocations, sends, settle, type, key, composition, pushState, deferNextView };
 }
 
 let passed = 0;
@@ -364,6 +374,33 @@ async function main() {
       'a textarea can hold the Shift+Enter newline; a single-line input cannot');
     assert.match(html, /id="chat-help"[^>]*>Enter envía\. Mayúsculas más Enter agrega una línea\./,
       'the help text documents Enter and Shift+Enter');
+  });
+
+  await check('B4: a late thinking snapshot cannot relock the composer after the turn completed', async () => {
+    const base = {
+      conversation_id: 'c-ordering', target: { alias: 'Abito-gpt' },
+      availability: { state: 'ready', message: 'Modelo local listo.' },
+      active_turn: null, queue_note: null, turns: [],
+    };
+    const page = await loadPage(base);
+    await page.type('hola');
+    const release = page.deferNextView();
+    page.key();
+    const turn = { turn_id: 't-1', user_text: 'hola', reply: '', state: 'thinking', seq: 1 };
+    const thinking = { ...base, active_turn: 't-1', turns: [turn] };
+    await page.pushState(thinking); // the submit acknowledgement now captures its follow-up view
+    assert.equal(page.sends().length, 1);
+    assert.equal(page.dom.el('chat-state').dataset.kind, 'busy');
+    await page.pushState({ ...base, turns: [{ ...turn, state: 'completed', seq: 3, reply: 'Hola. ¿Como va?', finish_reason: 'stop' }] });
+    assert.equal(page.dom.el('chat-state').dataset.kind, 'ready');
+    // Resolve the REAL post-submit view RPC after the completed event.
+    release(); await page.settle();
+    await page.type('seguimos');
+    assert.equal(page.dom.el('chat-state').dataset.kind, 'ready', 'no loading ring after completed seq 3');
+    assert.equal(page.dom.el('chat-send').disabled, false, 'same conversation accepts the next draft');
+    page.key(); await page.settle();
+    assert.equal(page.sends().length, 2, 'no new conversation is needed');
+    assert.equal(page.sends()[1].payload.text, 'seguimos');
   });
 
   console.log(`\n${passed} passed, ${failures.length} failed`);

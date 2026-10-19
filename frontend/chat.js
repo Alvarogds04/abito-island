@@ -366,6 +366,9 @@
   document.addEventListener('island:view', event => { if (event.detail === 'chat') { reportedHeight = 0; reportHeight(); } else reportedHeight = 0; });
   function apply(next) {
     if (!next || typeof next !== 'object') return;
+    // Events and view RPCs can arrive out of capture order. Never resurrect a
+    // running turn over a newer (possibly terminal) state of that same turn.
+    if (V.staleSnapshot(view, next)) return;
     const changed = !view || view.conversation_id !== next.conversation_id;
     const said = changed ? null : V.announcement(view, next);
     if (changed) {
