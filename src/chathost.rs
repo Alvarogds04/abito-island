@@ -76,7 +76,9 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     let (cw, ch) = if settings_open {
         geometry::settings_visible(area.w, area.h, scale)
     } else {
-        geometry::chat_visible(area.h, scale)
+        // S10 (L35): Coucou's growing chat — the height the page last asked for, clamped in Rust
+        let asked = state.core.lock().expect("core lock").chat_height();
+        geometry::chat_visible_for(area.h, scale, asked)
     };
     v["chat_visible"] = json!([cw, ch]);
     v["target"] = match current_target(state) {
@@ -126,7 +128,7 @@ pub fn apply_view(app: &AppHandle, state: &AppState, plan: ViewPlan) {
         "window.__islandSetView && window.__islandSetView('{}',{vw},{vh});",
         if chat { "chat" } else { "overview" }
     );
-    // #309: overview and column move in opposite directions per axis (672x176 <-> 432x656), so the
+    // #309: overview and column move in opposite directions per axis (672x208 <-> 672x656), so the
     // window first becomes the STAGE that holds both views, the page animates inside it, and the
     // window settles on the final rectangle once the animation is over. Opening: stage now, final
     // after the grow spring; closing: stage now, final after the 340 ms shrink (same generation
@@ -329,6 +331,21 @@ pub async fn chat_action(
                 })
                 .await
                 .map_err(|_| BridgeError::denied("check aborted"))?;
+            }
+            Ok(chat_view(&app, &state))
+        }
+        Command::Height { height } => {
+            // S10 (L35): only inside the chat view; the plan clamps to Coucou's 240..300 and the work area, and a
+            // repeated height is no resize at all. Same staged resize as every view change.
+            let plan = {
+                let area = refresh_work_area(&app, &state);
+                let win = main_window(&app);
+                let io = TauriIo(&win);
+                state.core.lock().expect("core lock").plan_chat_height(&io, area, height)
+            };
+            if let Some(plan) = plan {
+                apply_view(&app, &state, plan);
+                publish_chat(&app);
             }
             Ok(chat_view(&app, &state))
         }

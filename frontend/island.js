@@ -72,7 +72,7 @@
   // only the pre-first-push default and must match geometry::CHAT_COLUMN_W / CHAT_PREFERRED_H.
   // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
   // (128 units show ~112) a 46px box shows ~40px.
-  const CHAT = { w: 400, h: 640, r: 22, clay: 46, clayLeft: 52, clayTop: 3 };
+  const CHAT = { w: 640, h: 640, r: 22, clay: 46, clayLeft: 52, clayTop: 3 }; // S10 #480: 640 wide like the overview (geometry::CHAT_COLUMN_W); clayLeft is replaced below
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -206,7 +206,7 @@
     clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
     clayEl.style.width = csv + 'px';
     clayEl.style.height = csv + 'px';
-    clayEl.style.left = lerp(lerp(COMPACT.clayX, ov.clayX, p), CHAT.clayLeft, q.x) + 'px';
+    clayEl.style.left = lerp(lerp(COMPACT.clayX, ov.clayX, p), CHAT.clayLeft, q.x) + 'px'; // chat: the bot sits at the composer's left, inside the 640 island
     // Coucou companion follows the live composer, not a demo success pose.
     clayEl.style.top = lerp(overviewTop, CHAT.h - 76, q.x) + 'px';
     // Coucou's badge sits on the character's top-left (core/layout.ts botPosition: centre - (20, 21)); 16px circle.

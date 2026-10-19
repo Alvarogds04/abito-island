@@ -426,7 +426,7 @@ fn normal_compact_matches_actual_runtime_scale() {
         for (generation, view, logical) in [
             (0, "compact", (304, 44)),
             (1, "overview", (672, 176)),
-            (2, "chat", (432, 656)), // #309: the vertical column; its height follows the work area (1048 logical here)
+            (2, "chat", (672, 256)), // #309/#480: the chat island, as wide as the overview; its height follows the work area (1048 logical here)
             (3, "overview", (672, 176)),
             (4, "compact", (304, 44)),
         ] {

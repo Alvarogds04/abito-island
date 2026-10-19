@@ -352,6 +352,18 @@
     olderTurns = []; historyBefore = next.history_before || null; historyGeneration += 1; paging = false;
     log.textContent = ''; drawn = [];
   }
+  // S10 (L35): Coucou's growing chat. The page computes the height its conversation wants (240 + 40 per message, up to 300) and
+  // reports it through the closed `height` verb; Rust clamps it again and resizes the native window. Only while the chat is the
+  // visible view, and only when the number changed.
+  let reportedHeight = 0, reporting = false;
+  function reportHeight() {
+    if (capsule.dataset.view !== 'chat' || reporting) return;
+    const wanted = V.chatHeight(view);
+    if (wanted === reportedHeight) return;
+    reporting = true;
+    action({ action: 'height', height: wanted }).then(() => { reportedHeight = wanted; }, () => {}).finally(() => { reporting = false; });
+  }
+  document.addEventListener('island:view', event => { if (event.detail === 'chat') { reportedHeight = 0; reportHeight(); } else reportedHeight = 0; });
   function apply(next) {
     if (!next || typeof next !== 'object') return;
     const changed = !view || view.conversation_id !== next.conversation_id;
@@ -361,6 +373,7 @@
       if (view) { input.value = ''; pendingId = null; localProblem = ''; autosize(); attachments = []; renderAttachments(); }
     }
     view = next;
+    reportHeight();
     renderTarget();
     renderLog();
     renderControls();

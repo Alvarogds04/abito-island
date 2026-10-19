@@ -6,8 +6,8 @@ fn contract_uses_runtime_scale_for_each_view() {
         for (view, logical) in [
             ("compact", (288.0, 32.0)),
             ("overview", (672.0, 208.0)),
-            // the column follows the work area: 1048 logical px of height -> 640 visible + 16 margin
-            ("chat", (432.0, 656.0)),
+            // the chat starts at Coucou's minimum (240 visible) + 16 margin
+            ("chat", (672.0, 256.0)),
         ] {
             assert_eq!(
                 expected(view, scale, (1048.0 * scale) as i32),

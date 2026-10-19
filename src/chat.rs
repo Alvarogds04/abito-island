@@ -839,6 +839,9 @@ pub enum Command {
     Open,
     /// Chat view → overview (draft stays in page memory).
     Back,
+    /// S10 (L35): the page reports the chat height it wants (Coucou's `chatPromptHeight`, which grows with the message count).
+    /// The number is untrusted: Rust clamps it to Coucou's 240..300 and to the work area (`Core::plan_chat_height`).
+    Height { height: i32 },
     /// Re-read the local model's availability (metadata only, no inference).
     Check,
     New,
@@ -881,6 +884,10 @@ pub fn parse_command(payload: &Value) -> Result<Command, ChatError> {
         "view" if keys(&["action"]) => Ok(Command::View),
         "open" if keys(&["action"]) => Ok(Command::Open),
         "back" if keys(&["action"]) => Ok(Command::Back),
+        "height" if keys(&["action", "height"]) => {
+            let height = map.get("height").and_then(Value::as_i64).and_then(|n| i32::try_from(n).ok()).ok_or_else(bad)?;
+            Ok(Command::Height { height })
+        }
         "check" if keys(&["action"]) => Ok(Command::Check),
         "new" if keys(&["action"]) => Ok(Command::New),
         "list" if keys(&["action"]) => Ok(Command::List),

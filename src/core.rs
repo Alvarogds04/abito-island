@@ -133,6 +133,9 @@ pub struct Core {
     /// The chat rectangle before Settings grew it; closing restores it exactly (when it still fits).
     settings_prev: Option<Rect>,
     press: Option<Press>,
+    /// S10 (L35): the chat height the page last asked for (Coucou's `chatPromptHeight`), already clamped to 240..300. It starts at
+    /// the minimum and is kept across view switches, so reopening the chat gives the conversation the height it had.
+    chat_height: i32,
     /// S10 (L24): where the compact dot was (rect + docked edge) when it expanded into the top-edge notch;
     /// collapsing puts it back there. `None` before the first expansion (then the old anchoring applies).
     compact_home: Option<(Rect, Edge)>,
@@ -308,12 +311,43 @@ impl Core {
             return None;
         }
         let scale = io.scale();
-        // F009: both sizes come from the one view table
+        // F009: both sizes come from the one view table; the chat takes the height the page last asked for (L35)
         let view = if chat { geometry::View::Chat } else { geometry::View::Overview };
-        let (logical, visible) = geometry::view_sizes(view, area.w, area.h, scale);
+        let (mut logical, mut visible) = geometry::view_sizes(view, area.w, area.h, scale);
+        if chat {
+            logical = geometry::chat_window_for(area.h, scale, self.chat_height);
+            visible = geometry::chat_visible_for(area.h, scale, self.chat_height);
+        }
         self.settings = false; // any view change forgets the Settings size
         self.settings_prev = None;
         Some(self.resize(io, area, chat, logical, visible, None))
+    }
+
+    /// The chat height the page last asked for, already clamped (see [`Core::plan_chat_height`]).
+    pub fn chat_height(&self) -> i32 {
+        self.chat_height.clamp(geometry::CHAT_MIN_H, geometry::CHAT_MAX_H)
+    }
+
+    /// S10 (L35, «Alto de Coucou, crece con los mensajes»): the page reports the chat height it wants (Coucou's
+    /// `chatPromptHeight` rule, computed from the message count Rust does not have). Whatever it sends is clamped to Coucou's
+    /// 240..300 and to the room the work area leaves; only inside the chat view (and not under the Settings size). `None` =
+    /// nothing to do (not in the chat, or the clamped height is the one already planned).
+    pub fn plan_chat_height(&mut self, io: &dyn WindowIo, area: Rect, desired: i32) -> Option<ViewPlan> {
+        let scale = io.scale();
+        if !self.expanded || !self.chat || self.settings {
+            return None; // a report from outside the chat view is stale: it is not remembered either
+        }
+        let clamped = geometry::clamp_chat_height(desired, area.h, scale);
+        self.chat_height = clamped;
+        let logical = geometry::chat_window_for(area.h, scale, clamped);
+        let visible = geometry::chat_visible_for(area.h, scale, clamped);
+        let size = geometry::scaled_size(logical, scale);
+        let (w, h) = io.size();
+        let planned = match self.in_flight { Some((_, fin)) => (fin.w, fin.h), None => (w, h) };
+        if planned == size {
+            return None;
+        }
+        Some(self.resize(io, area, true, logical, visible, None))
     }
 
     /// #408: grow the chat column to the Settings size (`open`) or give it back. Only inside the chat
@@ -596,11 +630,11 @@ mod tests {
         let open = core.plan_view(&io, area(), true).expect("open chat");
         assert!(open.chat);
         assert_eq!(open.size, chat_window(area().h, 1.0));
-        assert_eq!(open.size, (432, 656));
+        assert_eq!(open.size, (672, 256), "S10 L35: the chat starts at Coucou's minimum height");
         assert_eq!(open.visible, chat_visible(area().h, 1.0), "Rust owns the visible size the page animates to");
         assert_eq!(open.rect.y, 32, "top-docked: grows downward");
-        assert_eq!(open.rect.w, 432);
-        // the column stays centred under the overview it replaces: 672 wide at x -> 432 wide at x+120
+        assert_eq!(open.rect.w, 672);
+        // the chat stays centred under the overview it replaces: 672 wide at x -> 672 wide at the same x
         assert_eq!(open.rect.x + open.rect.w / 2, io.pos.get().0 + 672 / 2);
         assert!(core.chat && core.expanded);
         io.size.set(open.size);
@@ -618,7 +652,7 @@ mod tests {
     fn a_view_switch_goes_through_a_stage_window_that_holds_both_views() {
         let (mut core, io) = expanded_top();
         let open = core.plan_view(&io, area(), true).unwrap();
-        assert_eq!((open.stage.w, open.stage.h), (672, 656), "wide as the overview, tall as the column");
+        assert_eq!((open.stage.w, open.stage.h), (672, 256), "wide as the overview and as tall as the 256 chat window (208 overview)");
         assert_eq!(open.stage.y, 32, "same docked edge as the final window");
         // the final window sits inside the stage, centred on it
         assert!(open.rect.x >= open.stage.x && open.rect.right() <= open.stage.right());
@@ -626,7 +660,7 @@ mod tests {
         io.size.set(open.size);
         io.pos.set((open.rect.x, open.rect.y));
         let back = core.plan_view(&io, area(), false).unwrap();
-        assert_eq!((back.stage.w, back.stage.h), (672, 656), "closing also holds the column until the page has shrunk");
+        assert_eq!((back.stage.w, back.stage.h), (672, 256), "closing also holds the chat until the page has shrunk");
         assert_eq!(back.stage.y, open.rect.y);
         // when nothing needs a stage, the stage IS the final window
         let same = Rect { x: 0, y: 0, w: 5, h: 5 };
@@ -634,14 +668,67 @@ mod tests {
     }
 
     #[test]
-    fn the_column_follows_the_work_area_height() {
-        for h in [1048, 768, 560] {
+    fn the_chat_fits_the_work_area_height() {
+        for h in [1048, 768, 560, 300] {
             let a = Rect { x: 0, y: 32, w: 1920, h };
             let (mut core, io) = expanded_top();
             let open = core.plan_view(&io, a, true).unwrap();
             assert_eq!(open.size, chat_window(h, 1.0), "{h}");
-            assert!(open.rect.bottom() <= a.bottom(), "{h}: the column fits the screen");
+            assert!(open.rect.bottom() <= a.bottom(), "{h}: the chat fits the screen");
         }
+    }
+
+    // --- S10 (L35): the page reports the chat height it wants; Rust clamps it to Coucou's 240..300 -----------------------
+
+    #[test]
+    fn the_chat_height_grows_with_what_the_page_reports_and_only_inside_the_chat() {
+        let (mut core, io) = expanded_top();
+        // no chat open: nothing to resize
+        assert_eq!(core.plan_chat_height(&io, area(), 280), None);
+        let open = core.plan_view(&io, area(), true).unwrap();
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        assert_eq!(open.visible.1, 240);
+        let grown = core.plan_chat_height(&io, area(), 280).expect("a taller chat");
+        assert!(grown.chat);
+        assert_eq!((grown.visible, grown.size), ((640, 280), (672, 296)));
+        assert_eq!(grown.rect.y, open.rect.y, "still hangs from the top edge");
+        assert_eq!(grown.rect.x, open.rect.x, "same width: nothing shifts sideways");
+        io.size.set(grown.size);
+        // the same height again is not a second resize
+        assert_eq!(core.plan_chat_height(&io, area(), 280), None);
+        // the cap, whatever the page asks
+        let capped = core.plan_chat_height(&io, area(), 9999).expect("capped");
+        assert_eq!(capped.visible.1, 300);
+        io.size.set(capped.size);
+        assert_eq!(core.plan_chat_height(&io, area(), 300), None, "already at the cap");
+        // and the floor
+        let low = core.plan_chat_height(&io, area(), -1).expect("floor");
+        assert_eq!(low.visible.1, 240);
+    }
+
+    #[test]
+    fn the_wanted_height_survives_a_view_switch_and_a_short_screen_still_wins() {
+        let (mut core, io) = expanded_top();
+        let open = core.plan_view(&io, area(), true).unwrap();
+        io.size.set(open.size);
+        io.pos.set((open.rect.x, open.rect.y));
+        let grown = core.plan_chat_height(&io, area(), 300).unwrap();
+        io.size.set(grown.size);
+        io.pos.set((grown.rect.x, grown.rect.y));
+        let back = core.plan_view(&io, area(), false).unwrap();
+        io.size.set(back.size);
+        io.pos.set((back.rect.x, back.rect.y));
+        let again = core.plan_view(&io, area(), true).unwrap();
+        assert_eq!(again.visible.1, 300, "reopening the chat keeps the height the conversation had");
+        // a short work area clamps it
+        let short = Rect { x: 0, y: 32, w: 1920, h: 320 };
+        let (mut core2, io2) = expanded_top();
+        let o2 = core2.plan_view(&io2, short, true).unwrap();
+        io2.size.set(o2.size);
+        io2.pos.set((o2.rect.x, o2.rect.y));
+        let g2 = core2.plan_chat_height(&io2, short, 300);
+        assert!(g2.map_or(true, |p| p.rect.bottom() <= short.bottom() && p.visible.1 >= 240));
     }
 
     #[test]
@@ -679,8 +766,8 @@ mod tests {
         io.size.set(open.size);
         io.pos.set((open.rect.x, open.rect.y));
         let back = core.plan_view(&io, area(), false).unwrap();
-        assert_eq!((back.stage.w, back.stage.h), (672, 656));
-        assert_eq!((back.stage.x, back.stage.y), (open.rect.x - (672 - 432) / 2, open.rect.y));
+        assert_eq!((back.stage.w, back.stage.h), (672, 256));
+        assert_eq!((back.stage.x, back.stage.y), (open.rect.x, open.rect.y), "same width: the stage is the chat window");
         io.size.set(back.size);
         io.pos.set((back.rect.x, back.rect.y));
         let again = core.plan_view(&io, area(), true).unwrap();
@@ -692,13 +779,13 @@ mod tests {
         let (mut core, io) = expanded_top();
         core.plan_view(&io, area(), true).unwrap();
         core.press(&io, (10.0, 10.0));
-        io.size.set((432, 656));
+        io.size.set((672, 256));
         io.pos.set((300, 32));
         core.release(&io, area(), (10.0, 10.0), true);
         let back = core.plan_view(&io, area(), false).unwrap();
         // S10 (L24): the expanded notch is never dragged, so the stage is the top-edge, work-area-centred window
         assert_eq!(back.stage.y, 32);
-        assert_eq!((back.stage.w, back.stage.h), (672, 656), "planned from the getter (the press dropped the in-flight memory)");
+        assert_eq!((back.stage.w, back.stage.h), (672, 256), "planned from the getter (the press dropped the in-flight memory)");
         assert_eq!(back.stage.x, (1920 - 672) / 2, "centred on the work area, wherever the stale getter says the window is");
     }
 
@@ -713,7 +800,7 @@ mod tests {
         io.apply(&plan);
         let chat = core.plan_view(&io, area(), true).unwrap();
         assert_eq!(chat.rect.y, area().y, "S10 (L24): the chat column also hangs from the top edge, whatever edge the dot was docked at");
-        assert_eq!(chat.rect.h, 656);
+        assert_eq!(chat.rect.h, 256);
         assert_eq!(chat.rect.x + chat.rect.w / 2, area().x + area().w / 2, "centred on the work area");
     }
 

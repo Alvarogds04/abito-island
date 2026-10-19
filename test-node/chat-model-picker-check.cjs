@@ -41,7 +41,7 @@ const CHAT_VIEW = {
   conversation_id: 'c1', active_turn: null, turns: [], evicted: 0,
   queue_note: null, availability: { state: 'ready', message: 'Modelo local listo.' },
   history_before: null, history_skipped: 0, history_problem: null, history_persisted: true,
-  conversation_specialist: null, display_name: '', view: 'chat', chat_visible: [400, 656],
+  conversation_specialist: null, display_name: '', view: 'chat', chat_visible: [640, 656],
   target: TARGET, producer: { pi: 'not_connected', note: 'Chat con el modelo local.' },
 };
 const LISTING = {

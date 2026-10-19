@@ -125,9 +125,13 @@ impl NativeResizeBarrier {
 /// from an obsolete compact request. Callers must reject an unknown scale. The chat column's height
 /// follows the work area (`area_h`, physical px), so that is part of the desired size.
 pub fn desired_native_size(expanded: bool, chat: bool, scale: f64, area_h: i32) -> (u32,u32) {
+    desired_native_size_for(expanded, chat, scale, area_h, crate::geometry::CHAT_MIN_H)
+}
+/// S10 (L35): the chat's height is the one the page last asked for (Coucou's growing prompt), already clamped in Rust.
+pub fn desired_native_size_for(expanded: bool, chat: bool, scale: f64, area_h: i32, chat_h: i32) -> (u32,u32) {
     use crate::geometry;
     let logical = if !expanded { geometry::LOGICAL_COMPACT }
-        else if chat { geometry::chat_window(area_h, scale) } else { geometry::LOGICAL_OVERVIEW };
+        else if chat { geometry::chat_window_for(area_h, scale, chat_h) } else { geometry::LOGICAL_OVERVIEW };
     let (w,h) = geometry::scaled_size(logical, scale); (w as u32,h as u32)
 }
 pub fn error_code(error: Error) -> &'static str {
