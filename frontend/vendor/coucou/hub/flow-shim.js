@@ -30,7 +30,7 @@ const FlowBridge = Object.freeze({
       edge: p.edge,
       mic: p.mic,
       keepDays: p.keepDays,
-      cleanup: false,
+      cleanup: p.cleanup === true,
       defaultStyle: p.defaultStyle
     } });
   },
@@ -44,7 +44,7 @@ const FlowBridge = Object.freeze({
   setSnippets: (snippets) => mutation({ action: "set_snippets", snippets }),
   styles: () => call({ action: "styles" }),
   setStyles: (styles) => mutation({ action: "set_styles", styles }),
-  runningApps: async () => [],
+  runningApps: () => call({ action: "running_apps" }),
   download: () => call({ action: "download_model" }),
   removeModels: () => call({ action: "remove_model" })
 });
