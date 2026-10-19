@@ -9,6 +9,15 @@
 #[path = "characterwin_tests.rs"]
 mod tests;
 
+// Adapted from Coucou NotchBuddy/Sources/App/IslandWindowController.swift @71b773f, Copyright (c) 2026 Louis Raillé, MIT.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DropOutcome { Home, AttachAndReturn, Install }
+
+/// Island hit wins; an explicit window drop never installs or changes the saved spot.
+pub fn drop_outcome(over_island: bool, window_found: bool, _from: &str) -> DropOutcome {
+    if over_island { DropOutcome::Home } else if window_found { DropOutcome::AttachAndReturn } else { DropOutcome::Install }
+}
+
 /// Side of the square window, logical pixels (DesktopMochiLogic.panelSize).
 pub const SIZE: f64 = 120.0;
 /// Kept between the character and the edges of the work area (clampMargin).

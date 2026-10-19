@@ -72,6 +72,32 @@ test('malformed events are ignored', async () => {
   assert.equal(f.d.phase(), 'home');
 });
 
+test('explicit window drop: island returns without install, desktop stays out without another home flight', async () => {
+  const island = fakes();
+  await island.d.init();
+  island.d.pickUp(1, 1);
+  island.handlers['desktop-character-dropped']({ payload: { from: 'island', home: true } });
+  assert.equal(island.d.carrying(), false);
+  assert.equal(island.d.canPickUp(), true);
+  assert.equal(island.clayEl.style.visibility, '');
+  const desktop = fakes({ info: { mode: 'window', onDesktop: true } });
+  await desktop.d.init();
+  desktop.handlers['desktop-character-dropped']({ payload: { from: 'desktop', home: false } });
+  assert.equal(desktop.calls.filter(([cmd]) => cmd === 'character_fly_home').length, 0);
+});
+
+test('highlight is host-owned and input-free before show, with stale-scan guards and quit cleanup', () => {
+  const host = fs.readFileSync(path.join(__dirname, '../src/characterhost.rs'), 'utf8');
+  assert.ok(host.includes('"character-highlight"'));
+  const paint = host.slice(host.indexOf('fn paint_highlight('), host.indexOf('fn start_highlight('));
+  assert.ok(paint.indexOf('input_shape_combine_region(&gtk::cairo::Region::create()') < paint.indexOf('w.show()'));
+  for (const flag of ['.focusable(false)', '.focused(false)', '.skip_taskbar(true)', '.transparent(true)']) assert.ok(paint.includes(flag));
+  assert.ok(host.includes('Duration::from_millis(250)') && host.includes('>= 2.0'));
+  assert.ok(host.includes('guard.highlight.load(Ordering::SeqCst) == id'));
+  const main = fs.readFileSync(path.join(__dirname, '../src/main.rs'), 'utf8');
+  assert.equal((main.match(/characterhost::shutdown\(/g) || []).length, 2);
+});
+
 // ---- island.js hook ----
 const src = read('island.js');
 

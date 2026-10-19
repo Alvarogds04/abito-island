@@ -1,5 +1,15 @@
 use super::*;
 
+#[test]
+fn drop_decision_prioritizes_home_then_explicit_context_over_install() {
+    for from in ["island", "desktop"] {
+        assert_eq!(drop_outcome(true, true, from), DropOutcome::Home);
+        assert_eq!(drop_outcome(true, false, from), DropOutcome::Home);
+        assert_eq!(drop_outcome(false, true, from), DropOutcome::AttachAndReturn);
+        assert_eq!(drop_outcome(false, false, from), DropOutcome::Install);
+    }
+}
+
 // Mirrors Coucou's desktop.rs tests (isOverBody, clampOrigin, spots, flights).
 
 #[test]

@@ -6,7 +6,7 @@
 // Exposes on the SESSION bus (name org.abito.Context):
 //   GetRecentWindows() -> a(sss)   (app id, app name, title), most recently focused first.
 // Read-only: it never focuses, moves or closes anything and exposes no window ids, pids or
-// content. Abito calls it only on demand (once, when the chat opens with the setting on).
+// content. Automatic capture is opt-in; explicit character drags query geometry on demand.
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -19,6 +19,11 @@ const IFACE = `<node>
   <interface name="org.abito.Context">
     <method name="GetRecentWindows">
       <arg type="a(sss)" direction="out" name="windows"/>
+    </method>
+    <method name="GetWindowAt">
+      <arg type="i" direction="in" name="x"/>
+      <arg type="i" direction="in" name="y"/>
+      <arg type="a(sssiiii)" direction="out" name="windows"/>
     </method>
   </interface>
 </node>`;
@@ -58,6 +63,27 @@ export default class AbitoContextExtension extends Extension {
                 this._history = this._history.filter(w => w !== win);
             }));
         }
+    }
+
+    // Adapted from Coucou NotchBuddy/Sources/App/IslandWindowController.swift @71b773f, Copyright (c) 2026 Louis Raillé, MIT.
+    // Meta frame rectangles and the input point are both in stage logical pixels.
+    GetWindowAt(x, y) {
+        const tracker = Shell.WindowTracker.get_default();
+        const windows = global.display.sort_windows_by_stacking(
+            global.get_window_actors().map(actor => actor.meta_window)).reverse();
+        for (const win of windows) {
+            if (win.minimized || win.is_skip_taskbar() || !win.showing_on_its_workspace()
+                || !win.located_on_workspace(global.workspace_manager.get_active_workspace())) continue;
+            const app = tracker.get_window_app(win);
+            const id = app?.get_id() ?? win.get_wm_class() ?? '';
+            const name = app?.get_name() ?? win.get_wm_class() ?? '';
+            if (`${id} ${name} ${win.get_wm_class() ?? ''}`.toLowerCase().includes('abito') || !name.trim()) continue;
+            const r = win.get_frame_rect();
+            if (x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height) {
+                return [[[id, name, win.get_title() ?? '', r.x, r.y, r.width, r.height]]];
+            }
+        }
+        return [[]];
     }
 
     GetRecentWindows() {

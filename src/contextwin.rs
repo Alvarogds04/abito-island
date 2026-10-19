@@ -15,9 +15,29 @@
 //! 2. X11/EWMH (`_NET_CLIENT_LIST_STACKING`, topmost first) over the existing x11rb; on GNOME
 //!    Wayland this only sees XWayland windows, never guessed.
 //!
-//! The reader is called ONLY when the user turned the setting on and the chat opened; nothing
-//! is polled and nothing here takes an argument from the page.
+//! Automatic capture runs only on chat open with the switch on. Explicit character drags use
+//! a separate point query, including while the switch is off. No browser URL or page-chosen window.
 use std::time::Duration;
+use crate::characterwin::Rect;
+
+// Adapted from Coucou NotchBuddy/Sources/App/IslandWindowController.swift @71b773f, Copyright (c) 2026 Louis Raillé, MIT.
+/// Topmost-first hit test. The input and rectangles must use the same coordinate space.
+pub fn topmost_at(point: (f64, f64), rows: &[(Candidate, Rect)]) -> Option<(ActiveWindow, Rect)> {
+    rows.iter().find_map(|(c, r)| {
+        if !r.contains(point) { return None; }
+        pick_external(std::slice::from_ref(c)).map(|w| (w, *r))
+    })
+}
+
+pub const POINT_METHOD: &str = "GetWindowAt";
+type PointRow = (String, String, String, i32, i32, i32, i32);
+
+fn point_rows(rows: Vec<PointRow>) -> Vec<(Candidate, Rect)> {
+    rows.into_iter().map(|(app_id, app_name, title, x, y, w, h)| (
+        Candidate { app_id, app_name, title },
+        Rect { x: x as f64, y: y as f64, w: w as f64, h: h as f64 },
+    )).collect()
+}
 
 /// A window as either source reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +122,23 @@ pub mod dbus {
         Some(from_reply(rows))
     }
 
+    /// An empty reply is authoritative (no visible target); None permits the X11 fallback.
+    pub fn window_at(point: (i32, i32)) -> Option<Vec<(Candidate, Rect)>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let answer = (|| {
+                let conn = connect(None).ok()?;
+                let bus = zbus::blocking::fdo::DBusProxy::new(&conn).ok()?;
+                if !bus.name_has_owner(zbus::names::BusName::try_from(BUS_NAME).ok()?).ok()? { return None; }
+                let proxy = Proxy::new(&conn, BUS_NAME, OBJECT_PATH, INTERFACE).ok()?;
+                let rows: Vec<PointRow> = proxy.call(POINT_METHOD, &point).ok()?;
+                (rows.len() <= 1).then(|| point_rows(rows))
+            })();
+            let _ = tx.send(answer);
+        });
+        rx.recv_timeout(DBUS_DEADLINE).ok().flatten()
+    }
+
     /// Recent windows from the extension; `None` when it is absent, slow or malformed.
     /// `bus_address` None = the user's session bus; Some(addr) = a private bus (tests).
     pub fn recent_windows(bus_address: Option<&str>) -> Option<Vec<Candidate>> {
@@ -135,6 +172,42 @@ pub mod x11 {
 
     fn text(bytes: &[u8]) -> String {
         String::from_utf8_lossy(bytes).into_owned()
+    }
+
+    /// Visible EWMH clients, topmost first, with root-relative physical geometry.
+    pub fn windows_with_rects() -> Option<Vec<(Candidate, Rect)>> {
+        use x11rb::protocol::xproto::MapState;
+        let (conn, screen) = std::panic::catch_unwind(|| RustConnection::connect(None)).ok()?.ok()?;
+        let root = conn.setup().roots[screen].root;
+        let list = intern(&conn, b"_NET_CLIENT_LIST_STACKING")?;
+        let ids: Vec<u32> = conn.get_property(false, root, list, AtomEnum::WINDOW, 0, u32::MAX)
+            .ok()?.reply().ok()?.value32()?.collect();
+        let utf8 = intern(&conn, b"UTF8_STRING")?;
+        let name = intern(&conn, b"_NET_WM_NAME")?;
+        let state = intern(&conn, b"_NET_WM_STATE")?;
+        let hidden = intern(&conn, b"_NET_WM_STATE_HIDDEN")?;
+        let skip = intern(&conn, b"_NET_WM_STATE_SKIP_TASKBAR")?;
+        let mut rows = Vec::new();
+        for id in ids.into_iter().rev() {
+            let Some(attrs) = conn.get_window_attributes(id).ok().and_then(|c| c.reply().ok()) else { continue };
+            if attrs.map_state != MapState::VIEWABLE { continue; }
+            let states = prop(&conn, id, state, AtomEnum::ATOM.into());
+            if states.chunks_exact(4).any(|b| {
+                let a = u32::from_ne_bytes([b[0], b[1], b[2], b[3]]);
+                a == hidden || a == skip
+            }) { continue; }
+            let Some(g) = conn.get_geometry(id).ok().and_then(|c| c.reply().ok()) else { continue };
+            let Some(p) = conn.translate_coordinates(id, root, 0, 0).ok().and_then(|c| c.reply().ok()) else { continue };
+            let class = prop(&conn, id, AtomEnum::WM_CLASS.into(), AtomEnum::STRING.into());
+            let mut parts = class.split(|b| *b == 0);
+            let instance = text(parts.next().unwrap_or(&[]));
+            let class = text(parts.next().unwrap_or(&[]));
+            let mut title = prop(&conn, id, name, utf8);
+            if title.is_empty() { title = prop(&conn, id, AtomEnum::WM_NAME.into(), AtomEnum::STRING.into()); }
+            let mut candidates = from_stacking(vec![(instance, class, text(&title))]);
+            rows.push((candidates.remove(0), Rect { x: p.dst_x as f64, y: p.dst_y as f64, w: g.width as f64, h: g.height as f64 }));
+        }
+        Some(rows)
     }
 
     /// Windows of the display, most recent (topmost) first. `None` when X is unreachable.
@@ -182,6 +255,18 @@ pub fn capture(bus_address: Option<&str>, display: Option<&str>) -> Option<Activ
     x11::recent_windows(display).as_deref().and_then(pick_external)
 }
 
+/// Explicit drag capture: physical pointer -> GNOME stage logical px using the display under it.
+/// Extension geometry is converted back to physical for the input-free highlight window.
+#[cfg(target_os = "linux")]
+pub fn capture_at(point: (f64, f64), scale: f64) -> Option<(ActiveWindow, Rect)> {
+    let k = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let logical = ((point.0 / k).floor(), (point.1 / k).floor());
+    if let Some(rows) = dbus::window_at((logical.0 as i32, logical.1 as i32)) {
+        return topmost_at(logical, &rows).map(|(w, r)| (w, Rect { x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k }));
+    }
+    topmost_at(point, &x11::windows_with_rects()?)
+}
+
 /// The chat's attach point (NotchBuddy `promptContext`): captured once when the chat opens and
 /// nothing is held; offered ONLY for the first message of a conversation (`conversationMessages
 /// .isEmpty`), where the caller prefixes that user message with it. Pure state; the caller
@@ -189,10 +274,16 @@ pub fn capture(bus_address: Option<&str>, display: Option<&str>) -> Option<Activ
 #[derive(Debug, Default)]
 pub struct ChatContext {
     captured: Option<String>,
+    dragged: Option<String>,
 }
 
 impl ChatContext {
-    /// Chat opened. Switch off: forget everything and read NOTHING. On: read only if none held.
+    /// Explicit human intent is independent of the automatic-capture switch.
+    pub fn attach_dragged(&mut self, text: String) { self.dragged = Some(text); }
+    pub fn first_message_consumed(&mut self) { self.dragged = None; }
+    pub fn new_conversation(&mut self) { self.dragged = None; }
+
+    /// Chat opened. Switch off: forget automatic context and read NOTHING. Preserve explicit drag.
     pub fn on_chat_open(&mut self, enabled: bool, read: impl FnOnce() -> Option<ActiveWindow>) {
         if !enabled {
             self.captured = None;
@@ -203,9 +294,10 @@ impl ChatContext {
         }
     }
 
-    /// Text for a turn: only the first message of a conversation, only while the switch is on.
+    /// First message only: explicit drag wins regardless of the automatic-capture switch.
     pub fn for_turn(&self, enabled: bool, first: bool) -> Option<String> {
-        if enabled && first { self.captured.clone() } else { None }
+        if !first { return None; }
+        self.dragged.clone().or_else(|| if enabled { self.captured.clone() } else { None })
     }
 }
 

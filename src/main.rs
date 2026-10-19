@@ -100,6 +100,7 @@ fn quit_clean(app: &AppHandle) {
     // in-flight /execute fails at once instead of holding the lane open
     // (the card stays inert through the quitting rule).
     approval::abort_lane(&app.state::<AppState>().approval);
+    characterhost::shutdown(app);
     hotkeyhost::stop(app); // release the X11 grab before leaving
     settingshost::stop(app);
     close_transport(app);
@@ -139,6 +140,7 @@ fn spawn_shutdown_watcher(app: AppHandle) {
             std::process::exit(0);
         }
         approval::abort_lane(&app.state::<AppState>().approval);
+        characterhost::shutdown(&app);
         close_transport(&app);
         app.state::<abito_island::daemonhost::HostSlot>().stop();
         // Release the single-instance name before a hard exit (probe does the

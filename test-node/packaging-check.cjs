@@ -6,6 +6,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const L = require('../packaging/lib.cjs');
+for (const f of ['desktop-highlight.html', 'desktop-highlight.css']) {
+  assert.ok(L.FRONTEND_FILES.includes(f), `highlight ships: ${f}`);
+}
+const highlight = fs.readFileSync(path.join(__dirname, '../frontend/desktop-highlight.html'), 'utf8');
+assert.ok(!/<script|\bon\w+=|style=/i.test(highlight), 'highlight has no JS, IPC or inline style');
+assert.ok(highlight.includes('desktop-highlight.css'));
+const capabilities = JSON.parse(fs.readFileSync(path.join(__dirname, '../capabilities/main.json'), 'utf8'));
+assert.ok(!capabilities.windows.includes('character-highlight'), 'no highlight capabilities');
 const T = require('./tmpdirs.cjs'); // self-cleaning temp dirs
 // a malformed fixture must fail the test with the file named, not with a bare SyntaxError
 function readJson(file) {

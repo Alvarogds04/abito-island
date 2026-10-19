@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use abito_island::characterwin::{self as cw, Display, Rect};
+use abito_island::contextwin;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
@@ -21,6 +22,8 @@ struct Inner {
     drag: Option<((f64, f64), (f64, f64))>,
     /// Being carried out of the island by the pointer (the island page drives it).
     carrying: bool,
+    /// Last drag event's screen pointer, physical px (not the character's centre).
+    pointer: Option<(f64, f64)>,
 }
 
 #[derive(Default)]
@@ -30,6 +33,8 @@ pub struct Character {
     flight: AtomicU64,
     /// Bumped to stop the gaze poll of an older show.
     gaze: AtomicU64,
+    /// Invalidates scans and queued UI updates on drop/cancel/quit.
+    highlight: AtomicU64,
 }
 
 #[derive(Serialize)]
@@ -131,6 +136,85 @@ fn apply_shape(app: &AppHandle, win: &WebviewWindow) {
     });
 }
 
+// Adapted from Coucou NotchBuddy/Sources/App/IslandWindowController.swift @71b773f, Copyright (c) 2026 Louis Raillé, MIT.
+const HIGHLIGHT: &str = "character-highlight";
+
+fn target_at(app: &AppHandle, point: (f64, f64)) -> Option<(contextwin::ActiveWindow, Rect)> {
+    let scale = displays(app).iter().find(|d| d.frame.contains(point)).map(|d| d.scale).unwrap_or(1.0);
+    contextwin::capture_at(point, scale)
+}
+
+fn stop_highlight(app: &AppHandle, c: &Character) {
+    c.highlight.fetch_add(1, Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window(HIGHLIGHT) { let _ = w.hide(); }
+}
+
+/// Also called by both native quit paths. No window or page IPC chooses this label.
+pub fn shutdown(app: &AppHandle) {
+    if let Some(c) = app.try_state::<Arc<Character>>() {
+        c.flight.fetch_add(1, Ordering::SeqCst);
+        c.gaze.fetch_add(1, Ordering::SeqCst);
+        stop_highlight(app, &c);
+    }
+}
+
+fn paint_highlight(app: &AppHandle, rect: Option<Rect>) {
+    let Some(r) = rect else {
+        if let Some(w) = app.get_webview_window(HIGHLIGHT) { let _ = w.hide(); }
+        return;
+    };
+    let win = app.get_webview_window(HIGHLIGHT).or_else(|| {
+        WebviewWindowBuilder::new(app, HIGHLIGHT, WebviewUrl::App("desktop-highlight.html".into()))
+            .title("Abito").inner_size(120.0, 120.0).resizable(true)
+            .decorations(false).transparent(true).shadow(false).always_on_top(true)
+            .skip_taskbar(true).visible_on_all_workspaces(true).focused(false).focusable(false)
+            .maximizable(false).minimizable(false).closable(false).visible(false).build().ok()
+    });
+    let Some(w) = win else { return };
+    // Realize while hidden, then apply GDK's EMPTY region BEFORE the first show.
+    // If the native input shape cannot be established, fail closed and keep it hidden.
+    use gtk::prelude::WidgetExt;
+    let Ok(gtk_win) = w.gtk_window() else { let _ = w.hide(); return };
+    gtk_win.realize();
+    let Some(gdk) = gtk_win.window() else { let _ = w.hide(); return };
+    gdk.input_shape_combine_region(&gtk::cairo::Region::create(), 0, 0);
+    let _ = w.set_ignore_cursor_events(true);
+    let _ = w.set_position(PhysicalPosition::new(r.x.round() as i32, r.y.round() as i32));
+    let _ = w.set_size(tauri::PhysicalSize::new(r.w.round().max(1.0) as u32, r.h.round().max(1.0) as u32));
+    let _ = w.show();
+}
+
+fn start_highlight(app: &AppHandle, c: &Arc<Character>) {
+    let id = c.highlight.fetch_add(1, Ordering::SeqCst) + 1;
+    let (app, c) = (app.clone(), c.clone());
+    std::thread::spawn(move || {
+        let mut last: Option<(f64, f64)> = None;
+        let mut scanned = std::time::Instant::now();
+        while c.highlight.load(Ordering::SeqCst) == id && !crate::QUITTING.load(Ordering::SeqCst) {
+            let at = {
+                let inner = c.inner.lock().unwrap();
+                if inner.drag.is_none() && !inner.carrying { break; }
+                inner.pointer
+            };
+            if let Some(p) = at {
+                if last.is_none_or(|q| (p.0 - q.0).hypot(p.1 - q.1) >= 2.0) || scanned.elapsed() >= Duration::from_millis(250) {
+                    last = Some(p);
+                    scanned = std::time::Instant::now();
+                    let rect = if island_rect(&app).is_some_and(|(r, _)| r.contains(p)) { None }
+                        else { target_at(&app, p).map(|(_, r)| r) };
+                    let (ui, guard) = (app.clone(), c.clone());
+                    let _ = app.run_on_main_thread(move || {
+                        if guard.highlight.load(Ordering::SeqCst) == id && !crate::QUITTING.load(Ordering::SeqCst) {
+                            paint_highlight(&ui, rect);
+                        }
+                    });
+                }
+            }
+            std::thread::sleep(Duration::from_millis(33));
+        }
+    });
+}
+
 fn place(win: &WebviewWindow, c: &Character, pos: (f64, f64)) {
     c.inner.lock().unwrap().pos = pos;
     let _ = win.set_position(PhysicalPosition::new(pos.0.round() as i32, pos.1.round() as i32));
@@ -223,6 +307,12 @@ pub async fn character_fly_home(webview: tauri::Webview, app: AppHandle, c: Stat
 }
 
 async fn go_home(app: &AppHandle, c: &Character, forget: bool) -> bool {
+    stop_highlight(app, c);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.drag = None;
+        inner.carrying = false;
+    }
     let Some(win) = window(app) else { return true };
     if let Some(to) = island_origin(app) {
         let from = c.inner.lock().unwrap().pos;
@@ -244,12 +334,16 @@ fn from_character(webview: &tauri::Webview) -> bool {
 }
 
 #[tauri::command]
-pub fn character_drag_begin(webview: tauri::Webview, c: State<'_, Arc<Character>>, x: f64, y: f64) -> bool {
+pub fn character_drag_begin(webview: tauri::Webview, app: AppHandle, c: State<'_, Arc<Character>>, x: f64, y: f64) -> bool {
     let (true, Some(press)) = (from_character(&webview), cw::valid_point(x, y)) else { return false };
     c.flight.fetch_add(1, Ordering::SeqCst);
     let mut inner = c.inner.lock().unwrap();
     let origin = inner.pos;
     inner.drag = Some((press, origin));
+    let scale = window(&app).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+    inner.pointer = Some((press.0 * scale, press.1 * scale));
+    drop(inner);
+    start_highlight(&app, &c);
     true
 }
 
@@ -258,6 +352,7 @@ pub fn character_drag_move(webview: tauri::Webview, app: AppHandle, c: State<'_,
     let (true, Some(now)) = (from_character(&webview), cw::valid_point(x, y)) else { return };
     let (Some(win), Some((press, origin))) = (window(&app), c.inner.lock().unwrap().drag) else { return };
     let dpr = win.scale_factor().unwrap_or(1.0);
+    c.inner.lock().unwrap().pointer = Some((now.0 * dpr, now.1 * dpr));
     place(&win, &c, cw::drag_top_left(origin, now, press, dpr));
 }
 
@@ -267,24 +362,49 @@ pub async fn character_drag_end(webview: tauri::Webview, app: AppHandle, c: Stat
     if !from_character(&webview) {
         return Err(());
     }
-    if c.inner.lock().unwrap().drag.take().is_some() {
-        finish_drop(&app, &c, "desktop").await;
+    let drag = c.inner.lock().unwrap().drag.take();
+    stop_highlight(&app, &c);
+    if let Some((_, origin)) = drag {
+        finish_drop(&app, &c, "desktop", Some(origin)).await;
     }
     Ok(())
 }
 
-async fn finish_drop(app: &AppHandle, c: &Character, from: &'static str) {
+async fn finish_drop(app: &AppHandle, c: &Character, from: &'static str, origin: Option<(f64, f64)>) {
+    stop_highlight(app, c);
     let Some(win) = window(app) else { return };
     let scale = win.scale_factor().unwrap_or(1.0);
     let pos = c.inner.lock().unwrap().pos;
     let half = cw::SIZE * scale / 2.0;
-    let centre = (pos.0 + half, pos.1 + half);
-    let home = island_rect(app).is_some_and(|(r, _)| cw::is_home_drop(centre, r));
-    let _ = app.emit_to("main", "desktop-character-dropped", Dropped { from, home });
-    if home {
-        // Dropped on the island: a pick-up from the island just returns; one from the desktop goes home for good.
-        go_home(app, c, true).await;
-        return;
+    let at = c.inner.lock().unwrap().pointer.unwrap_or((pos.0 + half, pos.1 + half));
+    let home = island_rect(app).is_some_and(|(r, _)| cw::is_home_drop(at, r));
+    let target = if home { None } else {
+        let host = app.clone();
+        tauri::async_runtime::spawn_blocking(move || target_at(&host, at)).await.ok().flatten()
+    };
+    match cw::drop_outcome(home, target.is_some(), from) {
+        cw::DropOutcome::Home => {
+            let _ = app.emit_to("main", "desktop-character-dropped", Dropped { from, home: true });
+            go_home(app, c, true).await;
+            return;
+        }
+        cw::DropOutcome::AttachAndReturn => {
+            let (target, _) = target.unwrap();
+            app.state::<crate::AppState>().chat_context.lock().expect("chat context lock")
+                .attach_dragged(contextwin::format_context(&target));
+            let _ = app.emit_to(cw::LABEL, "desktop-character-emote", serde_json::json!({ "emote": "happy" }));
+            // Same native intent as --chat; no additional command or page-chosen target.
+            let ui = app.clone();
+            let _ = app.run_on_main_thread(move || { crate::restore(&ui); crate::open_chat_and_type(&ui); });
+            let _ = app.emit_to("main", "desktop-character-dropped", Dropped { from, home: from == "island" });
+            if from == "island" { go_home(app, c, true).await; }
+            else if let Some(to) = origin { fly(&win, c, pos, to, cw::FLIGHT_MS, cw::ease_in_out).await; }
+            // Explicit drop: NEVER overwrite the saved desktop spot.
+            return;
+        }
+        cw::DropOutcome::Install => {
+            let _ = app.emit_to("main", "desktop-character-dropped", Dropped { from, home: false });
+        }
     }
     let to = cw::settle(pos, &displays(app), cw::SIZE, cw::MARGIN);
     if fly(&win, c, pos, to, cw::SNAP_MS, cw::ease_out_back).await {
@@ -311,7 +431,12 @@ pub async fn character_pick_up(webview: tauri::Webview, app: AppHandle, c: State
     c.flight.fetch_add(1, Ordering::SeqCst);
     let scale = win.scale_factor().unwrap_or(1.0);
     place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
-    c.inner.lock().unwrap().carrying = true;
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.carrying = true;
+        inner.pointer = Some(at);
+    }
+    start_highlight(&app, &c);
     let _ = win.show();
     apply_shape(&app, &win);
     start_gaze(&app, &c);
@@ -326,6 +451,7 @@ pub async fn character_carry(webview: tauri::Webview, app: AppHandle, c: State<'
     }
     if let (Some(win), Some(at)) = (window(&app), island_point(&app, x, y)) {
         let scale = win.scale_factor().unwrap_or(1.0);
+        c.inner.lock().unwrap().pointer = Some(at);
         place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
     }
     Ok(())
@@ -339,10 +465,11 @@ pub async fn character_carry_end(webview: tauri::Webview, app: AppHandle, c: Sta
     }
     if let (Some(win), Some(at)) = (window(&app), island_point(&app, x, y)) {
         let scale = win.scale_factor().unwrap_or(1.0);
+        c.inner.lock().unwrap().pointer = Some(at);
         place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
     }
     c.inner.lock().unwrap().carrying = false;
-    finish_drop(&app, &c, "island").await;
+    finish_drop(&app, &c, "island", None).await;
     Ok(())
 }
 

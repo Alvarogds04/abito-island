@@ -1,4 +1,44 @@
 use super::*;
+use crate::characterwin::Rect;
+
+#[test]
+fn window_at_point_respects_edges_stacking_and_external_filter() {
+    let r = Rect { x: 10.0, y: 20.0, w: 100.0, h: 80.0 };
+    let rows = vec![(c("abito", "Abito", "own"), r), (c("unknown", "  ", "empty"), r),
+        (c("code", "Code", "top"), r), (c("firefox", "Firefox", "bottom"), r)];
+    for p in [(10.0, 20.0), (109.0, 99.0), (50.0, 50.0)] {
+        assert_eq!(topmost_at(p, &rows), Some((ActiveWindow { app: "Code".into(), title: "top".into() }, r)));
+    }
+    for p in [(9.0, 20.0), (110.0, 20.0), (10.0, 100.0)] { assert_eq!(topmost_at(p, &rows), None); }
+    assert_eq!(topmost_at((10.0, 20.0), &rows[..2]), None);
+    assert_eq!(topmost_at((0.0, 0.0), &[]), None);
+    let off = Rect { x: 200.0, ..r };
+    assert_eq!(topmost_at((10.0, 20.0), &[(c("code", "Code", "off"), off), rows[3].clone()]).unwrap().0.app, "Firefox");
+}
+
+#[test]
+fn dragged_context_survives_switch_off_open_and_is_consumed_once() {
+    let mut cx = ChatContext::default();
+    cx.on_chat_open(true, || Some(win("Automatic")));
+    cx.attach_dragged("explicit".into());
+    cx.on_chat_open(false, || panic!("must not read"));
+    assert_eq!(cx.for_turn(false, false), None);
+    assert_eq!(cx.for_turn(false, true).as_deref(), Some("explicit"));
+    cx.first_message_consumed();
+    assert_eq!(cx.for_turn(false, true), None);
+}
+
+#[test]
+fn dragged_context_preferred_replaced_and_cleared_on_new_conversation() {
+    let mut cx = ChatContext::default();
+    cx.on_chat_open(true, || Some(win("Automatic")));
+    cx.attach_dragged("one".into());
+    cx.attach_dragged("two".into());
+    assert_eq!(cx.for_turn(true, true).as_deref(), Some("two"));
+    cx.new_conversation();
+    assert_eq!(cx.for_turn(false, true), None);
+    assert!(cx.for_turn(true, true).unwrap().contains("Automatic"));
+}
 
 fn c(id: &str, name: &str, title: &str) -> Candidate {
     Candidate { app_id: id.into(), app_name: name.into(), title: title.into() }

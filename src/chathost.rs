@@ -244,10 +244,7 @@ pub fn submit(
     }
     // #487: NotchBuddy prefixes the FIRST user message with the window context. It is held for the
     // conversation in memory and added to the prompt only: never to the stored or shown text.
-    let first = lane.lock().expect("chat lane lock").convo.is_empty();
-    let window_context = crate::settingshost::window_context(&state.settings)
-        .then(|| state.chat_context.lock().expect("chat context lock").for_turn(true, first))
-        .flatten();
+    let context_enabled = crate::settingshost::window_context(&state.settings);
     // #343: attachment ids are resolved ONLY against the island's uploads
     // directory — the page never sends names, sizes, MIME types or paths.
     // A chat without attachments never touches the island: no resolution,
@@ -265,9 +262,15 @@ pub fn submit(
     };
     let (accepted, conversation_id) = {
         let mut l = lane.lock().expect("chat lane lock");
+        let first = l.convo.is_empty();
         let accepted = l.submit_with_attachments(text, client_request_id, &target.profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
-        if let Some(text) = &window_context {
-            l.convo.attach_context(&accepted.turn_id, text);
+        // Consume explicit context only after a first message was really accepted, never on error/retry.
+        if first && !accepted.duplicate {
+            let mut cx = state.chat_context.lock().expect("chat context lock");
+            if let Some(text) = cx.for_turn(context_enabled, true) {
+                l.convo.attach_context(&accepted.turn_id, &text);
+            }
+            cx.first_message_consumed();
         }
         (accepted, l.convo.id().to_owned())
     };
@@ -304,7 +307,10 @@ pub async fn chat_action(
         Command::History { conversation_id, before } => state.chat.lock().expect("chat lane lock").history_page(&conversation_id, before).map_err(chat_error),
         Command::New => {
             let specialist = state.specialists.role().map(|s| SpecialistRef { id: s.id, name: s.name });
-            state.chat.lock().expect("chat lane lock").new_conversation(specialist, chatlane::history_now()).map_err(chat_error)?;
+            let mut lane = state.chat.lock().expect("chat lane lock");
+            lane.new_conversation(specialist, chatlane::history_now()).map_err(chat_error)?;
+            state.chat_context.lock().expect("chat context lock").new_conversation();
+            drop(lane);
             publish_chat(&app);
             Ok(chat_view(&app, &state))
         }
@@ -315,6 +321,7 @@ pub async fn chat_action(
             let role_id = summary.specialist.as_ref().map(|s| s.id.as_str());
             let missing = specialistshost::select_conversation_role(&app, &state, role_id)?;
             l.activate_conversation(summary, page);
+            state.chat_context.lock().expect("chat context lock").new_conversation();
             if missing { l.history_notice("El especialista de esta conversación ya no existe; ahora responde Abito principal."); }
             drop(l);
             publish_chat(&app);
