@@ -2729,6 +2729,8 @@ fn feature_validation(app: &AppHandle) {
     sleep(Duration::from_millis(500));
     record("dictado-inactivo", run(&win,"AbitoValidate.dictationIdle()"));
     record("sesiones-motor", run(&win,"AbitoValidate.sessions()"));
+    record("sesiones-foco-pildoras", run(&win,"AbitoValidate.sessionsFocus()"));
+    let _ = run(&win,"AbitoValidate.restoreSessionFocus()");
     record("sin-motor-sin-productor", run(&win,"AbitoValidate.connection(false)"));
 
     let fake = FakeModel::start(FakeModelConfig {reply:Reply::Stream {reasoning:false,pieces:vec!["respuesta del validador".into()],finish:"stop",gap_ms:600},..Default::default()});

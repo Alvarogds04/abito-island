@@ -15,7 +15,16 @@
     node.style.setProperty('--identity-color', stops?.[1] || '');
   }
   const A = root.AbitoAvatarColors;
-  let prefs = {}, version = 0, busy = false;
+  let prefs = {}, version = 0, busy = false, sessions = null, sessionFocus = null;
+  const sessionRows = () => {
+    const kept = new Set([prefs.mainPill, ...(prefs.declaredPills || [])]);
+    return (root.AbitoSessionsTicker?.sessionRows(sessions, prefs) || []).filter(r => r.tools || r.id === sessionFocus || kept.has(r.sourcePill));
+  };
+  const selectSession = id => {
+    focused = null;
+    doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
+    doc.dispatchEvent(new CustomEvent('abito:session-select', { detail: { id } }));
+  };
   const mounted = new Map();
   const owner = () => root.AbitoSpecialistsPanel;
   const store = () => owner()?.state().store;
@@ -28,10 +37,11 @@
   function syncClay(item) {
     // Per-instance lifecycle: never change the shared engine's global policy (Abito owns it).
     const mode = !onScreen() || doc.hidden ? 'hidden' : doc.documentElement.dataset.motion === 'reduce' ? 'static' : 'live';
-    if (item.mode === mode) return;
+    if (item.mode === mode && item.pose === item.row?.pose) return;
+    item.pose = item.row?.pose;
     item.clay?.destroy(); item.clay = null; item.mode = mode;
     if (mode !== 'hidden' && typeof AbitoClay !== 'undefined') {
-      item.clay = AbitoClay.create(item.svg, { state: 'idle', live: mode === 'live', viewBox: '36 32 128 128', shadow: false });
+      item.clay = AbitoClay.create(item.svg, { state: item.row?.pose || 'idle', live: mode === 'live', viewBox: '36 32 128 128', shadow: false });
     }
   }
   const syncVisibility = () => { for (const item of mounted.values()) syncClay(item); };
@@ -46,7 +56,7 @@
   // Coucou (views.ts otherTasks.slice(0, 4)): the grid shows every pill but the focused one, at most four; the focused
   // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
   const MAX_PILLS = 4;
-  const gridRows = all => all.filter(r => r.id !== focused).slice(0, MAX_PILLS);
+  const gridRows = all => all.filter(r => r.id !== focused && r.id !== sessionFocus).slice(0, MAX_PILLS);
   const CARD_PILLS = Object.freeze({ integration_github: 'GitHub', integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
   let focused = null; const badges = new Set(), connected = new Set(), seenBySource = new Map();
   const integrationRows = () => {
@@ -69,19 +79,26 @@
     const rows = [{ id: A.PRINCIPAL_ID, name: 'Abito', color: A.resolveColor(A.PRINCIPAL_ID, prefs.avatarColors) }, ...agents];
     const storedActive = currentStore?.specialists?.find(r => r.id === currentStore.active);
     const selected = storedActive ? storedActive.id : A.PRINCIPAL_ID;
-    const picked = storedActive || rows[0];
+    const pickedSession = !focused && sessionRows().find(r => r.id === sessionFocus);
+    const picked = pickedSession || storedActive || rows[0];
     name.textContent = picked.name;
     state.textContent = storedActive && !rows.some(r => r.id === selected) ? 'Fuera de la isla' : 'En reposo';
     detail.textContent = 'Elegir un destino no inicia tareas.';
     detail.setAttribute('aria-label', `${picked.name}: destino de conversación. No se inició ninguna tarea.`);
-    const alive = new Set(gridRows([...rows, ...integrationRows()]).map(r => r.id));
+    if (pickedSession) {
+      state.textContent = pickedSession.kindLabel;
+      detail.textContent = pickedSession.tools ? 'Sesión enfocada. El destino del chat no cambió.' : 'Pasos de herramientas no disponibles.';
+      detail.setAttribute('aria-label', `${picked.name}: sesión enfocada; el destino del chat no cambió.`);
+    }
+    const liveRows = sessionRows();
+    const alive = new Set(gridRows([...liveRows, ...rows, ...integrationRows()]).map(r => r.id));
     for (const [id, item] of mounted) if (!alive.has(id)) { item.clay?.destroy(); mounted.delete(id); }
     // #489: declared integration pills with a card (Coucou's declared pills): their pill colour, the unseen-event
     // badge, and a click that only focuses the card (abito:integration-focus). They never become the chat target.
     const integ = integrationRows();
-    const rowIds = new Set(gridRows([...rows, ...integ]).map(r => r.id));
+    const rowIds = new Set(gridRows([...liveRows, ...rows, ...integ]).map(r => r.id));
     for (const [id, item] of mounted) if (id.startsWith('integration_') && !rowIds.has(id)) { item.clay?.destroy(); mounted.delete(id); }
-    const buttons = gridRows([...rows, ...integ]).map(row => {
+    const buttons = gridRows([...liveRows, ...rows, ...integ]).map(row => {
       let item = mounted.get(row.id);
       if (!item) {
         const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
@@ -93,13 +110,18 @@
         item = { button, label, svg, clay: null, mode: null }; mounted.set(row.id, item);
         button.addEventListener('click', event => {
           if (event.isTrusted !== true || !onScreen()) return;
-          if (row.integration) focusIntegration(row.id); else choose(row.id);
+          if (item.row.session) selectSession(item.row.id);
+          else if (row.integration) focusIntegration(row.id); else choose(row.id);
         });
       }
       item.row = row;
       item.label.textContent = row.name; item.button.dataset.color = row.color; item.svg.dataset.color = row.color;
       paintChosenColor(item.button, row.color); paintChosenColor(item.svg, row.color);
-      if (row.integration) {
+      if (row.session) {
+        item.button.setAttribute('aria-pressed', String(sessionFocus === row.id));
+        item.button.setAttribute('aria-label', `${row.name}: enfocar sesión ${row.kindLabel}`);
+        item.button.dataset.sessionId = row.id;
+      } else if (row.integration) {
         item.button.setAttribute('aria-pressed', focused === row.id ? 'true' : 'false');
         item.button.setAttribute('aria-label', `${row.name}: integración${badges.has(row.id) ? ', con novedades' : ''}`);
         item.button.dataset.badge = badges.has(row.id) ? 'true' : 'false';
@@ -117,12 +139,23 @@
     if (focusedEl) (get(focusedEl) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
   }
   function apply(raw) {
+    const oldMain = prefs.mainPill;
     prefs = raw && typeof raw === 'object' ? raw : {};
+    if (oldMain !== prefs.mainPill) {
+      const main = sessionRows().find(r => r.sourcePill === prefs.mainPill);
+      if (main) selectSession(main.id);
+    }
     if (focused && !integrationRows().some(row => row.id === focused)) {
       focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
     }
     paint();
   }
+  doc.addEventListener('abito:sessions-view', event => {
+    sessions = event.detail?.view || null;
+    sessionFocus = event.detail?.focusId || null;
+    paint();
+  });
+  doc.addEventListener('abito:session-focused', () => { if (focused) { focused = null; paint(); } });
   doc.addEventListener('abito:specialists-changed', paint);
   // A service shows its pill once its poller answered (declared + key saved on the host); a pill with no key never appears.
   doc.addEventListener('abito:integration-seen', e => {

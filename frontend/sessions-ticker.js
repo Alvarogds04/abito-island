@@ -69,6 +69,17 @@
     return { state: 'ready', rows, truncated: frame.truncated };
   }
 
+  // Process identities stay separate from catalog identities: several projects
+  // can share a source, and Pi is never relabeled as Claude Code.
+  const SOURCES = { 'Claude Code': 'integration_claude', Codex: 'agent_codex', Gemini: 'agent_gemini', OpenCode: 'agent_opencode' };
+  function sessionRows(view, prefs = {}) {
+    return (view?.state === 'ready' ? view.rows : []).map(row => ({
+      ...row, session: true, name: row.cwd ?? row.kindLabel, sourcePill: SOURCES[row.kindLabel] || null,
+      color: prefs.pillColors?.[SOURCES[row.kindLabel]] || 'blue',
+      pose: row.tools?.steps.some(s => s.state === 'running') ? 'working' : row.tools?.steps.at(-1)?.state === 'error' ? 'error' : 'idle',
+    })).sort((a, b) => Number(b.sourcePill === prefs.mainPill) - Number(a.sourcePill === prefs.mainPill) || Number(!!b.tools?.total) - Number(!!a.tools?.total));
+  }
+
   /** Copy for an over-cap frame, or null when the list was not cut. */
   function boundedText(view) {
     if (!view || view.state !== 'ready' || !view.truncated) return null;
@@ -168,7 +179,7 @@
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
   }
 
-  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, requestSessions };
+  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -190,7 +201,28 @@ function mount(V) {
   const whoName = mkEl('span', 'name'), whoTool = mkEl('span', 'tool'), whoCount = mkEl('span', 'count');
   who.append(mkEl('span', 'who-dot'), whoName, whoTool, whoCount);
   leftCard.append(who);
-  let ticker = null, raf = 0, shownSession = null;
+  let ticker = null, raf = 0, shownSession = null, lastView = null, prefs = {}, integrationFocused = false;
+  const jump = mkEl('button', 'icon-btn jump', '↗'); jump.id = 'session-jump'; jump.type = 'button'; jump.hidden = true;
+  leftCard.append(jump);
+  who.style.paddingRight = '22px';
+  Object.assign(jump.style, { position: 'absolute', top: '0px', right: '0px', width: '44px', height: '44px', minWidth: '44px', minHeight: '44px', border: '0', background: 'transparent', color: 'var(--muted)', fontSize: '10px', padding: '14px', cursor: 'pointer', pointerEvents: 'auto' });
+  const canFocus = () => {
+    const d = capsule?.dataset || {};
+    return !document.hidden && ['compact', 'expanded'].includes(d.phase) && (d.phase === 'compact' || d.view === 'overview') && !d.card && d.settings !== 'open' && !['pending', 'expired', 'outcome'].includes(d.question) && d.noticeView !== 'notices';
+  };
+  const selectSession = id => {
+    if (!V.focus(memory, lastView, id)) return;
+    document.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
+    document.dispatchEvent(new CustomEvent('abito:session-focused', { detail: { id } }));
+    show(lastView);
+  };
+  jump.addEventListener('click', async event => {
+    if (event.isTrusted !== true || !canFocus() || !memory.focus || jump.hidden || jump.disabled) return;
+    jump.disabled = true;
+    try { await invoke('focus_host', { payload: { target: 'terminal' } }); }
+    catch { const live = document.getElementById('pill-live'); if (live) live.textContent = 'No se pudo abrir una terminal. La selección es por clase, no por sesión.'; }
+    finally { jump.disabled = false; }
+  });
   const memory = V.newMemory();
   const frame = now => { raf = 0; if (ticker) { ticker.tick(now); if (ticker.animating && !document.hidden) raf = requestAnimationFrame(frame); } };
   import('./vendor/coucou/views/ticker.js').then(mod => { ticker = new mod.Ticker(); ticker.el.hidden = true; leftCard.append(ticker.el); }).catch(() => {});
@@ -200,21 +232,37 @@ function mount(V) {
   let gridKey = '', minis = [];
   function paintMiniGrid(view) {
     if (!grid) return;
-    const rows = view && view.state === 'ready' ? view.rows.slice(0, 4) : [];
-    const key = rows.map(r => r.id).join('|');
+    grid.setAttribute('aria-hidden', 'false'); grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', 'Sesiones activas');
+    const rows = V.sessionRows(view, prefs).slice(0, 4);
+    const key = rows.map(r => `${r.id}:${r.text}:${r.color}:${r.pose}:${r.id === memory.focus?.id}`).join('|');
     if (key === gridKey) return;
     gridKey = key;
     for (const m of minis) { try { m.destroy(); } catch { /* decoration */ } }
+    const activeId = grid.contains(document.activeElement) ? document.activeElement?.dataset.sessionId : null;
     minis = []; grid.replaceChildren(); grid.dataset.count = String(rows.length);
     if (typeof AbitoClay === 'undefined') return;
     for (const r of rows) {
-      const slot = document.createElement('span'); slot.className = 'mini'; slot.title = r.text;
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); slot.append(svg); grid.append(slot);
-      try { minis.push(AbitoClay.create(svg, { state: 'idle', live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch { /* decoration */ }
+      const slot = document.createElement('button'); slot.className = 'mini'; slot.type = 'button'; slot.title = r.text;
+      slot.dataset.sessionId = r.id;
+      slot.setAttribute('aria-label', `Enfocar ${r.name}: ${r.kindLabel}`);
+      slot.setAttribute('aria-pressed', String(r.id === memory.focus?.id));
+      slot.style.border = '0'; slot.style.padding = '0'; slot.style.background = 'transparent'; slot.style.cursor = 'pointer'; slot.style.pointerEvents = 'auto';
+      slot.addEventListener('pointerdown', event => { if (event.isTrusted === true && capsule.dataset.phase === 'compact' && canFocus()) selectSession(r.id); });
+      slot.addEventListener('click', event => { if (event.isTrusted === true && canFocus()) selectSession(r.id); });
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'island-agent-clay'); svg.dataset.color = r.color;
+      const stops = window.AbitoAvatarColors?.gradientStops(r.color);
+      for (let i = 0; i < 3; i++) svg.style.setProperty(`--chosen-${i + 1}`, stops?.[i] || '');
+      slot.append(svg); grid.append(slot);
+      if (r.id === activeId) slot.focus();
+      try { minis.push(AbitoClay.create(svg, { state: r.pose, live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch { /* decoration */ }
     }
   }
   function show(view) {
     if (!ticker) return;
+    lastView = view;
+    const main = !memory.selected && V.sessionRows(view, prefs).find(r => r.sourcePill === prefs.mainPill);
+    if (main) V.focus(memory, view, main.id);
     const { active, task, who: w } = V.feed(memory, view);
     const session = memory.focus ? `${memory.focus.id}:${!!memory.focus.tools?.total}:${memory.focus.tools?.epoch ?? 0}` : null;
     if (session !== shownSession) { ticker.sync(null); shownSession = session; }
@@ -225,7 +273,25 @@ function mount(V) {
     if (active) overview.dataset.ticker = 'on'; else delete overview.dataset.ticker;
     ticker.sync(task);
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
+    jump.hidden = !memory.focus || integrationFocused;
+    jump.setAttribute('aria-label', `Abrir una terminal por clase · ${w?.name || ''}`);
+    jump.title = 'Terminal por clase; no identifica la ventana de esta sesión';
+    document.dispatchEvent(new CustomEvent('abito:sessions-view', { detail: { view, focusId: memory.focus?.id || null } }));
   }
+
+  const applyPrefs = raw => {
+    const previous = prefs.mainPill; prefs = raw && typeof raw === 'object' ? raw : {};
+    if (previous !== prefs.mainPill) {
+      const main = V.sessionRows(lastView, prefs).find(r => r.sourcePill === prefs.mainPill);
+      if (main) V.focus(memory, lastView, main.id);
+    }
+    if (lastView) show(lastView);
+  };
+  let prefsVersion = 0;
+  const listen = window.__TAURI__?.event?.listen;
+  if (listen) listen('prefs:state', event => { prefsVersion++; applyPrefs(event?.payload); }).catch(() => {});
+  const observed = prefsVersion;
+  invoke('prefs_action', { payload: { action: 'view' } }).then(raw => { if (observed === prefsVersion) applyPrefs(raw); }, () => {});
 
   let timer = null;
   let inFlight = false;
@@ -249,5 +315,7 @@ function mount(V) {
   document.addEventListener('visibilitychange', sync);
   document.addEventListener('island:view', sync);
   if (capsule) new MutationObserver(sync).observe(capsule, { attributes: true, attributeFilter: ['data-phase'] });
+  document.addEventListener('abito:session-select', event => { if (canFocus()) selectSession(event.detail?.id); });
+  document.addEventListener('abito:integration-focus', event => { integrationFocused = !!event.detail?.id; jump.hidden = integrationFocused || !memory.focus; });
   sync();
 }

@@ -819,7 +819,7 @@ test('L34 mini grid: up to four small characters on the bar, 13px cells 3px apar
   assert.match(isl, /#mini-grid \{[^}]*left: 233\.5px; top: 1\.5px; width: 29px; height: 29px;[^}]*grid-template-columns: 13px 13px; grid-auto-rows: 13px; gap: 3px;/);
   assert.match(isl, /#capsule\[data-phase="compact"\] #mini-grid\[data-count\]:not\(\[data-count="0"\]\) \{ display: grid; \}/);
   const t = fs.readFileSync(path.join(frontend, 'sessions-ticker.js'), 'utf8');
-  assert.match(t, /view\.rows\.slice\(0, 4\)/); assert.match(t, /AbitoClay\.create\(svg/);
+  assert.match(t, /V\.sessionRows\(view, prefs\)\.slice\(0, 4\)/); assert.match(t, /AbitoClay\.create\(svg/);
   assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /<div id="mini-grid" aria-hidden="true"><\/div>/);
 });
 
