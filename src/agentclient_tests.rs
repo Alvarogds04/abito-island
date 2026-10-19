@@ -550,3 +550,20 @@ fn recap_and_statusline_are_closed_agent_ids_with_the_same_flow() {
     assert_eq!(v["agents"][0]["id"], "recap");
     assert_eq!(v["agents"][1]["state"], "connected");
 }
+
+#[test]
+fn session_tool_history_is_closed_and_invalid_streams_are_unavailable() {
+    let mut st = ClientState::connected();
+    let mut row = json!({"id":"s-0123abcd","kind":"pi","cwd":"p","state":"running","origin":null,
+        "tools":{"total":2,"steps":[{"index":1,"name":"read","state":"done","args":"private"},{"index":2,"name":"bash","state":"running"}]}});
+    let frame = |r: &Value| json!({"type":"sessions","schema":SESSIONS_SCHEMA,"truncated":false,"sessions":[r]});
+    st.apply(&frame(&row)).unwrap();
+    let tools = &st.sessions_view()["rows"][0]["tools"];
+    assert_eq!(tools["total"], 2);
+    assert_eq!(tools["steps"][0].get("args"), None);
+    for bad in [json!({"total":2,"steps":[]}), json!({"total":1,"steps":[{"index":1,"name":"/private","state":"done"}]}), json!({"total":1,"steps":[{"index":1,"name":"read","state":"invented"}]})] {
+        row["tools"] = bad;
+        st.apply(&frame(&row)).unwrap();
+        assert!(st.sessions_view()["rows"][0].get("tools").is_none());
+    }
+}

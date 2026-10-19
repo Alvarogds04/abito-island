@@ -45,7 +45,12 @@
     // Plain text row: `Pi · mi-proyecto · inactiva · en herdr`. An unknown cwd is
     // an honest «—»; an unknown origin simply has no segment.
     const text = [kindLabel, cwd ?? '—', stateLabel].concat(origin ? [`en ${origin}`] : []).join(' · ');
-    return { id, kindLabel, cwd, stateLabel, origin, text };
+    const row = { id, kindLabel, cwd, stateLabel, origin, text };
+    const tools = raw.tools;
+    if (isObject(tools) && (tools.epoch === undefined || (Number.isSafeInteger(tools.epoch) && tools.epoch >= 0)) && Number.isSafeInteger(tools.total) && tools.total >= 0 && tools.total <= 4096 && Array.isArray(tools.steps) && tools.steps.length === Math.min(20, tools.total) && tools.steps.every((s, i) => isObject(s) && s.index === tools.total - tools.steps.length + i + 1 && typeof s.name === 'string' && /^[a-zA-Z0-9_.-]{1,64}$/.test(s.name) && ['running', 'done', 'error'].includes(s.state))) {
+      row.tools = { ...(tools.epoch === undefined ? {} : { epoch: tools.epoch }), total: tools.total, steps: tools.steps.map(s => ({ index: s.index, name: s.name, state: s.state })) };
+    }
+    return row;
   }
 
   /**
@@ -62,6 +67,17 @@
       if (row) rows.push(row);
     }
     return { state: 'ready', rows, truncated: frame.truncated };
+  }
+
+  // Process identities stay separate from catalog identities: several projects
+  // can share a source, and Pi is never relabeled as Claude Code.
+  const SOURCES = { 'Claude Code': 'integration_claude', Codex: 'agent_codex', Gemini: 'agent_gemini', OpenCode: 'agent_opencode' };
+  function sessionRows(view, prefs = {}) {
+    return (view?.state === 'ready' ? view.rows : []).map(row => ({
+      ...row, session: true, name: row.cwd ?? row.kindLabel, sourcePill: SOURCES[row.kindLabel] || null,
+      color: prefs.pillColors?.[SOURCES[row.kindLabel]] || 'blue',
+      pose: row.tools?.steps.some(s => s.state === 'running') ? 'working' : row.tools?.steps.at(-1)?.state === 'error' ? 'error' : 'idle',
+    })).sort((a, b) => Number(b.sourcePill === prefs.mainPill) - Number(a.sourcePill === prefs.mainPill) || Number(!!b.tools?.total) - Number(!!a.tools?.total));
   }
 
   /** Copy for an over-cap frame, or null when the list was not cut. */
@@ -124,37 +140,46 @@
   }
 
   // ---- the feed of Coucou's Ticker (S10) --------------------------------------------
-  // The ticker shows the last two STEPS of a task. Abito's sessions are a live list, so a step is a
-  // session row that appeared (or a one-time notice that the list is bounded / unavailable). `memory`
-  // is the caller's object; the result is the task shape Ticker.sync reads, plus whether to show it.
-  const LOG_CAP = 20; // Coucou caps steps at 20 too (core/state.ts)
-  const newMemory = () => ({ log: [], seq: 0, prev: new Set(), error: false, bounded: false, focus: null });
+  // Only the daemon's internal Pi has a tool stream. Other discovered agents
+  // remain useful identities, but process metadata must never invent steps.
+  const newMemory = () => ({ log: [], seq: 0, focus: null, selected: false });
+  function focus(memory, view, id) {
+    const row = view?.state === 'ready' && view.rows.find(r => r.id === id);
+    if (!row) return null;
+    memory.focus = row; memory.selected = true;
+    return feed(memory, view);
+  }
   function feed(memory, view) {
     if (view && view.state === 'pending') return { active: false, task: null, who: null };
+    const previous = memory.log.join('\n');
     if (!view || view.state !== 'ready') {
-      if (!memory.error) { memory.error = true; memory.log.push(errorText()); memory.seq++; }
+      memory.log = [errorText()]; memory.focus = null;
     } else {
-      memory.error = false;
-      const texts = view.rows.map(r => r.text);
-      for (const row of view.rows) if (!memory.prev.has(row.text)) { memory.log.push(row.text); memory.seq++; memory.focus = row; }
-      if (memory.focus && !texts.includes(memory.focus.text)) memory.focus = view.rows[view.rows.length - 1] || null; // the focused session ended
-      memory.prev = new Set(texts);
-      if (view.truncated && !memory.bounded) { memory.log.push(boundedText(view)); memory.seq++; }
-      memory.bounded = view.truncated;
-      if (!texts.length && !memory.error) { // nothing running: forget the history, show nothing
-        memory.log = []; memory.seq = 0; memory.bounded = false; memory.focus = null;
+      const remembered = view.rows.find(r => r.id === memory.focus?.id);
+      if (!remembered) memory.selected = false;
+      memory.focus = (memory.selected && remembered) || view.rows.find(r => r.tools?.total > 0) || remembered || view.rows[0] || null;
+      if (!view.rows.length) {
+        memory.log = []; memory.seq = 0; memory.focus = null;
         return { active: false, task: null, who: null };
       }
+      memory.log = ['Pasos de herramientas no disponibles'];
+      if (view.truncated) memory.log.push(boundedText(view));
     }
-    if (memory.log.length > LOG_CAP) memory.log = memory.log.slice(-LOG_CAP);
-    const steps = memory.log.slice();
-    // Coucou's who-row: the focused session's project, what kind of agent it is, and «n/N» steps when there is more than one.
+    // Ticker.sync uses a monotonic index, not text equality, to detect updates.
+    // Advance on notice transitions too, without counting process metadata.
+    if (memory.log.join('\n') !== previous) memory.seq += memory.log.length;
     const f = memory.focus;
-    const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: steps.length > 1 ? `${steps.length}/${steps.length}` : '' } : null;
+    if (f?.tools?.total > 0) {
+      const { total, steps } = f.tools;
+      return { active: true, task: { steps: steps.map(s => s.name), stepSeq: total - 1, finalLine: steps.some(s => s.state === 'running') ? null : steps.at(-1).name }, who: { name: f.cwd ?? '—', tool: f.kindLabel, count: `${steps.at(-1).index}/${total}` } };
+    }
+    const steps = memory.log.slice();
+    // Neither the availability notice nor the bounded-list notice is a tool.
+    const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: '' } : null;
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
   }
 
-  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, requestSessions };
+  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -176,7 +201,28 @@ function mount(V) {
   const whoName = mkEl('span', 'name'), whoTool = mkEl('span', 'tool'), whoCount = mkEl('span', 'count');
   who.append(mkEl('span', 'who-dot'), whoName, whoTool, whoCount);
   leftCard.append(who);
-  let ticker = null, raf = 0;
+  let ticker = null, raf = 0, shownSession = null, lastView = null, prefs = {}, integrationFocused = false;
+  const jump = mkEl('button', 'icon-btn jump', '↗'); jump.id = 'session-jump'; jump.type = 'button'; jump.hidden = true;
+  leftCard.append(jump);
+  who.style.paddingRight = '22px';
+  Object.assign(jump.style, { position: 'absolute', top: '0px', right: '0px', width: '44px', height: '44px', minWidth: '44px', minHeight: '44px', border: '0', background: 'transparent', color: 'var(--muted)', fontSize: '10px', padding: '14px', cursor: 'pointer', pointerEvents: 'auto' });
+  const canFocus = () => {
+    const d = capsule?.dataset || {};
+    return !document.hidden && ['compact', 'expanded'].includes(d.phase) && (d.phase === 'compact' || d.view === 'overview') && !d.card && d.settings !== 'open' && !['pending', 'expired', 'outcome'].includes(d.question) && d.noticeView !== 'notices';
+  };
+  const selectSession = id => {
+    if (!V.focus(memory, lastView, id)) return;
+    document.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
+    document.dispatchEvent(new CustomEvent('abito:session-focused', { detail: { id } }));
+    show(lastView);
+  };
+  jump.addEventListener('click', async event => {
+    if (event.isTrusted !== true || !canFocus() || !memory.focus || jump.hidden || jump.disabled) return;
+    jump.disabled = true;
+    try { await invoke('focus_host', { payload: { target: 'terminal' } }); }
+    catch { const live = document.getElementById('pill-live'); if (live) live.textContent = 'No se pudo abrir una terminal. La selección es por clase, no por sesión.'; }
+    finally { jump.disabled = false; }
+  });
   const memory = V.newMemory();
   const frame = now => { raf = 0; if (ticker) { ticker.tick(now); if (ticker.animating && !document.hidden) raf = requestAnimationFrame(frame); } };
   import('./vendor/coucou/views/ticker.js').then(mod => { ticker = new mod.Ticker(); ticker.el.hidden = true; leftCard.append(ticker.el); }).catch(() => {});
@@ -186,22 +232,40 @@ function mount(V) {
   let gridKey = '', minis = [];
   function paintMiniGrid(view) {
     if (!grid) return;
-    const rows = view && view.state === 'ready' ? view.rows.slice(0, 4) : [];
-    const key = rows.map(r => r.id).join('|');
+    grid.setAttribute('aria-hidden', 'false'); grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', 'Sesiones activas');
+    const rows = V.sessionRows(view, prefs).slice(0, 4);
+    const key = rows.map(r => `${r.id}:${r.text}:${r.color}:${r.pose}:${r.id === memory.focus?.id}`).join('|');
     if (key === gridKey) return;
     gridKey = key;
-    for (const m of minis) { try { m.destroy(); } catch (_) { /* decoration */ } }
+    for (const m of minis) { try { m.destroy(); } catch { /* decoration */ } }
+    const activeId = grid.contains(document.activeElement) ? document.activeElement?.dataset.sessionId : null;
     minis = []; grid.replaceChildren(); grid.dataset.count = String(rows.length);
     if (typeof AbitoClay === 'undefined') return;
     for (const r of rows) {
-      const slot = document.createElement('span'); slot.className = 'mini'; slot.title = r.text;
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); slot.append(svg); grid.append(slot);
-      try { minis.push(AbitoClay.create(svg, { state: 'idle', live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch (_) { /* decoration */ }
+      const slot = document.createElement('button'); slot.className = 'mini'; slot.type = 'button'; slot.title = r.text;
+      slot.dataset.sessionId = r.id;
+      slot.setAttribute('aria-label', `Enfocar ${r.name}: ${r.kindLabel}`);
+      slot.setAttribute('aria-pressed', String(r.id === memory.focus?.id));
+      slot.style.border = '0'; slot.style.padding = '0'; slot.style.background = 'transparent'; slot.style.cursor = 'pointer'; slot.style.pointerEvents = 'auto';
+      slot.addEventListener('pointerdown', event => { if (event.isTrusted === true && capsule.dataset.phase === 'compact' && canFocus()) selectSession(r.id); });
+      slot.addEventListener('click', event => { if (event.isTrusted === true && canFocus()) selectSession(r.id); });
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'island-agent-clay'); svg.dataset.color = r.color;
+      const stops = window.AbitoAvatarColors?.gradientStops(r.color);
+      for (let i = 0; i < 3; i++) svg.style.setProperty(`--chosen-${i + 1}`, stops?.[i] || '');
+      slot.append(svg); grid.append(slot);
+      if (r.id === activeId) slot.focus();
+      try { minis.push(AbitoClay.create(svg, { state: r.pose, live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch { /* decoration */ }
     }
   }
   function show(view) {
     if (!ticker) return;
+    lastView = view;
+    const main = !memory.selected && V.sessionRows(view, prefs).find(r => r.sourcePill === prefs.mainPill);
+    if (main) V.focus(memory, view, main.id);
     const { active, task, who: w } = V.feed(memory, view);
+    const session = memory.focus ? `${memory.focus.id}:${!!memory.focus.tools?.total}:${memory.focus.tools?.epoch ?? 0}` : null;
+    if (session !== shownSession) { ticker.sync(null); shownSession = session; }
     paintMiniGrid(view);
     ticker.el.hidden = !active;
     who.hidden = !active || !w;
@@ -209,7 +273,25 @@ function mount(V) {
     if (active) overview.dataset.ticker = 'on'; else delete overview.dataset.ticker;
     ticker.sync(task);
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
+    jump.hidden = !memory.focus || integrationFocused;
+    jump.setAttribute('aria-label', `Abrir una terminal por clase · ${w?.name || ''}`);
+    jump.title = 'Terminal por clase; no identifica la ventana de esta sesión';
+    document.dispatchEvent(new CustomEvent('abito:sessions-view', { detail: { view, focusId: memory.focus?.id || null } }));
   }
+
+  const applyPrefs = raw => {
+    const previous = prefs.mainPill; prefs = raw && typeof raw === 'object' ? raw : {};
+    if (previous !== prefs.mainPill) {
+      const main = V.sessionRows(lastView, prefs).find(r => r.sourcePill === prefs.mainPill);
+      if (main) V.focus(memory, lastView, main.id);
+    }
+    if (lastView) show(lastView);
+  };
+  let prefsVersion = 0;
+  const listen = window.__TAURI__?.event?.listen;
+  if (listen) listen('prefs:state', event => { prefsVersion++; applyPrefs(event?.payload); }).catch(() => {});
+  const observed = prefsVersion;
+  invoke('prefs_action', { payload: { action: 'view' } }).then(raw => { if (observed === prefsVersion) applyPrefs(raw); }, () => {});
 
   let timer = null;
   let inFlight = false;
@@ -233,5 +315,7 @@ function mount(V) {
   document.addEventListener('visibilitychange', sync);
   document.addEventListener('island:view', sync);
   if (capsule) new MutationObserver(sync).observe(capsule, { attributes: true, attributeFilter: ['data-phase'] });
+  document.addEventListener('abito:session-select', event => { if (canFocus()) selectSession(event.detail?.id); });
+  document.addEventListener('abito:integration-focus', event => { integrationFocused = !!event.detail?.id; jump.hidden = integrationFocused || !memory.focus; });
   sync();
 }

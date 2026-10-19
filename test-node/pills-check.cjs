@@ -115,11 +115,14 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
       if (cmd === 'agent_action' && payload.action === 'abito_account_remove' && store) return store.remove(payload.accountId);
       if (cmd === 'agent_action' && store && ['abito_account_create', 'abito_account_save', 'abito_account_endpoint_set'].includes(payload.action)) return Promise.resolve({ ownedAccounts: store.apply(payload) });
       if (cmd === 'agent_action' && payload.action === 'view') return Promise.resolve({ connection: 'no_daemon', ownedAccounts: store ? store.view() : undefined });
+      if (cmd === 'agent_action' && payload.action === 'sessions_list') return Promise.resolve({ connection: 'connected', sessions: { rows: backend.sessionRows || [], truncated: false } });
+      if (cmd === 'focus_host') return Promise.resolve({ focused: false, reason: 'No se encontró una terminal.' });
       if (cmd === 'hotkey_action' && payload.action === 'view') return Promise.resolve({ enabled: false });
       return Promise.reject(new Error('unexpected IPC'));
     } },
     event: { listen(name, fn) { (native[name] ||= []).push(fn); return Promise.resolve(() => {}); } },
   } };
+  window.AbitoSessionsTicker = require('../frontend/sessions-ticker.js');
   const intervals = new Map(); let nextInterval = 1;
   const leftCard = new Element();
   get('overview-view').querySelector = selector => selector === '.card-left' ? leftCard : null;
@@ -133,7 +136,7 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
     Event: class { constructor(type) { this.type = type; } }, console });
   const load = file => {
     if (file === 'settings.js') window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: settingsLabel } } };
-    const source = file === 'island-github.js' ? read(file).replace("import('./vendor/coucou/views/github.js')", 'Promise.resolve(window.testGithubView)') : read(file);
+    const source = file === 'island-github.js' ? read(file).replace("import('./vendor/coucou/views/github.js')", 'Promise.resolve(window.testGithubView)') : file === 'sessions-ticker.js' ? read(file).replace("import('./vendor/coucou/views/ticker.js')", 'Promise.resolve({Ticker:class {constructor(){this.el=document.createElement("div");this.animating=false;} sync(task){this.task=task;} tick(){} }})') : read(file);
     return vm.runInContext(source, ctx, { filename: file });
   };
   for (const file of ['clay-engine.js', 'pill-catalog.js', 'avatar-colors.js', 'pills.js', 'icons.js', 'pills-view.js', 'specialists-view.js']) load(file);
@@ -142,6 +145,61 @@ function boot({ prefs = {}, failView = false, deferView = false, store = null, s
   const emit = value => { backend.prefs = { ...backend.prefs, ...value }; for (const fn of native['prefs:state'] || []) fn({ payload: clone(backend.prefs) }); };
   return { leftCard, intervals, advanceFrames(n = 1) { for (let i = 0; i < n; i++) { frameAt += 17; const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(frameAt); } }, mutate(target) { for (const o of observers) if (o.target === target) o.fn([]); }, clayStatus: () => vm.runInContext('testedClays', ctx), get, calls, backend, doc, events, load, window, emit, click(id, fields) { assert.ok(get(id), id); if (id === 'open-screen-settings') doc.dispatchEvent({ type: 'abito:settings-select', detail: 'open' }); else get(id).fire('click', fields); } };
 }
+
+test('A02b session pills focus projects without changing the conversation target; main preference selects its live source', async () => {
+  const b = boot({ extraPrefs: { mainPill: 'integration_claude', declaredPills: ['agent_codex'], pillColors: { agent_codex: '#2DD4BF' } } }); await flush();
+  const T = b.window.AbitoSessionsTicker;
+  const view = T.sessionsView({ type: 'sessions', schema: T.SCHEMA, truncated: false, sessions: [
+    { id: 's-11111111', kind: 'claude-code', cwd: 'alpha', origin: null, state: 'running' },
+    { id: 's-22222222', kind: 'codex', cwd: 'beta', origin: null, state: 'sleeping' },
+  ] });
+  const requests = [];
+  b.doc.addEventListener('abito:session-select', e => requests.push(e.detail.id));
+  const publish = id => b.doc.dispatchEvent({ type: 'abito:sessions-view', detail: { view, focusId: id } });
+  publish('s-11111111');
+  assert.ok(b.get('pill-choice-s-22222222'), 'the other project appears in the grid');
+  assert.equal(b.get('pill-choice-s-11111111'), null, 'the focused session is not duplicated in the grid');
+  b.click('pill-choice-s-22222222', { isTrusted: false }); assert.equal(requests.length, 0);
+  b.click('pill-choice-s-22222222'); assert.equal(requests.at(-1), 's-22222222');
+  publish('s-22222222');
+  assert.equal(b.get('pill-name').textContent, 'beta');
+  assert.equal(b.backend.specCalls.length, 0, 'focusing a project never changes chat destination');
+  b.emit({ mainPill: 'integration_claude' });
+  b.emit({ mainPill: 'agent_codex' });
+  assert.equal(requests.at(-1), 's-22222222');
+  assert.equal(b.get('pill-choices').children.length <= 4, true);
+});
+
+test('A02b trusted mini/pill focus updates the card; jump stays explicitly class-based', async () => {
+  const b = boot({ extraPrefs: { mainPill: 'integration_claude', declaredPills: ['agent_codex', 'integration_n8n'] } }); await flush();
+  b.backend.sessionRows = [
+    { id: 's-11111111', kind: 'pi', cwd: 'alpha', origin: null, state: 'running', tools: { total: 1, steps: [{ index: 1, name: 'read', state: 'done' }] } },
+    { id: 's-22222222', kind: 'codex', cwd: 'beta', origin: null, state: 'sleeping' },
+  ];
+  b.load('sessions-ticker.js'); await flush(); await flush();
+  const who = () => b.leftCard.children.find(n => n.className === 'who').children[1].textContent;
+  const jump = b.leftCard.children.find(n => n.id === 'session-jump');
+  assert.equal(who(), 'alpha');
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n'] } });
+  b.click('pill-choice-integration_n8n');
+  assert.equal(jump.hidden, true);
+  assert.equal(b.get('mini-grid').getAttribute('aria-hidden'), 'false', 'interactive minis must be exposed to assistive technology');
+  const mini = b.get('mini-grid').children[1];
+  assert.equal(mini.style.pointerEvents, 'auto', 'mini controls must override the decorative grid hit mask');
+  mini.fire('click', { isTrusted: false }); assert.equal(who(), 'alpha');
+  mini.fire('click'); assert.equal(who(), 'beta');
+  assert.equal(jump.hidden, false, 'mini clears service focus');
+  assert.equal(b.get('pill-name').textContent, 'beta');
+  b.click('pill-choice-s-11111111'); assert.equal(who(), 'alpha');
+  assert.ok(jump); assert.match(jump.getAttribute('aria-label'), /por clase/);
+  assert.equal(jump.style.pointerEvents, 'auto', 'jump must override the overview display-only hit mask');
+  jump.fire('click', { isTrusted: false }); await flush();
+  assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, 0);
+  jump.fire('click'); await flush();
+  assert.deepEqual(b.calls.find(c => c.cmd === 'focus_host').payload, { target: 'terminal' });
+  b.emit({ mainPill: 'agent_codex' }); assert.equal(who(), 'beta');
+  assert.equal(b.backend.specCalls.length, 0);
+});
 
 test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
   const b = boot(); await flush();
@@ -667,12 +725,6 @@ test('#442 legacy custom blobs stay stored and only appear through explicit Sett
   assert.deepEqual(b.backend.prefs.customBlobs, blobs);
   assert.equal(writes(b).length, 0);
 });
-
-async function blobBootUnused() {
-  // two declared pills: the «Nuevo» slot only exists below the designed 4/4 full state
-  const b = await settingsBoot({ prefs: { declaredPills: ['integration_resend', 'integration_n8n'], customBlobs: [{ name: 'Abito GitHub', color: 'mint' }] } });
-  return b;
-}
 
 // #435 D4: «Principal» promotes a blob AND feeds the island character colour through
 // the existing typed pref (avatarColors['abito'] via set_avatar_color) — no new wire

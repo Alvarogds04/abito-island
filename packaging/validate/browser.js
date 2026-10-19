@@ -29,7 +29,7 @@
     if (!el || el.disabled) throw new Error('control ausente o deshabilitado');
     el.scrollIntoView({ block: 'center', inline: 'center' }); await frame(); await frame();
     const r = el.getBoundingClientRect(), o = window.__validateOrigin;
-    if (!visible(el)) throw new Error('control no visible');
+    if (!visible(el)) throw new Error(`control no visible: ${el.id || el.className}; phase=${byId('capsule')?.dataset.phase}`);
     await emit('validate-input', { kind:'click', x:Math.round(o.x + (r.x+r.width/2)*o.scale), y:Math.round(o.y + (r.y+r.height/2)*o.scale) });
   }
   async function key(key) { await emit('validate-input', { kind:'key', key }); }
@@ -108,8 +108,48 @@
       const until=performance.now()+4500;
       while(performance.now()<until){ seen.push(byId('overview-view').textContent); await frame(); }
       const s=await invoke('agent_action',{action:'view'});
-      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')),reason:'ticker mostró Sesiones no disponibles con daemon conectado',connection:s.connection,rows:s.sessions?.rows,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:byId('overview-view').textContent};
+      const card=byId('overview-view');
+      const rows=s.sessions?.rows || [];
+      const count=card.querySelector('.who .count');
+      const internal=rows.find(r=>r.tools?.total===2);
+      const truthfulSteps=!!internal && internal.tools.steps.map(s=>s.name).join(',')==='read,bash' && internal.tools.steps.every(s=>s.state==='done') && count && !count.hidden && count.textContent==='2/2' && card.textContent.includes('read') && card.textContent.includes('bash');
+      const external=rows.find(r=>!r.tools);
+      const externalHonest=!external || window.AbitoSessionsTicker.feed(window.AbitoSessionsTicker.newMemory(),{state:'ready',rows:[external],truncated:false}).who.count==='';
+      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')) && truthfulSteps && externalHonest,reason:'faltan dos herramientas reales proyectadas y contador 2/2, o se inventan pasos externos',connection:s.connection,rows:s.sessions?.rows,truthfulSteps,externalHonest,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:card.textContent};
     } finally { observer.disconnect(); }
+  }
+  let focusPrefs;
+  async function sessionsFocus() {
+    focusPrefs=await invoke('prefs_action',{action:'view'});
+    const s=await invoke('agent_action',{action:'sessions_list'});
+    const own=s.sessions.rows.find(r=>r.tools?.total===2);
+    const beta=s.sessions.rows.find(r=>r.kind==='codex' && r.cwd==='proyecto-beta');
+    if(!own || !beta) return {ok:false,reason:'faltan los dos proyectos privados',rows:s.sessions.rows};
+    const who=()=>byId('overview-view').querySelector('.who .name').textContent;
+    await invoke('prefs_action',{action:'set_main_pill',id:'agent_codex'});
+    await wait(()=>who()==='proyecto-beta' && byId('pill-name').textContent==='proyecto-beta','principal Codex cambia tarjeta');
+    const mainReadback=await invoke('prefs_action',{action:'view'});
+    await invoke('desktop_action',{action:'close'});
+    await wait(()=>byId('capsule').dataset.phase==='compact','barra compacta');
+    await click(byId('mini-grid').querySelector(`[data-session-id="${own.id}"]`));
+    await invoke('desktop_action',{action:'expand'});
+    await wait(()=>who()===own.cwd && byId('capsule').dataset.phase==='expanded' && visible(byId(`pill-choice-${beta.id}`)),'mini enfoca proyecto interno');
+    const miniFocused=who();
+    await click(byId(`pill-choice-${beta.id}`));
+    await wait(()=>who()==='proyecto-beta','píldora enfoca segundo proyecto');
+    const jump=byId('session-jump');
+    await click(jump);
+    await wait(()=>!jump.disabled && byId('pill-live').textContent.includes('No se pudo abrir una terminal'),'salto por clase informa ausencia de terminal');
+    const count=byId('overview-view').querySelector('.who .count');
+    const noFakeSteps=count.hidden && byId('overview-view').textContent.includes('Pasos de herramientas no disponibles');
+    const grid=[...byId('pill-choices').children].map(n=>n.dataset.pillId);
+    return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.length<=4 && !grid.includes(beta.id) && jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto por clase no coinciden'};
+  }
+  async function restoreSessionFocus() {
+    if(focusPrefs) await invoke('prefs_action',{action:'set_main_pill',id:focusPrefs.mainPill});
+    await invoke('desktop_action',{action:'expand'});
+    await wait(()=>byId('capsule').dataset.phase==='expanded' && visible(byId('overview-view')),'overview restaurado');
+    return {ok:true};
   }
   async function connection(connected) {
     const word=byId('connection-word');
@@ -386,5 +426,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel};
+  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus};
 })();

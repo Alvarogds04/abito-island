@@ -93,6 +93,17 @@ async function main(args = process.argv.slice(2)) {
     piRuntime = fs.mkdtempSync(path.join(piParent, 'run-'));
     env.ABITO_SOCKET_DIR = piRuntime;
     env.ABITO_MODELS_CONFIG_DIR = env.XDG_CONFIG_HOME;
+    // Replace only the private validator's Pi executable with a deterministic
+    // RPC fixture. Never start a real provider or change installed hooks.
+    const fixturePi = path.join(out, 'pi');
+    fs.copyFileSync(path.join(__dirname, 'validate/internal-pi.cjs'), fixturePi);
+    fs.chmodSync(fixturePi, 0o700);
+    env.PATH = `${out}:${env.PATH}`;
+    const secondProject = path.join(out, 'proyecto-beta');
+    fs.mkdirSync(secondProject, { mode: 0o700 });
+    const fixtureCodex = path.join(out, 'codex');
+    fs.copyFileSync(fixturePi, fixtureCodex); fs.chmodSync(fixtureCodex, 0o700);
+    launch('node', [fixtureCodex, '--discovery-project', secondProject], env, 'discovery-project.log');
     env.ABITO_PROJECT_ROOT = path.resolve(crate, '../..');
     // Xvfb atomically chooses a free display; never guess, and never touch :0.
     const xvfb = launch('Xvfb', ['-displayfd', '1', '-screen', '0', '1280x900x24', '-nolisten', 'tcp', '-noreset'], env, 'xvfb.log');
