@@ -34,7 +34,7 @@ fn emit(value: &serde_json::Value) {
 fn wait_for_size(app: &AppHandle, want: (i32, i32), timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        let win = main_window(app);
+        let Some(win) = main_window(app) else { return false };
         let got = win
             .inner_size()
             .map(|s| (s.width as i32, s.height as i32))
@@ -48,7 +48,7 @@ fn wait_for_size(app: &AppHandle, want: (i32, i32), timeout: Duration) -> bool {
 }
 
 fn readback(app: &AppHandle, step: &str) {
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let state = app.state::<AppState>();
     let wa = abito_island::workarea::current(&win);
     let pos = win.outer_position().ok().map(|p| (p.x, p.y));
@@ -120,7 +120,7 @@ fn readback(app: &AppHandle, step: &str) {
 /// handler the webview's `drag_move` command calls.
 fn simulated_drag(app: &AppHandle, area: geometry::Rect, target: (f64, f64)) {
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let io = TauriIo(&win);
     let scale = io.scale();
     for i in 1..=10 {
@@ -158,7 +158,7 @@ fn fixed_window_evidence(app: &AppHandle) {
         sleep(Duration::from_secs(3));
         readback(app, step);
         state.chat_probe.lock().expect("chat probe lock").clear();
-        let _ = main_window(app).eval("(()=>{const r=document.getElementById('island').getBoundingClientRect();window.__TAURI__.core.invoke('record_chat_evidence',{evidence:{visible:[r.width,r.height],phase:document.getElementById('capsule').dataset.phase}});})()");
+        let _ = main_window(app).map(|win| win.eval("(()=>{const r=document.getElementById('island').getBoundingClientRect();window.__TAURI__.core.invoke('record_chat_evidence',{evidence:{visible:[r.width,r.height],phase:document.getElementById('capsule').dataset.phase}});})()"));
         let lines = wait_chat_lines(app, 1, Duration::from_secs(3));
         emit(&json!({"step": step, "page_readback": lines}));
     }
@@ -195,7 +195,7 @@ pub fn run(app: AppHandle) {
     sleep(Duration::from_millis(100));
 
     // 1. Wait for the fixed native window to settle, then read honest getters.
-    let scale0 = main_window(&app).scale_factor().unwrap_or(1.0);
+    let scale0 = main_window(&app).and_then(|win| win.scale_factor().ok()).unwrap_or(1.0);
     let compact = geometry::scaled_size(geometry::ISLAND_WINDOW, scale0);
     let overview = compact;
     let settled = wait_for_size(&app, compact, Duration::from_secs(6));
@@ -207,7 +207,7 @@ pub fn run(app: AppHandle) {
 
     // 2. simulated drag to a point near the bottom of the work area.
     let area = refresh_work_area(&app, &state);
-    let win = main_window(&app);
+    let Some(win) = main_window(&app) else { return };
     let io = TauriIo(&win);
     let press_client = (50.0, 20.0);
     {
@@ -585,7 +585,7 @@ fn overview_visual_evidence(app: &AppHandle) {
     let card_scenes = fake.is_some();
     line["mode"] = json!(if card_scenes { "card" } else { "sin-tarjeta" });
 
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, state.inner());
     let io = TauriIo(&win);
     let scale = io.scale();
@@ -611,10 +611,10 @@ fn overview_visual_evidence(app: &AppHandle) {
         capture_visual(app, "overview-sinpi");
         capture_poses(app, "grande");
         // i-abierto: the «i» detail open (a real click on the real button).
-        let _ = main_window(app).eval("document.getElementById('notice-info').click()");
+        let _ = main_window(app).map(|win| win.eval("document.getElementById('notice-info').click()"));
         sleep(Duration::from_millis(300));
         capture_visual(app, "overview-i-abierto");
-        let _ = main_window(app).eval("document.getElementById('notice-info').click()");
+        let _ = main_window(app).map(|win| win.eval("document.getElementById('notice-info').click()"));
         sleep(Duration::from_millis(300));
         // compacta-sin-puente: no-card run = the approval bridge never became healthy
         // (ABITO_BRIDGE_BASE dead) -> the compact dot carries the RED triangle badge.
@@ -624,7 +624,7 @@ fn overview_visual_evidence(app: &AppHandle) {
             wait_for_size(app, compact, Duration::from_secs(3));
             sleep(Duration::from_millis(500));
             state.chat_probe.lock().expect("chat probe lock").clear();
-            let _ = main_window(app).eval("(async()=>{const f=document.getElementById('compact-flag'); const snap=await window.desktop.snapshot(); await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'compact_red_badge',bridge:snap.bridgeStatus,unavailable:snap.unavailable,flag_hidden:f.hidden,flag_tone:f.dataset.tone||null,flag_label:f.getAttribute('aria-label'),flag_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(f.getBoundingClientRect())}}); })()");
+            let _ = main_window(app).map(|win| win.eval("(async()=>{const f=document.getElementById('compact-flag'); const snap=await window.desktop.snapshot(); await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'compact_red_badge',bridge:snap.bridgeStatus,unavailable:snap.unavailable,flag_hidden:f.hidden,flag_tone:f.dataset.tone||null,flag_label:f.getAttribute('aria-label'),flag_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(f.getBoundingClientRect())}}); })()"));
             let lines = wait_chat_lines(app, 1, Duration::from_secs(4));
             emit(&json!({"step": "compact_red_badge", "webview": lines}));
             capture_visual(app, "compacta-sin-puente");
@@ -750,7 +750,7 @@ fn overview_visual_evidence(app: &AppHandle) {
             {
                 let st = app.state::<AppState>();
                 st.chat_probe.lock().expect("chat probe lock").clear();
-                let _ = main_window(app).eval("(async()=>{const c=document.getElementById('capsule'), f=document.getElementById('compact-flag'); const snap=await window.desktop.snapshot(); await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'compact_badge',dataset:{...c.dataset},flag_hidden:f.hidden,flag_tone:f.dataset.tone||null,flag_display:getComputedStyle(f).display,flag_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(f.getBoundingClientRect()),island_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(document.getElementById('island').getBoundingClientRect()),card:snap.card}}); })()");
+                let _ = main_window(app).map(|win| win.eval("(async()=>{const c=document.getElementById('capsule'), f=document.getElementById('compact-flag'); const snap=await window.desktop.snapshot(); await (window.__TAURI__.core.invoke)('record_chat_evidence',{evidence:{phase:'compact_badge',dataset:{...c.dataset},flag_hidden:f.hidden,flag_tone:f.dataset.tone||null,flag_display:getComputedStyle(f).display,flag_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(f.getBoundingClientRect()),island_rect:(r=>[r.x,r.y,r.width,r.height].map(Math.round))(document.getElementById('island').getBoundingClientRect()),card:snap.card}}); })()"));
                 let lines = wait_chat_lines(app, 1, Duration::from_secs(4));
                 emit(&json!({"step": "compact_badge", "webview": lines}));
             }
@@ -850,7 +850,7 @@ fn motion_diag(app: &AppHandle, tag: &str) {
     });
     let state = app.state::<AppState>();
     state.chat_probe.lock().expect("chat probe lock").clear();
-    let page = main_window(app);
+    let Some(page) = main_window(app) else { return };
     let _ = page.eval(
         "(async () => { const invoke = (window.__TAURI__.core.invoke);
           const snap = await window.desktop.snapshot().catch(() => null);
@@ -876,7 +876,7 @@ fn motion_diag(app: &AppHandle, tag: &str) {
 fn sample_motion(app: &AppHandle, name: &str, millis: u64, action: impl FnOnce()) -> Vec<serde_json::Value> {
     let state = app.state::<AppState>();
     state.chat_probe.lock().expect("chat probe lock").clear();
-    let page = main_window(app);
+    let Some(page) = main_window(app) else { return Vec::new() };
     // #304: NO gtk-enable-animations toggling any more. Whatever the system tells
     // WebKit (this session reports «reduced»), Abito must animate on its own: the
     // measurement below is taken under the REAL system value, reported here.
@@ -939,7 +939,7 @@ fn capture_sequence(app: &AppHandle, name: &str, fps: u32, millis: u64, action: 
         action();
         return;
     };
-    let page = main_window(app);
+    let Some(page) = main_window(app) else { return };
     let Ok(win) = abito_island::workarea::x11_find_own_window("Abito") else {
         action();
         return;
@@ -985,7 +985,7 @@ fn notification_scenes(app: &AppHandle) {
         return;
     }
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let Some(endpoint) = state
         .transport
         .lock()
@@ -1157,7 +1157,7 @@ fn hotkey_evidence(app: &AppHandle) {
         return;
     }
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let phase = |s: &AppState| format!("{:?}", *s.phase.lock().expect("phase lock"));
     let conns = |s: &AppState| s.connections.load(std::sync::atomic::Ordering::SeqCst);
     let transport_ok = |s: &AppState| s.transport.lock().expect("transport lock").is_some();
@@ -1216,7 +1216,7 @@ fn hotkey_evidence(app: &AppHandle) {
 /// taken mid-way never shows a clipped overview or a clipped column.
 fn column_transition_scenes(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let scale = io.scale();
@@ -1261,7 +1261,7 @@ fn settings_scenes(app: &AppHandle, tag: &str) {
         return;
     }
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let scale = io.scale();
@@ -1342,7 +1342,7 @@ fn r6_live_evidence(app: &AppHandle, state: &AppState) {
     if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
         return;
     }
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     state.chat_probe.lock().expect("chat probe lock").clear();
     let _ = win.eval(
         "(async () => { const invoke = (window.__TAURI__.core.invoke);
@@ -1388,7 +1388,7 @@ fn capture_poses(app: &AppHandle, suffix: &str) {
     if std::env::var("ABITO_PROBE_VISUAL").as_deref() != Ok("1") {
         return;
     }
-    let page = main_window(app);
+    let Some(page) = main_window(app) else { return };
     let _ = page.eval(
         "(() => { const real = document.getElementById('clay');
           const tmp = real.cloneNode(false); tmp.id = 'clay-pose';
@@ -1434,7 +1434,7 @@ fn approval_evidence(app: &AppHandle) {
         return;
     };
     // Legacy gates for an actionable card: open overlay + visible window.
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let plan = {
@@ -1574,7 +1574,7 @@ fn wait_chat_lines(app: &AppHandle, n: usize, timeout: Duration) -> Vec<serde_js
 /// panel shows content, and report which IPC calls ran in between and how long each took.
 fn panel_open_timing(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     if !state.core.lock().expect("core lock").expanded {
@@ -1645,7 +1645,7 @@ fn native_resize_flash_scene(app: &AppHandle) {
     let tag = std::env::var("ABITO_PROBE_FLASH_TAG").unwrap_or_else(|_| "ahora".into());
     let video = dir.join(format!("flash-{tag}.mkv"));
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     // a known beige behind the island for the whole recording: anything that is not beige, island black or
@@ -1744,7 +1744,7 @@ fn native_resize_flash_scene(app: &AppHandle) {
 /// portal's `Activated` use) and report phase and real visibility.
 fn hotkey_hide_from_views(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let area = refresh_work_area(app, &state);
     let io = TauriIo(&win);
     let phase = |s: &AppState| format!("{:?}", *s.phase.lock().expect("phase lock"));
@@ -1796,7 +1796,7 @@ fn send_flicker_diagnosis(app: &AppHandle) {
         return;
     }
     let state = app.state::<AppState>();
-    let page = main_window(app);
+    let Some(page) = main_window(app) else { return };
     state.chat_probe.lock().expect("chat probe lock").clear();
     let start = "(() => { const S = { t0: performance.now(), frames: [], removed: 0, added: 0, replaced: 0, logWrites: 0, firstRowIds: [] };
       window.__flick = S;
@@ -1874,7 +1874,7 @@ fn chat_evidence(app: &AppHandle) {
         .collect();
     *state.chat_target.lock().expect("chat target lock") = Some(fake_target(&fake.origin()));
 
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let io = TauriIo(&win);
     let scale = io.scale();
     let area = refresh_work_area(app, &state);
@@ -1911,7 +1911,7 @@ fn chat_evidence(app: &AppHandle) {
     // Warm-up (probe-only): after flipping gtk-enable-animations the first style
     // change of the session can still snap; run one page-driven round trip first.
     {
-        let page = main_window(app);
+        let Some(page) = main_window(app) else { return };
         let _ = page.eval("window.__islandSetView('overview', 640, 240)");
         sleep(Duration::from_millis(500));
         let _ = page.eval("window.__islandSetView('chat', 640, 240)");
@@ -1928,7 +1928,7 @@ fn chat_evidence(app: &AppHandle) {
     });
     emit(&json!({"step": "motion_sample", "scene": "vista-entrada", "webview": lines}));
     // DIAGNOSTIC: the same view change driven only by the page (no native resize).
-    let page = main_window(app);
+    let Some(page) = main_window(app) else { return };
     let lines = sample_motion(app, "vista-salida-solo-pagina", 1200, || {
         let _ = page.eval("window.__islandSetView('overview', 640, 240)");
     });
@@ -2143,7 +2143,7 @@ fn chat_state_scenes(app: &AppHandle) {
         return;
     }
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let registry = state.models_registry.lock().expect("models registry lock").clone();
     let invoke = "(window.__TAURI__.core.invoke)";
     let say = |text: &str, id: &str| {
@@ -2361,7 +2361,7 @@ const MODELS_JS: &str = r#"(async () => {
 
 fn a11y_evidence(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let focused_at_start = win.is_focused().ok();
     crate::restore(app); // the second-instance path, minus the process
     sleep(Duration::from_millis(400));
@@ -2477,7 +2477,7 @@ fn capture_visual(app: &AppHandle, name: &str) {
         return;
     };
     let _ = app;
-    let page = main_window(app); // WebviewWindow, for the body class only
+    let Some(page) = main_window(app) else { return }; // WebviewWindow, for the body class only
     let win = match abito_island::workarea::x11_find_own_window("Abito") {
         Ok(w) => w,
         Err(e) => {

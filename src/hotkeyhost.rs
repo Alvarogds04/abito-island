@@ -151,7 +151,7 @@ fn on_press(app: &AppHandle) {
             // focused the new map anyway, hand the keyboard straight back.
             let before = hotkey::x11::active_window(None);
             restore(app);
-            let win = crate::main_window(app);
+            let Some(win) = crate::main_window(app) else { return };
             let app = app.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(250));

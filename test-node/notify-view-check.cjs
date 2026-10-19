@@ -234,7 +234,7 @@ function harness(dataset) {
     dispatchEvent() {}, activeElement: { tagName: 'OL' } };
   const win = { AbitoNotify: N, AbitoIcons: { svg: () => '' }, __TAURI__: { core: { invoke: (name, args) => { calls.push(args.payload); return Promise.resolve(args.payload.action === 'view' ? view : {}); } } } };
   const view = snap(pending({ expires_at: Date.now() + 120000 }));
-  const ctx = vm.createContext({ window: win, document: doc, setInterval: () => 0, requestAnimationFrame: f => f(), MutationObserver: class { observe() {} },
+  const ctx = vm.createContext({ window: win, document: doc, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: f => f(), MutationObserver: class { observe() {} },
     CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, Date });
   vm.runInContext(fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8'), ctx);
   return { calls, nodes, key: (k, extra) => { for (const f of listeners.keydown || []) f({ key: k, isTrusted: true, ctrlKey: false, altKey: false, metaKey: false, isComposing: false, repeat: false, preventDefault() {}, ...extra }); } };

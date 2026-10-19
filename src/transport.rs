@@ -1093,7 +1093,11 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
                         Err(_) => {
                             let inbound = identity.as_ref().and_then(|bound| question::decode(frame, bound, now_ms()).ok());
                             if let Some(inbound) = inbound {
-                                if receive_question(&inner, id, identity.as_ref().expect("identified"), &origin, &mut subscribed, &mut busy_reason_supported, inbound) {
+                                let Some(bound) = identity.as_ref() else {
+                                    rejected = true;
+                                    break;
+                                };
+                                if receive_question(&inner, id, bound, &origin, &mut subscribed, &mut busy_reason_supported, inbound) {
                                     last_valid = Some(Instant::now());
                                     continue;
                                 }

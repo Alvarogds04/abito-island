@@ -66,7 +66,7 @@ pub(crate) fn sample(
     }
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        let win = super::main_window(&handle);
+        let Some(win) = super::main_window(&handle) else { return };
         let state = handle.state::<super::AppState>();
         let view = {
             let core = state.core.lock().expect("core lock");

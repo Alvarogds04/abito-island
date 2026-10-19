@@ -216,9 +216,14 @@ function mount(V) {
       inFlight = false;
     }
   }
-  const tick = () => { if (!document.hidden) ask(); };
+  const capsule = document.getElementById('capsule');
+  const active = () => !document.hidden && !!capsule && capsule.dataset.phase === 'expanded';
+  const tick = () => { if (active()) ask(); };
   const start = () => { if (!timer) { timer = setInterval(tick, POLL_MS); tick(); } };
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
-  document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
-  start();
+  const sync = () => (active() ? start() : stop());
+  document.addEventListener('visibilitychange', sync);
+  document.addEventListener('island:view', sync);
+  if (capsule) new MutationObserver(sync).observe(capsule, { attributes: true, attributeFilter: ['data-phase'] });
+  sync();
 }

@@ -82,7 +82,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 fn ensure_island_window(app: &AppHandle) -> Rect {
     let state = app.state::<AppState>();
     let area = refresh_work_area(app, &state);
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return area };
     let io = TauriIo(&win);
     let wanted = geometry::island_window_rect(area, io.scale());
     if io.size() != (wanted.w, wanted.h) {
@@ -146,7 +146,7 @@ fn install_shutdown_handlers() {
 /// quit performs, so Ctrl-C never leaves the endpoint or dir behind.
 fn spawn_shutdown_watcher(app: AppHandle) {
     std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(500));
         if !SHUTDOWN_SIGNAL.load(Ordering::SeqCst) {
             continue;
         }
@@ -454,9 +454,8 @@ fn characterhost_label() -> &'static str {
     abito_island::characterwin::LABEL
 }
 
-fn main_window(app: &AppHandle) -> WebviewWindow {
+fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window("main")
-        .expect("main window must exist")
 }
 
 fn edge_str(edge: Edge) -> &'static str {
@@ -468,7 +467,7 @@ fn edge_str(edge: Edge) -> &'static str {
 
 /// Push the island phase into the webview; animation stays inside the fixed window.
 fn push_phase(app: &AppHandle, phase: &str, edge: Edge) {
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let e = edge_str(edge);
     let _ = win.eval(format!(
         "window.__islandSetState && window.__islandSetState('{phase}','{e}');"
@@ -492,7 +491,7 @@ fn store_requested(
 }
 
 fn refresh_work_area(app: &AppHandle, state: &AppState) -> Rect {
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return *state.work_area.lock().unwrap_or_else(|e| e.into_inner()) };
     let wa = workarea::current(&win);
     let rect = placement_area(&win, wa.rect, settingshost::chosen_monitor(app).as_deref());
     *state.work_area.lock().expect("work area lock") = rect;
@@ -767,7 +766,7 @@ pub(crate) fn restore(app: &AppHandle) {
     questionhost::with_pending(&state, |pending| {
         if pending {
             // Preserve phase, view and geometry; a second launch is not an answer.
-            let win = main_window(app);
+            let Some(win) = main_window(app) else { return };
             let _ = win.unminimize();
             let _ = win.show();
             sync_host_visible(&win);
@@ -779,12 +778,12 @@ pub(crate) fn restore(app: &AppHandle) {
 }
 
 fn restore_without_question(app: &AppHandle, state: &AppState) {
+    let Some(win) = main_window(app) else { return };
     // transition(state, 'restore') -> compact when no question is pending.
     *state.phase.lock().expect("phase lock") = IslandState::Compact;
     // main.cjs restore() bumps the overlay epoch on EVERY restore (375).
     approval::bump_epoch(&state.approval);
     let area = refresh_work_area(app, state);
-    let win = main_window(app);
     let io = TauriIo(&win);
     let plan = {
         let mut core = state.core.lock().expect("core lock");
@@ -817,9 +816,9 @@ fn open_chat_and_type(app: &AppHandle) {
     let _ = dispatch_verb(app, &state, Action::Expand, None);
     // R2: keep the cached visibility honest at the call site too — the expand
     // verb above may have revealed the island from Hidden.
-    sync_host_visible(&main_window(app));
+    let Some(win) = main_window(app) else { return };
+    sync_host_visible(&win);
     chathost::switch_view(app, &state, true);
-    let win = main_window(app);
     let _ = win.set_focus();
     let _ = win.eval("window.__islandFocusComposer && window.__islandFocusComposer();");
 }
@@ -833,7 +832,7 @@ fn spawn_workarea_watcher(app: AppHandle) {
             return;
         }
         let state = app.state::<AppState>();
-        let win = main_window(&app);
+        let Some(win) = main_window(&app) else { return };
         let wa = workarea::current(&win);
         // #389: with a chosen monitor the island re-clamps into THAT monitor's
         // area, not the one it currently sits on; the fallback is unchanged.
@@ -904,7 +903,7 @@ fn drag_press(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x
     // #366: island-only; the settings window runs the same page and must not drive the island.
     if settingswindow::main_window_only(webview.label()).is_err() { return; }
     state.user_touch.store(true, Ordering::SeqCst);
-    let win = main_window(&app);
+    let Some(win) = main_window(&app) else { return };
     let io = TauriIo(&win);
     state.core.lock().expect("core lock").press(&io, (x, y));
 }
@@ -912,7 +911,7 @@ fn drag_press(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x
 #[tauri::command]
 fn drag_move(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x: f64, y: f64) {
     if settingswindow::main_window_only(webview.label()).is_err() { return; }
-    let win = main_window(&app);
+    let Some(win) = main_window(&app) else { return };
     let io = TauriIo(&win);
     let area = *state.work_area.lock().expect("work area lock");
     let moved = {
@@ -928,7 +927,7 @@ fn drag_move(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x:
 fn drag_release(app: AppHandle, webview: tauri::Webview, state: State<AppState>, x: f64, y: f64, cancelled: bool) -> String {
     if settingswindow::main_window_only(webview.label()).is_err() { return "ignored".to_string(); }
     let area = refresh_work_area(&app, &state);
-    let win = main_window(&app);
+    let Some(win) = main_window(&app) else { return "ignored".to_string() };
     let io = TauriIo(&win);
     questionhost::with_pending(&state, |pending| {
         let outcome = {
@@ -978,7 +977,7 @@ async fn open_chat_url(
         })?;
     } // Release shared rate guard before waiting, and reap only our own child.
     tauri::async_runtime::spawn_blocking(move || {
-        let status = child.expect("validated opener spawned").wait()
+        let status = child.ok_or_else(|| BridgeError::denied("external opener unavailable"))?.wait()
             .map_err(|_| BridgeError::denied("external opener failed"))?;
         if status.success() { Ok(()) } else { Err(BridgeError::denied("external opener failed")) }
     }).await.map_err(|_| BridgeError::denied("external opener aborted"))?
@@ -1136,7 +1135,7 @@ impl WindowIo for ClickMeasurements {
 /// Display-only identity transaction. Never call the legacy Expand arm: it
 /// promotes approval selection. This function runs on the native main thread.
 fn dispatch_click(app: &AppHandle, state: &AppState, click: bridge::Click) -> Result<Value, BridgeError> {
-    let win = main_window(app);
+    let win = main_window(app).ok_or_else(|| BridgeError::denied("main window unavailable"))?;
     let io = TauriIo(&win);
     let measured = ClickMeasurements {
         position: io.outer_position(), size: io.size(), scale: io.scale(),
@@ -1301,7 +1300,7 @@ fn auto_close_verdict(
 /// every guard is released before the reentrant publication (L15 iii).
 /// Unlike the legacy `Close` arm this path never publishes under the guard.
 fn dispatch_auto_close(app: &AppHandle, state: &AppState) -> Result<Value, BridgeError> {
-    let win = main_window(app);
+    let win = main_window(app).ok_or_else(|| BridgeError::denied("main window unavailable"))?;
     let io = TauriIo(&win);
     let visible = win.is_visible().unwrap_or(true);
     let now = now_ms() as i64;
@@ -1373,6 +1372,7 @@ fn dispatch_action(
     match action {
         Action::Snapshot => Ok(build_snapshot(app, state)),
         Action::Expand | Action::Close => {
+            let win = main_window(app).ok_or_else(|| BridgeError::denied("main window unavailable"))?;
             let verb = if action == Action::Expand {
                 "expand"
             } else {
@@ -1398,7 +1398,6 @@ fn dispatch_action(
                     approval::promote_selection(&state.approval);
                 }
                 let area = refresh_work_area(app, state);
-                let win = main_window(app);
                 let io = TauriIo(&win);
                 if was_hidden && next == IslandState::Expanded {
                     // #266 S2 Path B: reveal from Hidden through the EXISTING
@@ -1475,6 +1474,7 @@ fn dispatch_action(
         }
         Action::AutoClose => dispatch_auto_close(app, state),
         Action::Hide => {
+            let win = main_window(app).ok_or_else(|| BridgeError::denied("main window unavailable"))?;
             let hidden = {
                 let mut phase = state.phase.lock().expect("phase lock");
                 let next = desktop::transition(*phase, "hide");
@@ -1484,7 +1484,6 @@ fn dispatch_action(
             };
             if hidden {
                 approval::bump_epoch(&state.approval); // main.cjs 467
-                let win = main_window(app);
                 let _ = win.hide();
                 sync_host_visible(&win);
                 publish(app, state);
@@ -1619,7 +1618,7 @@ fn record_frontend_evidence(
             platform::audit::sample(&app, "pin-before", attempt, None);
             let rect = ensure_island_window(&app);
             let (w, h) = (rect.w, rect.h);
-            let win = main_window(&app);
+            let Some(win) = main_window(&app) else { return };
             store_requested(&state, "initial-pin", Some((rect.x, rect.y)), Some((w, h)));
             std::thread::sleep(Duration::from_millis(200));
             platform::audit::sample(&app, "pin-settled", attempt, Some((w, h)));
@@ -1909,7 +1908,7 @@ fn main() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
-            let win = main_window(&handle);
+            let win = main_window(&handle).ok_or("main window unavailable")?;
             // Load preferences before placement so the chosen monitor is available.
             // The legacy position preference stays on disk but is never applied.
             settingshost::start(&handle);

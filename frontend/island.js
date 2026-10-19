@@ -29,6 +29,7 @@
   const island = $('island');
   const clayEl = $('clay');
   let current = null;
+  let countdownTimer = null;
   // Native-confirmed notice lane is separate from approval-card selection.
   let noticeLane = null;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)'); // the SYSTEM value: informative only (#304)
@@ -710,6 +711,7 @@
     return view;
   }
   function renderNotices(snapshot) {
+    syncCountdownTimer();
     if (!snapshot || !noticesEl || !O) return;
     const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
     announceNotice(notices);
@@ -1053,6 +1055,7 @@
     putIcon($('compact-flag-icon'), (waiting || questionWaiting) ? dotNode() : iconNode(icon('triangle')));
   }
   function renderCard() {
+    syncCountdownTimer();
     paintCompactFlag();
     const card = current && current.card;
     const valid = validCard(card);
@@ -1100,13 +1103,21 @@
   });
   // The countdown texts (expiry label, 60 s ring) follow the clock without
   // touching the live regions.
-  setInterval(() => {
-    if (!current || !O) return;
-    if (validCard(current.card)) paintExpiry(current.card);
-    paintBand(Array.isArray(current.notices) ? current.notices : []); // #437 renamed paintRing -> paintBand
-    paintCompactFlag(); // an expired card must stop saying «waiting»
-    refreshHost(current);
-  }, 5000);
+  function syncCountdownTimer() {
+    const now = Date.now();
+    const card = current && current.card;
+    const active = current && O && ((validCard(card) && now < Date.parse(card.expires_at)) ||
+      (Array.isArray(current.notices) && current.notices.some(n => now < n.expiresAt)));
+    if (active && countdownTimer === null) countdownTimer = setInterval(() => {
+      if (validCard(current.card)) paintExpiry(current.card);
+      paintBand(Array.isArray(current.notices) ? current.notices : []);
+      paintCompactFlag(); // an expired card must stop saying «waiting»
+      refreshHost(current);
+      syncCountdownTimer();
+    }, 5000);
+    else if (!active && countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
+  }
+
   async function decideCard(verb, event) {
     renderCard(); // Recheck expiry/phase even without a newer snapshot.
     const card = current && current.card;

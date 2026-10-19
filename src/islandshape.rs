@@ -27,7 +27,7 @@ pub(crate) fn apply(app: &tauri::AppHandle, report: Option<Report>) {
         gtk::glib::idle_add_local_once(move || {
             use gtk::prelude::*;
             use abito_island::geometry;
-            let win = crate::main_window(&handle);
+            let Some(win) = crate::main_window(&handle) else { return };
             let Ok(gtk_win) = win.gtk_window() else { return };
             gtk_win.realize();
             let Some(gdk) = gtk_win.window() else { return };

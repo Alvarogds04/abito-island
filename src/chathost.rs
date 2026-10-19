@@ -114,7 +114,7 @@ pub fn apply_view(app: &AppHandle, state: &AppState, plan: ViewPlan) {
     } = plan;
     store_requested(state, if chat { "chat" } else { "overview" }, Some((r.x, r.y)), Some((w, h)));
     state.generation.fetch_add(1, Ordering::SeqCst);
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let push = format!(
         "window.__islandSetView && window.__islandSetView('{}',{vw},{vh});",
         if chat { "chat" } else { "overview" }
@@ -129,7 +129,7 @@ pub fn switch_view(app: &AppHandle, state: &AppState, chat: bool) {
         return; // the chat opens only from the overview, never from compact
     }
     let area = refresh_work_area(app, state);
-    let win = main_window(app);
+    let Some(win) = main_window(app) else { return };
     let io = TauriIo(&win);
     let plan = state
         .core
@@ -304,7 +304,7 @@ pub async fn chat_action(
             // repeated height is no resize at all. Same staged resize as every view change.
             let plan = {
                 let area = refresh_work_area(&app, &state);
-                let win = main_window(&app);
+                let win = main_window(&app).ok_or_else(|| BridgeError::denied("main window unavailable"))?;
                 let io = TauriIo(&win);
                 state.core.lock().expect("core lock").plan_chat_height(&io, area, height)
             };

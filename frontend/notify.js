@@ -40,6 +40,13 @@
   const stateEl = $('question-state');
   const askerName = $('question-asker-name');
 
+  let expiryTimer = null;
+  function syncExpiryTimer() {
+    const pending = snapshot && N.fromPending(snapshot.pending);
+    const active = pending && Date.now() < pending.expiresAt;
+    if (active && expiryTimer === null) expiryTimer = setInterval(() => render(), 5000);
+    else if (!active && expiryTimer !== null) { clearInterval(expiryTimer); expiryTimer = null; }
+  }
   let snapshot = null;
   let previous = null;
   let inFlight = false;
@@ -108,6 +115,7 @@
     crossfadeTimer = setTimeout(() => { delete capsule.dataset.crossfade; }, (Number.isFinite(raw) ? raw : 400) + 100);
   }
   function render() {
+    syncExpiryTimer();
     const view = current();
     const n = view.notification || null;
     if (outcomeOnScreen && view.kind !== 'outcome' && !n) crossfade();
@@ -233,5 +241,4 @@
   new MutationObserver(render).observe(capsule, { attributes: true, attributeFilter: ['data-card', 'data-view', 'data-phase'] });
   if (listen) listen('question:state', event => apply(event && event.payload)).catch(() => {});
   action({ action: 'view' }).then(apply, () => {});
-  setInterval(() => { if (snapshot) render(); }, 5000); // the expiry word and the local-clock «Vencida»
 })();

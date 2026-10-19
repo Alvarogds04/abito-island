@@ -168,7 +168,7 @@ function boot() {
   // #411: the shipped island parses its closed-registry icons, so the vm gets the
   // same DOMParser stub convention as test-node/pills-check.cjs:91.
   vm.runInNewContext(read('island.js'), { AbitoClay, window, document: doc,
-    DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } }, matchMedia: () => ({ matches: true, addEventListener() {} }), performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: setTimer, clearTimeout: clearTimer, setInterval() {}, MutationObserver: class { observe() {} }, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } }, console });
+    DOMParser: class { parseFromString() { const n = new Element('svg'); n.nodeName = 'svg'; return { documentElement: n }; } }, matchMedia: () => ({ matches: true, addEventListener() {} }), performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: setTimer, clearTimeout: clearTimer, setInterval() {}, clearInterval() {}, MutationObserver: class { observe() {} }, CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts.detail; } }, console });
   return { get, calls, window, native, clay, timers,
     fireWindow(name, event = {}) { for (const fn of windowEvents[name] || []) fn(event); },
     state(s) { for (const fn of stateHandlers) fn(s); } };

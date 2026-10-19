@@ -192,7 +192,7 @@ fn start_highlight(app: &AppHandle, c: &Arc<Character>) {
         let mut scanned = std::time::Instant::now();
         while c.highlight.load(Ordering::SeqCst) == id && !crate::QUITTING.load(Ordering::SeqCst) {
             let at = {
-                let inner = c.inner.lock().unwrap();
+                let inner = c.inner.lock().unwrap_or_else(|e| e.into_inner());
                 if inner.drag.is_none() && !inner.carrying { break; }
                 inner.pointer
             };
@@ -226,7 +226,7 @@ pub fn on_resized(app: &AppHandle) {
 }
 
 fn place(win: &WebviewWindow, c: &Character, pos: (f64, f64)) {
-    c.inner.lock().unwrap().pos = pos;
+    c.inner.lock().unwrap_or_else(|e| e.into_inner()).pos = pos;
     let _ = win.set_position(PhysicalPosition::new(pos.0.round() as i32, pos.1.round() as i32));
 }
 
@@ -319,13 +319,13 @@ pub async fn character_fly_home(webview: tauri::Webview, app: AppHandle, c: Stat
 async fn go_home(app: &AppHandle, c: &Character, forget: bool) -> bool {
     stop_highlight(app, c);
     {
-        let mut inner = c.inner.lock().unwrap();
+        let mut inner = c.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.drag = None;
         inner.carrying = false;
     }
     let Some(win) = window(app) else { return true };
     if let Some(to) = island_origin(app) {
-        let from = c.inner.lock().unwrap().pos;
+        let from = c.inner.lock().unwrap_or_else(|e| e.into_inner()).pos;
         fly(&win, c, from, to, cw::FLIGHT_MS, cw::ease_in_out).await;
     }
     c.gaze.fetch_add(1, Ordering::SeqCst);
@@ -347,7 +347,7 @@ fn from_character(webview: &tauri::Webview) -> bool {
 pub fn character_drag_begin(webview: tauri::Webview, app: AppHandle, c: State<'_, Arc<Character>>, x: f64, y: f64) -> bool {
     let (true, Some(press)) = (from_character(&webview), cw::valid_point(x, y)) else { return false };
     c.flight.fetch_add(1, Ordering::SeqCst);
-    let mut inner = c.inner.lock().unwrap();
+    let mut inner = c.inner.lock().unwrap_or_else(|e| e.into_inner());
     let origin = inner.pos;
     inner.drag = Some((press, origin));
     let scale = window(&app).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
@@ -360,9 +360,9 @@ pub fn character_drag_begin(webview: tauri::Webview, app: AppHandle, c: State<'_
 #[tauri::command]
 pub fn character_drag_move(webview: tauri::Webview, app: AppHandle, c: State<'_, Arc<Character>>, x: f64, y: f64) {
     let (true, Some(now)) = (from_character(&webview), cw::valid_point(x, y)) else { return };
-    let (Some(win), Some((press, origin))) = (window(&app), c.inner.lock().unwrap().drag) else { return };
+    let (Some(win), Some((press, origin))) = (window(&app), c.inner.lock().unwrap_or_else(|e| e.into_inner()).drag) else { return };
     let dpr = win.scale_factor().unwrap_or(1.0);
-    c.inner.lock().unwrap().pointer = Some((now.0 * dpr, now.1 * dpr));
+    c.inner.lock().unwrap_or_else(|e| e.into_inner()).pointer = Some((now.0 * dpr, now.1 * dpr));
     place(&win, &c, cw::drag_top_left(origin, now, press, dpr));
 }
 
@@ -372,7 +372,7 @@ pub async fn character_drag_end(webview: tauri::Webview, app: AppHandle, c: Stat
     if !from_character(&webview) {
         return Err(());
     }
-    let drag = c.inner.lock().unwrap().drag.take();
+    let drag = c.inner.lock().unwrap_or_else(|e| e.into_inner()).drag.take();
     stop_highlight(&app, &c);
     if let Some((_, origin)) = drag {
         finish_drop(&app, &c, "desktop", Some(origin)).await;
@@ -384,9 +384,9 @@ async fn finish_drop(app: &AppHandle, c: &Character, from: &'static str, origin:
     stop_highlight(app, c);
     let Some(win) = window(app) else { return };
     let scale = win.scale_factor().unwrap_or(1.0);
-    let pos = c.inner.lock().unwrap().pos;
+    let pos = c.inner.lock().unwrap_or_else(|e| e.into_inner()).pos;
     let half = cw::SIZE * scale / 2.0;
-    let at = c.inner.lock().unwrap().pointer.unwrap_or((pos.0 + half, pos.1 + half));
+    let at = c.inner.lock().unwrap_or_else(|e| e.into_inner()).pointer.unwrap_or((pos.0 + half, pos.1 + half));
     let home = island_rect(app).is_some_and(|(r, _)| cw::is_home_drop(at, r));
     let target = if home { None } else {
         let host = app.clone();
@@ -399,8 +399,8 @@ async fn finish_drop(app: &AppHandle, c: &Character, from: &'static str, origin:
             return;
         }
         cw::DropOutcome::AttachAndReturn => {
-            let (target, _) = target.unwrap();
-            app.state::<crate::AppState>().chat_context.lock().expect("chat context lock")
+            let Some((target, _)) = target else { return };
+            app.state::<crate::AppState>().chat_context.lock().unwrap_or_else(|e| e.into_inner())
                 .attach_dragged(contextwin::format_context(&target));
             let _ = app.emit_to(cw::LABEL, "desktop-character-emote", serde_json::json!({ "emote": "happy" }));
             // Same native intent as --chat; no additional command or page-chosen target.
@@ -433,7 +433,7 @@ fn island_point(app: &AppHandle, x: f64, y: f64) -> Option<(f64, f64)> {
 #[tauri::command]
 pub async fn character_pick_up(webview: tauri::Webview, app: AppHandle, c: State<'_, Arc<Character>>, x: f64, y: f64) -> Result<bool, ()> {
     crate::settingswindow::main_window_only(webview.label()).map_err(|_| ())?;
-    if c.inner.lock().unwrap().carrying || window(&app).is_some_and(|w| w.is_visible().unwrap_or(false)) {
+    if c.inner.lock().unwrap_or_else(|e| e.into_inner()).carrying || window(&app).is_some_and(|w| w.is_visible().unwrap_or(false)) {
         return Ok(false);
     }
     let Some(at) = island_point(&app, x, y) else { return Ok(false) };
@@ -442,7 +442,7 @@ pub async fn character_pick_up(webview: tauri::Webview, app: AppHandle, c: State
     let scale = win.scale_factor().unwrap_or(1.0);
     place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
     {
-        let mut inner = c.inner.lock().unwrap();
+        let mut inner = c.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.carrying = true;
         inner.pointer = Some(at);
     }
@@ -456,12 +456,12 @@ pub async fn character_pick_up(webview: tauri::Webview, app: AppHandle, c: State
 #[tauri::command]
 pub async fn character_carry(webview: tauri::Webview, app: AppHandle, c: State<'_, Arc<Character>>, x: f64, y: f64) -> Result<(), ()> {
     crate::settingswindow::main_window_only(webview.label()).map_err(|_| ())?;
-    if !c.inner.lock().unwrap().carrying {
+    if !c.inner.lock().unwrap_or_else(|e| e.into_inner()).carrying {
         return Ok(());
     }
     if let (Some(win), Some(at)) = (window(&app), island_point(&app, x, y)) {
         let scale = win.scale_factor().unwrap_or(1.0);
-        c.inner.lock().unwrap().pointer = Some(at);
+        c.inner.lock().unwrap_or_else(|e| e.into_inner()).pointer = Some(at);
         place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
     }
     Ok(())
@@ -470,15 +470,15 @@ pub async fn character_carry(webview: tauri::Webview, app: AppHandle, c: State<'
 #[tauri::command]
 pub async fn character_carry_end(webview: tauri::Webview, app: AppHandle, c: State<'_, Arc<Character>>, x: f64, y: f64) -> Result<(), ()> {
     crate::settingswindow::main_window_only(webview.label()).map_err(|_| ())?;
-    if !c.inner.lock().unwrap().carrying {
+    if !c.inner.lock().unwrap_or_else(|e| e.into_inner()).carrying {
         return Ok(());
     }
     if let (Some(win), Some(at)) = (window(&app), island_point(&app, x, y)) {
         let scale = win.scale_factor().unwrap_or(1.0);
-        c.inner.lock().unwrap().pointer = Some(at);
+        c.inner.lock().unwrap_or_else(|e| e.into_inner()).pointer = Some(at);
         place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
     }
-    c.inner.lock().unwrap().carrying = false;
+    c.inner.lock().unwrap_or_else(|e| e.into_inner()).carrying = false;
     finish_drop(&app, &c, "island", None).await;
     Ok(())
 }
@@ -531,7 +531,7 @@ fn start_gaze(app: &AppHandle, c: &Arc<Character>) {
             if let (Some(win), Some(p)) = (win, pointer()) {
                 if last != Some((p.0 as i64, p.1 as i64)) {
                     last = Some((p.0 as i64, p.1 as i64));
-                    let origin = c.inner.lock().unwrap().pos;
+                    let origin = c.inner.lock().unwrap_or_else(|e| e.into_inner()).pos;
                     let (x, y) = cw::cursor_local(p, origin, win.scale_factor().unwrap_or(1.0));
                     let _ = app.emit_to(cw::LABEL, "desktop-character-cursor", Cursor { x, y });
                 }
