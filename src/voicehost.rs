@@ -12,7 +12,11 @@ use abito_island::speech::{self, audio, kws};
 use abito_island::prefs::Command as PrefsCommand;
 use abito_island::voicecmd::{self, Command, VoicePrefs};
 use abito_island::voiceintent::{self, Effect, Hands, MusicOp, Outcome, Session, World};
+use abito_island::voicespeak::{self, Engine, Voices};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use serde_json::{json, Value};
+use std::io::Write;
 use std::sync::{mpsc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -78,6 +82,63 @@ fn music_control(app: &AppHandle, op: &MusicOp) -> bool {
     crate::spotifyhost::control(app, action)
 }
 
+/// Real sound. The system voice is `spd-say`; ElevenLabs is the user's own key, asked only
+/// when they chose it, with raw PCM played through `aplay`. Never used by tests.
+struct RealVoices;
+
+impl Voices for RealVoices {
+    fn system(&self, text: &str, lang: voiceintent::Lang, gender: voicecmd::Gender) -> bool {
+        std::process::Command::new("spd-say")
+            .args(voicespeak::spd_args(text, lang, gender))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn eleven(&self, text: &str, gender: voicecmd::Gender) -> bool {
+        use abito_island::secrets::{Keychain, SecretStore};
+        let Some(key) = Keychain.read(voicespeak::KEY_NAME).ok().flatten().filter(|k| !k.is_empty()) else { return false };
+        let run = async {
+            let client = reqwest::Client::builder()
+                .https_only(true)
+                .timeout(std::time::Duration::from_secs(8))
+                .user_agent(concat!("Abito/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .ok()?;
+            let list = client.get("https://api.elevenlabs.io/v1/voices").header("xi-api-key", &key).send().await.ok()?;
+            if !list.status().is_success() {
+                return None;
+            }
+            let voices: Value = serde_json::from_str(&list.text().await.ok()?).ok()?;
+            let (id, _) = voicespeak::pick_voice(&voices, gender)?;
+            let (url, body) = voicespeak::tts_request(&id, text);
+            let r = client.post(url).header("xi-api-key", &key).header("content-type", "application/json").body(body).send().await.ok()?;
+            if !r.status().is_success() {
+                return None;
+            }
+            r.bytes().await.ok().filter(|b| !b.is_empty())
+        };
+        let audio = tokio::runtime::Builder::new_current_thread().enable_all().build().ok().and_then(|rt| rt.block_on(run));
+        let Some(audio) = audio else { return false };
+        let Ok(mut child) = std::process::Command::new("aplay")
+            .args(voicespeak::PLAY_RAW_ARGS)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        else {
+            return false;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(&audio);
+        }
+        child.wait().map(|s| s.success()).unwrap_or(false)
+    }
+}
+
 struct Listener {
     capture: Option<audio::Capture>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -98,6 +159,10 @@ pub struct Host {
     last_error: Option<String>,
 }
 
+fn slot_prefs(app: &AppHandle) -> VoicePrefs {
+    app.state::<Mutex<Host>>().lock().expect("voice host").prefs
+}
+
 fn err(code: &str) -> BridgeError {
     BridgeError { code: code.into(), message: "No se pudo completar la acción de voz.".into() }
 }
@@ -105,6 +170,9 @@ fn err(code: &str) -> BridgeError {
 fn start_listener(app: &AppHandle, sensitivity: u8) -> Result<Listener, String> {
     let spotter = kws::SherpaSpotter::load(voicecmd::threshold_for(sensitivity)).ok_or("the wake-word model could not be loaded")?;
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
+    // The microphone is ignored while Abito speaks, so it never hears itself.
+    let speaking = Arc::new(AtomicBool::new(false));
+    let gate = speaking.clone();
     let handle = app.clone();
     let thread = std::thread::Builder::new()
         .name("abito-wake".into())
@@ -138,6 +206,20 @@ fn start_listener(app: &AppHandle, sensitivity: u8) -> Result<Listener, String> 
                                 Outcome::Question(_) => "question",
                             };
                             let _ = handle.emit("voice-result", json!({ "outcome": outcome, "message": reply.message, "lang": if reply.lang == voiceintent::Lang::En { "en" } else { "es" } }));
+                            let prefs = slot_prefs(&handle);
+                            let engine = {
+                                use abito_island::secrets::{Keychain, SecretStore};
+                                let has_key = Keychain.read(voicespeak::KEY_NAME).ok().flatten().is_some_and(|k| !k.is_empty());
+                                voicespeak::engine_for(prefs.output, has_key)
+                            };
+                            if engine != Engine::None {
+                                speaking.store(true, Ordering::Relaxed);
+                                voicespeak::speak(&RealVoices, &reply.message, reply.lang, prefs.gender, engine);
+                                // A short gap, then drop what the room echoed while it talked.
+                                std::thread::sleep(std::time::Duration::from_millis(250));
+                                while rx.try_recv().is_ok() {}
+                                speaking.store(false, Ordering::Relaxed);
+                            }
                             if reply.rearm {
                                 wake.arm_command();
                             }
@@ -148,7 +230,9 @@ fn start_listener(app: &AppHandle, sensitivity: u8) -> Result<Listener, String> 
         })
         .map_err(|e| e.to_string())?;
     let capture = audio::Capture::start(audio::Source::Mic(None), move |s| {
-        let _ = tx.send(s.to_vec());
+        if !gate.load(Ordering::Relaxed) {
+            let _ = tx.send(s.to_vec());
+        }
     })?;
     Ok(Listener { capture: Some(capture), thread: Some(thread) })
 }

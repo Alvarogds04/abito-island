@@ -14,6 +14,7 @@
 })(typeof self !== 'undefined' ? self : this, () => {
   const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
   const OUTCOMES = Object.freeze(['success', 'failure', 'question']);
+  const FADE_MS = 200;
   const RESULT_MS = 2000; // NotchBuddy shows the result for about 2 s
   const MAX_TEXT = 400;
   const clean = s => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, MAX_TEXT) : '');
@@ -28,7 +29,7 @@
   const askOf = p => { const t = isObject(p) && typeof p.text === 'string' ? clean(p.text).trim() : ''; return t || null; };
   /** Open the island on a wake only when it is folded or hidden. */
   const revealPlan = island => (island && (island.state === 'hidden' || island.phase === 'compact') ? 'expand' : 'none');
-  return { OUTCOMES, RESULT_MS, MAX_TEXT, heardOf, resultOf, askOf, revealPlan };
+  return { OUTCOMES, FADE_MS, RESULT_MS, MAX_TEXT, heardOf, resultOf, askOf, revealPlan };
 });
 
 function mount(api) {
@@ -47,7 +48,14 @@ function mount(api) {
   bar.className = 'voicebar'; bar.hidden = true; bar.setAttribute('role', 'status'); bar.setAttribute('aria-live', 'polite');
   header.append(bar);
   let timer = 0, weExpanded = false, flight = false;
-  const show = (text, kind) => { bar.textContent = text; bar.dataset.kind = kind || ''; bar.hidden = !text; };
+  let fade = 0;
+  // Fade in/out in 0.2 s (island-voice.css); `hidden` only after the fade-out ends.
+  const show = (text, kind) => {
+    clearTimeout(fade);
+    if (!text) { bar.classList.remove('on'); fade = setTimeout(() => { bar.hidden = true; }, api.FADE_MS); return; }
+    bar.textContent = text; bar.dataset.kind = kind || ''; bar.hidden = false;
+    void bar.offsetWidth; bar.classList.add('on');
+  };
   const hide = () => { clearTimeout(timer); timer = 0; show('', ''); };
   const later = ms => { clearTimeout(timer); timer = setTimeout(() => { hide(); giveBack(); }, ms); };
   const desktop = () => root.desktop;
