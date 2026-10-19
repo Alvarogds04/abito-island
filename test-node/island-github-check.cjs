@@ -63,7 +63,7 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   let details = 0;
   const card = view.githubPulseCard(pulse, null, act, () => { details++; });
   const t = text(card);
-  assert.match(t, /GitHub/); assert.match(t, /Mis PRs/); assert.match(t, /2 · 1 fallando/); assert.match(t, /Por revisar/); assert.match(t, /CI de la rama principal/); assert.match(t, /todo en verde/);
+  assert.match(t, /GitHub/); assert.match(t, /Mis PRs/); assert.match(t, /2 · 1 fallando/); assert.match(t, /Por revisar/); assert.match(t, /CI de la rama/); assert.match(t, /todo en verde/);
   const stats = cls(card, 'gh-stat'); assert.equal(stats.length, 3);
   stats[0].click(); assert.equal(details, 1); assert.deepEqual(refreshed, ['pulse'], 'opening a list asks the host again');
   cls(card, 'gh-spark')[0].click(); assert.deepEqual(refreshed, ['pulse', 'activity']);

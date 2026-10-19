@@ -56,6 +56,7 @@
   // S10 (L24, «Notch pegado arriba como Coucou»): the expanded island is stuck to the top edge of the screen (gap 0) with
   // Coucou's corners 0 0 14 14; Rust pins the window there (geometry::pin_top_center). Compact keeps its disc.
   const OVERVIEW = { w: 640, h: 160, r: 14, gap: 0, clay: 66, clayX: 68, cy: 101 };
+  const RECAP_H = 184; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
   const QUESTION_H = 200; // Coucou QUESTION_PICKER_H: the question card is taller; the window already has room (672x208)
   const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 101 };
   const BLOB_DROP = 10 / 140; // the drawn blob sits this fraction of the box below the box centre (measured, was drop 10 at box 140)
@@ -132,6 +133,7 @@
   const easeShrink = cubicBezier(0.45, 0, 0.2, 1);
 
   let cardShown = false; // UI.1: a valid approval card is on screen
+  let recapShown = false; // L32: the weekly recap card is open (Coucou's recap view is 184 high)
   let questionShown = false; // N6: a Pi question/notification is on screen (R6 shrinks like with a card)
   let p = 0;            // progress 0 = compact, 1 = overview
   let v = 0;            // spring velocity
@@ -175,12 +177,12 @@
 
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
-    const h = lerp(COMPACT.h, lerp(questionShown ? QUESTION_H : OVERVIEW.h, CHAT.h, q.x), p);
+    const h = lerp(COMPACT.h, lerp(recapShown ? RECAP_H : questionShown ? QUESTION_H : OVERVIEW.h, CHAT.h, q.x), p);
     // corners: the disc is round; the notch is square on top (it meets the screen edge) and r14 below
     const rTop = lerp(COMPACT.r, 0, p), rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
     // the question card is 148 high (200 island): the character centres on it, 15px lower than on the 108 cards
-    const ovBase = questionShown ? { ...OVERVIEW_CARD, cy: OVERVIEW_CARD.cy + (QUESTION_H - OVERVIEW.h) / 2 } : cardShown ? OVERVIEW_CARD : OVERVIEW;
+    const ovBase = recapShown ? { ...OVERVIEW_CARD, cy: 42 + (RECAP_H - 52) / 2 } : questionShown ? { ...OVERVIEW_CARD, cy: OVERVIEW_CARD.cy + (QUESTION_H - OVERVIEW.h) / 2 } : cardShown ? OVERVIEW_CARD : OVERVIEW;
     // the confirmed finished-notice lane (pane starts at x=108) uses the small R6 too, or the 128px blob covers the pane
     const ov = (noticeLane && noticeLane.view === 'notices') ? OVERVIEW_CARD : ovBase;
     const cs = lerp(COMPACT.clay, ov.clay, p);
@@ -1101,6 +1103,11 @@
 
   // U1: the card's actionability depends on the visible view too.
   document.addEventListener('island:view', () => { if (current) renderCard(); });
+  // L32: the recap card (island-recap.js) asks for its own 184px island; closing gives the overview height back
+  document.addEventListener('abito:recap', event => {
+    const show = !!(event.detail && event.detail.show);
+    if (show !== recapShown) { recapShown = show; render(); }
+  });
   document.addEventListener('abito:question', event => {
     const show = !!(event.detail && event.detail.show);
     if (show !== questionShown) { questionShown = show; render(); }
