@@ -156,14 +156,14 @@ fn questioncmd_native_resize_known_size_never_bypasses_unsettled_generation() {
 }
 #[test]
 fn questioncmd_native_recovery_only_accepts_current_plan_physical_size() {
-    // the chat column follows the work area height (physical px): 1048 -> 432x656, 2096@2x -> same logical
+    // the chat column follows the work area height (physical px): 1048 -> 672x656, 2096@2x -> same logical
     for (expanded, chat, expected) in [(false,false,(288,32)),(false,true,(288,32)),
-                                     (true,false,(672,208)),(true,true,(432,656))] {
+                                     (true,false,(672,208)),(true,true,(672,656))] {
         assert_eq!(desired_native_size(expanded, chat, 1.0, 1048), expected);
         assert_eq!(desired_native_size(expanded, chat, 2.0, 2096), (expected.0*2, expected.1*2));
     }
     // a shorter screen gets a shorter column, and only the chat depends on it
-    assert_eq!(desired_native_size(true, true, 1.0, 600), (432, 600 - 40));
+    assert_eq!(desired_native_size(true, true, 1.0, 600), (672, 600 - 40));
     assert_eq!(desired_native_size(true, false, 1.0, 600), (672, 208));
     for timed_out in [false,true] {
         let mut barrier = NativeResizeBarrier::default();

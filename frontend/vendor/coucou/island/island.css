@@ -592,7 +592,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 
 /* the shared header stays in the chat view, at the chat column's width, with the chat tab lit */
 #capsule[data-phase="expanded"][data-view="chat"] #island-header {
-  opacity: 1; visibility: visible; pointer-events: auto; left: calc(50% - 200px); width: 400px; right: auto;
+  opacity: 1; visibility: visible; pointer-events: auto; left: calc(50% - 320px); width: 640px; right: auto;
 }
 #capsule[data-phase="expanded"][data-view="chat"] .plan-pills, #capsule[data-phase="expanded"][data-view="chat"] .dpill { display: none; }
 #chat { padding: 42px 10px 10px; }
@@ -635,3 +635,13 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 #chat-composer #chat-send::after { background: var(--ink); border: 0; }
 #chat-send:disabled::after { opacity: 0.4; }
 #chat-composer .round .ico svg { width: 14px; height: 14px; }
+
+/* The chat is as wide as the island (640, geometry::CHAT_COLUMN_W): the header sits on the same 640 box as the overview's,
+   the body card is the 620-wide card of every other view, and the character stands at the composer's left like Coucou's bot. */
+#capsule[data-phase="expanded"][data-view="chat"] #chat { padding: 42px 10px 10px; }
+#chat-body { margin: 0; }
+#chat-log { padding-left: 100px; padding-right: 8px; } /* the bot's column, as in every Coucou card (108px text indent) */
+#chat-composer { padding-left: 100px; flex-wrap: nowrap; }
+#chat-model-row { padding-left: 100px; justify-content: flex-start; }
+#chat-composer #chat-input { flex: 1 1 auto; min-width: 0; }
+#chat-history-controls { padding-left: 92px; }

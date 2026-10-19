@@ -64,10 +64,11 @@ pub const LOGICAL_OVERVIEW: (i32, i32) = (672, 208);
 /// derive window margins; the overview itself is frozen.
 pub const OVERVIEW_VISIBLE: (i32, i32) = (640, 160);
 
-/// #309 — the chat is a vertical COLUMN (gentle-shell style): a fixed narrow width and a
-/// height that follows the work area. These are the VISIBLE sizes, in logical px; the native
-/// window adds the overview's margins (see [`chat_window`]).
-pub const CHAT_COLUMN_W: i32 = 400;
+/// #309 / S10 #480 (human L32): the chat lives INSIDE the expanded island, at Coucou's island width (`EXPANDED_W` 640, the same
+/// as the overview), and keeps Abito's height rule: it follows the work area (Coucou's prompt view is 240-300 high and grows
+/// with the message count, which Rust cannot know; a real conversation needs the room). These are the VISIBLE sizes, in
+/// logical px; the native window adds the margins (see [`chat_window`]). Ajustes has its own window now: this is only the chat.
+pub const CHAT_COLUMN_W: i32 = 640;
 /// Visible height when the screen allows it.
 pub const CHAT_PREFERRED_H: i32 = 640;
 /// Never shorter than the old horizontal chat (240): small screens keep a usable chat.
@@ -107,7 +108,7 @@ pub fn view_sizes(view: View, area_w_phys: i32, area_h_phys: i32, scale: f64) ->
     }
 }
 
-/// Window margins around the visible chat / Settings column (the 400-wide column in a 432-wide window,
+/// Window margins around the visible chat island (the 640-wide chat in a 672-wide window,
 /// the island stuck to the window's top edge, 16 px of transparent air below). Independent of the
 /// overview window since S10 gave the overview extra room for the 200 px question card.
 const WINDOW_MARGIN: (i32, i32) = (32, 16);
@@ -156,7 +157,7 @@ pub fn chat_window(area_h_phys: i32, scale: f64) -> (i32, i32) {
 }
 
 /// The window that holds BOTH views of a transition. Width and height move in opposite
-/// directions between the overview and the column (672x176 <-> 432x656), so resizing straight to
+/// directions between the overview and the chat (672x208 <-> 672x656; the width is equal since #480), so resizing straight to
 /// the target would clip the view that is still on screen; the stage is the per-axis maximum.
 pub fn stage_size(from: (i32, i32), to: (i32, i32)) -> (i32, i32) {
     (from.0.max(to.0), from.1.max(to.1))
@@ -626,13 +627,14 @@ mod tests {
 
     #[test]
     fn chat_column_width_is_fixed_and_the_window_adds_the_overview_margins() {
-        // measured contract: a narrow column (gentle-shell style), 400 visible
-        assert_eq!(CHAT_COLUMN_W, 400);
+        // S10 (L32 #480): the chat lives inside the expanded island at Coucou's width (EXPANDED_W 640), like the overview
+        assert_eq!(CHAT_COLUMN_W, 640);
+        assert_eq!(CHAT_COLUMN_W, OVERVIEW_VISIBLE.0, "the chat is as wide as the overview island");
         let (vw, vh) = chat_visible(1048, 1.0);
-        assert_eq!(vw, 400);
+        assert_eq!(vw, 640);
         // native = visible + the same window margins the overview uses (32 x 16)
         assert_eq!(chat_window(1048, 1.0), (vw + 32, vh + 16));
-        assert_eq!(chat_window(1048, 1.0).0, 432);
+        assert_eq!(chat_window(1048, 1.0).0, 672, "the same window width as the overview: nothing shifts sideways");
     }
 
     #[test]
@@ -675,7 +677,7 @@ mod tests {
         // the work area arrives in PHYSICAL px; the contract is logical
         assert_eq!(chat_visible(2096, 2.0), chat_visible(1048, 1.0));
         assert_eq!(chat_visible(1310, 1.25), chat_visible(1048, 1.0));
-        assert_eq!(scaled_size(chat_window(2096, 2.0), 2.0), (864, 1312));
+        assert_eq!(scaled_size(chat_window(2096, 2.0), 2.0), (1344, 1312));
         // a broken scale degrades to 1.0, never to a zero or absurd window
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert_eq!(chat_visible(1048, bad), chat_visible(1048, 1.0), "{bad}");
@@ -684,9 +686,9 @@ mod tests {
 
     #[test]
     fn the_stage_window_holds_both_views_so_nothing_is_clipped_mid_transition() {
-        // overview 672x176 <-> chat 432x656: opposite directions per axis
-        assert_eq!(stage_size(LOGICAL_OVERVIEW, (432, 656)), (672, 656));
-        assert_eq!(stage_size((432, 656), LOGICAL_OVERVIEW), (672, 656));
+        // overview 672x208 <-> chat 672x656: the chat is only taller now (S10 #480), so the stage is the chat window
+        assert_eq!(stage_size(LOGICAL_OVERVIEW, (672, 656)), (672, 656));
+        assert_eq!(stage_size((672, 656), LOGICAL_OVERVIEW), (672, 656));
         assert_eq!(stage_size((100, 100), (100, 100)), (100, 100));
         assert_eq!(stage_size((100, 300), (200, 100)), (200, 300));
     }
@@ -701,20 +703,20 @@ mod tests {
         assert_eq!(LOGICAL_COMPACT, COMPACT_BAR);
         assert_eq!(LOGICAL_COMPACT, (288, 32), "the bar is 288 wide: Coucou's NOTCH_W 184 + 104");
         assert!(LOGICAL_COMPACT.0 < OVERVIEW_VISIBLE.0 && LOGICAL_COMPACT.1 < OVERVIEW_VISIBLE.1);
-        // the chat column is NARROWER than the overview and much taller
-        assert!(CHAT_COLUMN_W < OVERVIEW_VISIBLE.0 && CHAT_PREFERRED_H > OVERVIEW_VISIBLE.1);
+        // the chat is as wide as the overview island and much taller
+        assert!(CHAT_COLUMN_W == OVERVIEW_VISIBLE.0 && CHAT_PREFERRED_H > OVERVIEW_VISIBLE.1);
     }
 
     #[test]
     fn chat_grows_upward_when_docked_at_the_bottom_and_stays_centred() {
         let a = area();
         let size = chat_window(a.h, 1.0);
-        assert_eq!(size, (432, 656));
+        assert_eq!(size, (672, 656));
         let overview = Rect { x: 624, y: a.bottom() - 176, w: 672, h: 176 };
         let chat = anchor_toggle(Edge::Bottom, overview, size, a);
         assert_eq!(chat.bottom(), a.bottom());
-        // the window centre does not move: 624 + 672/2 == x + 432/2
-        assert_eq!((chat.x + chat.w / 2, chat.w, chat.h), (624 + 336, 432, 656));
+        // the window centre does not move: same width, same x
+        assert_eq!((chat.x + chat.w / 2, chat.w, chat.h), (624 + 336, 672, 656));
         let top = Rect { x: 624, y: a.y, w: 672, h: 176 };
         let chat = anchor_toggle(Edge::Top, top, size, a);
         assert_eq!((chat.y, chat.h), (a.y, 656));

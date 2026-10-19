@@ -596,11 +596,11 @@ mod tests {
         let open = core.plan_view(&io, area(), true).expect("open chat");
         assert!(open.chat);
         assert_eq!(open.size, chat_window(area().h, 1.0));
-        assert_eq!(open.size, (432, 656));
+        assert_eq!(open.size, (672, 656));
         assert_eq!(open.visible, chat_visible(area().h, 1.0), "Rust owns the visible size the page animates to");
         assert_eq!(open.rect.y, 32, "top-docked: grows downward");
-        assert_eq!(open.rect.w, 432);
-        // the column stays centred under the overview it replaces: 672 wide at x -> 432 wide at x+120
+        assert_eq!(open.rect.w, 672);
+        // the chat stays centred under the overview it replaces: 672 wide at x -> 672 wide at the same x
         assert_eq!(open.rect.x + open.rect.w / 2, io.pos.get().0 + 672 / 2);
         assert!(core.chat && core.expanded);
         io.size.set(open.size);
@@ -680,7 +680,7 @@ mod tests {
         io.pos.set((open.rect.x, open.rect.y));
         let back = core.plan_view(&io, area(), false).unwrap();
         assert_eq!((back.stage.w, back.stage.h), (672, 656));
-        assert_eq!((back.stage.x, back.stage.y), (open.rect.x - (672 - 432) / 2, open.rect.y));
+        assert_eq!((back.stage.x, back.stage.y), (open.rect.x, open.rect.y), "same width: the stage is the chat window");
         io.size.set(back.size);
         io.pos.set((back.rect.x, back.rect.y));
         let again = core.plan_view(&io, area(), true).unwrap();
@@ -692,7 +692,7 @@ mod tests {
         let (mut core, io) = expanded_top();
         core.plan_view(&io, area(), true).unwrap();
         core.press(&io, (10.0, 10.0));
-        io.size.set((432, 656));
+        io.size.set((672, 656));
         io.pos.set((300, 32));
         core.release(&io, area(), (10.0, 10.0), true);
         let back = core.plan_view(&io, area(), false).unwrap();

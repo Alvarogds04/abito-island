@@ -126,7 +126,7 @@ pub fn apply_view(app: &AppHandle, state: &AppState, plan: ViewPlan) {
         "window.__islandSetView && window.__islandSetView('{}',{vw},{vh});",
         if chat { "chat" } else { "overview" }
     );
-    // #309: overview and column move in opposite directions per axis (672x176 <-> 432x656), so the
+    // #309: overview and column move in opposite directions per axis (672x208 <-> 672x656), so the
     // window first becomes the STAGE that holds both views, the page animates inside it, and the
     // window settles on the final rectangle once the animation is over. Opening: stage now, final
     // after the grow spring; closing: stage now, final after the 340 ms shrink (same generation

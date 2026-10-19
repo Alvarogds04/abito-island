@@ -193,14 +193,14 @@ test('chat wears Coucou\'s tokens: bubble .13 r12 6/10 12.5px, reply #b0b5be, in
 });
 
 // ---- #480: the chat in the island's own visual language -------------------------------------------------------------
-test('chat: keeps every id and verb; the island header stays on top at the column width; body is a Coucou card; controls are Coucou tabs/discs with 44px hits', () => {
+test('chat: keeps every id and verb; the island header stays on top at the island width (640); body is a Coucou card; controls are Coucou tabs/discs with 44px hits', () => {
   const html = read('index.html');
   for (const id of ['chat-header', 'chat-title', 'chat-target-chip', 'chat-specialist', 'open-screen-settings', 'chat-back', 'chat-status-strip', 'chat-state', 'chat-history-controls', 'chat-create', 'chat-conversations', 'chat-history-label', 'chat-log', 'chat-model-btn', 'chat-composer', 'chat-input', 'chat-send', 'chat-cancel'])
     assert.match(html, new RegExp(`id="${id}"`), id + ' is still there');
   const isl = read('vendor/coucou/island/island.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const from = isl.indexOf('#capsule[data-phase="expanded"][data-view="chat"] #island-header');
   assert.ok(from > 0, 'the chat block exists'); const blk = isl.slice(from);
-  assert.match(blk, /#island-header \{\s*opacity: 1; visibility: visible; pointer-events: auto; left: calc\(50% - 200px\); width: 400px; right: auto;/);
+  assert.match(blk, /#island-header \{\s*opacity: 1; visibility: visible; pointer-events: auto; left: calc\(50% - 320px\); width: 640px; right: auto;/);
   assert.match(blk, /#chat \{ padding: 42px 10px 10px; \}/, 'the card starts under the 34px header');
   assert.match(blk, /#chat-title::before \{ content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff;/, 'the who-row dot');
   assert.match(blk, /#chat-body \{ background: var\(--card\); border: 1px solid var\(--hairline\); border-radius: 20px;/);

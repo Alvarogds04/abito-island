@@ -76,6 +76,6 @@ export function buildStates(f) {
   // Chat tab of the island (Coucou: prompt view; Abito: chat column).
   states.push({ id: 'chat', title: 'Island chat view', w: 720, h: 660,
     coucou: { page: 'island', run: cAll(f) + `__vcCoucou.island.expand('prompt');` },
-    abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `window.__islandSetView('chat', 400, 640);`, settle: 2500 } });
+    abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `window.__islandSetView('chat', 640, 640);`, settle: 2500 } });
   return states;
 }
