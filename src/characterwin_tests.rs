@@ -168,3 +168,28 @@ fn the_island_may_push_only_known_states_and_emotes() {
     }
     assert!(!valid_emote("greeting") && !valid_emote("") && !valid_emote("Happy"));
 }
+
+fn covered(rects: &[(i16, i16, u16, u16)], p: (i16, i16)) -> bool {
+    rects.iter().any(|&(x, y, w, h)| p.0 >= x && p.0 < x + w as i16 && p.1 >= y && p.1 < y + h as i16)
+}
+
+#[test]
+fn the_input_shape_is_the_round_body_only() {
+    // 120 css px at scale 1: centre (60,60), radius 28.8.
+    let r = body_input_rects(120.0, 1.0);
+    assert!(!r.is_empty() && r.len() <= 64, "a bounded list of rectangles: {}", r.len());
+    assert!(covered(&r, (60, 60)) && covered(&r, (60, 35)) && covered(&r, (85, 60)), "inside the body takes the mouse");
+    for p in [(0, 0), (119, 119), (60, 5), (60, 115), (5, 60), (115, 60), (88, 88)] {
+        assert!(!covered(&r, p), "{p:?} is click-through");
+    }
+    // every rectangle stays inside the window
+    assert!(r.iter().all(|&(x, y, w, h)| x >= 0 && y >= 0 && x + w as i16 <= 120 && y + h as i16 <= 120));
+}
+
+#[test]
+fn the_shape_follows_the_scale() {
+    let r = body_input_rects(120.0, 2.0);
+    assert!(covered(&r, (120, 120)) && !covered(&r, (10, 10)));
+    assert!(r.iter().all(|&(x, y, w, h)| x + w as i16 <= 240 && y + h as i16 <= 240));
+    assert_eq!(body_input_rects(120.0, 0.0), body_input_rects(120.0, 1.0), "a bad scale reads as 1");
+}

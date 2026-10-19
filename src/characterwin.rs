@@ -170,3 +170,27 @@ pub fn valid_state(s: &str) -> bool {
 pub fn valid_emote(s: &str) -> bool {
     matches!(s, "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed")
 }
+
+/// Input region of the character window: the round body only, as scanline rectangles
+/// (window-local physical px), so everything around it is click-through.
+pub fn body_input_rects(size: f64, scale: f64) -> Vec<(i16, i16, u16, u16)> {
+    let k = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let side = (size * k).round();
+    let (c, r) = (side / 2.0, side * BODY_RADIUS_FRACTION);
+    let step = (side / 30.0).max(1.0);
+    let mut out = Vec::new();
+    let mut y = (c - r).floor();
+    while y < (c + r).ceil() {
+        // the widest chord of the band: the row nearest the centre
+        let mid = if y + step <= c { y + step } else if y >= c { y } else { c };
+        let dy = mid - c;
+        let half = (r * r - dy * dy).max(0.0).sqrt();
+        let (x0, x1) = ((c - half).floor().max(0.0), (c + half).ceil().min(side));
+        let h = step.min(side - y);
+        if x1 > x0 && h > 0.0 && y >= 0.0 {
+            out.push((x0 as i16, y as i16, (x1 - x0) as u16, h as u16));
+        }
+        y += step;
+    }
+    out
+}

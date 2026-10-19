@@ -112,6 +112,25 @@ fn island_origin(app: &AppHandle) -> Option<(f64, f64)> {
     Some(cw::island_spot(r.x + r.w / 2.0, r.y, cw::SIZE, scale))
 }
 
+/// Click-through everywhere but the round body (Coucou: `set_desktop_shape`). GDK sets the X11
+/// input shape on the window's GdkWindow, so no extra X11 crate is involved; must run on the GTK
+/// thread and after the window is realized (we call it right after `show`).
+fn apply_shape(app: &AppHandle, win: &WebviewWindow) {
+    let handle = win.clone();
+    let _ = app.run_on_main_thread(move || {
+        use gtk::cairo::{RectangleInt, Region};
+        use gtk::prelude::WidgetExt;
+        let Ok(gtk_win) = handle.gtk_window() else { return };
+        let Some(gdk) = gtk_win.window() else { return };
+        let region = Region::create();
+        // GDK takes the shape in the window's logical pixels.
+        for (x, y, w, h) in cw::body_input_rects(cw::SIZE, 1.0) {
+            let _ = region.union_rectangle(&RectangleInt::new(x as i32, y as i32, w as i32, h as i32));
+        }
+        gdk.input_shape_combine_region(&region, 0, 0);
+    });
+}
+
 fn place(win: &WebviewWindow, c: &Character, pos: (f64, f64)) {
     c.inner.lock().unwrap().pos = pos;
     let _ = win.set_position(PhysicalPosition::new(pos.0.round() as i32, pos.1.round() as i32));
@@ -172,6 +191,7 @@ async fn fly_out(app: &AppHandle, c: &Character, anywhere: bool) -> bool {
     let Some(win) = ensure_window(app) else { return false };
     place(&win, c, from);
     let _ = win.show();
+    apply_shape(app, &win);
     start_gaze(app, &app.state::<Arc<Character>>().inner().clone());
     if fly(&win, c, from, to, cw::FLIGHT_MS, cw::ease_in_out).await {
         remember(app, true, Some(to));
@@ -293,6 +313,7 @@ pub async fn character_pick_up(webview: tauri::Webview, app: AppHandle, c: State
     place(&win, &c, cw::centred_on(at, cw::SIZE, scale));
     c.inner.lock().unwrap().carrying = true;
     let _ = win.show();
+    apply_shape(&app, &win);
     start_gaze(&app, &c);
     Ok(true)
 }
