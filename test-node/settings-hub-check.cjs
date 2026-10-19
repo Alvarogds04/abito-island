@@ -132,7 +132,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     el.fire(el.tagName === 'select' ? 'change' : 'click'); await ui.settled(); assert.deepEqual(calls, []);
   }
   assert(text(ui).includes('No disponible todavía'));
-  assert(text(ui).includes('0 means never'));
+  assert(!text(ui).includes('0 means never'), 'D6: Coucou shows no such line under Auto-close');
   assert.equal(all(ui).find(e=>e.attrs.id==='hub-language').children.length,11);
   const field = id => all(ui).find(e => e.attrs.id === id);
   // 5a: real display list and custom sounds on the existing closed hosts.
