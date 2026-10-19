@@ -236,6 +236,10 @@ pub fn submit(
     let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
     let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
+    let gate = crate::model_gate(state, &target);
+    if let Err(e) = gate {
+        return Err(chat_error(e));
+    }
     // #487: NotchBuddy prefixes the FIRST user message with the window context. It is held for the
     // conversation in memory and added to the prompt only: never to the stored or shown text.
     let first = lane.lock().expect("chat lane lock").convo.is_empty();
