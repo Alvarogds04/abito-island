@@ -42,6 +42,7 @@ mod soundshost;
 mod recaphost;
 mod planhost;
 mod dictationhost;
+mod voicehost;
 mod settingshost;
 mod settingswindow;
 mod spotifyhost;
@@ -1974,6 +1975,7 @@ fn main() {
             recaphost::recap_action,
             planhost::plan_action,
             dictationhost::dictation_action,
+            voicehost::voice_action,
             settingshost::settings_view,
             settingshost::daemon_action,
             settingswindow::settings_window_action,
@@ -2061,6 +2063,7 @@ fn main() {
             // prefs.json/accounts.json; it has no window dependency).
             settingshost::start(&handle);
             dictationhost::start(&handle);
+            voicehost::start(&handle);
             characterhost::manage(&handle);
             characterhost::restore_on_launch(&handle);
             let wa = workarea::current(&win);

@@ -103,7 +103,7 @@ const tick = () => new Promise(r => setImmediate(r));
   leave();let release;setInvoke(()=>new Promise(r=>{release=r;}));const late=new Element('div');const opening=pages.dictionaryPage(late,ctx);leave();release({words:[],replacements:[]});await opening;assert.equal(all(late).filter(e=>e.tagName==='button').length,0);
   // Execute the real entry guard, independent of the bridge's trusted callers.
   const entry=fs.readFileSync(path.resolve(__dirname,'../frontend/settings-app.js'),'utf8').replace(/^import .*;\n/gm,'');
-  const forwarded=[], context={window:{__TAURI__:{core:{invoke:async(_c,a)=>forwarded.push(a.payload)}}},document:{getElementById:()=>({})},setInvoke(){},startHub:async()=>{},inactivePages:{},dictationPage(){},flowSettingsPage(){},...pages,TextEncoder};
+  const forwarded=[], context={window:{__TAURI__:{core:{invoke:async(_c,a)=>forwarded.push(a.payload)}}},document:{getElementById:()=>({})},setInvoke(){},startHub:async()=>{},inactivePages:{},dictationPage(){},flowSettingsPage(){},voicePage(){},...pages,TextEncoder};
   vm.runInNewContext(entry+'\nglobalThis.closedInvoke=invoke;',context);
   const good=[...['history','stats','words','snippets','styles'].map(action=>({action})),{action:'delete_entry',id:'a_-9'},{action:'clear_history',everything:false},{action:'set_words',words:{words:['Word'],replacements:[{id:'r',from:'a',to:'b'}]}},{action:'set_snippets',snippets:[{id:'s',trigger:'a',text:'b'}]},{action:'set_styles',styles:[{id:'a',name:'App',style:'natural'}]}];
   for(const payload of good){await context.closedInvoke('dictation_action',{payload});assert.deepEqual(forwarded.pop(),payload);await assert.rejects(context.closedInvoke('dictation_action',{payload:{...payload,extra:1}}));}
