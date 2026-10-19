@@ -101,11 +101,12 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(native.includes('WebviewUrl::App(std::path::PathBuf::from("settings.html"))'));
   const V = require('../frontend/settings-view.js');
   let prefs = { sound: true, gain: .12, autoCloseSeconds: 15, openOnHover: false, declaredPills: [], pillColors: {}, mainPill: 'integration_claude', theme: 'system', displayName: '', monitor: 'DP-1' };
-  const calls = []; let rejectGain = false; let customSounds = ['finish', 'greet'];
+  const calls = []; let rejectGain = false; let rejectReveal = false; let customSounds = ['finish', 'greet'];
   const invoke = async (cmd, { payload: p }) => {
     calls.push([cmd, p]);
     if (cmd === 'recap_action') return p.action === 'prefs' ? {enabled:true} : {ok:true};
     if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1', x: 0, y: 0, width: 1920, height: 1080 }, { key: 'HDMI-1', x: 1920, y: 0, width: 1280, height: 720 }] };
+    if (cmd === 'sound_action' && p.action === 'reveal' && rejectReveal) throw Error('xdg-open failed');
     if (cmd === 'sound_action') return p.action === 'list' ? { names: customSounds } : { ok: true };
     if (cmd === 'hotkey_action') return { combo: 'Ctrl+Space', enabled: true, status: 'active' };
     if (p.action === 'sound_off') prefs.sound = false;
@@ -142,6 +143,14 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const id of ['hub-sounds-folder', 'hub-sounds-reload']) assert(!field(id).disabled, id);
   field('hub-sounds-folder').fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
   field('hub-sounds-folder').fire('click'); await ui.settled(); assert.deepEqual(calls.splice(0), [['sound_action', { action: 'reveal' }]]);
+  // L42 F3: when the file manager cannot be opened the page says so, in words about the FOLDER (never «No se pudo guardar»)
+  rejectReveal = true; field('hub-sounds-folder').fire('click'); await ui.settled();
+  assert(text(ui).includes('No se pudo abrir la carpeta de sonidos'), 'a failed open is said');
+  assert(text(ui).includes('sounds'), 'and the folder name is given so it can be opened by hand');
+  assert(!text(ui).includes('No se pudo guardar.'), 'never the save wording for a folder that did not open');
+  rejectReveal = false; field('hub-sounds-folder').fire('click'); await ui.settled();
+  assert(!text(ui).includes('No se pudo abrir la carpeta'), 'the note clears on the next success');
+  calls.length = 0;
   customSounds = ['finish']; field('hub-sounds-reload').fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
   field('hub-sounds-reload').fire('click'); await ui.settled();
   assert.deepEqual(calls.splice(0), [['sound_action', { action: 'reload' }], ['sound_action', { action: 'list' }]]);

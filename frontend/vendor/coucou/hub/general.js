@@ -48,14 +48,15 @@ async function renderGeneral({ invoke, V }) {
   let queue = Promise.resolve(), issue = "", nameDraft = null, capturing = false;
   const root = h("div", {});
   const send = (cmd, payload) => invoke(cmd, { payload });
-  const run = (work) => {
+  const DEFAULT_FAILURE = "No se pudo guardar. Revisa el valor e inténtalo de nuevo.";
+  const run = (work, failure = DEFAULT_FAILURE) => {
     queue = queue.then(async () => {
       try {
         await work();
         issue = "";
       } catch {
-        issue = "No se pudo guardar. Revisa el valor e inténtalo de nuevo.";
-        try {
+        issue = failure;
+        if (failure === DEFAULT_FAILURE) try {
           settings = await bridge.boot();
           prefs = await send("prefs_action", { action: "view" });
           hotkey = await send("hotkey_action", { action: "view" });
@@ -162,7 +163,7 @@ async function renderGeneral({ invoke, V }) {
     const soundsFolder = identify(trusted(h("button", { text: t("Open sounds folder"), onclick: () => {
       run(async () => {
         await send("sound_action", { action: "reveal" });
-      });
+      }, "No se pudo abrir la carpeta de sonidos (el administrador de archivos no respondió). Ábrela a mano: la carpeta «sounds» dentro de la carpeta de configuración de Abito.");
     } })), "hub-sounds-folder");
     const soundsReload = identify(trusted(h("button", { text: t("Reload sounds"), onclick: () => {
       run(async () => {
