@@ -2656,9 +2656,155 @@ fn island_validation(app: &AppHandle) {
     if let Err(error) = result {
         scene("isla-atajo-sobre-rival", false, &error, json!({"error":error}));
     }
+    feature_validation(app);
 }
 
 #[cfg(not(unix))]
 fn island_validation(_app: &AppHandle) {
     emit(&json!({"step":"validation_scene","name":"isla","verdict":"unverifiable","reason":"requiere X11"}));
+}
+
+/// T3/T4 use the real WebViews and real IPC. Only the feature-gated probe
+/// includes this driver; XTest remains in the external validator process.
+#[cfg(unix)]
+fn feature_validation(app: &AppHandle) {
+    use tauri::Listener;
+    use std::sync::{Arc, Mutex};
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use abito_island::fakemodel::{FakeModel, FakeModelConfig, Reply};
+    use abito_island::chatlane::{self, Target};
+    use abito_island::localmodel::LocalEndpoint;
+    let state = app.state::<AppState>();
+    let Some(win) = main_window(app) else { return };
+    app.add_capability(tauri::ipc::CapabilityBuilder::new("validator-only")
+        .windows(["main","settings"]).permission("core:event:allow-emit"))
+        .expect("probe-only event evidence");
+    let result = Arc::new(Mutex::new(None::<serde_json::Value>));
+    let sink = result.clone();
+    let result_listener = app.listen("validate-result", move |event| {
+        *sink.lock().expect("validator result") = serde_json::from_str(event.payload()).ok();
+    });
+    let input_listener = app.listen("validate-input", |event| {
+        if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+            value["step"] = json!("validation_input"); emit(&value);
+        }
+    });
+    let install = |page: &tauri::WebviewWindow| {
+        let pos = page.inner_position().unwrap_or_default();
+        let scale = page.scale_factor().unwrap_or(1.0);
+        let _ = page.eval(format!("window.__validateOrigin={{x:{},y:{},scale:{}}};",pos.x,pos.y,scale));
+        let _ = page.eval(include_str!("../packaging/validate/browser.js"));
+    };
+    let run = |page: &tauri::WebviewWindow, expression: &str| -> serde_json::Value {
+        install(page);
+        *result.lock().expect("validator result") = None;
+        state.chat_probe.lock().expect("chat probe").clear();
+        let _ = page.eval(format!("try{{window.AbitoValidate.run(async()=>({expression})).catch(e=>window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{diagnostic:String(e)}}}}))}}catch(e){{window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{diagnostic:String(e),driver:typeof window.AbitoValidate}}}})}}"));
+        let end = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < end {
+            if let Some(value) = result.lock().expect("validator result").take() { return value; }
+            if let Some(value)=state.chat_probe.lock().expect("chat probe").pop() {
+                emit(&json!({"step":"validation_diagnostic","value":value}));
+                return json!({"ok":false,"reason":value});
+            }
+            sleep(Duration::from_millis(40));
+        }
+        json!({"ok":false,"reason":format!("sin respuesta del navegador: {expression}")})
+    };
+    // Capture only our private nonzero Xvfb screen. For Settings this also
+    // proves the separate window, rather than re-capturing the island.
+    let record = |name: &str, observation: serde_json::Value| {
+        if let (Ok(display), Ok(dir)) = (std::env::var("DISPLAY"), std::env::var("ABITO_PROBE_VISUAL_DIR")) {
+            if display.starts_with(':') && display.split('.').next() != Some(":0") {
+                let out = std::path::Path::new(&dir).join(format!("{name}.png"));
+                let status = std::process::Command::new("timeout").args(["8s","ffmpeg","-hide_banner","-loglevel","error","-y","-f","x11grab","-draw_mouse","0","-video_size","1280x900","-i",&display,"-frames:v","1"]).arg(&out).output();
+                emit(&json!({"step":"visual","name":name,"path":out,"ok":status.as_ref().map(|o|o.status.success()).unwrap_or(false),"source":"private Xvfb only"}));
+            }
+        }
+        emit(&json!({"step":"validation_observation","name":name,"observation":observation}));
+    };
+    install(&win);
+    let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
+    sleep(Duration::from_millis(500));
+    record("dictado-inactivo", run(&win,"AbitoValidate.dictationIdle()"));
+    record("sesiones-motor", run(&win,"AbitoValidate.sessions()"));
+    record("sin-motor-sin-productor", run(&win,"AbitoValidate.connection(false)"));
+
+    let fake = FakeModel::start(FakeModelConfig {reply:Reply::Stream {reasoning:false,pieces:vec!["respuesta del validador".into()],finish:"stop",gap_ms:600},..Default::default()});
+    let origin: &'static str = Box::leak(fake.origin().into_boxed_str());
+    {
+        let mut registry=state.models_registry.lock().expect("registry");
+        for entry in registry.iter_mut() {if entry.profile_id=="local-abito-gpt" {entry.origin=origin;}}
+    }
+    *state.chat_target.lock().expect("target") = Some(Target {endpoint:LocalEndpoint::parse(origin).expect("loopback"),alias:"Abito-gpt".into(),profile:chatlane::default_target().profile,max_output:128});
+    crate::chathost::switch_view(app, &state, true);
+    sleep(Duration::from_millis(600));
+    let first = run(&win,"AbitoValidate.chatFirst()");
+    if first["ok"] == true {
+        let _ = app.emit("chat:state", &first["stale"]);
+        sleep(Duration::from_millis(250));
+        record("chat-segundo-turno",run(&win,"AbitoValidate.chatSecond()"));
+    } else { record("chat-segundo-turno",first); }
+    fake.shutdown();
+    crate::chathost::switch_view(app, &state, false);
+    sleep(Duration::from_millis(500));
+    // This is the test producer used by transport_receiver.rs, on the actual
+    // receiver endpoint (the ABITO_DESKTOP_SOCKET used by the Pi adapter).
+    let producer = (|| -> Result<(),String> {
+        let endpoint = state.transport.lock().expect("transport").as_ref().map(|t|t.endpoint().to_path_buf()).ok_or("sin receptor")?;
+        let mut stream = UnixStream::connect(endpoint).map_err(|e|e.to_string())?;
+        stream.set_read_timeout(Some(Duration::from_secs(4))).map_err(|e|e.to_string())?;
+        stream.set_write_timeout(Some(Duration::from_secs(4))).map_err(|e|e.to_string())?;
+        let mut reader = BufReader::new(stream.try_clone().map_err(|e|e.to_string())?);
+        let send = |stream: &mut UnixStream, mut frame:serde_json::Value| -> Result<(),String> {
+            frame["v"]=json!(1);frame["project"]=json!(state.project);frame["sessionId"]=json!("validator-pi");frame["at"]=json!(crate::now_ms() as u64);
+            writeln!(stream,"{frame}").map_err(|e|e.to_string())
+        };
+        let read = |reader:&mut BufReader<UnixStream>| -> Result<String,String> {let mut line=String::new();reader.read_line(&mut line).map_err(|e|e.to_string())?;Ok(line)};
+        send(&mut stream,json!({"type":"hello"}))?;
+        let ready=read(&mut reader)?;
+        if ready.as_bytes()!=abito_island::protocol::READY_LINE {return Err(format!("hello: {ready}"));}
+        record("sin-motor-con-productor",run(&win,"AbitoValidate.connection(true)"));
+        send(&mut stream,json!({"type":"settled","id":"validator-notice","projectName":"Validador","agent":"pi"}))?;
+        record("pi-aviso",run(&win,"AbitoValidate.notice()"));
+        send(&mut stream,json!({"type":"questions_hello","questionVersion":1}))?;
+        let ready=read(&mut reader)?;
+        if !ready.contains("questions_ready") {return Err(format!("questions hello: {ready}"));}
+        let id="3f2b8a41-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        send(&mut stream,json!({"type":"question","questionVersion":1,"id":id,"kind":"question","text":"¿Validar esta pantalla?","options":[{"value":"validate","label":"Validar","description":""},{"value":"cancel","label":"Cancelar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
+        let mut observation=run(&win,"AbitoValidate.answerQuestion()");
+        if observation["ok"]==true {
+            let answer:serde_json::Value=serde_json::from_str(&read(&mut reader)?).map_err(|e|e.to_string())?;
+            observation["ok"]=json!(answer["type"]=="answer" && answer["id"]==id && answer["answer"]["value"]=="validate");
+            observation["producer_received"]=answer;
+            observation["reason"]=json!("respuesta no llegó al productor Pi");
+        }
+        record("pi-pregunta",observation);
+        Ok(())
+    })();
+    if let Err(error)=producer {
+        emit(&json!({"step":"validation_producer_error","reason":error}));
+    }
+    let gear=run(&win,"AbitoValidate.gear()");
+    let end=Instant::now()+Duration::from_secs(10);
+    let settings=loop {
+        if let Some(page)=app.get_webview_window("settings") {break Some(page);}
+        if Instant::now()>=end {break None;}
+        sleep(Duration::from_millis(50));
+    };
+    let mut gear=gear;
+    gear["ok"]=json!(gear["ok"]==true && settings.is_some());
+    record("ajustes-engranaje",gear);
+    if let Some(page)=settings {
+        sleep(Duration::from_millis(1000));
+        install(&page);
+        let catalog:serde_json::Value=serde_json::from_str(include_str!("../packaging/validate/pages.json")).expect("page catalog");
+        for (index,id) in catalog.as_array().expect("pages").iter().enumerate() {
+            let id=id.as_str().expect("page id");
+            record(&format!("ajustes-{id}"),run(&page,&format!("AbitoValidate.hub({index},{id:?})")));
+        }
+        record("ajustes-cuentas-keyring",json!({"ok":true,"unverifiable":"sin servicio de secretos privado; no se leen claves del usuario"}));
+    }
+    app.unlisten(result_listener); app.unlisten(input_listener);
 }

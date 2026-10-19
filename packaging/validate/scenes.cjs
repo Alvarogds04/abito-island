@@ -1,0 +1,10 @@
+'use strict';
+const hubPages = require('./pages.json');
+const extraScenes = ['chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta', 'ajustes-engranaje', ...hubPages.map(p => `ajustes-${p}`), 'ajustes-cuentas-keyring'];
+function classify(observation) {
+  const o = observation || {};
+  if (o.ok !== true || o.errors?.length) return { verdict: 'fail', reason: o.reason || o.errors?.join('; ') || 'falta evidencia de comportamiento', evidence: o };
+  if (o.unverifiable) return { verdict: 'unverifiable', reason: o.unverifiable, evidence: o };
+  return { verdict: 'pass', evidence: o };
+}
+module.exports = { hubPages, extraScenes, classify };

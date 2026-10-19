@@ -1,0 +1,22 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { classify, extraScenes, hubPages } = require('../packaging/validate/scenes.cjs');
+const expected = ['chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta'];
+for (const name of expected) assert(extraScenes.includes(name), `missing ${name}`);
+for (const page of ['general','agents','pills','chat','integrations','shortcuts','voice','dictation','flowsettings','dictionary','snippets','styles','insights','notes','phone']) assert(hubPages.includes(page), `missing hub page ${page}`);
+assert.equal(classify({ok:true}).verdict, 'pass');
+assert.equal(classify({ok:false,reason:'composer locked'}).verdict, 'fail');
+assert.equal(classify({ok:true,errors:['uncaught']}).verdict, 'fail');
+assert.equal(classify({}).verdict, 'fail', 'missing evidence cannot pass');
+assert.equal(classify({ok:true,unverifiable:'no keyring'}).verdict, 'unverifiable');
+assert.equal(classify({ok:false,reason:'blank',unverifiable:'no keyring'}).verdict, 'fail', 'render failure wins over environmental limitation');
+assert.equal(classify(null).verdict, 'fail');
+assert(extraScenes.includes('ajustes-engranaje'));
+for (const page of hubPages) assert(extraScenes.includes(`ajustes-${page}`));
+// Detect hub additions rather than silently skipping them.
+const fs = require('node:fs');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../frontend/vendor/coucou/hub/shell.js'), 'utf8');
+const ids = [...source.matchAll(/\{ id: "([a-z]+)", icon:/g)].map(m => m[1]);
+assert.deepEqual([...hubPages].sort(), ids.sort());
+console.log('validate-scenes: 33 behavior/catalog checks passed');

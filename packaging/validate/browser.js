@@ -1,0 +1,202 @@
+// Probe-only browser driver. Compiled only through src/probe.rs (feature probe).
+// Trusted clicks/keys are requested from the external validator, never injected
+// by the app. Native reads and DOM reads are both required for a pass.
+(() => {
+  if (window.AbitoValidate) return;
+  const errors = [];
+  addEventListener('error', e => errors.push(String(e.message)));
+  addEventListener('unhandledrejection', e => errors.push(String(e.reason)));
+  const original = console.error;
+  console.error = (...args) => { errors.push(args.map(String).join(' ')); original.apply(console, args); };
+  let calls=Promise.resolve();
+  const invoke = (command, payload) => {
+    const next=calls.then(()=>new Promise(r=>setTimeout(r,120))).then(()=>window.__TAURI__.core.invoke(command,{payload}));
+    calls=next.catch(()=>{}); return next;
+  };
+  const emit = (event, payload) => window.__TAURI__.event.emit(event, payload);
+  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  async function wait(check, description, ms = 6500) {
+    const deadline = performance.now() + ms;
+    let value;
+    while (performance.now() < deadline) {
+      value = await check(); if (value) return value;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error(`tiempo agotado: ${description}`);
+  }
+  const visible = el => !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[inert]');
+  async function click(el) {
+    if (!el || el.disabled) throw new Error('control ausente o deshabilitado');
+    el.scrollIntoView({ block: 'center', inline: 'center' }); await frame(); await frame();
+    const r = el.getBoundingClientRect(), o = window.__validateOrigin;
+    if (!visible(el)) throw new Error('control no visible');
+    await emit('validate-input', { kind:'click', x:Math.round(o.x + (r.x+r.width/2)*o.scale), y:Math.round(o.y + (r.y+r.height/2)*o.scale) });
+  }
+  async function key(key) { await emit('validate-input', { kind:'key', key }); }
+  const byId = id => document.getElementById(id);
+  async function chatFirst() {
+    await invoke('chat_action', {action:'check'});
+    await wait(async () => (await invoke('chat_action',{action:'view'})).availability?.state === 'ready', 'modelo falso listo');
+    const input = byId('chat-input');
+    input.value = 'primera pregunta del validador'; input.dispatchEvent(new Event('input'));
+    await wait(() => !byId('chat-send').disabled, 'Enviar habilitado');
+    await click(byId('chat-send'));
+    const stale = await wait(async () => { const v=await invoke('chat_action',{action:'view'}); return v.active_turn && v; }, 'turno en curso');
+    const terminal = await wait(async () => { const v=await invoke('chat_action',{action:'view'}); return !v.active_turn && v.turns.some(t=>t.state==='completed' && t.reply.includes('respuesta del validador')) && v; }, 'respuesta completada', 15000);
+    await wait(() => !input.disabled && byId('chat-log').textContent.includes('respuesta del validador'), 'respuesta dibujada');
+    window.__validateChat = { stale, terminal };
+    const cancel=byId('chat-cancel');
+    const observer=new MutationObserver(records=>{
+      if(records.some(r=>r.oldValue===null) || !cancel.hidden) window.__validateChat.cancel_was_shown=true;
+    });
+    observer.observe(cancel,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+    window.__validateChat.observer=observer;
+    const turn=stale.turns.at(-1);
+    window.__validateChat.unlisten=await window.__TAURI__.event.listen('chat:state', e=>{
+      const t=e.payload?.turns?.find(t=>t.turn_id===turn.turn_id);
+      if(t?.seq!==turn.seq) return;
+      window.__validateChat.staleObservation={composer_enabled:!input.disabled,cancel_visible:visible(byId('chat-cancel')),state:byId('chat-state').outerHTML};
+    });
+    return {ok:true, stale, terminal};
+  }
+  async function chatSecond() {
+    // Rust publishes the captured in-flight snapshot AFTER completed, on the
+    // same event lane as a delayed real publisher. An RPC cannot mask it here.
+    await frame(); await frame();
+    const {stale, terminal,staleObservation,unlisten} = window.__validateChat;
+    if(unlisten) unlisten();
+    window.__validateChat.observer.disconnect();
+    if(window.__validateChat.cancel_was_shown) return {ok:false,reason:'snapshot tardío volvió a mostrar Cancelar (turno en curso)',staleObservation};
+    if(!staleObservation) return {ok:false,reason:'no se observó la entrega del snapshot tardío'};
+    if(!staleObservation.composer_enabled || staleObservation.cancel_visible) return {ok:false,reason:'snapshot tardío volvió a bloquear el compositor',staleObservation};
+    const input=byId('chat-input'), state=byId('chat-state');
+    if (input.disabled || state.dataset.kind === 'busy' || visible(byId('chat-cancel'))) return {ok:false,reason:'snapshot tardío volvió a bloquear el compositor',state:state.outerHTML};
+    input.value='segunda pregunta en la misma conversación'; input.dispatchEvent(new Event('input'));
+    if (byId('chat-send').disabled) return {ok:false,reason:'Enviar sigue bloqueado tras completed',state:state.outerHTML};
+    await click(byId('chat-send'));
+    const second=await wait(async()=>{const v=await invoke('chat_action',{action:'view'});return !v.active_turn && v.turns.filter(t=>t.state==='completed').length===2 && v;},'segundo turno completado',15000);
+    await wait(()=>!input.disabled && !visible(byId('chat-cancel')), 'compositor libre tras segundo turno');
+    return {ok:second.conversation_id===terminal.conversation_id,reason:'el segundo mensaje cambió de conversación',conversation_id:second.conversation_id,turns:second.turns,stale_seq:stale.turns.at(-1)?.seq,completed_seq:terminal.turns.at(-1)?.seq,composer_enabled:!input.disabled,staleObservation,state:state.outerHTML};
+  }
+  async function dictationIdle() {
+    const s=await invoke('dictation_action',{action:'status'});
+    const prefs=Object.fromEntries(['enabled','key','edge','mic','keepDays','cleanup','defaultStyle'].map(k=>[k,s.prefs[k]]));
+    await invoke('dictation_action',{action:'set_prefs',prefs:{...prefs,enabled:true}});
+    // The real pill refreshes status on open, with a five-second throttle.
+    // Force that PUBLIC lifecycle after enabling, so a hidden pill with a
+    // stale disabled status cannot give us a false pass.
+    await invoke('desktop_action',{action:'close'});
+    await new Promise(resolve=>setTimeout(resolve,5200));
+    await invoke('desktop_action',{action:'expand'});
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    await wait(()=>document.querySelector('.dpill'), 'pill montada');
+    await frame(); await frame();
+    const pill=document.querySelector('.dpill'), css=getComputedStyle(pill), rect=pill.getBoundingClientRect();
+    return {ok:pill.hidden && css.display==='none' && rect.width===0 && rect.height===0,reason:'pill de dictado visible en idle con función habilitada',hidden:pill.hidden,display:css.display,rect:[rect.width,rect.height],phase:byId('capsule').dataset.dictation||'idle'};
+  }
+  async function sessions() {
+    const seen=[byId('overview-view').textContent];
+    // Observe actual rendered text during initial asynchronous request and at
+    // least two ticker polls; even a transient unavailable message is a failure.
+    const observer=new MutationObserver(()=>seen.push(byId('overview-view').textContent));
+    observer.observe(byId('overview-view'),{subtree:true,childList:true,characterData:true});
+    try {
+      await invoke('agent_action',{action:'view'});
+      let last;
+      try { await wait(async()=>{await invoke('agent_action',{action:'view'});last=await invoke('agent_action',{action:'sessions_list'}); return last.connection==='connected' && Array.isArray(last.sessions?.rows);},'daemon conectado y lista de sesiones',15000); }
+      catch { const unavailable=seen.some(t=>t.includes('Sesiones no disponibles')); return {ok:false,reason:unavailable ? 'ticker mostró Sesiones no disponibles con daemon conectado' : 'daemon conectado pero sessions_list no devolvió una lista (no es una lista vacía)',unavailable_seen:unavailable,last}; }
+      const until=performance.now()+4500;
+      while(performance.now()<until){ seen.push(byId('overview-view').textContent); await frame(); }
+      const s=await invoke('agent_action',{action:'view'});
+      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')),reason:'ticker mostró Sesiones no disponibles con daemon conectado',connection:s.connection,rows:s.sessions?.rows,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:byId('overview-view').textContent};
+    } finally { observer.disconnect(); }
+  }
+  async function connection(connected) {
+    const word=byId('connection-word');
+    const snapshot=await wait(async()=>{const s=await invoke('desktop_action',{action:'snapshot'});return (connected ? s.connections>0 : s.connections===0) && s;},'conexiones nativas Pi');
+    // Do not accept the previous disconnected/connected label before its event
+    // paints. Check the settled label repeatedly, not merely one early match.
+    await new Promise(resolve=>setTimeout(resolve,500));
+    const words=[];
+    for(let i=0;i<4;i++){words.push(word.textContent);await new Promise(resolve=>setTimeout(resolve,250));}
+    return {ok:words.every(w=>connected ? w!=='Sin motor' : w==='Sin motor'),reason:'etiqueta Sin motor no coincide con conexiones reales',word:word.textContent,words,connections:snapshot.connections,aria:byId('connection')?.getAttribute('aria-label')};
+  }
+  async function notice() {
+    await wait(()=>byId('notices').textContent.includes('Validador'),'aviso Pi visible');
+    return {ok:true,text:byId('notices').textContent};
+  }
+  async function answerQuestion() {
+    const button=await wait(()=>[...document.querySelectorAll('#question-options .q-option')].find(b=>visible(b) && b.textContent.includes('Validar')),'pregunta y opción de Pi');
+    const text=byId('question')?.textContent || button.parentElement.textContent;
+    await click(button);
+    return {ok:true,text,input:'XTest sobre opción real de la isla'};
+  }
+  async function gear() {
+    await click(visible(byId('open-settings')) ? byId('open-settings') : byId('open-screen-settings'));
+    return {ok:true,input:'XTest sobre engranaje público'};
+  }
+  async function snapshot() {
+    return {prefs:await invoke('prefs_action',{action:'view'}),dictation:(await invoke('dictation_action',{action:'status'})).prefs,voice:(await invoke('voice_action',{action:'status'})).prefs};
+  }
+  async function hub(index, page) {
+    const buttons=[...document.querySelectorAll('.hub-side .hub-item')];
+    if (!buttons[index]) throw new Error(`falta página ${page}`);
+    const previous=document.querySelector('.hub-page');
+    await click(buttons[index]);
+    await wait(()=>buttons[index].classList.contains('on') && document.querySelector('.hub-page')!==previous,'página '+page);
+    const root=document.querySelector('.hub-page');
+    await wait(()=>root.textContent.trim().length>20 && root.querySelector('button,input,select,textarea'), 'contenido y controles '+page);
+    const text=root.textContent;
+    if (/No se pudieron (leer|abrir) los ajustes/.test(text)) return {ok:false,reason:'renderer de ajustes mostró su fallback de error',text};
+    const controls=[...root.querySelectorAll('button,input,select,textarea')];
+    const before=await snapshot();
+    let effect, limitation;
+    const buttonByText=t=>[...root.querySelectorAll('button')].find(b=>b.textContent.trim()===t && !b.disabled);
+    const assertChanged=async()=>wait(async()=>{const after=await snapshot();return JSON.stringify(before)!==JSON.stringify(after) && after;},'preferencia persistida '+page);
+    if(page==='notes'||page==='phone') {
+      limitation='página pública renderizada; controles de la función deshabilitados por el producto';
+    } else if(page==='dictionary'||page==='snippets') {
+      const fields=[...root.querySelectorAll('input,textarea')].filter(e=>!e.disabled);
+      fields[0].value=page==='dictionary'?'Validador':'firma validador';
+      if(page==='snippets') fields[1].value='Texto privado del validador';
+      const b=buttonByText(page==='dictionary'?'Añadir':'Guardar') || buttonByText(page==='dictionary'?'Agregar':'Save') || root.querySelector('button.primary');
+      await click(b);
+      const action=page==='dictionary'?'words':'snippets';
+      effect=await wait(async()=>{const data=await invoke('dictation_action',{action});return JSON.stringify(data).includes(page==='dictionary'?'Validador':'firma validador') && data;},'dato guardado '+page);
+    } else if(page==='insights'||page==='pills') {
+      const segment=root.querySelector('.hub-segmented');
+      const target=segment && [...segment.querySelectorAll('button')].find(b=>!b.classList.contains('on'));
+      const selected=target.textContent;
+      await click(target); await wait(()=>[...document.querySelectorAll('.hub-segmented button')].some(b=>b.textContent===selected && b.classList.contains('on')),'selección de vista '+page);
+      effect={selected:target.textContent,observable:'selección visual local; no cambia configuración'};
+    } else if(page==='dictation') {
+      const toggle=root.querySelector('.switch:not(:disabled)');
+      await click(toggle); effect=await assertChanged();
+    } else if(page==='voice') {
+      const segment=root.querySelector('.hub-segmented');
+      const target=[...segment.querySelectorAll('button')].find(b=>b.textContent.includes('texto')) || segment.querySelector('button:last-child');
+      await click(target); effect=await assertChanged();
+    } else if(page==='styles'||page==='flowsettings') {
+      // Keyboard navigation on a real select produces trusted change events.
+      const selects=[...root.querySelectorAll('select')].filter(s=>!s.disabled && s.options.length>1);
+      const select=page==='flowsettings'?selects.at(-1):selects[0];
+      await click(select); await key('Down'); await key('Return'); effect=await assertChanged();
+    } else {
+      const selector=page==='general'?'#hub-sound':page==='shortcuts'?'#shortcut-desktopToggle .switch':'.switch:not(:disabled)';
+      const control=root.querySelector(selector);
+      if(!control) throw new Error('no se encontró control seguro en '+page);
+      await click(control);
+      if(page==='shortcuts') effect=await wait(async()=>{const h=await invoke('hotkey_action',{action:'view',id:'desktopToggle'});return h.enabled===false && h;},'atajo desactivado');
+      else effect=await assertChanged();
+    }
+    return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
+  }
+  async function run(expression) {
+    let result;
+    try { result=await expression(); }
+    catch(e) {result={ok:false,reason:typeof e==='string' ? e : (e.code ? JSON.stringify(e) : e.message || String(e))};}
+    result.errors=[...errors];
+    await emit('validate-result',result);
+  }
+  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,answerQuestion,gear,hub};
+})();
