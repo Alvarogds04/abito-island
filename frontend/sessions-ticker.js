@@ -124,33 +124,31 @@
   }
 
   // ---- the feed of Coucou's Ticker (S10) --------------------------------------------
-  // The ticker shows the last two STEPS of a task. Abito's sessions are a live list, so a step is a
-  // session row that appeared (or a one-time notice that the list is bounded / unavailable). `memory`
-  // is the caller's object; the result is the task shape Ticker.sync reads, plus whether to show it.
-  const LOG_CAP = 20; // Coucou caps steps at 20 too (core/state.ts)
-  const newMemory = () => ({ log: [], seq: 0, prev: new Set(), error: false, bounded: false, focus: null });
+  // Process discovery is NOT a tool-event stream. Until the daemon projects real
+  // tools, keep the session identity but explicitly report missing steps instead
+  // of fabricating work from changes of cwd, process state or the session list.
+  const newMemory = () => ({ log: [], seq: 0, focus: null });
   function feed(memory, view) {
     if (view && view.state === 'pending') return { active: false, task: null, who: null };
+    const previous = memory.log.join('\n');
     if (!view || view.state !== 'ready') {
-      if (!memory.error) { memory.error = true; memory.log.push(errorText()); memory.seq++; }
+      memory.log = [errorText()]; memory.focus = null;
     } else {
-      memory.error = false;
-      const texts = view.rows.map(r => r.text);
-      for (const row of view.rows) if (!memory.prev.has(row.text)) { memory.log.push(row.text); memory.seq++; memory.focus = row; }
-      if (memory.focus && !texts.includes(memory.focus.text)) memory.focus = view.rows[view.rows.length - 1] || null; // the focused session ended
-      memory.prev = new Set(texts);
-      if (view.truncated && !memory.bounded) { memory.log.push(boundedText(view)); memory.seq++; }
-      memory.bounded = view.truncated;
-      if (!texts.length && !memory.error) { // nothing running: forget the history, show nothing
-        memory.log = []; memory.seq = 0; memory.bounded = false; memory.focus = null;
+      memory.focus = view.rows.find(r => r.id === memory.focus?.id) || view.rows[0] || null;
+      if (!view.rows.length) {
+        memory.log = []; memory.seq = 0; memory.focus = null;
         return { active: false, task: null, who: null };
       }
+      memory.log = ['Pasos de herramientas no disponibles'];
+      if (view.truncated) memory.log.push(boundedText(view));
     }
-    if (memory.log.length > LOG_CAP) memory.log = memory.log.slice(-LOG_CAP);
+    // Ticker.sync uses a monotonic index, not text equality, to detect updates.
+    // Advance on notice transitions too, without counting process metadata.
+    if (memory.log.join('\n') !== previous) memory.seq += memory.log.length;
     const steps = memory.log.slice();
-    // Coucou's who-row: the focused session's project, what kind of agent it is, and «n/N» steps when there is more than one.
+    // Neither the availability notice nor the bounded-list notice is a tool.
     const f = memory.focus;
-    const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: steps.length > 1 ? `${steps.length}/${steps.length}` : '' } : null;
+    const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: '' } : null;
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
   }
 
@@ -190,13 +188,13 @@ function mount(V) {
     const key = rows.map(r => r.id).join('|');
     if (key === gridKey) return;
     gridKey = key;
-    for (const m of minis) { try { m.destroy(); } catch (_) { /* decoration */ } }
+    for (const m of minis) { try { m.destroy(); } catch { /* decoration */ } }
     minis = []; grid.replaceChildren(); grid.dataset.count = String(rows.length);
     if (typeof AbitoClay === 'undefined') return;
     for (const r of rows) {
       const slot = document.createElement('span'); slot.className = 'mini'; slot.title = r.text;
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); slot.append(svg); grid.append(slot);
-      try { minis.push(AbitoClay.create(svg, { state: 'idle', live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch (_) { /* decoration */ }
+      try { minis.push(AbitoClay.create(svg, { state: 'idle', live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch { /* decoration */ }
     }
   }
   function show(view) {

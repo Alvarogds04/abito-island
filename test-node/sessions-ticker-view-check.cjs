@@ -85,18 +85,21 @@ test('render is DOM-guarded: no rows clears and hides; rows are textContent-only
 });
 
 // ---- the feed of Coucou's Ticker (S10) ------------------------------------------
-test('feed: a session that appears is one step; the same list again adds nothing; stepSeq is the newest step index', () => {
+test('feed: process discovery and idle state changes never impersonate tool steps', () => {
   const m = T.newMemory();
   const v1 = T.sessionsView(frame());
   let r = T.feed(m, v1);
   assert.equal(r.active, true);
-  assert.deepEqual(r.task, { steps: ['Pi · mi-proyecto · inactiva · en herdr'], stepSeq: 0, finalLine: null });
+  assert.deepEqual(r.task, { steps: ['Pasos de herramientas no disponibles'], stepSeq: 0, finalLine: null });
+  assert.equal(r.who.count, '', 'no invented n/m without tool events');
   r = T.feed(m, v1);
   assert.equal(r.task.steps.length, 1, 'unchanged list: no new step');
   const v2 = T.sessionsView(frame({ sessions: [row(), row({ id: 's-0123abce', kind: 'codex', cwd: 'otro', state: 'running', origin: null })] }));
   r = T.feed(m, v2);
-  assert.deepEqual([r.task.steps.length, r.task.stepSeq], [2, 1]);
-  assert.equal(r.task.steps[1], 'Codex · otro · ejecutando');
+  assert.deepEqual([r.task.steps.length, r.task.stepSeq], [1, 0]);
+  r = T.feed(m, T.sessionsView(frame({ sessions: [row({ state: 'running' })] })));
+  assert.deepEqual(r.task.steps, ['Pasos de herramientas no disponibles']);
+  assert.equal(r.task.stepSeq, 0);
 });
 
 test('feed: no sessions hides the ticker and forgets the history; an error is shown once; bounded lists say so once', () => {
@@ -114,11 +117,24 @@ test('feed: no sessions hides the ticker and forgets the history; an error is sh
   assert.equal(again.task.steps.filter(x => x === T.boundedText({ state: 'ready', truncated: true })).length, 1);
 });
 
-test('feed: the log is capped at 20 steps and stepSeq keeps counting', () => {
+test('feed: recovery changes the ticker index so the unavailable line cannot stick', () => {
+  const m = T.newMemory();
+  const unavailable = T.feed(m, { state: 'error' });
+  const recovered = T.feed(m, T.sessionsView(frame()));
+  assert.ok(recovered.task.stepSeq > unavailable.task.stepSeq);
+  assert.deepEqual(recovered.task.steps, ['Pasos de herramientas no disponibles']);
+  const unavailableAgain = T.feed(m, { state: 'error' });
+  assert.ok(unavailableAgain.task.stepSeq > recovered.task.stepSeq);
+  assert.equal(unavailableAgain.who, null);
+});
+
+test('feed: repeated process metadata updates do not accumulate history', () => {
   const m = T.newMemory();
   let r;
   for (let i = 0; i < 25; i++) r = T.feed(m, T.sessionsView(frame({ sessions: [row({ cwd: `p${i}` })] })));
-  assert.equal(r.task.steps.length, 20); assert.equal(r.task.stepSeq, 24);
+  assert.equal(r.task.steps.length, 1); assert.equal(r.task.stepSeq, 0);
+  assert.equal(r.who.name, 'p24');
+  assert.equal(r.who.count, '');
 });
 
 test('wiring: the mount feeds Coucou\'s Ticker through a dynamic import of the vendored module', () => {

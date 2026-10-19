@@ -130,7 +130,7 @@ test('finished card markup + wiring: lives inside #notices, survives the boot re
 });
 
 // ---- slice 4/5: overview with sessions, calm strip, Spotify tile, character badge -------------------
-test('sessions feed drives the who-row: focused session project + agent kind + n/N steps (none with one step, none when idle)', () => {
+test('sessions feed keeps session identity without pretending process discovery is tool history', () => {
   const T = require(path.join(frontend, 'sessions-ticker.js'));
   const fr = rows => ({ type: 'sessions', schema: 'abito-sessions/view/1', sessions: rows, truncated: false });
   const row = (id, kind, cwd) => ({ id, kind, cwd, state: 'running', origin: null });
@@ -138,9 +138,9 @@ test('sessions feed drives the who-row: focused session project + agent kind + n
   let r = T.feed(m, T.sessionsView(fr([row('s-0123abcd', 'claude-code', 'sb')])));
   assert.deepEqual(r.who, { name: 'sb', tool: 'Claude Code', count: '' });
   r = T.feed(m, T.sessionsView(fr([row('s-0123abcd', 'claude-code', 'sb'), row('s-4567ef01', 'codex', 'abito')])));
-  assert.deepEqual(r.who, { name: 'abito', tool: 'Codex', count: '2/2' }, 'the newest session takes the focus');
+  assert.deepEqual(r.who, { name: 'sb', tool: 'Claude Code', count: '' }, 'an unrelated session neither steals focus nor adds a tool step');
   r = T.feed(m, T.sessionsView(fr([row('s-0123abcd', 'claude-code', 'sb')])));
-  assert.equal(r.who.name, 'sb', 'the focused session ended: focus falls back to the one that remains');
+  assert.equal(r.who.name, 'sb', 'remaining session identity is stable');
   assert.equal(T.feed(m, T.sessionsView(fr([]))).who, null);
 });
 

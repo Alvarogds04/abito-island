@@ -108,7 +108,11 @@
       const until=performance.now()+4500;
       while(performance.now()<until){ seen.push(byId('overview-view').textContent); await frame(); }
       const s=await invoke('agent_action',{action:'view'});
-      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')),reason:'ticker mostró Sesiones no disponibles con daemon conectado',connection:s.connection,rows:s.sessions?.rows,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:byId('overview-view').textContent};
+      const card=byId('overview-view');
+      const rows=s.sessions?.rows || [];
+      const count=card.querySelector('.who .count');
+      const truthfulSteps=rows.length===0 || (card.textContent.includes('Pasos de herramientas no disponibles') && (!count || count.hidden || count.textContent===''));
+      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')) && truthfulSteps,reason:'sesiones no disponibles con daemon conectado o metadatos de procesos presentados como pasos',connection:s.connection,rows:s.sessions?.rows,truthfulSteps,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:card.textContent};
     } finally { observer.disconnect(); }
   }
   async function connection(connected) {
