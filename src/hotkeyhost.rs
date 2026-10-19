@@ -126,6 +126,12 @@ fn press_target_on_main(app: &AppHandle, target: Target) {
             if target == Target::DesktopToggle {
                 let _ = inner.emit_to("main", "desktop-character-toggle", ());
             } else {
+                // These two shortcuts explicitly ask to work in the island.
+                // Reveal before focusing: a hidden window cannot take focus.
+                if matches!(target, Target::OpenChat | Target::GoToAlert) {
+                    let _ = dispatch_verb(&inner, &state, Action::Expand, None);
+                    if let Some(win) = crate::main_window(&inner) { let _ = win.set_focus(); }
+                }
                 let _ = inner.emit_to("main", "global-shortcut", target.id());
             }
         }

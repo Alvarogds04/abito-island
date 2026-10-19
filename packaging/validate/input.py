@@ -19,14 +19,14 @@ if not display:
 try:
     if len(sys.argv) == 3 and sys.argv[1] == 'key':
         key = sys.argv[2]
-        if key not in ('Down', 'Up', 'Return', 'Escape', 'BackSpace', 'Ctrl+F8', 'Ctrl+Alt+A'):
+        if key not in ('Down', 'Up', 'Return', 'Escape', 'BackSpace', 'Ctrl+F8', 'Ctrl+Alt+A', 'Ctrl+Alt+space', 'Ctrl+Alt+s', 'Ctrl+Alt+t', 'Ctrl+Alt+Shift+a'):
             raise SystemExit('key not allowlisted')
         x.XStringToKeysym.argtypes = [C.c_char_p]
         x.XStringToKeysym.restype = C.c_ulong
         x.XKeysymToKeycode.argtypes = [C.c_void_p, C.c_ulong]
         x.XKeysymToKeycode.restype = C.c_uint
         t.XTestFakeKeyEvent.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_ulong]
-        names = {'Ctrl': 'Control_L', 'Alt': 'Alt_L'}
+        names = {'Ctrl': 'Control_L', 'Alt': 'Alt_L', 'Shift': 'Shift_L'}
         codes = [x.XKeysymToKeycode(display, x.XStringToKeysym(names.get(k, k).encode('ascii'))) for k in key.split('+')]
         if not all(codes):
             raise SystemExit('key unavailable')

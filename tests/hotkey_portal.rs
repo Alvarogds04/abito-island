@@ -43,7 +43,7 @@ struct FakePortal { strict_app_id: bool, version_delay: Duration, dialog: Dialog
 
 /// Everything one fake portal remembers; NEVER shared between tests running in parallel.
 #[derive(Default)]
-struct ServerState { active_session: std::sync::Mutex<Option<String>>, last_sender: std::sync::Mutex<String>, registered: std::sync::Mutex<HashMap<String, String>> }
+struct ServerState { descriptions: std::sync::Mutex<HashMap<String, String>>, active_session: std::sync::Mutex<Option<String>>, last_sender: std::sync::Mutex<String>, registered: std::sync::Mutex<HashMap<String, String>> }
 
 #[zbus::interface(name = "org.freedesktop.portal.GlobalShortcuts")]
 impl FakePortal {
@@ -80,6 +80,8 @@ impl FakePortal {
         let (id, props) = &shortcuts[0];
         let trigger: String = props.get("preferred_trigger").and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
         self.binds.lock().unwrap().push((id.clone(), trigger));
+        let description=props.get("description").and_then(|v|String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
+        self.state.descriptions.lock().unwrap().insert(id.clone(),description);
         let conn = self.conn.get().unwrap().clone();
         let path = format!("/org/freedesktop/portal/desktop/request/{}/{}", self.state.last_sender.lock().unwrap().clone(), token);
         let dialog = self.dialog;
@@ -340,4 +342,22 @@ fn a_portal_without_the_registry_still_works_like_before() {
     let (g, _rx) = start(&bus, "Ctrl+Alt+A");
     assert!(wait_status(&g, Status::Active, 4000), "no Registry on the bus: the shortcut still binds; got {:?}", g.status());
     g.stop();
+}
+
+#[test]
+fn every_catalog_action_sends_its_own_human_description_to_the_portal() {
+    use abito_island::hotkey::{Target,HotkeyConfig};
+    let expected = ["Mostrar u ocultar la isla de Abito", "Enviar Abito al escritorio o traerlo a casa",
+        "Abrir el chat de Abito", "Ir al permiso o pregunta pendiente", "Enfocar una terminal abierta",
+        "Ir a la siguiente pestaña", "Ir a la pestaña anterior", "Silenciar o activar el sonido de Abito",
+        "Abrir o cerrar el guardarropa"];
+    let bus=Bus::start();
+    let _server=serve(&bus,Dialog::Accept);
+    for (target,description) in Target::ALL.into_iter().zip(expected) {
+        let grab=PortalGrabber::start_with_id(Some(&bus.address),HotkeyConfig::default_for(target).combo,target.portal_id(),||{});
+        assert!(wait_status(&grab,Status::Active,3000),"{:?}",grab.status());
+        let server=STATES.lock().unwrap().get(&bus.address).unwrap().clone();
+        assert_eq!(server.descriptions.lock().unwrap().get(target.portal_id()).map(String::as_str),Some(description));
+        grab.stop();
+    }
 }

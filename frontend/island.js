@@ -1246,6 +1246,34 @@
     renderCard(); render();
     document.dispatchEvent(new CustomEvent('island:view', { detail: 'overview' }));
   });
+  // Native X11/portal callbacks emit this closed action ID to the main window.
+  // Never synthesize an approval click: jumping only changes presentation.
+  const globalShortcutListen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  if (globalShortcutListen && invoke) globalShortcutListen('global-shortcut', event => {
+    const id = event && event.payload;
+    const feedback = message => { const live = $('notice-live'); if (live) live.textContent = message; };
+    if (id === 'openChat') {
+      const button = $('open-chat'); if (button) button.click();
+    } else if (id === 'goToAlert') {
+      const pending = capsule.dataset.question === 'pending' || (current && validCard(current.card) && current.card.state === 'pending');
+      if (!pending) { feedback('No hay permisos ni preguntas pendientes.'); return; }
+      invoke('chat_action', { payload: { action: 'back' } }).then(() => {
+        noticeLane = null; delete capsule.dataset.noticeView;
+        renderCard(); render();
+        document.dispatchEvent(new CustomEvent('island:view', { detail: 'overview' }));
+      }, () => feedback('No se pudo mostrar la solicitud pendiente.'));
+    } else if (id === 'jumpToTerminal') {
+      capsule.dataset.shortcutTerminal = 'pending';
+      // No exact session/window identity is available here. Keep the existing
+      // closed class-based host contract, never pretend this selected a session.
+      invoke('focus_host', { payload: { target: 'terminal' } }).then(() => {
+        capsule.dataset.shortcutTerminal = 'focused-class';
+      }, error => {
+        capsule.dataset.shortcutTerminal = 'unavailable';
+        feedback(error && typeof error.message === 'string' ? error.message : 'No se pudo enfocar una terminal.');
+      });
+    }
+  }).catch(() => {});
   // Filter the real model list only. The existing controller remains the sole
   // owner of refresh, readiness, selection and host calls; no sample accounts.
   const search = $('models-search'), modelList = $('models-list');

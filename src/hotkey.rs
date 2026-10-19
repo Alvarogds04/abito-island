@@ -256,6 +256,19 @@ impl Target {
             Self::WardrobeToggle => "wardrobeToggle",
         }
     }
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::ToggleIsland => "Mostrar u ocultar la isla de Abito",
+            Self::DesktopToggle => "Enviar Abito al escritorio o traerlo a casa",
+            Self::OpenChat => "Abrir el chat de Abito",
+            Self::GoToAlert => "Ir al permiso o pregunta pendiente",
+            Self::JumpToTerminal => "Enfocar una terminal abierta",
+            Self::NextPill => "Ir a la siguiente pestaña",
+            Self::PrevPill => "Ir a la pestaña anterior",
+            Self::MuteToggle => "Silenciar o activar el sonido de Abito",
+            Self::WardrobeToggle => "Abrir o cerrar el guardarropa",
+        }
+    }
     pub fn portal_id(self) -> &'static str {
         match self {
             Self::ToggleIsland => portal::SHORTCUT_ID,

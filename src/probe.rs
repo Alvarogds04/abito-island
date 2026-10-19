@@ -2768,11 +2768,58 @@ fn feature_validation(app: &AppHandle) {
         record("sin-motor-con-productor",run(&win,"AbitoValidate.connection(true)"));
         send(&mut stream,json!({"type":"settled","id":"validator-notice","projectName":"Validador","agent":"pi"}))?;
         record("pi-aviso",run(&win,"AbitoValidate.notice()"));
+        // A private, clearly identified terminal-class fixture, not an actual
+        // session. Keep the X11 connection alive through native focus readback.
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::{ConnectionExt, CreateWindowAux, WindowClass, PropMode, AtomEnum};
+        use x11rb::wrapper::ConnectionExt as _;
+        let (terminal_conn, screen) = x11rb::connect(None).map_err(|e|e.to_string())?;
+        let root = terminal_conn.setup().roots[screen].root;
+        let terminal = terminal_conn.generate_id().map_err(|e|e.to_string())?;
+        terminal_conn.create_window(0,terminal,root,20,320,340,180,0,WindowClass::INPUT_OUTPUT,0,
+            &CreateWindowAux::new().background_pixel(0x223344)).map_err(|e|e.to_string())?;
+        terminal_conn.change_property8(PropMode::REPLACE,terminal,AtomEnum::WM_CLASS,AtomEnum::STRING,b"validator-terminal\0XTerm\0").map_err(|e|e.to_string())?;
+        terminal_conn.change_property8(PropMode::REPLACE,terminal,AtomEnum::WM_NAME,AtomEnum::STRING,b"Validator terminal class fixture (not a session)").map_err(|e|e.to_string())?;
+        terminal_conn.map_window(terminal).map_err(|e|e.to_string())?;
+        terminal_conn.flush().map_err(|e|e.to_string())?;
+        sleep(Duration::from_millis(400));
+        let mut shortcuts=run(&win,"AbitoValidate.shortcutDispatch()");
+        let active=abito_island::hotkey::x11::active_window(None);
+        shortcuts["terminal_native"]=json!({"expected":terminal,"active":active,"class_only":true});
+        shortcuts["ok"]=json!(shortcuts["ok"]==true && active==Some(terminal));
         send(&mut stream,json!({"type":"questions_hello","questionVersion":1}))?;
         let ready=read(&mut reader)?;
         if !ready.contains("questions_ready") {return Err(format!("questions hello: {ready}"));}
+        let approval_id="3f2b8a42-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        send(&mut stream,json!({"type":"question","questionVersion":1,"id":approval_id,"kind":"approval","text":"¿Permitir la operación del validador?","options":[{"value":"allow","label":"Permitir","description":""},{"value":"deny","label":"Denegar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
+        let approval_alert=run(&win,"AbitoValidate.shortcutAlert()");
+        shortcuts["approval_alert"]=approval_alert.clone();
+        shortcuts["ok"]=json!(shortcuts["ok"]==true && approval_alert["ok"]==true && approval_alert["after"]["id"]==approval_id);
+        // Only the producer retires this fixture; the shortcut never answers it.
+        send(&mut stream,json!({"type":"question_cancel","questionVersion":1,"id":approval_id,"reason":"cancelled"}))?;
+        let cancel_deadline=Instant::now()+Duration::from_secs(4);
+        while !crate::questionhost::question_view(&state)["pending"].is_null() && Instant::now()<cancel_deadline {
+            sleep(Duration::from_millis(40));
+        }
         let id="3f2b8a41-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
         send(&mut stream,json!({"type":"question","questionVersion":1,"id":id,"kind":"question","text":"¿Validar esta pantalla?","options":[{"value":"validate","label":"Validar","description":""},{"value":"cancel","label":"Cancelar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
+        let pending_deadline=Instant::now()+Duration::from_secs(4);
+        while crate::questionhost::question_view(&state)["pending"].is_null() && Instant::now()<pending_deadline {
+            sleep(Duration::from_millis(40));
+        }
+        let pending_before=crate::questionhost::question_view(&state)["pending"].clone();
+        let alert=run(&win,"AbitoValidate.shortcutAlert()");
+        let pending_after=crate::questionhost::question_view(&state)["pending"].clone();
+        shortcuts["alert"]=alert.clone();
+        shortcuts["ok"]=json!(shortcuts["ok"]==true && alert["ok"]==true && pending_before==pending_after && !pending_after.is_null());
+        shortcuts["pending_native_before"]=pending_before;
+        shortcuts["pending_native_after"]=pending_after;
+        drop(terminal_conn);
+        sleep(Duration::from_millis(300));
+        let absent=run(&win,"AbitoValidate.shortcutTerminalAbsent()");
+        shortcuts["ok"]=json!(shortcuts["ok"]==true && absent["ok"]==true);
+        shortcuts["terminal_absent"]=absent;
+        record("atajos-chat-alerta-terminal-sonido",shortcuts);
         let mut observation=run(&win,"AbitoValidate.answerQuestion()");
         if observation["ok"]==true {
             let answer:serde_json::Value=serde_json::from_str(&read(&mut reader)?).map_err(|e|e.to_string())?;
