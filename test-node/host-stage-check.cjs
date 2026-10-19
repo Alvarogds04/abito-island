@@ -33,6 +33,12 @@ try {
     fs.copyFileSync(path.join(crate, '../desktop-daemon', file), target);
     fs.chmodSync(target, 0o644);
   }
+  for (const file of L.HARNESS_FILES) {
+    const target = path.join(stage, 'desktop-harness', file);
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o755 });
+    fs.copyFileSync(path.join(crate, '../desktop-harness', file), target);
+    fs.chmodSync(target, 0o644);
+  }
   const receipt = {
     fixture: 'PRE-COMMIT STRUCTURAL TEST ONLY; toy executable, synthetic provenance, NOT RELEASE EVIDENCE',
     identifier: L.IDENTIFIER, version: L.checkConfig(crate).version,
