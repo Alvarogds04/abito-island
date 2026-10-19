@@ -14,7 +14,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const calls = [], events = {};
   const hash = 'a'.repeat(64);
   let state = { connection:'connected', agents:[{id:'claude-code',state:'not_connected',plan_hash:hash,summary:'Add managed hooks',reviewable:true},{id:'codex',state:'connected',backup:true}], providers:[],accounts:[],models:null };
-  let ui, secretFailure = false; const planPrefs = { claude: false, codex: false };
+  let ui, secretFailure = false, accountFailure = false; const planPrefs = { claude: false, codex: false };
   const soon = Date.now() + 3600e3;
   let planReply = {
     claude: { available: true, updatedAt: Date.now(), fiveHour: { usedPct: 42, resetsAt: soon }, sevenDay: { usedPct: 61, resetsAt: soon } },
@@ -25,6 +25,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
     calls.push([cmd,p]);
     if (cmd === 'secret_action') { if (secretFailure) throw new Error('fixture-secret-error'); return {present:p.action === 'set'}; }
     if (cmd === 'plan_action') return planReply[p.action];
+    if (cmd === 'agent_action' && /^abito_account_/.test(p.action)) { if (accountFailure) throw new Error('fixture-account-error'); const secretNow = p.config?.apiKey; calls.push(['__secret_seen', secretNow ? 'yes' : 'no']); if (p.action === 'abito_account_remove') state.ownedAccounts = { accounts: (state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId) }; else state.ownedAccounts = { accounts: [...(state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId), { accountId: p.accountId, provider: p.provider, hasCredential: !!p.config.apiKey, config: { nombre: p.config.nombre, baseUrl: p.config.baseUrl, api: p.config.api, compat: {}, models: p.config.models, defaultModel: p.config.defaultModel } }] }; return structuredClone(state); }
     if (cmd === 'prefs_action' && p.action === 'view') return {chosenModels:{}, showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex};
     if (cmd === 'prefs_action' && p.action === 'set_show_plan_in_notch') { planPrefs.claude = p.show_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
     if (cmd === 'prefs_action' && p.action === 'set_show_codex_plan_in_notch') { planPrefs.codex = p.show_codex_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
@@ -97,10 +98,46 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
     const scope=all(ui).find(e=>e.className==='row'&&e.children.includes(input));
     calls.length=0;input.value='fixture-only';button(scope,id==='anthropic-api-key'?'Guardar clave':'Guardar').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
     button(scope,id==='anthropic-api-key'?'Guardar clave':'Guardar').fire('click');await ui.settled();
-    assert.deepEqual(calls,[['secret_action',{action:'set',key:id,value:'fixture-only'}]]);
+    assert.deepEqual(calls.filter(([c])=>c==='secret_action'),[['secret_action',{action:'set',key:id,value:'fixture-only'}]]); assert(calls.some(([c,p])=>c==='agent_action'&&p.action==='abito_account_create'&&p.accountId.startsWith('key-')),'the key also creates its provider account');
     assert.equal(input.value,'');assert(!text(ui).includes('fixture-only'));
     calls.length=0;button(scope,'Quitar').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
-    button(scope,'Quitar').fire('click');await ui.settled();assert.deepEqual(calls,[['secret_action',{action:'clear',key:id}]]);
+    button(scope,'Quitar').fire('click');await ui.settled();assert.deepEqual(calls.filter(([c])=>c==='secret_action'),[['secret_action',{action:'clear',key:id}]]);
+  }
+  // L32b: a saved provider key also becomes a provider account the chat can use (alongside Cuentas).
+  {
+    const scopeOf = id => all(ui).find(e=>e.className==='row'&&e.children.includes(all(ui).find(x=>x.attrs.id===`chat-key-${id}`)));
+    const field = id => all(ui).find(e=>e.attrs.id===`chat-key-${id}`);
+    const presets = { 'anthropic-api-key': ['anthropic','Anthropic','https://api.anthropic.com/v1','anthropic-messages'], 'google-api-key': ['google','Google','https://generativelanguage.googleapis.com/v1beta','google-generative-ai'], 'openai-api-key': ['openai','OpenAI','https://api.openai.com/v1','openai-completions'], 'openrouter-api-key': ['openrouter','OpenRouter','https://openrouter.ai/api/v1','openai-completions'] };
+    state.ownedAccounts = { accounts: [] };
+    for (const [key, [provider, nombre, baseUrl, api]] of Object.entries(presets)) {
+      calls.length = 0; field(key).value = 'sk-fixture-1';
+      button(scopeOf(key), key === 'anthropic-api-key' ? 'Guardar clave' : 'Guardar').fire('click'); await ui.settled();
+      const account = calls.filter(([c]) => c === 'agent_action' && /^abito_account_/.test(c === 'agent_action' ? '' : '')).length;
+      const created = calls.find(([c, p]) => c === 'agent_action' && p.action === 'abito_account_create');
+      assert(created, `${key} creates its provider account`);
+      assert.equal(created[1].accountId, `key-${provider}`); assert.equal(created[1].provider, provider);
+      assert.equal(created[1].config.nombre, nombre); assert.equal(created[1].config.baseUrl, baseUrl); assert.equal(created[1].config.api, api);
+      assert.equal(created[1].config.apiKey, 'sk-fixture-1'); assert(created[1].config.models.includes(created[1].config.defaultModel));
+      assert.deepEqual(calls.map(([c, p]) => c === 'secret_action' ? `secret:${p.action}` : c === 'agent_action' ? p.action : c).filter(x => x !== '__secret_seen'), [`secret:set`, 'abito_account_create'], 'keychain first, then the account');
+      assert.equal(field(key).value, '', 'field cleared');
+      assert(!text(ui).includes('sk-fixture-1'), 'secret never rendered');
+    }
+    // again: the account exists, so it is saved (key replaced), not created twice
+    calls.length = 0; field('openai-api-key').value = 'sk-fixture-2';
+    button(scopeOf('openai-api-key'), 'Guardar').fire('click'); await ui.settled();
+    const saved = calls.find(([c, p]) => c === 'agent_action' && /^abito_account_/.test(p.action));
+    assert.equal(saved[1].action, 'abito_account_save'); assert.equal(saved[1].accountId, 'key-openai'); assert.equal(saved[1].config.apiKey, 'sk-fixture-2');
+    // remove: the keychain entry AND the account we created
+    calls.length = 0; button(scopeOf('openai-api-key'), 'Quitar').fire('click'); await ui.settled();
+    assert.deepEqual(calls.map(([c, p]) => c === 'secret_action' ? `secret:${p.action}` : p.action).filter(x => x !== undefined), ['secret:clear', 'abito_account_remove']);
+    assert.deepEqual(calls.find(([c, p]) => p?.action === 'abito_account_remove')[1], { action: 'abito_account_remove', accountId: 'key-openai' });
+    // untrusted click does nothing
+    calls.length = 0; field('google-api-key').value = 'sk-x'; button(scopeOf('google-api-key'), 'Guardar').fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+    // an account failure is said, never hidden: the key stays saved
+    accountFailure = true; calls.length = 0; field('openrouter-api-key').value = 'sk-fixture-3';
+    button(scopeOf('openrouter-api-key'), 'Guardar').fire('click'); await ui.settled();
+    assert(text(ui).includes('no se pudo crear la cuenta'), 'honest note when the account step fails'); accountFailure = false;
+    state.ownedAccounts = { accounts: [] };
   }
   const anthKey=all(ui).find(e=>e.attrs.id==='chat-key-anthropic-api-key');
   const anthRow=all(ui).find(e=>e.className==='row'&&e.children.includes(anthKey));
