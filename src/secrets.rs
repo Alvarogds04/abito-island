@@ -46,6 +46,10 @@ pub const KNOWN_KEYS: &[&str] = &[
     "elevenlabs-api-key",
 ];
 
+/// Keys the host itself keeps in the keychain (phone link certificate, key and pairing token, #490).
+/// They are NOT in [`KNOWN_KEYS`]: the page can never set, clear or ask about them.
+pub const INTERNAL_KEYS: &[&str] = &["phone-link-cert", "phone-link-key", "phone-link-token"];
+
 /// Upper bound of a stored value (Windows Credential Manager caps a secret near 2.5 KB).
 pub const MAX_VALUE_BYTES: usize = 2048;
 

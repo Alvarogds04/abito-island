@@ -68,7 +68,7 @@ sherpa-onnx = { version = "1.13.8", default-features = false, features = ["stati
 # which are not available offline; 0.12's rustls-tls is ring + webpki-roots.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 futures-util = { version = "0.3", default-features = false }
-tokio = { version = "1", default-features = false, features = ["rt", "time", "net", "io-util"] }
+tokio = { version = "1", default-features = false, features = ["rt", "time", "net", "io-util", "sync", "macros"] }
 # Dictation (#467): the microphone. Apache-2.0. PulseAudio (or PipeWire's
 # PulseAudio server) for the device list on Linux.
 cpal = { version = "0.18", features = ["pulseaudio"] }
@@ -84,6 +84,15 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 webpki-roots = "1"
+# #490 phone link (LAN only, off by default): the self-signed pinned certificate and the pairing QR.
+# rcgen was a dev-dependency for the mail tests; the phone link needs it at run time. qrcode renders
+# the pairing link as SVG (no image crates). ring is already resolved (rustls); direct edge only.
+rcgen = { version = "0.13", default-features = false, features = ["ring"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+ring = "0.17"
+# The phone finds this computer again when its address changes: announced on the local network only
+# while the phone link is on. Pure Rust, no async runtime, default features off.
+mdns-sd = { version = "0.21", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # #467 key store: Windows Credential Manager.
@@ -104,9 +113,3 @@ windows-sys = { version = "0.61.2", default-features = false, features = ["Win32
 [target.'cfg(unix)'.dev-dependencies]
 # tests only: fake key presses on a PRIVATE Xvfb (tests/hotkey_x11.rs). Never shipped.
 x11rb = { version = "0.13", features = ["xtest"] }
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-# tests only: a self-signed certificate for the fake IMAP/SMTP servers, so the TLS path that
-# ships (rustls + a root store) is the one exercised. No pem feature (the pem crate is not
-# in the offline registry); the DER is enough.
-rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring"] }
