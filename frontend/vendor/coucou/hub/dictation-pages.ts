@@ -24,11 +24,10 @@ function mount(page: HTMLElement, ctx: HubContext) {
     work: async (fn: () => Promise<any>) => {
       if (!alive) return;
       try { return await fn(); }
-      catch { if (alive) message.textContent = 'No se pudo completar. No se anuncia ningún cambio como guardado.'; }
+      catch { if (alive) { message.textContent = 'No se pudo completar. No se anuncia ningún cambio como guardado.'; if (!message.isConnected) page.append(message); } }
     },
   };
   ctx.onLeave = life.dispose;
-  queueMicrotask(() => { if (alive) page.append(message); });
   return life;
 }
 /** Same model states/confirmation as upstream; also paints direct remove/download replies. */

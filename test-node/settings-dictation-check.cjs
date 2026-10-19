@@ -29,7 +29,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   await FlowBridge.setPrefs({...state.prefs,cleanup:true,unexpected:1});
   const expectedPrefs = () => Object.fromEntries(['enabled','key','edge','mic','keepDays','cleanup','defaultStyle'].map(k=>[k,k==='cleanup'?false:state.prefs[k]]));
   assert.deepEqual(calls.pop(), ['dictation_action',{action:'set_prefs',prefs:expectedPrefs()}]);
-  for (const [enabled,model,keys,copy] of [[false,'missing','ok','El dictado está apagado'],[true,'missing','ok','Descarga el modelo de voz para dictar'],[true,'ready','ok','Listo · mantén Ctrl+Alt+V'],[true,'ready','pending','Usa el micrófono'],[true,'ready','denied','Usa el micrófono'],[true,'ready','unsupported','Usa el micrófono']]) {
+  for (const [enabled,model,keys,copy] of [[false,'missing','ok','Dictado desactivado'],[true,'missing','ok','Descarga el modelo de voz para dictar'],[true,'ready','ok','Listo · mantén Ctrl+Alt+V'],[true,'ready','pending','Usa el micrófono'],[true,'ready','denied','Usa el micrófono'],[true,'ready','unsupported','Usa el micrófono']]) {
     state.prefs.enabled=enabled; state.models.parakeet={state:model}; state.keys=keys;
     const host=new Element('div'); await startHub(host,{version:'test',flowPages:{},renderNotch:async()=>{}});
     assert(text(all(host).find(e=>e.className==='hub-status')).includes(copy), copy);
@@ -37,7 +37,8 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   state.prefs.enabled=false; state.models.parakeet={state:'missing'}; state.keys='ok';
   let status=structuredClone(state), leave;
   const ctx={get status(){return status;},hero,navigate(){},refresh:async()=>{status=await FlowBridge.status();return status;},setPrefs:async change=>{const p={...status.prefs};change(p);await FlowBridge.setPrefs(p);status={...status,prefs:p};},set onLeave(fn){leave=fn;}};
-  const page = new Element('div'); await flowSettingsPage(page,ctx);
+  const page = new Element('div'); await flowSettingsPage(page,ctx); await Promise.resolve(); await Promise.resolve();
+  assert(String(page.children[0].className).includes('hub-hero'), 'D3: the hero is the first thing on the page; the feedback line must not sit above it');
   const labels = all(page).filter(e=>e.className==='hub-label').map(e=>e.textContent);
   assert.deepEqual(labels,['Teclas','Micrófono','Reconocimiento','Notetaker','App','Privacidad'], 'upstream section order');
   assert.deepEqual(all(page).filter(e=>e.className==='title').map(e=>e.textContent),['Mantén una tecla para dictar en cualquier lugar','Mantener para dictar','Posición de la píldora','Manos libres','Volver a pegar el último dictado','Cancelar un dictado','Micrófono','Parakeet, en tu ordenador','Resúmenes','Abrir esta ventana al abrir Abito','Guardar el historial']);
@@ -66,7 +67,8 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   all(page).find(e=>e.textContent==='Eliminar los modelos').fire('click');await new Promise(r=>setImmediate(r));assert.deepEqual(calls.splice(0),[['dictation_action',{action:'remove_model'}]]);
   rejectWrite=true;control('Micrófono','select').fire('change');await new Promise(r=>setImmediate(r));assert(text(page).includes('No se pudo completar'));rejectWrite=false;calls.length=0;
   leave();assert.equal(events.get('dictation:models').size,6,'page listener disposed, shell listeners remain');
-  const home=new Element('div');status=structuredClone(state);status.prefs.enabled=false;await dictationPage(home,ctx);
+  const home=new Element('div');status=structuredClone(state);status.prefs.enabled=false;await dictationPage(home,ctx); await Promise.resolve(); await Promise.resolve();
+  assert(String(home.children[0].className).includes('hub-hero'), 'D3: dictation hero first');
   assert(all(home).some(e=>e.className==='hub-columns')); assert.equal(all(home).filter(e=>e.tagName==='b'&&e.textContent==='0').length,3);
   assert(text(home).includes('Tus dictados aparecerán aquí'));assert(text(home).includes('612'));
   calls.length=0;for(const e of all(home).filter(e=>e.disabled))e.fire('click');await new Promise(r=>setImmediate(r));assert.deepEqual(calls,[]);

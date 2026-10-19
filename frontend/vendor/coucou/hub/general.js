@@ -181,7 +181,6 @@ async function renderGeneral({ invoke, V }) {
       row(t("Open on hover"), hover),
       hint(t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.")),
       row(t("Auto-close"), seconds, h("span", { class: "hint", text: t("seconds after you leave the island") })),
-      hint(t("0 means never")),
       row(t("Island lives on"), screen),
       row(t("Theme"), themeSelect),
       row(t("Launch at startup"), unavailable(toggle(false, () => {

@@ -56,7 +56,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert.deepEqual(all(host).filter(e => e.className === 'hub-group').map(e => e.textContent), ['Flow', 'Notch']);
   const status = all(host).find(e => e.className === 'hub-status');
   assert.equal(status.children[0].className, 'dot');
-  assert.equal(status.children[1].textContent, 'El dictado está apagado');
+  assert.equal(status.children[1].textContent, 'Dictado desactivado');
   assert.equal(all(host).find(e => e.className === 'hub-version').textContent, 'Abito test');
   for (const cls of ['hub-panel', 'hub-scroll', 'hub-page', 'hub-hero']) assert(all(host).some(e => e.className === cls));
   assert(!/Coucou|Mochi/.test(text(host)));
@@ -132,7 +132,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     el.fire(el.tagName === 'select' ? 'change' : 'click'); await ui.settled(); assert.deepEqual(calls, []);
   }
   assert(text(ui).includes('No disponible todavía'));
-  assert(text(ui).includes('0 means never'));
+  assert(!text(ui).includes('0 means never'), 'D6: Coucou shows no such line under Auto-close');
   assert.equal(all(ui).find(e=>e.attrs.id==='hub-language').children.length,11);
   const field = id => all(ui).find(e => e.attrs.id === id);
   // 5a: real display list and custom sounds on the existing closed hosts.
@@ -195,5 +195,27 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(calls.every(([cmd]) => ['prefs_action','hotkey_action','recap_action','monitor_action','sound_action'].includes(cmd)));
   assert(entry.includes("command === 'monitor_action'") && entry.includes("command === 'sound_action'"), '5a closed guards');
   assert(!/action: 'read'|'read'/.test(fs.readFileSync(path.join(base,'general.ts'),'utf8')), 'general never reads sound bytes');
+  const abitoCss = fs.readFileSync(path.join(base, 'abito.css'), 'utf8');
+  assert(/\.hub-empty svg\s*\{[^}]*width:\s*64px[^}]*height:\s*64px/.test(abitoCss), 'D2: the empty-state character is sized like Coucou\'s canvas (64px)');
+  assert.equal(fs.readFileSync(path.join(base, 'i18n-es.ts'), 'utf8').match(/'Dictation is off': '([^']*)'/)[1], 'Dictado desactivado', 'D5: Coucou\'s own Spanish string');
+  // D1: the band's colour and particles are code (Coucou's backdrop), not an Abito flat black.
+  {
+    const props = [];
+    const mk = tag => { const e = new Element(tag); e.style = { setProperty: (k, v) => props.push([tag, k, v]) }; e.getContext = () => null; return e; };
+    global.document = { createElement: mk, createElementNS: (_, t) => mk(t), documentElement: { lang: 'es' }, body: new Element('body'), addEventListener() {}, visibilityState: 'hidden' };
+    const heroMod = await import(pathToFileURL(path.join(base, 'hero.js')) + '?d1');
+    const band = heroMod.hero('dictation', 'Hola', null);
+    assert(props.some(([, k, v]) => k === '--hero-line' && v === 'rgba(251,146,60,0.16)'), 'D1: dictation band line is its orange at .16 alpha');
+    assert(all(band).some(e => e.tagName === 'canvas' && e.className === 'backdrop'), 'D1: backdrop canvas present');
+    props.length = 0; heroMod.hero('chat', 'Chat', null);
+    assert(props.some(([, k, v]) => k === '--hero-line' && v === 'rgba(224,121,80,0.16)'), 'D1: chat band uses the chat colour');
+    props.length = 0; heroMod.hero('unknown-page', 'x', null);
+    assert(props.some(([, k, v]) => k === '--hero-line' && v === 'rgba(142,147,156,0.16)'), 'D1: unknown pages fall back to the general colour');
+    props.length = 0; heroMod.glowCard('#FB923C', new Element('div'));
+    assert(props.some(([, k, v]) => k === '--glow-line' && v === 'rgba(251,146,60,0.18)'), 'D1: glow card line from its colour');
+    const src = fs.readFileSync(path.join(base, 'hero.ts'), 'utf8');
+    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+    assert(!/wardrobe|outfit|roundGlasses|sunglasses|partyHat|BotEngine/.test(code), 'D1: no Coucou characters or wardrobe in the ported code');
+  }
   console.log('PASS settings-hub: sidebar parity, CSP, page gate, trusted gestures, bridge payloads, volume commit, unavailable motion');
 })().catch(e => { console.error(e); process.exitCode = 1; });

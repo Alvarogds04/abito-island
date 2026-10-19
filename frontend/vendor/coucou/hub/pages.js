@@ -3,8 +3,8 @@ import { h } from "../views/dom.js";
 import { card, row, button, keyLabel, label, divider, toggle, segmented } from "./ui.js";
 import { notchSection, notchRow, notchHint } from "./notch.js";
 import { t } from "./i18n-es.js";
+import { glowCard, emptyState } from "./hero.js";
 const definitions = {
-  notes: ["Notetaker", "Your calls transcribed person by person, with a summary and the to-dos. No bot in the meeting.", "Record a call"],
   voice: ["OK Abito", "Say « OK Abito », then ask anything: add a pill, play music, the weather, an email to prepare.", "Enable"]
 };
 function renderUnavailable(page) {
@@ -25,6 +25,36 @@ function renderUnavailable(page) {
   });
   control.disabled = true;
   return card(row(page === "phone" ? "No disponible" : "pendiente de conectar", null, control));
+}
+const NOT_YET = "No disponible todavía";
+function notesPage(container, ctx) {
+  const off = (el) => {
+    el.disabled = true;
+    el.title = NOT_YET;
+    return el;
+  };
+  container.append(ctx.hero("notes", t("Notetaker"), t("Your calls transcribed person by person, with a summary and the to-dos. No bot in the meeting."), [], true));
+  container.append(glowCard(
+    "#3B9EFF",
+    h("div", { style: "font:700 15px var(--font)", text: t("One download, then offline") }),
+    h("div", { class: "hub-note", style: "color:#b7bbc2", text: t("Coucou writes your calls on this computer with Parakeet, and tells the voices apart with a second small model. Both are downloaded once (about {0} MB), then everything works offline.", { 0: 700 }) }),
+    off(button(t("Download"), () => {
+    }, "primary"))
+  ));
+  const record = off(button(t("Record a call"), () => {
+  }, "primary"));
+  record.prepend(h("span", { class: "hub-rec", style: "background:#170c04;box-shadow:none;margin-inline-end:8px" }));
+  record.style.setProperty("width", "100%");
+  const list = h(
+    "div",
+    { class: "hub-notes-list" },
+    record,
+    h("div", { class: "hub-note", style: "padding:14px 4px", text: t("Your calls will show here. Click Record a call when one starts.") }),
+    h("div", { style: "flex:1" }),
+    h("div", { class: "hub-note", style: "padding:10px;border-radius:10px;background:rgba(255,255,255,0.04)", text: t("Everything stays on this computer. Tell the people in the call that you are recording.") })
+  );
+  const detail = h("div", { class: "hub-note-detail" }, emptyState(t("Your calls will show here. Click Record a call when one starts.")), h("div", { class: "hub-note", text: NOT_YET }));
+  container.append(h("div", { class: "hub-notes" }, list, detail));
 }
 const inactivePages = Object.fromEntries(
   Object.entries(definitions).map(([page, [title, subtitle, action]]) => [page, (container, ctx) => {
@@ -66,6 +96,7 @@ const inactivePages = Object.fromEntries(
     container.append(h("div", { id: "settings-root" }, card(row("pendiente de conectar", null, control))));
   }])
 );
+inactivePages.notes = notesPage;
 export {
   inactivePages,
   renderUnavailable

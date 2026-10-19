@@ -34,14 +34,14 @@ function mount(page, ctx) {
       try {
         return await fn();
       } catch {
-        if (alive) message.textContent = "No se pudo completar. No se anuncia ningún cambio como guardado.";
+        if (alive) {
+          message.textContent = "No se pudo completar. No se anuncia ningún cambio como guardado.";
+          if (!message.isConnected) page.append(message);
+        }
       }
     }
   };
   ctx.onLeave = life.dispose;
-  queueMicrotask(() => {
-    if (alive) page.append(message);
-  });
   return life;
 }
 function modelsControl(ctx, life, onReady) {
