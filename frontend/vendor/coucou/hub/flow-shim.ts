@@ -35,7 +35,7 @@ export const FlowBridge = Object.freeze({
   setPrefs: async (p: FlowPrefs): Promise<Partial<FlowPrefs>> => {
     if (!hasStatus) throw new Error('No disponible todavía'); // Never overwrite unread stored prefs with shell defaults.
     return call({ action:'set_prefs', prefs: {
-      enabled:p.enabled, key:p.key, edge:p.edge, mic:p.mic, keepDays:p.keepDays, cleanup:false, defaultStyle:p.defaultStyle,
+      enabled:p.enabled, key:p.key, edge:p.edge, mic:p.mic, keepDays:p.keepDays, cleanup:p.cleanup === true, defaultStyle:p.defaultStyle,
     } });
   },
   history: (): Promise<FlowEntry[]> => call({action:'history'}),
@@ -48,7 +48,7 @@ export const FlowBridge = Object.freeze({
   setSnippets: (snippets: Snippet[]) => mutation({action:'set_snippets', snippets}),
   styles: (): Promise<AppStyle[]> => call({action:'styles'}),
   setStyles: (styles: AppStyle[]) => mutation({action:'set_styles', styles}),
-  runningApps: async (): Promise<{id: string; name: string}[]> => [],
+  runningApps: (): Promise<{id: string; name: string}[]> => call({action:'running_apps'}),
   download: (): Promise<ModelsStatus> => call({action:'download_model'}),
   removeModels: (): Promise<ModelsStatus> => call({action:'remove_model'}),
 });

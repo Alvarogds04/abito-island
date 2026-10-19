@@ -131,13 +131,14 @@ fn resolve_turn(
     fallback: Option<Target>,
     registry: &[Entry],
     base: &str,
+    principal_instructions: Option<&str>,
 ) -> Result<(Option<Target>, String), ChatError> {
     let target = match role.and_then(|r| r.model.as_deref()) {
         None => fallback,
         Some(id) => Some(modelshost::target_of(models::select(registry, id)?)
             .ok_or_else(ChatError::profile_missing)?),
     };
-    Ok((target, specialists::system_prompt(base, role)))
+    Ok((target, specialists::system_prompt_with_principal(base, role, principal_instructions)))
 }
 
 pub fn turn_configuration(state: &AppState, base: &str) -> Result<(Option<Target>, String), ChatError> {
@@ -145,11 +146,17 @@ pub fn turn_configuration(state: &AppState, base: &str) -> Result<(Option<Target
 }
 
 /// #341 uses the SAME role snapshot for the prompt, target and conversation association.
+/// Copy prefs while holding the role lock: both values coexist at the prefs read, and
+/// subsequent edits cannot mix a new role or new principal instructions into this turn.
 pub fn turn_snapshot(state: &AppState, base: &str) -> Result<(Option<Target>, String, Option<abito_island::conversations::SpecialistRef>), ChatError> {
-    let role = state.specialists.role();
+    let (role, principal_instructions) = {
+        let store = state.specialists.store.lock().expect("specialists lock");
+        let instructions = crate::settingshost::abito_instructions(&state.settings);
+        (store.active().cloned(), instructions)
+    };
     let fallback = state.chat_target.lock().expect("chat target lock").clone();
     let registry = modelshost::registry(state);
-    let (target, system) = resolve_turn(role.as_ref(), fallback, &registry, base)?;
+    let (target, system) = resolve_turn(role.as_ref(), fallback, &registry, base, principal_instructions.as_deref())?;
     let specialist = role.map(|s| abito_island::conversations::SpecialistRef { id: s.id, name: s.name });
     Ok((target, system, specialist))
 }

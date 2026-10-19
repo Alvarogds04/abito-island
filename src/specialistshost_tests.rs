@@ -154,14 +154,14 @@ fn one_frozen_role_supplies_both_model_and_instructions() {
     let frozen = host.role();
     host.execute(None, &registry, Command::Select { id: None }, |_| {}).unwrap();
     let fallback = modelshost::target_of(&models::REGISTRY[0]);
-    let (target, prompt) = resolve_turn(frozen.as_ref(), fallback.clone(), &registry, "BASE").unwrap();
+    let (target, prompt) = resolve_turn(frozen.as_ref(), fallback.clone(), &registry, "BASE", None).unwrap();
     assert_eq!(target.unwrap().profile.profile_id, "local-specialist");
     assert!(prompt.starts_with("BASE"));
     assert!(prompt.contains("Role 1"));
-    let (principal, next) = resolve_turn(host.role().as_ref(), fallback, &registry, "BASE").unwrap();
+    let (principal, next) = resolve_turn(host.role().as_ref(), fallback, &registry, "BASE", None).unwrap();
     assert_eq!(principal.unwrap().profile.profile_id, "local-abito-gpt");
     assert_eq!(next, "BASE");
-    assert!(resolve_turn(frozen.as_ref(), None, models::REGISTRY, "BASE").is_err());
+    assert!(resolve_turn(frozen.as_ref(), None, models::REGISTRY, "BASE", None).is_err());
 }
 
 #[test]
@@ -193,4 +193,73 @@ fn ipc_dispatcher_persists_before_events_and_failure_keeps_disk_and_roles() {
     assert_eq!(events, 1);
     assert_eq!(specialists::read_file(&dir).unwrap(), before);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn principal_test_state(instructions: &str) -> AppState {
+    use crate::*;
+    let project = "principal-prompt-test".to_string();
+    let prefs = abito_island::prefs::Prefs::from_text(Some(
+        &json!({"v": 1, "abito_instructions": instructions}).to_string(),
+    ));
+    AppState {
+        core: Mutex::new(Core::new()),
+        work_area: Mutex::new(Rect { x: 0, y: 0, w: 0, h: 0 }),
+        requested: Mutex::new(Requested::default()),
+        evidence: Mutex::new(None),
+        initial_pin: AtomicBool::new(false),
+        user_touch: AtomicBool::new(false),
+        generation: AtomicU64::new(0),
+        phase: Mutex::new(IslandState::Compact),
+        motion_override: AtomicBool::new(true),
+        revision: AtomicU64::new(0),
+        last_published: Mutex::new(String::new()),
+        rate: Mutex::new(bridge::RateLimiter::new()),
+        facade: Mutex::new(None),
+        notices: Mutex::new(protocol::NoticeStore::new(project.clone())),
+        connections: AtomicU32::new(0),
+        unavailable: AtomicBool::new(false),
+        transport: Mutex::new(None),
+        project,
+        approval: Arc::new(Mutex::new(approval::Approval::new("http://127.0.0.1:1", None).unwrap())),
+        hooks: Mutex::new(None),
+        #[cfg(any(debug_assertions, feature = "probe"))]
+        probe_fake: Mutex::new(None),
+        chat: chatlane::Lane::new("c-principal-test"),
+        chat_target: Mutex::new(None),
+        chat_rate: Mutex::new(bridge::RateLimiter::new()),
+        hotkey: hotkeyhost::HotkeyHost::default(),
+        settings: settingshost::with_test_prefs(prefs),
+        specialists: SpecialistsHost::default(),
+        chat_deadlines: Mutex::new(chathost::default_deadlines()),
+        chat_probe: Mutex::new(Vec::new()),
+        models_registry: Mutex::new(models::REGISTRY.to_vec()),
+        models_last: Mutex::new(Value::Null),
+        models_revision: AtomicU64::new(0),
+        models_persisted: AtomicBool::new(false),
+    }
+}
+
+#[test]
+fn turn_snapshot_applies_preferences_only_to_principal_and_freezes_the_prompt() {
+    let instructions = "Contestá con ejemplos.\nConservá los saltos.";
+    let mut state = principal_test_state(instructions);
+    let base = abito_island::chatlane::SYSTEM_PROMPT;
+    let (target, frozen, association) = turn_snapshot(&state, base).unwrap();
+    assert!(target.is_none());
+    assert!(association.is_none());
+    assert!(frozen.starts_with(base));
+    assert!(frozen.contains(instructions));
+    state.specialists.execute(None, models::REGISTRY, create_command(1), |_| {}).unwrap();
+    state.specialists.execute(None, models::REGISTRY, Command::Select {
+        id: Some("esp-0000000000000001".into()),
+    }, |_| {}).unwrap();
+    let (_, prompt, association) = turn_snapshot(&state, base).unwrap();
+    let role = state.specialists.role().unwrap();
+    assert_eq!(prompt, specialists::system_prompt(base, Some(&role)));
+    assert!(!prompt.contains(instructions));
+    assert_eq!(association.unwrap().id, role.id);
+    state.settings = crate::settingshost::with_test_prefs(abito_island::prefs::Prefs::default());
+    state.specialists.execute(None, models::REGISTRY, Command::Select { id: None }, |_| {}).unwrap();
+    assert_eq!(turn_snapshot(&state, base).unwrap().1, base);
+    assert!(frozen.contains(instructions), "later edits cannot change an existing turn");
 }

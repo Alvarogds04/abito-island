@@ -1,7 +1,7 @@
 'use strict';
 /* Abito island sound engine (#313). Dependency-free UMD, loaded as a CLASSIC script
-   (global AbitoSound) and by node tests. Every sound is SYNTHESIZED here with a WebAudio
-   subset (oscillator + gain). No samples, no files, no DOM, no network. Catalog and rules:
+   (global AbitoSound) and by node tests. Built-in cues are synthesized with a WebAudio
+   subset (oscillator + gain); optional decoded samples can be injected. No file access, DOM or network. Catalog and rules:
    docs/desktop-sound-catalog.md. Integration contract: README.md. */
 (function (root, factory) {
   const api = factory();
@@ -188,6 +188,7 @@
     let lastStart = -Infinity;
     const byId = new Map();
     const voices = new Set();
+    const samples = new Map();
     const trans = new Map();
     let pending = null;
     const cues = cuesOption.failed ? (diag('invalid_cue_override'), resolveCues(undefined, diag)) : resolveCues(cuesOption.value, diag);
@@ -260,21 +261,28 @@
       let totalS = 0;
       let committed = false;
       try {
-        for (const n of cueDef.notes) {
+        const sample = samples.get(cueDef.id);
+        const notes = sample ? [{ t: 0, dur: sample.duration, peak: 1 }] : cueDef.notes;
+        for (const n of notes) {
           const s = base + n.t;
           const end = s + n.dur;
-          const osc = c.createOscillator();
+          const osc = sample ? c.createBufferSource() : c.createOscillator();
           const g = c.createGain();
           const part = { osc, g, ended: false };
           v.parts.push(part);
           const amp = Math.max(FLOOR, gain * cueDef.level * n.peak);
-          osc.type = n.type;
-          osc.frequency.setValueAtTime(n.f, s);
-          if (n.f2 !== undefined) osc.frequency.exponentialRampToValueAtTime(n.f2, end);
-          g.gain.setValueAtTime(FLOOR, s);
-          g.gain.linearRampToValueAtTime(amp, s + n.attack);
-          g.gain.setValueAtTime(amp, end - n.release);
-          g.gain.exponentialRampToValueAtTime(FLOOR, end);
+          if (sample) {
+            osc.buffer = sample;
+            g.gain.setValueAtTime(amp, s);
+          } else {
+            osc.type = n.type;
+            osc.frequency.setValueAtTime(n.f, s);
+            if (n.f2 !== undefined) osc.frequency.exponentialRampToValueAtTime(n.f2, end);
+            g.gain.setValueAtTime(FLOOR, s);
+            g.gain.linearRampToValueAtTime(amp, s + n.attack);
+            g.gain.setValueAtTime(amp, end - n.release);
+            g.gain.exponentialRampToValueAtTime(FLOOR, end);
+          }
           osc.connect(g);
           g.connect(c.destination);
           osc.onended = () => {
@@ -380,6 +388,18 @@
     function stopAll() { for (const v of [...voices]) endVoice(v); }
 
     const engine = {
+      // Ready AudioBuffer-like values only: decoding and file access belong to the host.
+      setSample(id, buffer) {
+        try {
+          if (closed || typeof id !== 'string' || !hasOwn(cues, id)) return false;
+          if (buffer === null) { samples.delete(id); return true; }
+          if (!buffer || !isNum(buffer.duration) || buffer.duration <= 0
+              || typeof buffer.getChannelData !== 'function') return false;
+          samples.set(id, buffer);
+          return true;
+        } catch { return false; }
+      },
+      clearSamples() { samples.clear(); },
       ready() { ready = true; },
       quiet(ms) {
         const n = isNum(ms) ? Math.min(60000, Math.max(0, ms)) : 0;
@@ -414,6 +434,7 @@
       close() {
         if (closed) return;
         closed = true;
+        samples.clear();
         if (pending) {
           const p = pending; pending = null; clearT(p.timer);
           for (const it of p.items) it.resolve(result(false, 'closed', it.id));

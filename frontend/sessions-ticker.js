@@ -172,9 +172,28 @@ function mount(V) {
   const toFrame = state => (state && Array.isArray(state.rows))
     ? { type: 'sessions', schema: V.SCHEMA, sessions: state.rows, truncated: state.truncated === true }
     : null;
+  // Coucou's collapsed bar draws up to four small characters (#mini-grid), one per running agent. Abito: one clay per running session.
+  const grid = document.getElementById('mini-grid');
+  let gridKey = '', minis = [];
+  function paintMiniGrid(view) {
+    if (!grid) return;
+    const rows = view && view.state === 'ready' ? view.rows.slice(0, 4) : [];
+    const key = rows.map(r => r.id).join('|');
+    if (key === gridKey) return;
+    gridKey = key;
+    for (const m of minis) { try { m.destroy(); } catch (_) { /* decoration */ } }
+    minis = []; grid.replaceChildren(); grid.dataset.count = String(rows.length);
+    if (typeof AbitoClay === 'undefined') return;
+    for (const r of rows) {
+      const slot = document.createElement('span'); slot.className = 'mini'; slot.title = r.text;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); slot.append(svg); grid.append(slot);
+      try { minis.push(AbitoClay.create(svg, { state: 'idle', live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch (_) { /* decoration */ }
+    }
+  }
   function show(view) {
     if (!ticker) return;
     const { active, task, who: w } = V.feed(memory, view);
+    paintMiniGrid(view);
     ticker.el.hidden = !active;
     who.hidden = !active || !w;
     if (w) { whoName.textContent = w.name; whoTool.textContent = w.tool; whoCount.textContent = w.count; whoCount.hidden = !w.count; }

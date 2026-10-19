@@ -46,7 +46,7 @@ const invoke = (command, args) => {
     const strings = (v, fields) => exact(v, fields) && fields.every(k => typeof v[k] === 'string');
     const list = (v, fields) => Array.isArray(v) && Array.from(v).every(x => strings(x, fields));
     if (!exact(args, ['payload']) || !p ||
-      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'history', 'stats', 'words', 'snippets', 'styles'].includes(p.action)) ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'running_apps', 'history', 'stats', 'words', 'snippets', 'styles'].includes(p.action)) ||
         (exact(p, ['action', 'id']) && p.action === 'delete_entry' && typeof p.id === 'string' && p.id.length >= 1 && p.id.length <= 64 && !/[^A-Za-z0-9_-]/.test(p.id)) ||
         (exact(p, ['action', 'everything']) && p.action === 'clear_history' && typeof p.everything === 'boolean') ||
         (exact(p, ['action', 'words']) && p.action === 'set_words' && exact(p.words, ['words', 'replacements']) && Array.isArray(p.words.words) && Array.from(p.words.words).every(w => typeof w === 'string') && list(p.words.replacements, ['id', 'from', 'to'])) ||
@@ -55,7 +55,7 @@ const invoke = (command, args) => {
         (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, keys) &&
           typeof p.prefs.enabled === 'boolean' && ['right_ctrl', 'right_alt', 'right_shift', 'left_ctrl_super'].includes(p.prefs.key) &&
           ['bottom', 'left', 'right'].includes(p.prefs.edge) && typeof p.prefs.mic === 'string' && new TextEncoder().encode(p.prefs.mic).length <= 200 &&
-          [0, 7, 30, 365, -1].includes(p.prefs.keepDays) && p.prefs.cleanup === false && ['verbatim', 'natural', 'polished'].includes(p.prefs.defaultStyle)))) return Promise.reject(new Error('No disponible'));
+          [0, 7, 30, 365, -1].includes(p.prefs.keepDays) && typeof p.prefs.cleanup === 'boolean' && ['verbatim', 'natural', 'polished'].includes(p.prefs.defaultStyle)))) return Promise.reject(new Error('No disponible'));
   }
   return rawInvoke(command, args);
 };

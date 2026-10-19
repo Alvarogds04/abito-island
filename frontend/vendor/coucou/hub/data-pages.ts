@@ -125,17 +125,34 @@ export async function stylesPage(page: HTMLElement, ctx: HubContext) {
   page.append(ctx.hero('styles',t('Styles'),t('Claude cleans up what you say, in the style of the app you write in.')));
   const perApp = h('div', {});
   const drawApps = () => {
-    clear(perApp); perApp.classList.toggle('dimmed',true);
+    clear(perApp); perApp.classList.toggle('dimmed',status.prefs.cleanup !== true);
     styles.forEach((s,i) => { if (i) perApp.append(divider()); perApp.append(row(s.name,null,
       life.live(select(styleOptions(),s.style,style => save(styles.map(x => x.id === s.id ? {...x,style} : x)))),
       life.live(iconButton('x',t('Delete'), () => save(styles.filter(x => x.id !== s.id)))))); });
   };
   const keyNote = h('div', {class:'hub-warn',text:t('The clean-up uses your Claude key. Add it in Notch → Chat.')});
-  const cleanup = toggle(false, () => {}); (cleanup as HTMLButtonElement).disabled = true; cleanup.title = 'No disponible todavía';
+  // The host accepts cleanup:true only with a saved Claude key, so the switch is real only then (set_prefs).
+  const hasKey = status.hasClaudeKey === true;
+  keyNote.hidden = hasKey;
+  const cleanup = life.live(toggle(status.prefs.cleanup === true, on => life.change(() => {}, () => ctx.setPrefs(p => {p.cleanup = on;}), async () => {const next = await ctx.refresh(); if (life.alive()) { cleanup.classList.toggle('on', next.prefs.cleanup === true); cleanup.setAttribute('aria-pressed', String(next.prefs.cleanup === true)); perApp.classList.toggle('dimmed', next.prefs.cleanup !== true); }}, () => {}, () => { cleanup.classList.toggle('on', ctx.status.prefs.cleanup === true); cleanup.setAttribute('aria-pressed', String(ctx.status.prefs.cleanup === true)); })));
+  if (!hasKey) { (cleanup as HTMLButtonElement).disabled = true; cleanup.title = 'Falta la clave de Claude: guárdala en Notch → Chat'; }
   const defaultSelect = life.live(select(styleOptions(),status.prefs.defaultStyle,style => life.change(() => {}, () => ctx.setPrefs(p => {p.defaultStyle = style;}), async () => {const next = await ctx.refresh(); if (life.alive()) defaultSelect.value = next.prefs.defaultStyle;}, () => {}, () => {defaultSelect.value = ctx.status.prefs.defaultStyle;})));
   page.append(card(row(t('Clean up with Claude'),t('Removes the “um”, the repeats and the corrections you made while speaking, and fixes the punctuation.'),cleanup), keyNote, divider(), row(t('Other apps'),null,defaultSelect),
     h('div', {class:'hub-note',text:t('With the clean-up on, the text (never your voice) goes to Anthropic with your Claude key. Off, everything stays on this computer.')})));
-  const add = h('select', {class:'hub-select',disabled:true,title:'No disponible todavía'}, h('option', {value:'',text:`+ ${t('Add an app')}`}), h('option', {value:'-',text:t('No other open app'),disabled:true}));
+  const add = life.live(h('select', {class:'hub-select'}, h('option', {value:'',text:`+ ${t('Add an app')}`}))) as HTMLSelectElement;
+  // Open apps (X11) not already styled; each is added with the default style. Empty on Wayland, like Coucou's.
+  const fillAdd = async () => {
+    const running = (await life.load(FlowBridge.runningApps) ?? []).filter(a => !styles.some(s => s.id === a.id)).slice(0, 64);
+    clear(add); add.append(h('option', {value:'',text:`+ ${t('Add an app')}`}));
+    if (!running.length) add.append(h('option', {value:'-',text:t('No other open app'),disabled:true}));
+    for (const a of running) add.append(h('option', {value:`${a.id}\n${a.name}`,text:a.name}));
+    add.value = '';
+  };
+  add.addEventListener('focus', () => { void fillAdd(); });
+  add.addEventListener('change', () => {
+    const [id, name] = add.value.split('\n'); if (!id || id === '-') return;
+    save([...styles, {id, name: name ?? id, style: status.prefs.defaultStyle as AppStyle['style']}]); void fillAdd();
+  });
   page.append(h('div', {class:'hub-row'}, label(t('Style per app')), h('span', {class:'spacer',style:'flex:1'}), add), card(perApp)); drawApps();
 }
 export async function insightsPage(page: HTMLElement, ctx: HubContext) {

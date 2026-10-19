@@ -27,7 +27,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   });
   assert.deepEqual(await FlowBridge.status(), state); assert.deepEqual(calls.pop(), ['dictation_action',{action:'status'}]);
   await FlowBridge.setPrefs({...state.prefs,cleanup:true,unexpected:1});
-  const expectedPrefs = () => Object.fromEntries(['enabled','key','edge','mic','keepDays','cleanup','defaultStyle'].map(k=>[k,k==='cleanup'?false:state.prefs[k]]));
+  const expectedPrefs = () => Object.fromEntries(['enabled','key','edge','mic','keepDays','cleanup','defaultStyle'].map(k=>[k,state.prefs[k]]));
   assert.deepEqual(calls.pop(), ['dictation_action',{action:'set_prefs',prefs:expectedPrefs()}]);
   for (const [enabled,model,keys,copy] of [[false,'missing','ok','Dictado desactivado'],[true,'missing','ok','Descarga el modelo de voz para dictar'],[true,'ready','ok','Listo · mantén Ctrl+Alt+V'],[true,'ready','pending','Usa el micrófono'],[true,'ready','denied','Usa el micrófono'],[true,'ready','unsupported','Usa el micrófono']]) {
     state.prefs.enabled=enabled; state.models.parakeet={state:model}; state.keys=keys;

@@ -12,9 +12,9 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const V = require('../frontend/settings-view.js');
   const C = require('../frontend/chat-view.js');
   const calls = [], events = {};
-  const hash = 'a'.repeat(64);
-  let state = { connection:'connected', agents:[{id:'claude-code',state:'not_connected',plan_hash:hash,summary:'Add managed hooks',reviewable:true},{id:'codex',state:'connected',backup:true}], providers:[],accounts:[],models:null };
-  let ui, secretFailure = false; const planPrefs = { claude: false, codex: false };
+  const hash = 'a'.repeat(64), hash2 = 'b'.repeat(64), hash3 = 'c'.repeat(64);
+  let state = { connection:'connected', agents:[{id:'claude-code',state:'not_connected',plan_hash:hash,summary:'Add managed hooks',reviewable:true},{id:'codex',state:'connected',backup:true},{id:'recap',state:'not_connected',plan_hash:hash2,summary:'Adds notify-only hooks that only count activity for the weekly recap. No command text, path or prompt is kept. A backup is made first.',reviewable:true},{id:'statusline',state:'not_connected',plan_hash:hash3,summary:'Adds the status-line relay in ~/.claude/settings.json. An existing status line keeps working (the relay prints it). A backup is made first.',reviewable:true}], providers:[],accounts:[],models:null };
+  let ui, secretFailure = false, accountFailure = false; const planPrefs = { claude: false, codex: false };
   const soon = Date.now() + 3600e3;
   let planReply = {
     claude: { available: true, updatedAt: Date.now(), fiveHour: { usedPct: 42, resetsAt: soon }, sevenDay: { usedPct: 61, resetsAt: soon } },
@@ -25,6 +25,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
     calls.push([cmd,p]);
     if (cmd === 'secret_action') { if (secretFailure) throw new Error('fixture-secret-error'); return {present:p.action === 'set'}; }
     if (cmd === 'plan_action') return planReply[p.action];
+    if (cmd === 'agent_action' && /^abito_account_/.test(p.action)) { if (accountFailure) throw new Error('fixture-account-error'); const secretNow = p.config?.apiKey; calls.push(['__secret_seen', secretNow ? 'yes' : 'no']); if (p.action === 'abito_account_remove') state.ownedAccounts = { accounts: (state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId) }; else state.ownedAccounts = { accounts: [...(state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId), { accountId: p.accountId, provider: p.provider, hasCredential: !!p.config.apiKey, config: { nombre: p.config.nombre, baseUrl: p.config.baseUrl, api: p.config.api, compat: {}, models: p.config.models, defaultModel: p.config.defaultModel } }] }; return structuredClone(state); }
     if (cmd === 'prefs_action' && p.action === 'view') return {chosenModels:{}, showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex};
     if (cmd === 'prefs_action' && p.action === 'set_show_plan_in_notch') { planPrefs.claude = p.show_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
     if (cmd === 'prefs_action' && p.action === 'set_show_codex_plan_in_notch') { planPrefs.codex = p.show_codex_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
@@ -36,7 +37,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const heads = () => all(ui).filter(e => e.tagName === 'h2').map(text).map(s=>s.trim());
   const button = (scope,word) => {const b=all(scope).find(e=>e.tagName==='button'&&e.textContent===word);assert(b,word);return b;};
   ui = await renderAgentSettings(opts); await ui.settled();
-  assert.deepEqual(heads(), ['Claude Code','Agentes','Uso del plan']);
+  assert.deepEqual(heads(), ['Claude Code','Agentes','Uso del plan','Resumen semanal']);
   assert(calls.some(([c,p])=>c==='agent_action'&&p.action==='hooks_preview'));
   assert(calls.some(([c,p])=>c==='agent_action'&&p.action==='agents_list'));
   assert(text(ui).includes('settings.json'));assert(text(ui).includes('Relay'));
@@ -49,10 +50,10 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   assert.equal(ui.children[0].children[1].children[3].className,'notice warn', 'unavailable relay/diff warning precedes the action row');
   assert.equal(ui.children[0].children[1].children[4].className,'row');
   const plan=ui.children[2];
-  assert(all(plan).filter(e=>e.tagName==='button'&&!String(e.className).includes('switch')).every(e=>e.disabled), 'Install relay stays disabled');
+  assert(all(plan).filter(e=>e.tagName==='button'&&!String(e.className).includes('switch')&&e.textContent!=='Instalar…').every(e=>e.disabled), 'only the relay installer is a live button here');
   assert.deepEqual(calls.filter(([c])=>c==='plan_action').map(([,p])=>p),[{action:'claude'},{action:'codex'}], 'exactly the two closed plan reads, no other payload');
   assert(!/\d+ %/.test(text(plan)), 'numbers belong to the island usage view, not to settings');
-  assert(text(plan).includes('installed') || text(plan).includes('instalado'), 'relay row follows plan_action (claude available)');
+  assert(all(plan).some(e=>e.attrs.id==='agent-integration-statusline'), 'the relay is an installable integration block');
   const planSwitches=all(plan).filter(e=>e.tagName==='button'&&String(e.className).includes('switch'));
   assert.equal(planSwitches.length,2);assert(planSwitches.every(e=>!e.disabled), 'both plan switches follow their Abito prefs');
   calls.length=0;planSwitches[0].fire('click',false);await ui.settled();assert.deepEqual(calls,[],'untrusted click sends nothing');
@@ -69,6 +70,29 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   button(claude,'Respaldar y escribir').fire('click');await ui.settled();
   assert.deepEqual(calls,[['agent_action',{action:'agent_connect',agentId:'claude-code',plan_hash:hash}]]);
   assert(!calls.some(([,p])=>p.action==='hooks_apply'));
+  // L32e: the recap hooks and the status-line relay install from Ajustes with the same review-and-confirm flow.
+  {
+    const section = title => all(ui).find(e=>e.tagName==='section'&&text(e).includes(title));
+    const recap = all(ui).find(e=>e.attrs.id==='agent-integration-recap'), relay = all(ui).find(e=>e.attrs.id==='agent-integration-statusline');
+    assert(recap&&relay,'both integrations render a block with a stable id');
+    assert(text(relay).includes('Relay'));
+    calls.length=0;
+    button(recap,'Instalar…').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
+    button(recap,'Instalar…').fire('click');await ui.settled();assert.equal(calls.length,0,'opening the review writes nothing');
+    assert(text(recap).includes(V.planSummary('Adds notify-only hooks that only count activity for the weekly recap. No command text, path or prompt is kept. A backup is made first.')),'the plan summary is shown before anything is written');
+    button(recap,'Respaldar y escribir').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
+    button(recap,'Respaldar y escribir').fire('click');await ui.settled();
+    assert.deepEqual(calls,[['agent_action',{action:'agent_connect',agentId:'recap',plan_hash:hash2}]],'the click carries the hash the user saw');
+    calls.length=0;
+    button(relay,'Instalar…').fire('click');await ui.settled();button(relay,'Respaldar y escribir').fire('click');await ui.settled();
+    assert.deepEqual(calls,[['agent_action',{action:'agent_connect',agentId:'statusline',plan_hash:hash3}]]);
+    state.agents.find(a=>a.id==='recap').state='connected';state.agents.find(a=>a.id==='recap').backup=true;
+    ui.dispose();ui=await renderAgentSettings(opts);await ui.settled();
+    const recap2=all(ui).find(e=>e.attrs.id==='agent-integration-recap');calls.length=0;
+    button(recap2,'Desinstalar…').fire('click');await ui.settled();button(recap2,'Respaldar y quitar').fire('click');await ui.settled();
+    assert.deepEqual(calls,[['agent_action',{action:'agent_disconnect',agentId:'recap'}]]);
+    state.agents.find(a=>a.id==='recap').state='not_connected';ui.dispose();ui=await renderAgentSettings(opts);await ui.settled();
+  }
   const codex = all(ui.children[1]).find(e => e.children[0]?.className === 'row' && text(e.children[0]).includes('Codex'));
   calls.length=0;button(codex,'Desinstalar…').fire('click');await ui.settled();assert.deepEqual(calls,[]);
   button(codex,'Respaldar y quitar').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
@@ -80,7 +104,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   ui.dispose();
   planReply = { claude: { available: false }, codex: { available: false } };
   ui=await renderAgentSettings(opts);await ui.settled();
-  assert(text(ui.children[2]).includes('not installed')||text(ui.children[2]).includes('no instalado'), 'available=false: relay not installed');
+  assert(all(ui.children[2]).some(e=>e.attrs.id==='agent-integration-statusline'), 'available=false: the relay can still be installed');
   assert(all(ui.children[2]).filter(e=>e.tagName==='button'&&String(e.className).includes('switch')).every(e=>!e.disabled), 'the plan switches are prefs, independent of the data');
   ui.dispose();
   state.agents=[];state.hooks=[];
@@ -97,10 +121,46 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
     const scope=all(ui).find(e=>e.className==='row'&&e.children.includes(input));
     calls.length=0;input.value='fixture-only';button(scope,id==='anthropic-api-key'?'Guardar clave':'Guardar').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
     button(scope,id==='anthropic-api-key'?'Guardar clave':'Guardar').fire('click');await ui.settled();
-    assert.deepEqual(calls,[['secret_action',{action:'set',key:id,value:'fixture-only'}]]);
+    assert.deepEqual(calls.filter(([c])=>c==='secret_action'),[['secret_action',{action:'set',key:id,value:'fixture-only'}]]); assert(calls.some(([c,p])=>c==='agent_action'&&p.action==='abito_account_create'&&p.accountId.startsWith('key-')),'the key also creates its provider account');
     assert.equal(input.value,'');assert(!text(ui).includes('fixture-only'));
     calls.length=0;button(scope,'Quitar').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);
-    button(scope,'Quitar').fire('click');await ui.settled();assert.deepEqual(calls,[['secret_action',{action:'clear',key:id}]]);
+    button(scope,'Quitar').fire('click');await ui.settled();assert.deepEqual(calls.filter(([c])=>c==='secret_action'),[['secret_action',{action:'clear',key:id}]]);
+  }
+  // L32b: a saved provider key also becomes a provider account the chat can use (alongside Cuentas).
+  {
+    const scopeOf = id => all(ui).find(e=>e.className==='row'&&e.children.includes(all(ui).find(x=>x.attrs.id===`chat-key-${id}`)));
+    const field = id => all(ui).find(e=>e.attrs.id===`chat-key-${id}`);
+    const presets = { 'anthropic-api-key': ['anthropic','Anthropic','https://api.anthropic.com/v1','anthropic-messages'], 'google-api-key': ['google','Google','https://generativelanguage.googleapis.com/v1beta','google-generative-ai'], 'openai-api-key': ['openai','OpenAI','https://api.openai.com/v1','openai-completions'], 'openrouter-api-key': ['openrouter','OpenRouter','https://openrouter.ai/api/v1','openai-completions'] };
+    state.ownedAccounts = { accounts: [] };
+    for (const [key, [provider, nombre, baseUrl, api]] of Object.entries(presets)) {
+      calls.length = 0; field(key).value = 'sk-fixture-1';
+      button(scopeOf(key), key === 'anthropic-api-key' ? 'Guardar clave' : 'Guardar').fire('click'); await ui.settled();
+      const account = calls.filter(([c]) => c === 'agent_action' && /^abito_account_/.test(c === 'agent_action' ? '' : '')).length;
+      const created = calls.find(([c, p]) => c === 'agent_action' && p.action === 'abito_account_create');
+      assert(created, `${key} creates its provider account`);
+      assert.equal(created[1].accountId, `key-${provider}`); assert.equal(created[1].provider, provider);
+      assert.equal(created[1].config.nombre, nombre); assert.equal(created[1].config.baseUrl, baseUrl); assert.equal(created[1].config.api, api);
+      assert.equal(created[1].config.apiKey, 'sk-fixture-1'); assert(created[1].config.models.includes(created[1].config.defaultModel));
+      assert.deepEqual(calls.map(([c, p]) => c === 'secret_action' ? `secret:${p.action}` : c === 'agent_action' ? p.action : c).filter(x => x !== '__secret_seen'), [`secret:set`, 'abito_account_create'], 'keychain first, then the account');
+      assert.equal(field(key).value, '', 'field cleared');
+      assert(!text(ui).includes('sk-fixture-1'), 'secret never rendered');
+    }
+    // again: the account exists, so it is saved (key replaced), not created twice
+    calls.length = 0; field('openai-api-key').value = 'sk-fixture-2';
+    button(scopeOf('openai-api-key'), 'Guardar').fire('click'); await ui.settled();
+    const saved = calls.find(([c, p]) => c === 'agent_action' && /^abito_account_/.test(p.action));
+    assert.equal(saved[1].action, 'abito_account_save'); assert.equal(saved[1].accountId, 'key-openai'); assert.equal(saved[1].config.apiKey, 'sk-fixture-2');
+    // remove: the keychain entry AND the account we created
+    calls.length = 0; button(scopeOf('openai-api-key'), 'Quitar').fire('click'); await ui.settled();
+    assert.deepEqual(calls.map(([c, p]) => c === 'secret_action' ? `secret:${p.action}` : p.action).filter(x => x !== undefined), ['secret:clear', 'abito_account_remove']);
+    assert.deepEqual(calls.find(([c, p]) => p?.action === 'abito_account_remove')[1], { action: 'abito_account_remove', accountId: 'key-openai' });
+    // untrusted click does nothing
+    calls.length = 0; field('google-api-key').value = 'sk-x'; button(scopeOf('google-api-key'), 'Guardar').fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+    // an account failure is said, never hidden: the key stays saved
+    accountFailure = true; calls.length = 0; field('openrouter-api-key').value = 'sk-fixture-3';
+    button(scopeOf('openrouter-api-key'), 'Guardar').fire('click'); await ui.settled();
+    assert(text(ui).includes('no se pudo crear la cuenta'), 'honest note when the account step fails'); accountFailure = false;
+    state.ownedAccounts = { accounts: [] };
   }
   const anthKey=all(ui).find(e=>e.attrs.id==='chat-key-anthropic-api-key');
   const anthRow=all(ui).find(e=>e.className==='row'&&e.children.includes(anthKey));

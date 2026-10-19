@@ -65,12 +65,12 @@ test('island icon buttons draw a 32px visual on ::after and keep the 44px hit ar
   assert.equal(a['border-radius'], '10px');
 });
 
-test('chat composer: 36px input row, 36px round buttons in 44px hit areas (design §2)', () => {
+test('chat composer: 36px input row, 28px (Coucou .send-btn) round buttons in 44px hit areas', () => {
   assert.equal(decls('#chat-input')['min-height'], '36px');
   const round = decls('#chat-composer .round');
   assert.equal(round.width, '44px', 'hit area stays 44');
   assert.equal(round.height, '44px');
-  assert.equal(decls('#chat-composer .round::after').inset, '4px', '44 hit - 2x4 inset = 36 visual');
+  assert.equal(decls('#chat-composer .round::after').inset, '8px', 'L32 #480: 44 hit - 2x8 inset = 28 visual, Coucou\'s send disc');
   const auto = fs.readFileSync(path.join(dir, 'chat.js'), 'utf8');
   assert.match(auto, /const MIN_INPUT = 36/, 'autosize grows from the 36px design row');
 });
