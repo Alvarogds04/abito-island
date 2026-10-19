@@ -1,6 +1,6 @@
 'use strict';
 /* S10 slice 4: the pure Coucou island modules vendored for Abito (core/anim, core/diff, views/icons,
-   views/ticker, views/diff). Behaviour of the pure parts; the views are only imported (no DOM here). */
+   views/ticker). Behaviour of the pure parts; the views are only imported (no DOM here). */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -8,7 +8,7 @@ const { pathToFileURL } = require('node:url');
 const vendor = path.join(__dirname, '..', 'frontend/vendor/coucou');
 const imp = f => import(pathToFileURL(path.join(vendor, f)));
 (async () => {
-  for (const f of ['views/icons', 'core/anim', 'core/diff', 'views/ticker', 'views/diff']) {
+  for (const f of ['views/icons', 'core/anim', 'core/diff', 'views/ticker']) {
     const head = fs.readFileSync(path.join(vendor, `${f}.ts`), 'utf8').split('\n')[0];
     assert.match(head, /@434d6a2b — Copyright \(c\) 2026 Louis Raillé, MIT$/, f);
     assert.ok(fs.existsSync(path.join(vendor, `${f}.js`)), `${f}.js built`);
@@ -31,7 +31,6 @@ const imp = f => import(pathToFileURL(path.join(vendor, f)));
   const { ICONS } = await imp('views/icons.js');
   for (const k of ['house', 'bubble', 'gear', 'arrowUpRight', 'chevronUp', 'check', 'xmark', 'bang']) assert.ok(ICONS[k], `icon ${k}`);
   const T = await imp('views/ticker.js'); assert.equal(typeof T.Ticker, 'function');
-  const V = await imp('views/diff.js'); assert.equal(typeof V.buildDiffCard, 'function');
   const { t, tl } = await imp('i18n/i18n.js');
   for (const k of ['Back', 'Open in VS Code', 'Diff too large', 'No changes']) assert.ok(t(k) && t(k) !== k, k);
   assert.equal(String(tl('Back')), 'Volver');

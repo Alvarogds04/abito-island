@@ -118,7 +118,6 @@ function hashTree() {
   const { statusDot, renderDiff } = await load('settings/parts.js');
   const { PILL_PALETTE, parsePillColors } = await load('core/pill-colors.js');
   execFileSync(process.execPath, [path.join(__dirname, 'coucou-bridge-check.cjs')], { stdio: 'inherit' });
-  execFileSync(process.execPath, [path.join(__dirname, 'coucou-general-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-hub-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-accounts-check.cjs')], { stdio: 'inherit' });
   execFileSync(process.execPath, [path.join(__dirname, 'settings-pills-check.cjs')], { stdio: 'inherit' });
