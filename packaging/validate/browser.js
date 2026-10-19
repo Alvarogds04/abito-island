@@ -125,6 +125,43 @@
     await wait(()=>byId('notices').textContent.includes('Validador'),'aviso Pi visible');
     return {ok:true,text:byId('notices').textContent};
   }
+  async function shortcutDispatch() {
+    for(const id of ['openChat','goToAlert','muteToggle','jumpToTerminal']) {
+      await invoke('hotkey_action',{id,action:'disable'});
+      await invoke('hotkey_action',{id,action:'enable'});
+    }
+    await invoke('desktop_action',{action:'hide'});
+    await key('Ctrl+Alt+space');
+    await wait(()=>byId('capsule').dataset.view==='chat' && visible(byId('chat-input')) && document.activeElement===byId('chat-input'),'atajo abre chat oculto con foco');
+    const chat=await invoke('chat_action',{action:'view'});
+    const before=await invoke('prefs_action',{action:'view'});
+    await key('Ctrl+Alt+s');
+    const muted=await wait(async()=>{const p=await invoke('prefs_action',{action:'view'});return p.sound!==before.sound && p;},'mute global persistido');
+    await wait(()=>byId('toggle-sound').getAttribute('aria-pressed')===String(!muted.sound),'mute dibujado');
+    // A second deliberate press, outside the shared X11/portal dedup window.
+    await new Promise(resolve=>setTimeout(resolve,300));
+    await key('Ctrl+Alt+s');
+    await wait(async()=> (await invoke('prefs_action',{action:'view'})).sound===before.sound,'sonido restaurado');
+    await key('Ctrl+Alt+Shift+a');
+    await wait(()=>byId('notice-live').textContent==='No hay permisos ni preguntas pendientes.','alerta vacía explica que no hay solicitud');
+    await key('Ctrl+Alt+t');
+    await wait(()=>byId('capsule').dataset.shortcutTerminal==='focused-class','terminal confirmó foco por clase');
+    return {ok:true,chat_view:chat.view,sound_before:before.sound,sound_after:muted.sound,terminal:'class-based focus_host; native X11 readback follows'};
+  }
+  async function shortcutTerminalAbsent() {
+    await key('Ctrl+Alt+t');
+    await wait(()=>byId('capsule').dataset.shortcutTerminal==='unavailable','terminal ausente no anuncia éxito');
+    return {ok:!!byId('notice-live').textContent,reason:byId('notice-live').textContent};
+  }
+  async function shortcutAlert() {
+    const before=await wait(async()=>{const v=await invoke('question_action',{action:'view'});return v.pending && v;},'request pendiente');
+    await key('Ctrl+Alt+space');
+    await wait(()=>byId('capsule').dataset.view==='chat','chat antes de saltar a alerta');
+    await key('Ctrl+Alt+Shift+a');
+    await wait(()=>byId('capsule').dataset.view==='overview' && visible(byId('question')),'alerta pendiente visible');
+    const after=await invoke('question_action',{action:'view'});
+    return {ok:JSON.stringify(before.pending)===JSON.stringify(after.pending),before:before.pending,after:after.pending,text:byId('question').textContent};
+  }
   async function answerQuestion() {
     const button=await wait(()=>[...document.querySelectorAll('#question-options .q-option')].find(b=>visible(b) && b.textContent.includes('Validar')),'pregunta y opción de Pi');
     const text=byId('question')?.textContent || button.parentElement.textContent;
@@ -282,6 +319,52 @@
     const info=await window.__TAURI__.core.invoke('character_info');
     return {ok:value===true && info.onDesktop===on,info};
   }
+  async function hotkeys() {
+    await click(document.querySelectorAll('.hub-side .hub-item')[window.__validatePages.indexOf('shortcuts')]);
+    const ids=['toggleIsland','openChat','goToAlert','jumpToTerminal','nextPill','prevPill','muteToggle','desktopToggle','wardrobeToggle'];
+    const payload=(id,action)=>id==='toggleIsland'?{action}:{id,action};
+    await wait(()=>ids.every(id=>byId(`shortcut-${id}`)?.querySelector('button')?.disabled===false),'nueve atajos disponibles');
+    const views={};
+    for(const id of ids) {
+      const row=()=>byId(`shortcut-${id}`), sw=()=>row().querySelector('button');
+      const before=await invoke('hotkey_action',payload(id,'view'));
+      await click(sw());
+      await wait(async()=>sw()?.disabled===false && (await invoke('hotkey_action',payload(id,'view'))).enabled!==before.enabled,`${id}: interruptor guardado`);
+      await click(sw());
+      await wait(async()=>sw()?.disabled===false && (await invoke('hotkey_action',payload(id,'view'))).enabled===before.enabled,`${id}: restaurado`);
+      views[id]=await invoke('hotkey_action',payload(id,'view'));
+    }
+    // A rejected collision must leave BOTH configurations intact.
+    let conflict=false;
+    try { await invoke('hotkey_action',{id:'openChat',action:'set',combo:views.toggleIsland.combo}); }
+    catch(e) { conflict=e.code==='combo_in_use'; }
+    const unchanged=await invoke('hotkey_action',{id:'openChat',action:'view'});
+    await wait(()=>!byId('shortcut-reset').disabled,'reset disponible tras cambios de catálogo');
+    await click(byId('shortcut-reset'));
+    await wait(()=>!byId('shortcut-reset').disabled,'reset de catálogo');
+    return {ok:conflict && unchanged.combo===views.openChat.combo && new Set(Object.values(views).map(v=>v.combo)).size===9,views,conflict,unchanged};
+  }
+  async function recordHotkey() {
+    const row=()=>byId('shortcut-toggleIsland'), cap=()=>row().querySelector('.keycap');
+    await wait(()=>cap() && !cap().disabled && !byId('shortcut-reset').disabled,'catálogo listo para grabar');
+    const before=await invoke('hotkey_action',{action:'view'});
+    const chat=await invoke('hotkey_action',{id:'openChat',action:'view'});
+    await click(cap()).catch(e=>{throw Error(`iniciar grabación: ${e.message}`);});
+    await wait(()=>cap()?.classList.contains('recording'),'grabador listo tras suspender catálogo');
+    const suspended=await invoke('hotkey_action',{id:'openChat',action:'view'});
+    await key('Ctrl+F8');
+    await wait(async()=>!cap()?.disabled && (await invoke('hotkey_action',{action:'view'})).combo==='Ctrl+F8','nueva combinación guardada');
+    const rebound=await invoke('hotkey_action',{action:'view'});
+    await click(cap()).catch(e=>{throw Error(`iniciar borrado: ${e.message}`);});
+    await wait(()=>cap()?.classList.contains('recording'),'grabador para borrar');
+    await key('BackSpace');
+    await wait(async()=>!cap()?.disabled && (await invoke('hotkey_action',{action:'view'})).combo==='','Backspace borró solo la fila elegida');
+    const cleared=await invoke('hotkey_action',{action:'view'});
+    const other=await invoke('hotkey_action',{id:'openChat',action:'view'});
+    await click(byId('shortcut-reset')).catch(e=>{throw Error(`reset después de borrar: ${e.message}`);});
+    await wait(()=>!byId('shortcut-reset').disabled,'reset completo');
+    return {ok:suspended.status!=='active' && rebound.combo==='Ctrl+F8' && !cleared.enabled && cleared.combo==='' && other.combo===chat.combo,before,suspended,rebound,cleared,other,coverage:'trusted recording/Backspace and native readback; old-combo dispatch not exercised from settings'};
+  }
   async function noModel(page) {
     const index=window.__validatePages.indexOf(page);
     if(index < 0) throw Error(`página desconocida: ${page}`);
@@ -300,5 +383,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,answerQuestion,gear,hub,github,mail,sounds,spotify,character,noModel};
+  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel};
 })();

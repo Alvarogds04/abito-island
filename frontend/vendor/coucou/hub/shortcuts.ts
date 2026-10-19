@@ -10,15 +10,24 @@ import { t } from './i18n-es.js';
 export async function renderShortcuts({invoke,V,listen,timers}:any) {
   const s=session(invoke,listen,timers),{root,call,work}=s;
   root.style.setProperty('display','contents');
-  const views:Record<string,any>={toggleIsland:null,desktopToggle:null};
+  const views:Record<string,any>=Object.fromEntries(SHORTCUTS.filter(d=>d.ported).map(d=>[d.id,null]));
   let recording:string|null=null,busy=false;
+  const resume=()=>call('hotkey_action',{action:'resume'});
+  function stopRecording(){recording=null;work(resume).finally(()=>{if(s.alive())draw();});draw();}
+  function startRecording(id:string){
+    if(recording===id){stopRecording();return;}
+    busy=true;draw();
+    work(()=>call('hotkey_action',{action:'suspend'}),()=>{recording=id;},()=>{recording=null;})
+      .finally(()=>{busy=false;if(s.alive()){draw();list.querySelector<HTMLButtonElement>('.recording')?.focus();}else invoke('hotkey_action',{payload:{action:'resume'}}).catch(()=>{});});
+  }
   const payloadFor=(id:string,payload:any)=>id==='toggleIsland'?payload:{...payload,id};
   const list=h('div',{id:'global-shortcuts',class:'shortcut-list'}),feedback=hint('');
   function save(id:string,payload:any){
     if(busy||!views[id]||!s.alive())return;
+    const wasRecording=recording!==null;
     busy=true;recording=null;draw();
-    work(()=>call('hotkey_action',payloadFor(id,payload)),next=>{views[id]=next;},()=>{views[id]=null;})
-      .finally(()=>{busy=false;if(s.alive())draw();});
+    work(()=>call('hotkey_action',payloadFor(id,payload)),next=>{views[id]=next;},error=>{if(error?.code==='combo_in_use')s.message.textContent='Esa combinación ya está asignada a otro atajo. El anterior sigue guardado.';})
+      .finally(async()=>{if(wasRecording)await resume().catch(()=>{});busy=false;if(s.alive())draw();});
   }
   function draw(){
     clear(list);
@@ -29,19 +38,21 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
       const enabled=supported?hotkey?.enabled===true:d.enabledByDefault;
       const keys=hotkey?hotkey.combo:d.defaultKeys;
       const sw=trusted(toggle(enabled,on=>{if(known&&!busy)save(d.id,{action:on?'enable':'disable'});}));
-      (sw as HTMLButtonElement).disabled=!known||busy;sw.setAttribute('aria-label',t(SHORTCUT_TEXT[d.id]));
+      (sw as HTMLButtonElement).disabled=!known||busy||!keys;sw.setAttribute('aria-label',t(SHORTCUT_TEXT[d.id]));
+      if(known&&!keys)sw.title='Graba una combinación antes de activar este atajo.';
       const isRecording=recording===d.id;
       const keycap=trusted(h('button',{class:isRecording?'keycap recording':'keycap',text:isRecording?t('Press keys…'):displayKeys(keys)})) as HTMLButtonElement;
-      keycap.disabled=!known||!enabled||busy;
-      if(supported)keycap.title='Backspace: No disponible todavía';
-      keycap.addEventListener('click',e=>{if(!e.isTrusted||keycap.disabled)return;recording=isRecording?null:d.id;draw();list.querySelector<HTMLButtonElement>('.recording')?.focus();});
+      keycap.disabled=!known||busy;
+      if(supported)keycap.title='Esc: cancelar · Backspace: borrar';
+      keycap.addEventListener('click',e=>{if(!e.isTrusted||keycap.disabled)return;startRecording(d.id);});
       keycap.addEventListener('keydown',e=>{
         if(!e.isTrusted||recording!==d.id||!known||busy)return;
-        e.preventDefault();const result=V.captureCombo(e);
-        if(result.kind==='cancel'){recording=null;draw();}
+        e.preventDefault();const result=e.key==='Backspace'&&!e.repeat&&!e.isComposing?{kind:'clear'}:V.captureCombo(e);
+        if(result.kind==='cancel')stopRecording();
+        else if(result.kind==='clear')save(d.id,{action:'clear'});
         else if(result.kind==='combo')save(d.id,{action:'set',combo:result.text});
       });
-      keycap.addEventListener('blur',()=>{if(recording===d.id){recording=null;draw();}});
+      keycap.addEventListener('blur',()=>{if(recording===d.id)stopRecording();});
       const r=h('div',{id:`shortcut-${d.id}`,class:enabled?'row shortcut':'row shortcut off'},sw,h('span',{class:'shortcut-name',text:t(SHORTCUT_TEXT[d.id])}));
       if(known&&enabled){
         if(dups.has(d.id))r.append(h('span',{class:'tag err',text:t('Used twice')}));
@@ -63,22 +74,27 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
     if(!e.isTrusted||reset.disabled)return;
     busy=true;recording=null;draw();
     work(async()=>{
-      // each binding resets on its own: one failing never leaves the others unreset
-      for(const id of Object.keys(views)){try{views[id]=await call('hotkey_action',payloadFor(id,{action:'reset'}));}catch{/* its row keeps the previous view */}}
+      // Release all reservations first: swapped/custom combinations must not
+      // prevent another action from reclaiming its own default. Continue after
+      // a failed row, but never announce that row as successfully restored.
+      for(const action of ['clear','reset'])for(const id of Object.keys(views)){
+        try{views[id]=await call('hotkey_action',payloadFor(id,{action}));}
+        catch{s.message.textContent='No se pudieron restablecer todos los atajos. Revisa las filas e inténtalo otra vez.';}
+      }
     },()=>{},()=>{}).finally(()=>{busy=false;if(s.alive())draw();});
   });
   const island=h('div',{id:'island-shortcuts',class:'shortcut-list'});
   for(const r of ISLAND_SHORTCUTS)island.append(h('div',{class:'row shortcut'},h('span',{class:'shortcut-name',text:t(r.description)}),h('span',{class:'keycap static',text:r.keys})));
   const recap=await renderRecapRows({invoke,listen,timers});
   root.append(section(t('Shortcuts'),hint(t('Work from any app. Click a shortcut to change it, then press the new keys — Esc cancels, Backspace removes it.')),
-    h('div',{class:'subhead',text:t('From anywhere')}),list,hint('No disponible todavía'),feedback,h('div',{class:'row'},reset),h('div',{class:'subhead',text:t('In the open island')}),island),recap,s.message);
+    h('div',{class:'subhead',text:t('From anywhere')}),list,feedback,h('div',{class:'row'},reset),h('div',{class:'subhead',text:t('In the open island')}),island),recap,s.message);
   draw();
   for(const id of Object.keys(views)){
     work(()=>call('hotkey_action',payloadFor(id,{action:'view'})),next=>{views[id]=next;draw();});
-    s.watch(id==='toggleIsland'?'hotkey:state':'hotkey-desktop:state',next=>{views[id]=next;if(!recording)draw();});
+    s.watch(id==='toggleIsland'?'hotkey:state':id==='desktopToggle'?'hotkey-desktop:state':`hotkey-${id}:state`,next=>{views[id]=next;if(!recording)draw();});
   }
   const mounted=s.finish(),dispose=mounted.dispose,settled=mounted.settled;
-  mounted.dispose=()=>{recording=null;recap.dispose();dispose();};
+  mounted.dispose=()=>{if(recording)invoke('hotkey_action',{payload:{action:'resume'}}).catch(()=>{});recording=null;recap.dispose();dispose();};
   mounted.settled=async()=>{await settled();await recap.settled();};
   return mounted;
 }

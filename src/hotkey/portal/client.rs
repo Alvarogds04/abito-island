@@ -169,7 +169,9 @@ impl PortalGrabber {
             // 2) BindShortcuts: THIS is where the OS dialog appears (accept once)
             let bind_tok = token("bind");
             let mut shortcut: HashMap<&str, Value<'_>> = HashMap::new();
-            shortcut.insert("description", Value::from(if id == "toggle-desktop-character" { "Enviar Abito al escritorio o traerlo a casa" } else { "Mostrar u ocultar la isla de Abito" }));
+            let description = crate::hotkey::Target::ALL.into_iter().find(|t| t.portal_id() == id)
+                .map(|t| t.description()).unwrap_or("Atajo de Abito");
+            shortcut.insert("description", Value::from(description));
             shortcut.insert("preferred_trigger", Value::from(combo.portal_trigger()));
             let mut bind_opts: HashMap<&str, Value<'_>> = HashMap::new();
             bind_opts.insert("handle_token", Value::from(bind_tok.as_str()));

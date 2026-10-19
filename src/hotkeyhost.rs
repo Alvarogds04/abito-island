@@ -17,11 +17,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-const TARGETS: [Target; 2] = [Target::ToggleIsland, Target::DesktopToggle];
-
-fn other(target: Target) -> Target {
-    match target { Target::ToggleIsland => Target::DesktopToggle, Target::DesktopToggle => Target::ToggleIsland }
-}
+const TARGETS: [Target; 9] = Target::ALL;
 
 /// The live grab(s). `Portal` carries the limited X11 grab IN PARALLEL while the OS
 /// dialog is open (an unanswered dialog must never leave the shortcut without a
@@ -67,6 +63,7 @@ impl Held {
 
 #[derive(Default)]
 struct Slot {
+    press: Mutex<hotkey::PressGate>,
     config: Mutex<HotkeyConfig>,
     grabber: Mutex<Option<Held>>,
     /// #467: Ajustes is recording a combination (see `hotkey::SuspendGate`).
@@ -76,22 +73,23 @@ struct Slot {
 pub struct HotkeyHost {
     island: Slot,
     desktop: Slot,
+    actions: Vec<(Target, Slot)>,
     // Serialize cross-slot mutations: two concurrent sets must not both pass the clash check.
     mutation: Mutex<()>,
 }
 impl Default for HotkeyHost {
     fn default() -> Self {
-        Self { island: Slot::default(), desktop: Slot { config: Mutex::new(HotkeyConfig::default_for(Target::DesktopToggle)), ..Slot::default() }, mutation: Mutex::new(()) }
+        Self { island: Slot::default(), desktop: Slot { config: Mutex::new(HotkeyConfig::default_for(Target::DesktopToggle)), ..Slot::default() }, actions: TARGETS.into_iter().skip(2).map(|t| (t, Slot { config: Mutex::new(HotkeyConfig::default_for(t)), ..Slot::default() })).collect(), mutation: Mutex::new(()) }
     }
 }
 impl HotkeyHost {
     fn slot(&self, target: Target) -> &Slot {
-        match target { Target::ToggleIsland => &self.island, Target::DesktopToggle => &self.desktop }
+        match target { Target::ToggleIsland => &self.island, Target::DesktopToggle => &self.desktop, _ => &self.actions.iter().find(|(t, _)| *t == target).expect("catalog slot").1 }
     }
 }
 
 fn config_path(app: &AppHandle, target: Target) -> Option<std::path::PathBuf> {
-    let file = match target { Target::ToggleIsland => "hotkey.json", Target::DesktopToggle => "hotkey-desktop.json" };
+    let file = match target { Target::ToggleIsland => "hotkey.json".into(), Target::DesktopToggle => "hotkey-desktop.json".into(), _ => format!("hotkey-{}.json", target.id()) };
     app.path().app_config_dir().ok().map(|d| d.join(file))
 }
 
@@ -123,9 +121,19 @@ fn press_target_on_main(app: &AppHandle, target: Target) {
     let inner = app.clone();
     let _ = app.run_on_main_thread(move || {
         if target == Target::ToggleIsland { on_press(&inner); return; }
-        static DESKTOP_PRESS_GATE: Mutex<hotkey::PressGate> = Mutex::new(hotkey::PressGate::new_const());
-        if !QUITTING.load(Ordering::SeqCst) && DESKTOP_PRESS_GATE.lock().map(|mut g| g.accept(crate::now_ms() as u64)).unwrap_or(false) {
-            let _ = inner.emit_to("main", "desktop-character-toggle", ());
+        let state = inner.state::<AppState>();
+        if !QUITTING.load(Ordering::SeqCst) && state.hotkey.slot(target).press.lock().map(|mut g| g.accept(crate::now_ms() as u64)).unwrap_or(false) {
+            if target == Target::DesktopToggle {
+                let _ = inner.emit_to("main", "desktop-character-toggle", ());
+            } else {
+                // These two shortcuts explicitly ask to work in the island.
+                // Reveal before focusing: a hidden window cannot take focus.
+                if matches!(target, Target::OpenChat | Target::GoToAlert) {
+                    let _ = dispatch_verb(&inner, &state, Action::Expand, None);
+                    if let Some(win) = crate::main_window(&inner) { let _ = win.set_focus(); }
+                }
+                let _ = inner.emit_to("main", "global-shortcut", target.id());
+            }
         }
     });
 }
@@ -182,13 +190,13 @@ fn view_of(host: &Slot) -> View {
         Some(h) => (h.status(), h.backend(), h.portal_note()),
         None => (idle_status(&cfg), portal::choose_backend(session(), PortalState::Unavailable), None),
     };
-    View { combo: cfg.combo.to_string(), enabled: cfg.enabled, status, limited: backend_limited(backend), backend: backend_name(backend), portal_note }
+    View { combo: if cfg.bound { cfg.combo.to_string() } else { String::new() }, enabled: cfg.enabled, status, limited: backend_limited(backend), backend: backend_name(backend), portal_note }
 }
 
 fn publish(app: &AppHandle, target: Target) {
     let state = app.state::<AppState>();
-    let event = match target { Target::ToggleIsland => "hotkey:state", Target::DesktopToggle => "hotkey-desktop:state" };
-    let _ = app.emit(event, view_of(state.hotkey.slot(target)));
+    let event = match target { Target::ToggleIsland => "hotkey:state".into(), Target::DesktopToggle => "hotkey-desktop:state".into(), _ => format!("hotkey-{}:state", target.id()) };
+    let _ = app.emit(&event, view_of(state.hotkey.slot(target)));
 }
 
 /// One decision, two backends. On Wayland the XDG portal is primary (the OS asks the
@@ -204,7 +212,7 @@ fn grab(app: &AppHandle, target: Target, combo: hotkey::Combo) -> Held {
     let x11 = || Grabber::start(None, combo, move |GrabEvent::Pressed| press_target_on_main(&x11_handle, target));
     if backend == Backend::Portal {
         let handle = app.clone();
-        let id = match target { Target::ToggleIsland => portal::SHORTCUT_ID, Target::DesktopToggle => "toggle-desktop-character" };
+        let id = target.portal_id();
         let portal = PortalGrabber::start_with_id(None, combo, id, move || press_target_on_main(&handle, target));
         // the limited X11 grab runs meanwhile: no route is ever missing while the OS dialog is open
         let held = Held::Portal { portal, x11: Some(x11()) };
@@ -307,14 +315,15 @@ pub fn start(app: &AppHandle) {
     }
     let state = app.state::<AppState>();
     let _mutation = state.hotkey.mutation.lock().expect("hotkey mutation lock");
-    let island = load(app, Target::ToggleIsland);
-    let mut desktop = load(app, Target::DesktopToggle);
-    // A legacy island config may already use Ctrl+Alt+D. Keep it, but never grab it twice.
-    if hotkey::check_combo_available(desktop.combo, &island).is_err() {
-        desktop.enabled = false;
+    let mut accepted = Vec::new();
+    for target in TARGETS {
+        let mut cfg = load(app, target);
+        // Earlier (legacy first) bindings win. A colliding persisted combo is
+        // visible but disabled, never registered on either backend.
+        if accepted.contains(&cfg.combo) { cfg.enabled = false; }
+        if cfg.enabled { accepted.push(cfg.combo); }
+        *state.hotkey.slot(target).config.lock().expect("hotkey config lock") = cfg;
     }
-    *state.hotkey.island.config.lock().expect("hotkey config lock") = island;
-    *state.hotkey.desktop.config.lock().expect("hotkey config lock") = desktop;
     for target in TARGETS { rebind(app, target); }
 }
 
@@ -342,45 +351,47 @@ pub async fn hotkey_action(app: AppHandle, webview: tauri::Webview, state: State
         Command::View => {}
         Command::Suspend => {
             let _mutation = state.hotkey.mutation.lock().expect("hotkey mutation lock");
-            let token = host.suspend.lock().expect("hotkey suspend lock").suspend();
-            let taken = host.grabber.lock().expect("hotkey grabber lock").take();
-            if let Some(held) = taken {
-                held.stop();
+            // The recorder owns the keyboard, not just its selected action.
+            for target in TARGETS {
+                let slot = state.hotkey.slot(target);
+                let token = slot.suspend.lock().expect("hotkey suspend lock").suspend();
+                if let Some(held) = slot.grabber.lock().expect("hotkey grabber lock").take() { held.stop(); }
+                publish(&app, target);
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(hotkey::SUSPEND_MAX_MS));
+                    let expired = handle.state::<AppState>().hotkey.slot(target).suspend.lock().expect("hotkey suspend lock").expire(token);
+                    if expired { regrab(&handle, target); }
+                });
             }
-            publish(&app, target);
-            // Never leave the shortcut off if the recorder does not report back.
-            let handle = app.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(hotkey::SUSPEND_MAX_MS));
-                let expired = handle.state::<AppState>().hotkey.slot(target).suspend.lock().expect("hotkey suspend lock").expire(token);
-                if expired {
-                    regrab(&handle, target);
-                }
-            });
         }
         Command::Resume => {
-            let was = host.suspend.lock().expect("hotkey suspend lock").resume();
-            if was {
-                regrab(&app, target);
+            for target in TARGETS {
+                let was = state.hotkey.slot(target).suspend.lock().expect("hotkey suspend lock").resume();
+                if was { regrab(&app, target); }
             }
         }
-        Command::Enable | Command::Disable | Command::Reset | Command::Set(_) => {
+        Command::Enable | Command::Disable | Command::Clear | Command::Reset | Command::Set(_) => {
             let _mutation = state.hotkey.mutation.lock().expect("hotkey mutation lock");
             let next = {
                 let mut cfg = host.config.lock().expect("hotkey config lock").clone();
                 match command {
-                    Command::Enable => cfg.enabled = true,
+                    Command::Enable => { if !cfg.bound { return Err(err("invalid_combo")); } cfg.enabled = true; },
+                    Command::Clear => { cfg.enabled = false; cfg.bound = false; },
                     Command::Disable => cfg.enabled = false,
                     Command::Reset => cfg = HotkeyConfig::default_for(target),
                     Command::Set(combo) => {
                         cfg.combo = combo;
+                        cfg.bound = true;
                         cfg.enabled = true;
                     }
                     Command::View | Command::Suspend | Command::Resume => {}
                 }
-                if command != Command::Disable {
-                    hotkey::check_combo_available(cfg.combo, &state.hotkey.slot(other(target)).config.lock().expect("hotkey config lock"))
-                        .map_err(|e| err(e.code()))?;
+                if !matches!(command, Command::Disable | Command::Clear) {
+                    for other in TARGETS.into_iter().filter(|t| *t != target) {
+                        hotkey::check_combo_available(cfg.combo, &state.hotkey.slot(other).config.lock().expect("hotkey config lock"))
+                            .map_err(|e| err(e.code()))?;
+                    }
                 }
                 *host.config.lock().expect("hotkey config lock") = cfg.clone();
                 cfg

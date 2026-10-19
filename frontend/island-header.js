@@ -65,10 +65,23 @@ function mount(api) {
   import('./vendor/coucou/views/icons.js').then(m => { ICONS = m.ICONS; paint(); paintSound(); }).catch(() => {});
 
   if (label !== 'settings' && invoke) {
+    let soundChanges = Promise.resolve();
+    const toggleSound = () => {
+      soundChanges = soundChanges.then(async () => {
+        // Serialize clicks/global presses and re-read the same persisted pref
+        // used by Settings; two presses must not both apply a stale action.
+        apply(await invoke('prefs_action', { payload: { action: 'view' } }));
+        apply(await invoke('prefs_action', { payload: { action: view.action } }));
+      }).catch(() => {
+        const live = doc.getElementById('notice-live');
+        if (live) live.textContent = 'No se pudo cambiar el sonido.';
+      });
+    };
     if (mute) mute.addEventListener('click', e => {
       if (e.isTrusted !== true) return;
-      invoke('prefs_action', { payload: { action: view.action } }).then(apply, () => {});
+      toggleSound();
     });
+    if (listen) listen('global-shortcut', e => { if (e && e.payload === 'muteToggle') toggleSound(); }).catch(() => {});
     invoke('prefs_action', { payload: { action: 'view' } }).then(apply, () => {});
     if (listen) listen('prefs:state', e => apply(e && e.payload)).catch(() => {});
   }

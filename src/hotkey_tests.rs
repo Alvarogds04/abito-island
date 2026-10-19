@@ -30,7 +30,7 @@ fn targeted_schema_preserves_legacy_and_rejects_extra_keys() {
         p["extra"] = json!(true);
         assert_eq!(parse_targeted(&p), Err(CommandError::InvalidSchema));
     }
-    for id in [json!(null), json!(1), json!(true), json!("toggleIsland"), json!("unknown")] {
+    for id in [json!(null), json!(1), json!(true), json!("unknown")] {
         assert_eq!(parse_targeted(&json!({"action":"view","id":id})), Err(CommandError::InvalidSchema));
     }
     assert_eq!(parse_targeted(&json!({"action":"set","id":"desktopToggle","combo":"A"})), Err(CommandError::NeedsModifier));
@@ -478,4 +478,50 @@ fn a_suspension_ends_once_by_resume_or_by_its_own_timeout_and_never_by_a_stale_o
     let b = gate.suspend();
     assert!(!gate.expire(a));
     assert!(gate.expire(b));
+}
+
+#[test]
+fn catalog_routes_each_action_and_roundtrips_defaults() {
+    let mut combos = Vec::new();
+    for id in ["toggleIsland", "desktopToggle", "openChat", "goToAlert", "jumpToTerminal", "nextPill", "prevPill", "muteToggle", "wardrobeToggle"] {
+        let (target, command) = parse_targeted(&serde_json::json!({"id":id,"action":"view"})).expect("catalog action accepted");
+        assert_eq!(command, Command::View);
+        let cfg = HotkeyConfig::default_for(target);
+        assert!(!combos.contains(&cfg.combo), "independent default for {id}");
+        combos.push(cfg.combo);
+        assert_eq!(HotkeyConfig::from_text_for(Some(&cfg.to_text()), target), cfg);
+    }
+    assert!(parse_targeted(&serde_json::json!({"id":"unknown","action":"view"})).is_err());
+}
+
+#[test]
+fn catalog_arrow_bindings_match_each_backend() {
+    for (key, keysym, vk) in [("Left", 0xff51, 0x25), ("Right", 0xff53, 0x27)] {
+        let combo = Combo::parse(&format!("Ctrl+Alt+{key}")).expect("pill arrow accepted");
+        assert_eq!(combo.keysym(), keysym);
+        assert_eq!(combo.win_vk(), vk);
+        assert_eq!(combo.to_string(), format!("Ctrl+Alt+{key}"));
+    }
+}
+
+#[test]
+fn catalog_portal_ids_never_activate_another_action() {
+    for action in Target::ALL {
+        let signal = portal::ShortcutSignal { shortcut_id: action.portal_id().into(), activated: true };
+        for candidate in Target::ALL {
+            assert_eq!(portal::is_our_activation_for(&signal, candidate.portal_id()), action == candidate);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cleared_binding_stays_cleared_across_restart_and_releases_combo() {
+    let raw = r#"{"v":1,"combo":"Ctrl+Alt+A","enabled":true,"bound":false}"#;
+    let cfg = HotkeyConfig::from_text(Some(raw));
+    assert!(!cfg.enabled, "cleared binding cannot reactivate on restart");
+    assert_eq!(check_combo_available(cfg.combo, &cfg), Ok(()));
+    assert_eq!(HotkeyConfig::from_text(Some(&cfg.to_text())), cfg);
+    assert!(parse_command(&serde_json::json!({"action":"clear"})).is_ok());
+    assert!(parse_command(&serde_json::json!({"action":"clear","combo":"Ctrl+K"})).is_err());
 }

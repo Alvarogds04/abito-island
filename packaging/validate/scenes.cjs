@@ -1,6 +1,6 @@
 'use strict';
 const hubPages = require('./pages.json');
-const extraScenes = ['ajustes-arranque-apagado', 'ajustes-arranque-manual', 'ajustes-arranque-login', 'integracion-github', 'correo-keyring', 'spotify-reproductor', 'sonidos-controles', 'sonidos-audible', 'dictado-sin-modelo', 'voz-sin-modelo', 'voz-reconocimiento', 'bandeja-menu', 'autoinicio', 'personaje-escritorio', 'chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta', 'ajustes-engranaje', ...hubPages.map(p => `ajustes-${p}`), 'ajustes-cuentas-keyring'];
+const extraScenes = ['ajustes-arranque-apagado', 'ajustes-arranque-manual', 'ajustes-arranque-login', 'atajos-chat-alerta-terminal-sonido', 'atajos-catalogo', 'atajos-grabar-borrar', 'integracion-github', 'correo-keyring', 'spotify-reproductor', 'sonidos-controles', 'sonidos-audible', 'dictado-sin-modelo', 'voz-sin-modelo', 'voz-reconocimiento', 'bandeja-menu', 'autoinicio', 'personaje-escritorio', 'chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta', 'ajustes-engranaje', ...hubPages.map(p => `ajustes-${p}`), 'ajustes-cuentas-keyring'];
 function classify(observation) {
   const o = observation || {};
   if (o.ok !== true || o.errors?.length) return { verdict: 'fail', reason: o.reason || o.errors?.join('; ') || 'falta evidencia de comportamiento', evidence: o };
