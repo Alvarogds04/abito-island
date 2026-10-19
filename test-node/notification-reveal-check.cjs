@@ -182,7 +182,7 @@ test('main.rs reveal arm captures the keyboard owner BEFORE showing', () => {
   assert(arm, 'the hidden-reveal arm must exist in the Expand dispatch');
   const body = arm[0];
   const capture = body.indexOf('hotkey::x11::active_window');
-  const firstShow = body.indexOf('win.show()');
+  const firstShow = body.search(/win\.show\(\)|show_on_top\(&win\)/); // L56: show_on_top re-asserts always-on-top
   assert(capture !== -1, 'the arm reads the active window (no new focus architecture)');
   assert(firstShow !== -1 && capture < firstShow, 'the keyboard owner is captured BEFORE the show');
 });

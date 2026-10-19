@@ -768,7 +768,7 @@ pub(crate) fn restore(app: &AppHandle) {
             // Preserve phase, view and geometry; a second launch is not an answer.
             let Some(win) = main_window(app) else { return };
             let _ = win.unminimize();
-            let _ = win.show();
+            show_on_top(&win);
             sync_host_visible(&win);
             publish(app, &state);
             return;
@@ -803,9 +803,17 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
     let _ = win.unminimize();
     // Q1: show, never focus — the island must not take the keyboard from
     // the app the human is working in (legacy `restore()` focused it).
-    let _ = win.show();
+    show_on_top(&win);
     sync_host_visible(&win);
     publish(app, state);
+}
+
+/// Human L56: show the island and re-assert always-on-top. Mutter clears _NET_WM_STATE_ABOVE
+/// when the window is withdrawn (hide), so a plain show() remaps it BEHIND other windows:
+/// mapped but invisible, and the toggle shortcut looks dead.
+fn show_on_top(win: &WebviewWindow) {
+    let _ = win.show(); // show_on_top body
+    let _ = win.set_always_on_top(true);
 }
 
 /// Q1: the deliberate "Open Abito chat and type" activation (second launch
@@ -1193,7 +1201,7 @@ fn dispatch_click(app: &AppHandle, state: &AppState, click: bridge::Click) -> Re
         desktop::ClickPlan::Show(edge) => push_phase(app, "overview", edge),
     }
     let _ = win.unminimize();
-    let _ = win.show(); // no set_focus: focus handback is not an acceptance gate
+    show_on_top(&win); // no set_focus: focus handback is not an acceptance gate
     sync_host_visible(&win);
     chathost::publish_chat(app);
     publish(app, state);
@@ -1431,7 +1439,7 @@ fn dispatch_action(
                             // geometry — a toggle would emit a COLLAPSE plan.
                             // Show in place; the chat view is NOT switched.
                             let _ = win.unminimize();
-                            let _ = win.show();
+                            show_on_top(&win);
                             sync_host_visible(&win);
                             push_phase(app, "overview", edge);
                             chathost::publish_chat(app);
@@ -1443,7 +1451,7 @@ fn dispatch_action(
                             };
                             apply_plan(app, state, plan);
                             let _ = win.unminimize();
-                            let _ = win.show();
+                            show_on_top(&win);
                             sync_host_visible(&win);
                         }
                     }
