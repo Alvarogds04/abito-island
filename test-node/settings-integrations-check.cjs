@@ -20,7 +20,9 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const calls=[], events={};
   let hotkey={combo:'Ctrl+Space',enabled:true,status:'active'};
   const desktopHotkey={combo:'Ctrl+Alt+D',enabled:true,status:'active'};
+  let failResetOf=null;
   const invoke=async(cmd,{payload:p})=>{
+    if(cmd==='hotkey_action'&&p.action==='reset'&&p.id===failResetOf){calls.push([cmd,p]);throw Error('reset fixture');}
     if(cmd==='secret_action'&&p.action!=='present') assert.equal(all(ui).find(e=>e.id===`integration-key-${p.key}`).value,'','clear BEFORE IPC');
     calls.push([cmd,p]);
     if(fail) throw Error('fixture');
@@ -114,6 +116,8 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   assert.deepEqual(calls,[['hotkey_action',{action:'set',combo:'Ctrl+J',id:'desktopToggle'}]]);
   assert.equal(hotkey.combo,'Ctrl+K','desktop recording does not change island binding');
   calls.length=0;click(find('shortcut-reset'),false);await ui.settled();assert.deepEqual(calls,[]);click(find('shortcut-reset'));await ui.settled();assert.deepEqual(calls,[['hotkey_action',{action:'reset'}],['hotkey_action',{action:'reset',id:'desktopToggle'}]]);ui.dispose();
+  ui=await renderShortcuts(opts);await ui.settled();failResetOf=undefined;calls.length=0;click(find('shortcut-reset'));await ui.settled();failResetOf=null;ui.dispose();
+  assert.deepEqual(calls,[['hotkey_action',{action:'reset'}],['hotkey_action',{action:'reset',id:'desktopToggle'}]],'a failing island reset still resets the desktop binding');
   desktopHotkey.status='taken';ui=await renderShortcuts(opts);await ui.settled();assert(text(find('shortcut-desktopToggle')).includes('En uso por otra app'));ui.dispose();desktopHotkey.status='active';
   hotkey.status='taken';ui=await renderShortcuts(opts);await ui.settled();assert(text(find('shortcut-toggleIsland')).includes('En uso por otra app'));ui.dispose();hotkey.status='active';
   ui=await renderRecapRows(opts);await ui.settled();assert.equal(ui.children.length,3);assert(text(ui).includes('Resumen semanal'));

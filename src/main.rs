@@ -433,6 +433,10 @@ impl core::WindowIo for TauriIo<'_> {
     }
 }
 
+fn characterhost_label() -> &'static str {
+    abito_island::characterwin::LABEL
+}
+
 fn main_window(app: &AppHandle) -> WebviewWindow {
     app.get_webview_window("main")
         .expect("main window must exist")
@@ -954,7 +958,9 @@ fn navigation_lock() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             // #366 F093 / #474: exactly the sender gate's rule: the island keeps its
             // closed page allowlist and the settings window may also load its own
             // settings.html, never anything else and never by the page's choice.
-            let allowed = bridge::sender_ok(webview.label(), url.as_str()).is_ok();
+            let allowed = bridge::sender_ok(webview.label(), url.as_str()).is_ok()
+                // #486: the two Rust-created character windows load exactly their own page.
+                || abito_island::characterwin::navigation_allowed(webview.label(), url.as_str());
             if !allowed {
                 eprintln!("navigation blocked from {}: {url}", webview.label());
             }
@@ -1993,6 +1999,11 @@ fn main() {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 if window.label() == "main" {
                     chathost::record_drops(paths.clone());
+                }
+            }
+            if window.label() == characterhost_label() {
+                if let tauri::WindowEvent::Resized(_) = event {
+                    characterhost::on_resized(window.app_handle());
                 }
             }
             if window.label() == "main" {

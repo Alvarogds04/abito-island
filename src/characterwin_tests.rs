@@ -203,3 +203,41 @@ fn the_shape_follows_the_scale() {
     assert!(r.iter().all(|&(x, y, w, h)| x + w as i16 <= 240 && y + h as i16 <= 240));
     assert_eq!(body_input_rects(120.0, 0.0), body_input_rects(120.0, 1.0), "a bad scale reads as 1");
 }
+
+#[test]
+fn the_gaze_thread_ends_as_soon_as_anything_says_so() {
+    // current generation == mine, app alive, window there and shown: keep going
+    assert!(gaze_should_run(3, 3, false, true, true));
+    assert!(!gaze_should_run(4, 3, false, true, true), "a newer show took over");
+    assert!(!gaze_should_run(3, 3, true, true, true), "quitting");
+    assert!(!gaze_should_run(3, 3, false, false, true), "the window is gone");
+    assert!(!gaze_should_run(3, 3, false, true, false), "the window is hidden: nothing to feed");
+}
+
+#[test]
+fn the_navigation_lock_admits_exactly_the_two_pages_of_the_two_windows() {
+    assert!(navigation_allowed("character", "tauri://localhost/desktop-character.html"));
+    assert!(navigation_allowed("character-highlight", "tauri://localhost/desktop-highlight.html"));
+    for (l, u) in [
+        ("character", "tauri://localhost/desktop-highlight.html"),
+        ("character-highlight", "tauri://localhost/desktop-character.html"),
+        ("character", "tauri://localhost/index.html"),
+        ("character", "https://evil.example/desktop-character.html"),
+        ("character", "tauri://localhost/desktop-character.html?x=1"),
+        ("main", "tauri://localhost/desktop-character.html"),
+        ("settings", "tauri://localhost/desktop-highlight.html"),
+        ("Character", "tauri://localhost/desktop-character.html"),
+    ] {
+        assert!(!navigation_allowed(l, u), "{l} {u}");
+    }
+}
+
+#[test]
+fn main_rs_navigation_lock_still_uses_the_sender_gate_and_adds_the_character_pages() {
+    let src = include_str!("main.rs");
+    let at = src.find("fn navigation_lock()").unwrap();
+    let body = &src[at..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    assert!(body.contains("bridge::sender_ok(webview.label(), url.as_str()).is_ok()"));
+    assert!(body.contains("characterwin::navigation_allowed("));
+}

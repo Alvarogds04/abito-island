@@ -88,7 +88,12 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
     recording = null;
     draw();
     work(async () => {
-      for (const id of Object.keys(views)) views[id] = await call("hotkey_action", payloadFor(id, { action: "reset" }));
+      for (const id of Object.keys(views)) {
+        try {
+          views[id] = await call("hotkey_action", payloadFor(id, { action: "reset" }));
+        } catch {
+        }
+      }
     }, () => {
     }, () => {
     }).finally(() => {

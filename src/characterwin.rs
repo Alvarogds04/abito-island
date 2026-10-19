@@ -203,3 +203,19 @@ pub fn body_input_rects(size: f64, scale: f64) -> Vec<(i16, i16, u16, u16)> {
     }
     out
 }
+
+/// Whether the gaze poll thread of generation `mine` keeps running. It ends when a newer
+/// show took over, the app is quitting, or the character window is gone or hidden, so a
+/// path that hides the window without bumping the generation can never leak the thread.
+pub fn gaze_should_run(current: u64, mine: u64, quitting: bool, window_present: bool, visible: bool) -> bool {
+    current == mine && !quitting && window_present && visible
+}
+
+/// Navigation the app's lock admits for the character windows: each Rust-created window loads
+/// exactly its own page (the character, and the click-through highlight border), nothing else.
+pub fn navigation_allowed(label: &str, url: &str) -> bool {
+    matches!(
+        (label, url),
+        ("character", "tauri://localhost/desktop-character.html") | ("character-highlight", "tauri://localhost/desktop-highlight.html")
+    )
+}

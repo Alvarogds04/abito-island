@@ -63,7 +63,8 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
     if(!e.isTrusted||reset.disabled)return;
     busy=true;recording=null;draw();
     work(async()=>{
-      for(const id of Object.keys(views))views[id]=await call('hotkey_action',payloadFor(id,{action:'reset'}));
+      // each binding resets on its own: one failing never leaves the others unreset
+      for(const id of Object.keys(views)){try{views[id]=await call('hotkey_action',payloadFor(id,{action:'reset'}));}catch{/* its row keeps the previous view */}}
     },()=>{},()=>{}).finally(()=>{busy=false;if(s.alive())draw();});
   });
   const island=h('div',{id:'island-shortcuts',class:'shortcut-list'});

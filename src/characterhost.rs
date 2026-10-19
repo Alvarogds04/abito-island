@@ -215,6 +215,16 @@ fn start_highlight(app: &AppHandle, c: &Arc<Character>) {
     });
 }
 
+/// The window events handler hands a `Resized` of the character window here: GTK may rebuild the
+/// surface and drop the input shape, so the click-through region is applied again.
+pub fn on_resized(app: &AppHandle) {
+    if let Some(win) = window(app) {
+        if win.is_visible().unwrap_or(false) {
+            apply_shape(app, &win);
+        }
+    }
+}
+
 fn place(win: &WebviewWindow, c: &Character, pos: (f64, f64)) {
     c.inner.lock().unwrap().pos = pos;
     let _ = win.set_position(PhysicalPosition::new(pos.0.round() as i32, pos.1.round() as i32));
@@ -512,8 +522,13 @@ fn start_gaze(app: &AppHandle, c: &Arc<Character>) {
     let (app, c) = (app.clone(), c.clone());
     std::thread::spawn(move || {
         let mut last = None;
-        while c.gaze.load(Ordering::SeqCst) == id && !crate::QUITTING.load(Ordering::SeqCst) {
-            if let (Some(win), Some(p)) = (window(&app), pointer()) {
+        loop {
+            let win = window(&app);
+            let visible = win.as_ref().is_some_and(|w| w.is_visible().unwrap_or(false));
+            if !cw::gaze_should_run(c.gaze.load(Ordering::SeqCst), id, crate::QUITTING.load(Ordering::SeqCst), win.is_some(), visible) {
+                break;
+            }
+            if let (Some(win), Some(p)) = (win, pointer()) {
                 if last != Some((p.0 as i64, p.1 as i64)) {
                     last = Some((p.0 as i64, p.1 as i64));
                     let origin = c.inner.lock().unwrap().pos;
@@ -549,3 +564,16 @@ pub fn character_push(webview: tauri::Webview, app: AppHandle, state: Option<Str
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    /// The GDK input shape can be dropped when GTK re-realizes the surface on a resize: the
+    /// window events handler must hand `Resized` of the character window back to this module.
+    #[test]
+    fn a_resize_of_the_character_window_reapplies_the_click_through_shape() {
+        let main = include_str!("main.rs");
+        assert!(main.contains("characterhost::on_resized"), "main.rs must route Resized to characterhost::on_resized");
+        assert!(include_str!("characterhost.rs").contains("pub fn on_resized"));
+    }
+}
+
