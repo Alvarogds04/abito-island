@@ -165,6 +165,11 @@ fn fixed_window_evidence(app: &AppHandle) {
 }
 
 pub fn run(app: AppHandle) {
+    if std::env::var("ABITO_PROBE_VALIDATE").as_deref() == Ok("island") {
+        island_validation(&app);
+        crate::quit_clean(&app);
+        return;
+    }
     if std::env::var("ABITO_PROBE_FIXED_WINDOW").as_deref() == Ok("1") {
         sleep(Duration::from_secs(3));
         fixed_window_evidence(&app);
@@ -2536,4 +2541,124 @@ fn capture_visual(app: &AppHandle, name: &str) {
         "source": "x11grab -window_id (own window drawable only, matched by _NET_WM_PID)",
         "error": (!stderr.is_empty()).then_some(stderr),
     }));
+}
+
+
+/// Validator-only island route. Same actions/readback/capture as the long probe;
+/// the external harness owns the display, WM and lifetime. No input injection.
+#[cfg(unix)]
+fn island_validation(app: &AppHandle) {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{ConnectionExt, CreateWindowAux, WindowClass, PropMode, AtomEnum, MapState};
+    use x11rb::wrapper::ConnectionExt as _;
+    let state = app.state::<AppState>();
+    let Some(win) = main_window(app) else { return };
+    let timeout = Duration::from_secs(8);
+    let wait = |condition: &dyn Fn() -> bool| {
+        let end = Instant::now() + timeout;
+        while Instant::now() < end {
+            if condition() { return true; }
+            sleep(Duration::from_millis(50));
+        }
+        false
+    };
+    let scene = |name: &str, passed: bool, reason: &str, evidence: serde_json::Value| {
+        readback(app, name);
+        capture_visual(app, name);
+        emit(&json!({"step":"validation_scene", "name":name,
+            "verdict":if passed {"pass"} else {"fail"},
+            "reason":if passed {serde_json::Value::Null} else {json!(reason)},
+            "evidence":evidence}));
+    };
+    wait(&|| state.evidence.lock().expect("evidence").is_some());
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let native_size = geometry::scaled_size(geometry::ISLAND_WINDOW, scale);
+    let compact_size = wait_for_size(app, native_size, timeout);
+    // Visible compact dimensions are measured from the page, not inferred from
+    // the fixed native stage (which intentionally holds the expanded island).
+    let page_state = |expected: &str| {
+        state.chat_probe.lock().expect("chat probe").clear();
+        let script = format!(r#"(async()=>{{const end=performance.now()+6000;
+          let last="", stable=0; while(performance.now()<end){{
+            const c=document.getElementById('capsule'), r=document.getElementById('island').getBoundingClientRect();
+            const size=[Math.round(r.width*10),Math.round(r.height*10)].join(','); stable=size===last?stable+1:0;last=size;
+            if(c.dataset.phase==={expected:?} && r.width>0 && r.height>0 && stable>=8){{
+              await window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{phase:c.dataset.phase,visible:[r.width,r.height],fold:(b=>[b.x+b.width/2,b.y+b.height/2])(document.getElementById('header-fold').getBoundingClientRect())}}}});return;
+            }} await new Promise(r=>requestAnimationFrame(r));
+          }} }})()"#);
+        let _ = win.eval(script);
+        wait_chat_lines(app, 1, timeout)
+    };
+    let compact = page_state("compact");
+    let visible = compact.first().and_then(|v| v["visible"].as_array());
+    let small = visible.map_or(false, |v| (v[0].as_f64().unwrap_or(0.0) - geometry::COMPACT_BAR.0 as f64).abs() <= 0.5 && (v[1].as_f64().unwrap_or(0.0) - geometry::COMPACT_BAR.1 as f64).abs() <= 0.5);
+    scene("isla-compacta", compact_size && small, "tamaño compacto no observado", json!({"page":compact,"native_expected":[native_size.0,native_size.1]}));
+    let above = wait(&|| abito_island::workarea::x11_find_own_window("Abito").map(|w| w.wm_state_above == Some(true)).unwrap_or(false));
+    scene("isla-siempre-encima", above, "falta _NET_WM_STATE_ABOVE al arrancar", json!({"above":above}));
+    let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
+    let expanded = page_state("expanded");
+    scene("isla-expandir", !expanded.is_empty(), "la isla no se expandió", json!({"page":expanded}));
+    let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Close, None);
+    let collapsed = page_state("compact");
+    scene("isla-colapsar", !collapsed.is_empty(), "la isla no colapsó", json!({"page":collapsed}));
+    let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
+    let expanded = page_state("expanded");
+    if let (Some(point), Ok(pos)) = (expanded.first().and_then(|v|v["fold"].as_array()), win.outer_position()) {
+        emit(&json!({"step":"validation_input","kind":"click","x":pos.x+(point[0].as_f64().unwrap_or(0.0)*scale) as i32,"y":pos.y+(point[1].as_f64().unwrap_or(0.0)*scale) as i32}));
+    }
+    let minimized = page_state("compact");
+    scene("isla-minimizar", !minimized.is_empty(), "Minimizar Abito no colapsó la isla", json!({"page":minimized,"input":"XTest click by external validator on real header-fold button"}));
+
+    // Use the identical callback used by X11/portal shortcuts, not a direct show.
+    let first_press = Instant::now();
+    crate::hotkeyhost::press_on_main(app);
+    let hidden = wait(&|| !win.is_visible().unwrap_or(true));
+    // Reproduce Mutter's loss of ABOVE on withdrawal deterministically even on
+    // Openbox, which may preserve it. Without this the regression can false-pass.
+    let _ = win.set_always_on_top(false);
+    let result = (|| -> Result<serde_json::Value, String> {
+        let (conn, screen) = x11rb::connect(None).map_err(|e| e.to_string())?;
+        let root = conn.setup().roots[screen].root;
+        let atom = |name: &[u8]| -> Result<u32,String> {
+            conn.intern_atom(false,name).map_err(|e|e.to_string())?.reply().map(|r|r.atom).map_err(|e|e.to_string())
+        };
+        let rival = conn.generate_id().map_err(|e|e.to_string())?;
+        conn.create_window(0,rival,root,0,0,1000,700,0,WindowClass::INPUT_OUTPUT,0,
+            &CreateWindowAux::new().background_pixel(0x336699)).map_err(|e|e.to_string())?;
+        conn.change_property8(PropMode::REPLACE,rival,AtomEnum::WM_NAME,AtomEnum::STRING,b"Abito validator rival").map_err(|e|e.to_string())?;
+        conn.map_window(rival).map_err(|e|e.to_string())?;
+        conn.flush().map_err(|e|e.to_string())?;
+        let stacking = atom(b"_NET_CLIENT_LIST_STACKING")?;
+        let stack = || -> Vec<u32> {
+            conn.get_property(false,root,stacking,AtomEnum::WINDOW,0,4096).ok()
+                .and_then(|c|c.reply().ok()).and_then(|r|r.value32().map(|v|v.collect())).unwrap_or_default()
+        };
+        let rival_ready = wait(&|| stack().contains(&rival));
+        let before = stack();
+        // Two deliberate presses, not duplicate reports from two backends.
+        wait(&|| first_press.elapsed() >= Duration::from_millis(abito_island::hotkey::PRESS_DEDUP_MS + 50));
+        crate::hotkeyhost::press_on_main(app);
+        wait(&|| win.is_visible().unwrap_or(false) && abito_island::workarea::x11_find_own_window("Abito").is_ok());
+        let own = abito_island::workarea::x11_find_own_window("Abito").map_err(|e|e.as_str().to_owned())?.id;
+        let mapped = || conn.get_window_attributes(own).ok().and_then(|c|c.reply().ok()).map(|a|a.map_state == MapState::VIEWABLE).unwrap_or(false);
+        let on_top = wait(&|| {
+            let list = stack();
+            let order = match (list.iter().position(|w| *w==own), list.iter().position(|w| *w==rival)) {
+                (Some(a),Some(b)) => a>b, _=>false
+            };
+            mapped() && order && abito_island::workarea::x11_find_own_window("Abito").map(|w|w.wm_state_above == Some(true)).unwrap_or(false)
+        });
+        // Keep the rival connection alive until after the capture.
+        let evidence = json!({"hidden":hidden,"rival_ready":rival_ready,"rival":rival,"own":own,"stack_before":before,"stack_after":stack(),"mapped":mapped(),"above":abito_island::workarea::x11_find_own_window("Abito").map(|w|w.wm_state_above == Some(true)).unwrap_or(false),"withdrawal_fixture":"clear ABOVE while hidden, as Mutter does","input":"hotkeyhost::press_on_main, same shortcut callback; not injected keys"});
+        scene("isla-atajo-sobre-rival", hidden && rival_ready && on_top, "atajo no restauró la isla mapeada y encima del rival con ABOVE", evidence);
+        Ok(json!(true))
+    })();
+    if let Err(error) = result {
+        scene("isla-atajo-sobre-rival", false, &error, json!({"error":error}));
+    }
+}
+
+#[cfg(not(unix))]
+fn island_validation(_app: &AppHandle) {
+    emit(&json!({"step":"validation_scene","name":"isla","verdict":"unverifiable","reason":"requiere X11"}));
 }
