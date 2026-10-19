@@ -36,13 +36,18 @@
   }
   const syncVisibility = () => { for (const item of mounted.values()) syncClay(item); };
   function choose(id) {
+    if (focused) { focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } })); paint(); }
     if (busy || !owner()) return;
     busy = true;
     owner().act({ action: 'select', id: id === A.PRINCIPAL_ID ? null : id }).then(() => {
       busy = false; paint(); say('Destino elegido. No se inició ninguna tarea.');
     }, () => { busy = false; paint(); say('No se pudo elegir el destino; se mantuvo el anterior.'); });
   }
-  const CARD_PILLS = Object.freeze({ integration_n8n: 'n8n', integration_vercel: 'Vercel' });
+  // Coucou (views.ts otherTasks.slice(0, 4)): the grid shows every pill but the focused one, at most four; the focused
+  // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
+  const MAX_PILLS = 4;
+  const gridRows = all => all.filter(r => r.id !== focused).slice(0, MAX_PILLS);
+  const CARD_PILLS = Object.freeze({ integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
   let focused = null; const badges = new Set(), connected = new Set();
   const integrationRows = () => {
     const ids = [prefs.mainPill, ...(Array.isArray(prefs.declaredPills) ? prefs.declaredPills : [])];
@@ -53,7 +58,7 @@
     }));
   };
   function focusIntegration(id) {
-    focused = focused === id ? null : id; badges.delete(id);
+    focused = id; badges.delete(id);
     doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: focused } }));
     paint();
   }
@@ -69,14 +74,14 @@
     state.textContent = storedActive && !rows.some(r => r.id === selected) ? 'Fuera de la isla' : 'En reposo';
     detail.textContent = 'Elegir un destino no inicia tareas.';
     detail.setAttribute('aria-label', `${picked.name}: destino de conversación. No se inició ninguna tarea.`);
-    const alive = new Set([...rows, ...integrationRows()].map(r => r.id));
+    const alive = new Set(gridRows([...rows, ...integrationRows()]).map(r => r.id));
     for (const [id, item] of mounted) if (!alive.has(id)) { item.clay?.destroy(); mounted.delete(id); }
     // #489: declared integration pills with a card (Coucou's declared pills): their pill colour, the unseen-event
     // badge, and a click that only focuses the card (abito:integration-focus). They never become the chat target.
     const integ = integrationRows();
-    const rowIds = new Set(integ.map(r => r.id));
+    const rowIds = new Set(gridRows([...rows, ...integ]).map(r => r.id));
     for (const [id, item] of mounted) if (id.startsWith('integration_') && !rowIds.has(id)) { item.clay?.destroy(); mounted.delete(id); }
-    const buttons = [...rows, ...integ].map(row => {
+    const buttons = gridRows([...rows, ...integ]).map(row => {
       let item = mounted.get(row.id);
       if (!item) {
         const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';

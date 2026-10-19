@@ -36,6 +36,16 @@ struct Net;
 #[cfg(target_os = "linux")]
 impl Http for Net {
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError> {
+        send(url, headers, None)
+    }
+    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError> {
+        send(url, headers, Some(body))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn send(url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<Response, NetError> {
+    {
         use std::str::FromStr;
         let client = reqwest::Client::builder()
             .timeout(TIMEOUT)
@@ -43,7 +53,10 @@ impl Http for Net {
             .user_agent(concat!("Abito/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|_| NetError("client".into()))?;
-        let mut request = client.get(url);
+        let mut request = match body {
+            Some(b) => client.post(url).body(b.to_string()),
+            None => client.get(url),
+        };
         for (name, value) in headers {
             let name = reqwest::header::HeaderName::from_str(name).map_err(|_| NetError("header".into()))?;
             let value = reqwest::header::HeaderValue::from_str(value).map_err(|_| NetError("header".into()))?;
@@ -67,6 +80,9 @@ impl Http for Net {
 #[cfg(not(target_os = "linux"))]
 impl Http for Net {
     fn get(&self, _: &str, _: &[(&str, &str)]) -> Result<Response, NetError> {
+        Err(NetError("unsupported".into()))
+    }
+    fn post_json(&self, _: &str, _: &[(&str, &str)], _: &str) -> Result<Response, NetError> {
         Err(NetError("unsupported".into()))
     }
 }

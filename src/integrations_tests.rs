@@ -16,14 +16,19 @@ fn keys(pairs: &[(&str, &str)]) -> Keys { Keys(pairs.iter().map(|(k, v)| (k.to_s
 struct Fake {
     routes: Vec<(&'static str, u16, String)>,
     log: RefCell<Vec<(String, Vec<(String, String)>)>>,
+    bodies: RefCell<Vec<String>>,
 }
 impl Fake {
     fn new(routes: Vec<(&'static str, u16, &str)>) -> Fake {
-        Fake { routes: routes.into_iter().map(|(a, b, c)| (a, b, c.to_string())).collect(), log: RefCell::new(vec![]) }
+        Fake { routes: routes.into_iter().map(|(a, b, c)| (a, b, c.to_string())).collect(), log: RefCell::new(vec![]), bodies: RefCell::new(vec![]) }
     }
     fn urls(&self) -> Vec<String> { self.log.borrow().iter().map(|(u, _)| u.clone()).collect() }
 }
 impl Http for Fake {
+    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError> {
+        self.bodies.borrow_mut().push(body.to_string());
+        self.get(url, headers)
+    }
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError> {
         self.log.borrow_mut().push((url.to_string(), headers.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()));
         self.routes.iter().find(|(p, _, _)| url.contains(p)).map(|(_, s, b)| Response { status: *s, body: b.clone() })
@@ -158,14 +163,15 @@ fn n8n_base_url_must_be_safe_before_any_request() {
 
 #[test]
 fn cadence_matches_coucou() {
-    assert_eq!(POLLERS, [(N8N, 3, 15), (VERCEL, 5, 30)]);
+    assert_eq!(POLLERS, [(N8N, 3, 15), (VERCEL, 5, 30), (STRIPE, 6, 30), (RESEND, 6, 60), (CALCOM, 8, 300), (NOTION, 9, 300)]);
 }
 
 #[test]
 fn command_is_closed() {
+    assert_eq!(parse_command(&json!({"action":"refresh","id":"integration_stripe"})), Some(Command::Refresh(STRIPE)));
     assert_eq!(parse_command(&json!({"action":"view"})), Some(Command::View));
     assert_eq!(parse_command(&json!({"action":"refresh","id":"integration_n8n"})), Some(Command::Refresh(N8N)));
-    for bad in [json!({"action":"refresh"}), json!({"action":"refresh","id":"integration_stripe"}), json!({"action":"refresh","id":"integration_n8n","x":1}),
+    for bad in [json!({"action":"refresh"}), json!({"action":"refresh","id":"integration_github"}), json!({"action":"refresh","id":"integration_n8n","x":1}),
         json!({"action":"view","id":"integration_n8n"}), json!({"action":"poll"}), json!("view"), json!({"action":7}), json!({"action":"refresh","id":["integration_n8n"]})] {
         assert_eq!(parse_command(&bad), None, "{bad}");
     }
@@ -177,4 +183,94 @@ fn declared_means_main_or_declared_pill() {
     assert!(declared(&prefs, "integration_n8n"));
     assert!(!declared(&prefs, "integration_vercel"));
     assert!(!declared(&crate::prefs::Prefs::default(), "integration_stripe"));
+}
+
+const CHARGES: &str = r#"{"data":[{"id":"ch_2","amount":1250,"currency":"eur","description":"Pro plan","created":1700000100,"status":"succeeded"},{"id":"ch_1","amount":500,"currency":"eur","billing_details":{"name":"Ana"},"created":1700000000,"status":"failed"}]}"#;
+const BALANCE: &str = r#"{"available":[{"amount":10000,"currency":"usd"}],"pending":[{"amount":250,"currency":"usd"}]}"#;
+
+#[test]
+fn stripe_basic_auth_balance_payments_and_event_once() {
+    let store = keys(&[("stripe-api-key", "sk_test_x")]);
+    let seen = Seen::default();
+    let http = Fake::new(vec![("/v1/balance", 200, BALANCE), ("/v1/charges", 200, CHARGES)]);
+    let first = poll(STRIPE, &http, &store, &seen).unwrap();
+    assert_eq!(first.event, None);
+    assert_eq!(first.data["balance"], 10250);
+    assert_eq!(first.data["currency"], "usd");
+    assert_eq!(first.data["payments"][0]["description"], "Pro plan");
+    assert_eq!(first.data["payments"][1]["description"], "Ana");
+    assert_eq!(first.data["payments"][0]["createdAt"], 1_700_000_100_000i64);
+    let sent = http.log.borrow()[0].clone();
+    assert!(sent.1.contains(&("Authorization".into(), "Basic c2tfdGVzdF94Og==".into())), "Basic base64(key:)");
+    let newer = CHARGES.replace("ch_2", "ch_3");
+    let up = poll(STRIPE, &Fake::new(vec![("/v1/balance", 200, BALANCE), ("/v1/charges", 200, &newer)]), &store, &seen).unwrap();
+    assert_eq!(up.event, Some(Event { success: true, label: "Pro plan".into(), detail: None }));
+}
+
+#[test]
+fn stripe_errors_say_what_to_do_without_the_key() {
+    let store = keys(&[("stripe-api-key", "sk_test_secret")]);
+    let up = poll(STRIPE, &Fake::new(vec![("balance", 403, "{}")]), &store, &Seen::default()).unwrap();
+    assert_eq!(up.error.as_deref(), Some("Usá una clave secreta (sk_live_…, no pk_live_…)"));
+    let down = poll(STRIPE, &Fake::new(vec![]), &store, &Seen::default()).unwrap();
+    assert!(down.error.unwrap().starts_with("Sin conexión"));
+    let bad = poll(STRIPE, &Fake::new(vec![("balance", 401, "{}")]), &store, &Seen::default()).unwrap();
+    assert!(!format!("{bad:?}").contains("secret"));
+}
+
+#[test]
+fn resend_keeps_five_and_the_total() {
+    let list: Vec<String> = (0..7).map(|i| format!(r#"{{"id":"e{i}","to":["a{i}@x.io"],"subject":"S{i}","created_at":"2026-10-19T10:00:00Z","last_event":"delivered"}}"#)).collect();
+    let body = format!(r#"{{"total":42,"data":[{}]}}"#, list.join(","));
+    let http = Fake::new(vec![("api.resend.com", 200, &body)]);
+    let up = poll(RESEND, &http, &keys(&[("resend-api-key", "re_x")]), &Seen::default()).unwrap();
+    assert_eq!(up.data["total"], 42);
+    assert_eq!(up.data["emails"].as_array().unwrap().len(), 5);
+    assert_eq!(up.data["emails"][0]["to"], json!(["a0@x.io"]));
+    assert_eq!(up.event, None);
+    let bad = poll(RESEND, &Fake::new(vec![("resend", 403, "{}")]), &keys(&[("resend-api-key", "k")]), &Seen::default()).unwrap();
+    assert_eq!(bad.error.as_deref(), Some("La clave no tiene acceso"));
+}
+
+#[test]
+fn notion_posts_a_search_and_reads_pages_and_databases() {
+    let body = r#"{"results":[
+      {"object":"page","id":"p1","last_edited_time":"2026-10-19T10:00:00Z","url":"https://notion.so/p1","icon":{"type":"emoji","emoji":"📝"},"properties":{"Name":{"type":"title","title":[{"plain_text":"Plan"}]}}},
+      {"object":"database","id":"d1","last_edited_time":"2026-10-18T10:00:00Z","title":[{"plain_text":"Tasks"}]},
+      {"object":"page","id":"p2","last_edited_time":"2026-10-17T10:00:00Z","properties":{}},
+      {"object":"page","id":"bad"}]}"#;
+    let http = Fake::new(vec![("api.notion.com/v1/search", 200, body)]);
+    let up = poll(NOTION, &http, &keys(&[("notion-api-key", "secret_x")]), &Seen::default()).unwrap();
+    let pages = up.data["pages"].as_array().unwrap();
+    assert_eq!(pages.len(), 3, "a result with no edit time is dropped");
+    assert_eq!((pages[0]["title"].as_str(), pages[0]["emoji"].as_str()), (Some("Plan"), Some("📝")));
+    assert_eq!(pages[1]["title"], "Tasks");
+    assert_eq!(pages[2]["title"], "Sin título");
+    assert_eq!(pages[2]["url"], "https://notion.so");
+    assert!(http.bodies.borrow()[0].contains("last_edited_time"));
+    let sent = http.log.borrow()[0].clone();
+    assert!(sent.1.contains(&("Notion-Version".into(), "2022-06-28".into())));
+}
+
+#[test]
+fn calcom_reads_bookings_with_both_start_spellings() {
+    let body = r#"{"data":[{"id":7,"title":"Demo","start":"2026-10-20T09:00:00Z","attendees":[{"name":"Ana","email":"a@x.io"}],"responses":{"notes":{"value":"hola"}}},
+      {"id":8,"startTime":"2026-10-21T09:00:00Z","description":"d"},{"id":9}]}"#;
+    let http = Fake::new(vec![("api.cal.com/v2/bookings", 200, body)]);
+    let up = poll(CALCOM, &http, &keys(&[("calcom-api-key", "cal_x")]), &Seen::default()).unwrap();
+    let b = up.data["bookings"].as_array().unwrap();
+    assert_eq!(b.len(), 2);
+    assert_eq!((b[0]["id"].as_str(), b[0]["attendeeName"].as_str(), b[0]["attendeeNotes"].as_str()), (Some("7"), Some("Ana"), Some("hola")));
+    assert_eq!((b[1]["title"].as_str(), b[1]["start"].as_str(), b[1]["attendeeNotes"].as_str()), (Some("Reunión"), Some("2026-10-21T09:00:00Z"), Some("d")));
+    let sent = http.log.borrow()[0].clone();
+    assert!(sent.1.contains(&("cal-api-version".into(), "2024-08-13".into())));
+}
+
+#[test]
+fn every_new_service_is_silent_without_its_key() {
+    let http = Fake::new(vec![]);
+    for id in [STRIPE, RESEND, NOTION, CALCOM] {
+        assert!(poll(id, &http, &keys(&[]), &Seen::default()).is_none(), "{id}");
+    }
+    assert!(http.urls().is_empty());
 }

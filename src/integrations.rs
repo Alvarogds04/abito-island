@@ -33,9 +33,10 @@ pub struct Response {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetError(pub String);
 
-/// The HTTP seam. Only GET so far; POST joins with the services that need it.
+/// The HTTP seam: GET, and a JSON POST for the services that need one (Notion search).
 pub trait Http {
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError>;
+    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError>;
 }
 
 /// What the island receives. `event` is set only when something actually changed: it drives
@@ -61,7 +62,13 @@ pub const N8N: &str = "integration_n8n";
 pub const VERCEL: &str = "integration_vercel";
 
 /// (pill id, first-run delay s, interval s): Coucou's cadence.
-pub const POLLERS: [(&str, u64, u64); 2] = [(N8N, 3, 15), (VERCEL, 5, 30)];
+pub const STRIPE: &str = "integration_stripe";
+pub const RESEND: &str = "integration_resend";
+pub const NOTION: &str = "integration_notion";
+pub const CALCOM: &str = "integration_calcom";
+
+pub const POLLERS: [(&str, u64, u64); 6] =
+    [(N8N, 3, 15), (VERCEL, 5, 30), (STRIPE, 6, 30), (RESEND, 6, 60), (CALCOM, 8, 300), (NOTION, 9, 300)];
 
 /// Remembers the newest id per service so an event fires once, not on every poll. The very
 /// first load only fills the card.
@@ -104,6 +111,10 @@ pub fn poll(id: &str, http: &dyn Http, store: &dyn SecretStore, seen: &Seen) -> 
     match id {
         N8N => poll_n8n(http, store, seen),
         VERCEL => poll_vercel(http, store, seen),
+        STRIPE => poll_stripe(http, store, seen),
+        RESEND => poll_resend(http, store),
+        NOTION => poll_notion(http, store),
+        CALCOM => poll_calcom(http, store),
         _ => None,
     }
 }
@@ -291,6 +302,208 @@ fn fmt_value(v: &Value) -> String {
         Value::Object(_) => "{…}".into(),
         other => other.to_string(),
     }
+}
+
+// ── Stripe ────────────────────────────────────────────────────────────────────
+
+fn ok(r: &Response) -> bool {
+    (200..300).contains(&r.status)
+}
+
+pub fn poll_stripe(http: &dyn Http, store: &dyn SecretStore, seen: &Seen) -> Option<Update> {
+    use base64::Engine;
+    let secret = key(store, "stripe-api-key")?;
+    let auth = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{secret}:")));
+    let headers = [("Authorization", auth.as_str())];
+    let balance = match http.get("https://api.stripe.com/v1/balance", &headers) {
+        Ok(r) if ok(&r) => serde_json::from_str::<Value>(&r.body).unwrap_or(json!({})),
+        Ok(r) => return Some(failed(STRIPE, status_error(r.status, "Usá una clave secreta (sk_live_…, no pk_live_…)"))),
+        Err(e) => return Some(failed(STRIPE, format!("Sin conexión: {}", e.0))),
+    };
+    let buckets: Vec<&Value> = ["available", "pending"]
+        .iter()
+        .filter_map(|k| balance.get(*k).and_then(Value::as_array))
+        .flatten()
+        .collect();
+    let currency = buckets.first().and_then(|b| b.get("currency")).and_then(Value::as_str).unwrap_or("eur").to_string();
+    let amount: i64 = buckets.iter().filter_map(|b| b.get("amount").and_then(Value::as_i64)).sum();
+    let charges = http.get("https://api.stripe.com/v1/charges?limit=3", &headers).ok().filter(ok)?;
+    let json: Value = serde_json::from_str(&charges.body).unwrap_or(json!({}));
+    let payments: Vec<Value> = json
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|c| {
+                    let description = c
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .or_else(|| c.get("billing_details").and_then(|b| b.get("name")).and_then(Value::as_str));
+                    Some(json!({
+                        "id": c.get("id")?.as_str()?,
+                        "amount": c.get("amount")?.as_i64()?,
+                        "currency": c.get("currency")?.as_str()?,
+                        "description": description,
+                        "createdAt": c.get("created").and_then(Value::as_i64).unwrap_or(0) * 1000,
+                        "status": c.get("status").and_then(Value::as_str).unwrap_or("succeeded"),
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let newest = payments.first().and_then(|p| p.get("id")).and_then(Value::as_str).unwrap_or("");
+    let event = if !newest.is_empty() && seen.is_new("stripe", newest) {
+        let label = payments[0].get("description").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
+            format!("{:.2}", payments[0].get("amount").and_then(Value::as_i64).unwrap_or(0) as f64 / 100.0)
+        });
+        Some(Event { success: true, label, detail: None })
+    } else {
+        None
+    };
+    Some(Update { id: STRIPE, data: json!({ "balance": amount, "currency": currency, "payments": payments }), error: None, event })
+}
+
+// ── Resend ────────────────────────────────────────────────────────────────────
+
+pub fn poll_resend(http: &dyn Http, store: &dyn SecretStore) -> Option<Update> {
+    let secret = key(store, "resend-api-key")?;
+    let auth = format!("Bearer {secret}");
+    let r = http.get("https://api.resend.com/emails?limit=100", &[("Authorization", &auth), ("Accept", "application/json")]).ok()?;
+    if !ok(&r) {
+        return Some(failed(RESEND, status_error(r.status, "La clave no tiene acceso")));
+    }
+    let json: Value = serde_json::from_str(&r.body).unwrap_or(json!({}));
+    let total = json.get("total").or_else(|| json.get("count")).and_then(Value::as_i64);
+    let emails: Vec<Value> = json
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .take(5)
+                .filter_map(|e| {
+                    let to = match e.get("to") {
+                        Some(Value::Array(a)) => a.clone(),
+                        Some(Value::String(s)) => vec![Value::String(s.clone())],
+                        _ => vec![],
+                    };
+                    Some(json!({
+                        "id": e.get("id")?.as_str()?,
+                        "to": to,
+                        "subject": e.get("subject").and_then(Value::as_str).unwrap_or(""),
+                        "createdAt": e.get("created_at").and_then(Value::as_str).unwrap_or(""),
+                        "lastEvent": e.get("last_event").and_then(Value::as_str).unwrap_or(""),
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Update { id: RESEND, data: json!({ "emails": emails, "total": total }), error: None, event: None })
+}
+
+// ── Notion ────────────────────────────────────────────────────────────────────
+
+pub fn poll_notion(http: &dyn Http, store: &dyn SecretStore) -> Option<Update> {
+    let token = key(store, "notion-api-key")?;
+    let auth = format!("Bearer {token}");
+    let body = json!({ "sort": { "direction": "descending", "timestamp": "last_edited_time" }, "page_size": 3 }).to_string();
+    let r = http
+        .post_json(
+            "https://api.notion.com/v1/search",
+            &[("Authorization", &auth), ("Notion-Version", "2022-06-28"), ("Content-Type", "application/json")],
+            &body,
+        )
+        .ok()?;
+    if !ok(&r) {
+        return Some(failed(NOTION, status_error(r.status, "La integración no tiene acceso")));
+    }
+    let json: Value = serde_json::from_str(&r.body).unwrap_or(json!({}));
+    let pages: Vec<Value> = json
+        .get("results")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(notion_page).collect())
+        .unwrap_or_default();
+    Some(Update { id: NOTION, data: json!({ "pages": pages }), error: None, event: None })
+}
+
+fn notion_page(obj: &Value) -> Option<Value> {
+    let id = obj.get("id")?.as_str()?;
+    let first_text = |v: Option<&Value>| {
+        v.and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(|t| t.get("plain_text"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let mut title = "Sin título".to_string();
+    if obj.get("object").and_then(Value::as_str) == Some("database") {
+        if let Some(t) = first_text(obj.get("title")) {
+            title = t;
+        }
+    } else if let Some(props) = obj.get("properties").and_then(Value::as_object) {
+        if let Some(t) = props
+            .values()
+            .filter(|p| p.get("type").and_then(Value::as_str) == Some("title"))
+            .find_map(|p| first_text(p.get("title")))
+        {
+            title = t;
+        }
+    }
+    let emoji = obj
+        .get("icon")
+        .filter(|i| i.get("type").and_then(Value::as_str) == Some("emoji"))
+        .and_then(|i| i.get("emoji"))
+        .and_then(Value::as_str);
+    Some(json!({
+        "id": id,
+        "title": title,
+        "emoji": emoji,
+        "lastEditedAt": obj.get("last_edited_time").and_then(Value::as_str)?,
+        "url": obj.get("url").and_then(Value::as_str).unwrap_or("https://notion.so"),
+    }))
+}
+
+// ── Cal.com ───────────────────────────────────────────────────────────────────
+
+pub fn poll_calcom(http: &dyn Http, store: &dyn SecretStore) -> Option<Update> {
+    let secret = key(store, "calcom-api-key")?;
+    let auth = format!("Bearer {secret}");
+    let r = http
+        .get("https://api.cal.com/v2/bookings?status=upcoming", &[("Authorization", &auth), ("cal-api-version", "2024-08-13")])
+        .ok()?;
+    if !ok(&r) {
+        return Some(failed(CALCOM, status_error(r.status, "La clave no tiene acceso")));
+    }
+    let json: Value = serde_json::from_str(&r.body).unwrap_or(json!({}));
+    let bookings: Vec<Value> = json
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|b| {
+                    let start = b.get("start").or_else(|| b.get("startTime")).and_then(Value::as_str)?;
+                    let attendee = b.get("attendees").and_then(Value::as_array).and_then(|a| a.first());
+                    let notes = b
+                        .get("responses")
+                        .and_then(|r| r.get("notes"))
+                        .and_then(|n| n.get("value"))
+                        .and_then(Value::as_str)
+                        .or_else(|| b.get("description").and_then(Value::as_str))
+                        .filter(|s| !s.is_empty());
+                    Some(json!({
+                        "id": b.get("id").map(|v| v.to_string()).unwrap_or_default(),
+                        "title": b.get("title").and_then(Value::as_str).unwrap_or("Reunión"),
+                        "start": start,
+                        "status": b.get("status").and_then(Value::as_str).unwrap_or("accepted"),
+                        "attendeeName": attendee.and_then(|a| a.get("name")).and_then(Value::as_str),
+                        "attendeeEmail": attendee.and_then(|a| a.get("email")).and_then(Value::as_str),
+                        "attendeeNotes": notes,
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Update { id: CALCOM, data: json!({ "bookings": bookings }), error: None, event: None })
 }
 
 // ── Command surface ───────────────────────────────────────────────────────────

@@ -16,7 +16,10 @@
   root.AbitoIntegrationCard = Object.freeze(api);
   mount(api);
 })(typeof self !== 'undefined' ? self : this, () => {
-  const IDS = Object.freeze(['integration_n8n', 'integration_vercel']);
+  const IDS = Object.freeze(['integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend', 'integration_notion', 'integration_calcom']);
+  const NAMES = Object.freeze({ integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
+  const COLORS = Object.freeze({ integration_n8n: '#F29B38', integration_vercel: '#7C5CFF', integration_stripe: '#0570DE', integration_resend: '#22C55E', integration_notion: '#E8E8E8', integration_calcom: '#C9956A' });
+  const KINDS = Object.freeze({ integration_n8n: 'Workflow', integration_vercel: 'Despliegues', integration_stripe: 'Pagos', integration_resend: 'Correos', integration_notion: 'Recientes', integration_calcom: 'Agenda' });
   const GREEN = '#22C55E', RED = '#F4505E';
   const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
   const clean = (v, max = 200) => (typeof v === 'string' ? [...v.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ').trim()].slice(0, max).join('') : '');
@@ -41,7 +44,7 @@
 
   /** An Update (possibly absent) → the closed view the renderer draws. Never a guess: off-shape is «sin datos». */
   function view(id, update, now = Date.now()) {
-    const base = { id, kind: 'idle', error: '', status: 'Sin datos todavía', name: id === 'integration_n8n' ? 'n8n' : 'Vercel' };
+    const base = { id, kind: 'idle', error: '', status: 'Sin datos todavía', name: NAMES[id] || id };
     if (!IDS.includes(id) || !isObject(update) || update.id !== id) return base;
     if (typeof update.error === 'string' && update.error) return { ...base, kind: 'error', error: clean(update.error), status: clean(update.error) };
     const data = isObject(update.data) ? update.data : {};
@@ -52,6 +55,32 @@
       }));
       return rows.length ? { ...base, kind: 'list', rows } : base;
     }
+    if (id === 'integration_stripe') {
+      const cents = n => (Number.isFinite(n) ? n : 0) / 100;
+      const payments = (Array.isArray(data.payments) ? data.payments : []).filter(isObject).slice(0, 3).map(p => ({
+        text: clean(p.description, 80) || 'Pago', ok: p.status === 'succeeded', amount: '+' + cents(p.amount).toFixed(2), ago: timeAgo(p.createdAt, now),
+      }));
+      return { ...base, kind: 'payments', balance: cents(data.balance).toFixed(2), currency: clean(data.currency, 3).toUpperCase() || 'EUR', payments };
+    }
+    if (id === 'integration_resend') {
+      const rows = (Array.isArray(data.emails) ? data.emails : []).filter(isObject).slice(0, 3).map((e, i) => ({
+        to: clean(Array.isArray(e.to) && typeof e.to[0] === 'string' ? e.to[0] : '?', 80).split('@')[0] || '?', ok: e.lastEvent === 'delivered',
+        ago: timeAgo(e.createdAt, now), subject: i === 0 ? clean(e.subject, 120) : '',
+      }));
+      return rows.length ? { ...base, kind: 'emails', rows, total: Number.isFinite(data.total) ? data.total : null } : base;
+    }
+    if (id === 'integration_notion') {
+      const rows = (Array.isArray(data.pages) ? data.pages : []).filter(isObject).slice(0, 3).map(p => ({
+        title: clean(p.title, 100) || 'Sin título', emoji: clean(p.emoji, 4), ago: timeAgo(p.lastEditedAt, now), url: notionUrl(p.url),
+      }));
+      return rows.length ? { ...base, kind: 'pages', rows } : base;
+    }
+    if (id === 'integration_calcom') {
+      const rows = (Array.isArray(data.bookings) ? data.bookings : []).filter(isObject)
+        .map(b => ({ at: Date.parse(String(b.start)), title: clean(b.title, 100) || 'Reunión' })).filter(b => Number.isFinite(b.at))
+        .sort((a, b) => a.at - b.at).slice(0, 3).map(b => ({ when: whenOf(b.at), title: b.title }));
+      return { ...base, kind: 'bookings', rows };
+    }
     const ev = isObject(update.event) ? update.event : null;
     if (!ev && typeof data.workflow !== 'string') return base;
     return {
@@ -59,8 +88,16 @@
       workflow: clean(ev ? ev.label : data.workflow, 120) || 'Workflow', detail: ev ? text(ev.detail) : '',
     };
   }
+  /** Only https pages on notion.so / notion.site leave the island (the host re-validates). */
+  function notionUrl(raw) {
+    if (typeof raw !== 'string' || !raw || raw.length > 2000 || /[\s\u0000-\u001f\u007f]/.test(raw)) return null;
+    let u; try { u = new URL(raw); } catch { return null; }
+    return u.protocol === 'https:' && !u.username && !u.password && /(^|\.)notion\.(so|site)$/.test(u.hostname) ? u.href : null;
+  }
+  const pad = n => String(n).padStart(2, '0');
+  const whenOf = ms => { const d = new Date(ms); return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
   const STATE_LABEL = Object.freeze({ READY: 'Listo', CANCELED: 'Cancelado', ERROR: 'Error' });
-  return { IDS, GREEN, RED, view, timeAgo, vercelUrl, STATE_LABEL, clean };
+  return { IDS, NAMES, COLORS, KINDS, notionUrl, GREEN, RED, view, timeAgo, vercelUrl, STATE_LABEL, clean };
 });
 
 function mount(api) {
@@ -106,6 +143,7 @@ function mount(api) {
       });
       c.append(rows); return c;
     }
+    if (v.id !== 'integration_n8n') return simpleCard(c, v);
     c.append(head('#F29B38', 'n8n', 'Workflow'));
     if (v.kind !== 'workflow') { c.append(statusLine(v)); return c; }
     const pill = el('button', 'int-pill'); pill.type = 'button';
@@ -114,6 +152,29 @@ function mount(api) {
     pill.append(dot(color), el('span', 'int-name', v.workflow), el('span', '', '…'));
     pill.addEventListener('click', e => { if (e.isTrusted === true) { detail = true; draw(); } });
     const actions = el('div', 'int-actions'); actions.append(pill); c.append(actions); return c;
+  }
+  function simpleCard(c, v) {
+    let extra = null;
+    if (v.kind === 'emails' && v.total !== null) { extra = el('span', 'int-total'); extra.append(el('i', 'pulse'), el('span', '', String(v.total))); }
+    const h = head(api.COLORS[v.id], v.name, api.KINDS[v.id]); if (extra) h.append(extra); c.append(h);
+    const rows = el('div', v.kind === 'emails' ? 'int-rows' : 'int-rows tight');
+    if (v.kind === 'payments') {
+      const bal = el('div', 'int-balance'); bal.append(el('span', '', v.balance), el('i', '', v.currency)); c.append(bal);
+      for (const p of v.payments) { const r = el('div', 'int-row'); const amt = el('span', 'int-amount', p.amount); amt.style.color = '#22c55e'; r.append(dot(p.ok ? api.GREEN : api.RED), el('span', 'int-name', p.text), amt, el('span', 'int-ago', p.ago)); rows.append(r); }
+    } else if (v.kind === 'emails') {
+      v.rows.forEach((e, i) => { const r = el('div', i === 0 ? 'int-row first' : 'int-row'); r.append(dot(e.ok ? api.GREEN : api.RED), el('span', 'int-name', e.to), el('span', 'int-ago', e.ago)); if (e.subject) r.append(el('span', 'int-sub', e.subject)); rows.append(r); });
+    } else if (v.kind === 'pages') {
+      for (const p of v.rows) {
+        const b = el('button', 'int-page'); b.type = 'button';
+        b.append(el('span', 'int-emoji', p.emoji || '▤'), el('span', 'int-name', p.title), el('span', 'int-ago', p.ago));
+        b.addEventListener('click', e => { if (e.isTrusted === true) open(p.url); });
+        rows.append(b);
+      }
+    } else if (v.kind === 'bookings') {
+      if (!v.rows.length) rows.append(el('div', 'int-empty', 'No hay llamadas agendadas'));
+      for (const b of v.rows) { const r = el('div', 'int-row'); r.append(dot('#C9956A'), el('span', 'int-time', b.when), el('span', 'int-name', b.title)); rows.append(r); }
+    } else { c.append(statusLine(v)); return c; }
+    c.append(rows); return c;
   }
   function statusLine(v) {
     const s = el('div', 'int-status'); s.append(dot(v.kind === 'error' ? api.RED : '#6B7079'), el('span', '', v.status)); return s;

@@ -10,7 +10,7 @@ const NOW = Date.UTC(2026, 9, 19, 12, 0, 0);
 test('idle without an update, with a foreign update or an unknown id', () => {
   assert.equal(M.view('integration_vercel', undefined).kind, 'idle');
   assert.equal(M.view('integration_n8n', { id: 'integration_vercel', data: {} }).kind, 'idle');
-  assert.equal(M.view('integration_stripe', { id: 'integration_stripe', data: {} }).kind, 'idle');
+  assert.equal(M.view('integration_github', { id: 'integration_github', data: {} }).kind, 'idle');
   assert.equal(M.view('integration_n8n', { id: 'integration_n8n', data: {}, error: null, event: null }).kind, 'idle');
 });
 
@@ -50,6 +50,39 @@ test('timeAgo follows Coucou buckets', () => {
   assert.equal(M.timeAgo(NOW - 3 * 3600000, NOW), '3 h');
   assert.equal(M.timeAgo(NOW - 2 * 86400000, NOW), '2 d');
   assert.equal(M.timeAgo('nope', NOW), '');
+});
+
+test('stripe: balance in major units, three payments, failed charge is red', () => {
+  const v = M.view('integration_stripe', { id: 'integration_stripe', data: { balance: 10250, currency: 'usd', payments: [
+    { description: 'Pro', amount: 1250, status: 'succeeded', createdAt: NOW - 60000 }, { amount: 500, status: 'failed', createdAt: NOW }, {}, {}] } }, NOW);
+  assert.equal(v.kind, 'payments');
+  assert.equal(v.balance, '102.50');
+  assert.equal(v.currency, 'USD');
+  assert.equal(v.payments.length, 3);
+  assert.deepEqual([v.payments[0].amount, v.payments[0].ok, v.payments[1].ok, v.payments[1].text], ['+12.50', true, false, 'Pago']);
+});
+
+test('resend: first row carries the subject, recipient is shortened, total survives', () => {
+  const v = M.view('integration_resend', { id: 'integration_resend', data: { total: 9, emails: [
+    { to: ['ana@x.io'], subject: 'Hola', lastEvent: 'delivered', createdAt: new Date(NOW - 3600000).toISOString() }, { to: 'x', subject: 'B', lastEvent: 'bounced' }] } }, NOW);
+  assert.equal(v.kind, 'emails');
+  assert.deepEqual([v.total, v.rows[0].to, v.rows[0].subject, v.rows[0].ok, v.rows[1].subject, v.rows[1].ok], [9, 'ana', 'Hola', true, '', false]);
+  assert.equal(M.view('integration_resend', { id: 'integration_resend', data: { emails: [] } }).kind, 'idle');
+});
+
+test('notion: only https notion pages link out', () => {
+  for (const bad of ['http://notion.so/a', 'https://evil.com/notion.so', 'https://notion.so.evil.com/a', 'https://u@notion.so/a', 'javascript:alert(1)', '', null, 'https://x.notion.so/a b']) assert.equal(M.notionUrl(bad), null, String(bad));
+  assert.equal(M.notionUrl('https://www.notion.so/Plan-1'), 'https://www.notion.so/Plan-1');
+  const v = M.view('integration_notion', { id: 'integration_notion', data: { pages: [{ title: '', emoji: '📝', lastEditedAt: new Date(NOW).toISOString(), url: 'https://evil.com' }] } }, NOW);
+  assert.deepEqual([v.rows[0].title, v.rows[0].emoji, v.rows[0].url], ['Sin título', '📝', null]);
+});
+
+test('cal.com: soonest first, at most three, empty list is still a card', () => {
+  const b = n => ({ title: 'T' + n, start: new Date(2030, 0, n, 9, 5).toISOString() });
+  const v = M.view('integration_calcom', { id: 'integration_calcom', data: { bookings: [b(5), b(2), b(9), b(3), { title: 'x', start: 'nope' }] } }, NOW);
+  assert.deepEqual(v.rows.map(r => r.title), ['T2', 'T3', 'T5']);
+  assert.equal(v.rows[0].when, '02/01 09:05');
+  assert.equal(M.view('integration_calcom', { id: 'integration_calcom', data: { bookings: [] } }).kind, 'bookings');
 });
 
 test('the renderer never uses innerHTML', () => {
