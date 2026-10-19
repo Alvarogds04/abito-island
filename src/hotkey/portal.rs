@@ -86,7 +86,11 @@ pub struct ShortcutSignal {
 
 /// Only OUR shortcut's activation toggles the island (never its release, never another's).
 pub fn is_our_activation(signal: &ShortcutSignal) -> bool {
-    signal.activated && signal.shortcut_id == SHORTCUT_ID
+    is_our_activation_for(signal, SHORTCUT_ID)
+}
+
+pub fn is_our_activation_for(signal: &ShortcutSignal, id: &str) -> bool {
+    signal.activated && signal.shortcut_id == id
 }
 
 /// While the OS dialog is open the limited X11 grab runs IN PARALLEL, so a dialog

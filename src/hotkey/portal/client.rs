@@ -4,7 +4,7 @@
 //! The OS shows a permission dialog on the first `BindShortcuts`: the human must
 //! accept ONCE. Until the Response arrives the status is `PermissionPending`; a
 //! declined dialog is `PermissionDenied` (visible, and the caller falls back).
-use super::{is_our_activation, outcome_of_response, request_path, token, Outcome, PortalState, ShortcutSignal, SHORTCUT_ID};
+use super::{is_our_activation_for, outcome_of_response, request_path, token, Outcome, PortalState, ShortcutSignal, SHORTCUT_ID};
 use crate::hotkey::{Combo, Status};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -108,6 +108,12 @@ impl PortalGrabber {
     /// Create the session, bind our shortcut (the OS asks the human once) and listen.
     /// `bus_address` None = the user's session bus; Some(addr) = a private bus (tests).
     pub fn start(bus_address: Option<&str>, combo: Combo, on_press: impl Fn() + Send + 'static) -> PortalGrabber {
+        Self::start_with_id(bus_address, combo, SHORTCUT_ID, on_press)
+    }
+
+    /// Each binding owns a connection and a uniquely-tokened portal session.
+    pub fn start_with_id(bus_address: Option<&str>, combo: Combo, id: &str, on_press: impl Fn() + Send + 'static) -> PortalGrabber {
+        let id = id.to_owned();
         let status = Arc::new(AtomicU8::new(S_PENDING));
         let stop = Arc::new(AtomicBool::new(false));
         let (t_status, t_stop) = (status.clone(), stop.clone());
@@ -145,11 +151,11 @@ impl PortalGrabber {
             // 2) BindShortcuts: THIS is where the OS dialog appears (accept once)
             let bind_tok = token("bind");
             let mut shortcut: HashMap<&str, Value<'_>> = HashMap::new();
-            shortcut.insert("description", Value::from("Mostrar u ocultar la isla de Abito"));
+            shortcut.insert("description", Value::from(if id == "toggle-desktop-character" { "Enviar Abito al escritorio o traerlo a casa" } else { "Mostrar u ocultar la isla de Abito" }));
             shortcut.insert("preferred_trigger", Value::from(combo.portal_trigger()));
             let mut bind_opts: HashMap<&str, Value<'_>> = HashMap::new();
             bind_opts.insert("handle_token", Value::from(bind_tok.as_str()));
-            let shortcuts = vec![(SHORTCUT_ID, shortcut)];
+            let shortcuts = vec![(id.as_str(), shortcut)];
             t_status.store(S_PENDING, Ordering::SeqCst);
             let Some((code, _)) = call_request(&conn, &proxy, "BindShortcuts", &(&session_path, shortcuts, "", bind_opts), &bind_tok, deadline, &t_stop) else { return fail(S_UNSUPPORTED) };
             match outcome_of_response(code) {
@@ -171,8 +177,8 @@ impl PortalGrabber {
                 if owner.is_none() || sender != owner {
                     continue;
                 }
-                if let Ok((sig_session, id, _ts, _opts)) = msg.body().deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>() {
-                    if sig_session.as_str() == session_path.as_str() && is_our_activation(&ShortcutSignal { shortcut_id: id, activated: true }) {
+                if let Ok((sig_session, sig_id, _ts, _opts)) = msg.body().deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>() {
+                    if sig_session.as_str() == session_path.as_str() && is_our_activation_for(&ShortcutSignal { shortcut_id: sig_id, activated: true }, &id) {
                         on_press();
                     }
                 }

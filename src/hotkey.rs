@@ -217,6 +217,13 @@ pub fn lock_variants() -> [u16; 4] {
     [0, 0x02, 0x10, 0x12]
 }
 
+/// The two independently persisted global bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    ToggleIsland,
+    DesktopToggle,
+}
+
 // ---- persisted config ------------------------------------------------------------
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HotkeyConfig {
@@ -231,9 +238,20 @@ impl Default for HotkeyConfig {
 }
 
 impl HotkeyConfig {
+    pub fn default_for(target: Target) -> Self {
+        match target {
+            Target::ToggleIsland => Self::default(),
+            Target::DesktopToggle => Self { combo: Combo { mods: CTRL | ALT, key: Key::Letter(b'D') }, enabled: true },
+        }
+    }
+
     /// `hotkey.json` = `{"v":1,"combo":"Ctrl+Alt+A","enabled":true}`. Absent,
     /// unreadable, corrupt, wrong version or an invalid combo = the default.
     pub fn from_text(text: Option<&str>) -> HotkeyConfig {
+        Self::from_text_for(text, Target::ToggleIsland)
+    }
+
+    pub fn from_text_for(text: Option<&str>, target: Target) -> HotkeyConfig {
         let parsed = text
             .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
             .and_then(|v| {
@@ -245,7 +263,7 @@ impl HotkeyConfig {
                 let enabled = v.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true);
                 Some(HotkeyConfig { combo, enabled })
             });
-        parsed.unwrap_or_default()
+        parsed.unwrap_or_else(|| Self::default_for(target))
     }
 
     pub fn to_text(&self) -> String {
@@ -389,6 +407,7 @@ pub enum CommandError {
     InvalidSchema,
     InvalidCombo,
     NeedsModifier,
+    ComboInUse,
 }
 
 impl CommandError {
@@ -397,8 +416,25 @@ impl CommandError {
             CommandError::InvalidSchema => "invalid_schema",
             CommandError::InvalidCombo => "invalid_combo",
             CommandError::NeedsModifier => "needs_modifier",
+            CommandError::ComboInUse => "combo_in_use",
         }
     }
+}
+
+/// Additive routing: the legacy exact-key schema is unchanged.
+pub fn parse_targeted(payload: &serde_json::Value) -> Result<(Target, Command), CommandError> {
+    let mut map = payload.as_object().ok_or(CommandError::InvalidSchema)?.clone();
+    let target = match map.remove("id") {
+        None => Target::ToggleIsland,
+        Some(serde_json::Value::String(id)) if id == "desktopToggle" => Target::DesktopToggle,
+        _ => return Err(CommandError::InvalidSchema),
+    };
+    parse_command(&serde_json::Value::Object(map)).map(|command| (target, command))
+}
+
+/// Disabled bindings still reserve their combination, so enabling cannot clash.
+pub fn check_combo_available(combo: Combo, other: &HotkeyConfig) -> Result<(), CommandError> {
+    if combo == other.combo { Err(CommandError::ComboInUse) } else { Ok(()) }
 }
 
 pub fn parse_command(payload: &serde_json::Value) -> Result<Command, CommandError> {

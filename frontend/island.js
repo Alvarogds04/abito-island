@@ -86,6 +86,12 @@
   }
   // #486: the desktop character (island-desktop.js); null where it is unavailable.
   const desktopCharacter = window.AbitoIslandDesktop || null;
+  {
+    const listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+    if (listen) listen('desktop-character-toggle', () => {
+      if (desktopCharacter) desktopCharacter.flyOutOrHome();
+    }).catch(() => {});
+  }
   // #347: presentation-only producers; pending human requests outrank decorations.
   const character = window.AbitoCharacter.create({
     clay, applyState: next => { if (clay && clay.state !== next) clay.setState(next); }, choosePose: (chat, host) => O.choosePose(chat, host), validCard, setTimer: setTimeout, clearTimer: clearTimeout,

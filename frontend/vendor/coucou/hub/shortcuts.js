@@ -9,17 +9,19 @@ import { t } from "./i18n-es.js";
 async function renderShortcuts({ invoke, V, listen, timers }) {
   const s = session(invoke, listen, timers), { root, call, work } = s;
   root.style.setProperty("display", "contents");
-  let hotkey = null, recording = false, busy = false;
+  const views = { toggleIsland: null, desktopToggle: null };
+  let recording = null, busy = false;
+  const payloadFor = (id, payload) => id === "toggleIsland" ? payload : { ...payload, id };
   const list = h("div", { id: "global-shortcuts", class: "shortcut-list" }), feedback = hint("");
-  function save(payload) {
-    if (busy || !hotkey || !s.alive()) return;
+  function save(id, payload) {
+    if (busy || !views[id] || !s.alive()) return;
     busy = true;
-    recording = false;
+    recording = null;
     draw();
-    work(() => call("hotkey_action", payload), (next) => {
-      hotkey = next;
+    work(() => call("hotkey_action", payloadFor(id, payload)), (next) => {
+      views[id] = next;
     }, () => {
-      hotkey = null;
+      views[id] = null;
     }).finally(() => {
       busy = false;
       if (s.alive()) draw();
@@ -27,37 +29,38 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
   }
   function draw() {
     clear(list);
-    const dups = duplicates(hotkey?.enabled ? [["toggleIsland", hotkey.combo]] : []);
+    const dups = duplicates(Object.entries(views).filter(([, v]) => v?.enabled).map(([id, v]) => [id, v.combo]));
     for (const d of SHORTCUTS.filter((d2) => d2.ported)) {
-      const supported = d.id === "toggleIsland", known = supported && !!hotkey;
+      const supported = Object.hasOwn(views, d.id), hotkey = views[d.id], known = supported && !!hotkey;
       const enabled = supported ? hotkey?.enabled === true : d.enabledByDefault;
-      const keys = supported && hotkey ? hotkey.combo : d.defaultKeys;
+      const keys = hotkey ? hotkey.combo : d.defaultKeys;
       const sw = trusted(toggle(enabled, (on) => {
-        if (known && !busy) save({ action: on ? "enable" : "disable" });
+        if (known && !busy) save(d.id, { action: on ? "enable" : "disable" });
       }));
       sw.disabled = !known || busy;
       sw.setAttribute("aria-label", t(SHORTCUT_TEXT[d.id]));
-      const keycap = trusted(h("button", { class: recording && supported ? "keycap recording" : "keycap", text: recording && supported ? t("Press keys…") : displayKeys(keys) }));
+      const isRecording = recording === d.id;
+      const keycap = trusted(h("button", { class: isRecording ? "keycap recording" : "keycap", text: isRecording ? t("Press keys…") : displayKeys(keys) }));
       keycap.disabled = !known || !enabled || busy;
       if (supported) keycap.title = "Backspace: No disponible todavía";
       keycap.addEventListener("click", (e) => {
         if (!e.isTrusted || keycap.disabled) return;
-        recording = !recording;
+        recording = isRecording ? null : d.id;
         draw();
         list.querySelector(".recording")?.focus();
       });
       keycap.addEventListener("keydown", (e) => {
-        if (!e.isTrusted || !recording || !known || busy) return;
+        if (!e.isTrusted || recording !== d.id || !known || busy) return;
         e.preventDefault();
         const result = V.captureCombo(e);
         if (result.kind === "cancel") {
-          recording = false;
+          recording = null;
           draw();
-        } else if (result.kind === "combo") save({ action: "set", combo: result.text });
+        } else if (result.kind === "combo") save(d.id, { action: "set", combo: result.text });
       });
       keycap.addEventListener("blur", () => {
-        if (recording) {
-          recording = false;
+        if (recording === d.id) {
+          recording = null;
           draw();
         }
       });
@@ -75,14 +78,23 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
       r.append(keycap);
       list.append(r);
     }
-    const view = V.generalView({ hotkey }).hotkey;
-    feedback.textContent = hotkey?.status === "permission_pending" ? t("Asking your desktop to register the shortcuts. It may show its own window to confirm them.") : [view?.backendLabel, view?.note].filter(Boolean).join(" — ");
-    reset.disabled = !hotkey || busy;
+    feedback.textContent = Object.values(views).some((v) => v?.status === "permission_pending") ? t("Asking your desktop to register the shortcuts. It may show its own window to confirm them.") : Object.values(views).map((hotkey) => V.generalView({ hotkey }).hotkey).flatMap((view) => [view?.backendLabel, view?.note]).filter(Boolean).join(" — ");
+    reset.disabled = Object.values(views).some((v) => !v) || busy;
   }
   const reset = trusted(h("button", { id: "shortcut-reset", text: t("Reset to defaults") }));
-  reset.title = t("Open or close the island");
   reset.addEventListener("click", (e) => {
-    if (e.isTrusted && !reset.disabled) save({ action: "reset" });
+    if (!e.isTrusted || reset.disabled) return;
+    busy = true;
+    recording = null;
+    draw();
+    work(async () => {
+      for (const id of Object.keys(views)) views[id] = await call("hotkey_action", payloadFor(id, { action: "reset" }));
+    }, () => {
+    }, () => {
+    }).finally(() => {
+      busy = false;
+      if (s.alive()) draw();
+    });
   });
   const island = h("div", { id: "island-shortcuts", class: "shortcut-list" });
   for (const r of ISLAND_SHORTCUTS) island.append(h("div", { class: "row shortcut" }, h("span", { class: "shortcut-name", text: t(r.description) }), h("span", { class: "keycap static", text: r.keys })));
@@ -99,13 +111,19 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
     island
   ), recap, s.message);
   draw();
-  work(() => call("hotkey_action", { action: "view" }), (next) => {
-    hotkey = next;
-    draw();
-  });
+  for (const id of Object.keys(views)) {
+    work(() => call("hotkey_action", payloadFor(id, { action: "view" })), (next) => {
+      views[id] = next;
+      draw();
+    });
+    s.watch(id === "toggleIsland" ? "hotkey:state" : "hotkey-desktop:state", (next) => {
+      views[id] = next;
+      if (!recording) draw();
+    });
+  }
   const mounted = s.finish(), dispose = mounted.dispose, settled = mounted.settled;
   mounted.dispose = () => {
-    recording = false;
+    recording = null;
     recap.dispose();
     dispose();
   };

@@ -14,6 +14,9 @@ const selected = process.argv.includes('--hub-only') ? inputs.filter(file => fil
 for (const file of selected) {
   const source = fs.readFileSync(path.join(root, `${file}.ts`), 'utf8');
   const banner = source.split('\n')[0];
-  execFileSync(compiler, [`${file}.ts`, '--format=esm', '--target=es2021', '--charset=utf8', '--legal-comments=inline', `--banner:js=${banner}`, `--outfile=${file}.js`, '--log-level=error'], { cwd: root, stdio: 'inherit' });
+  const output = execFileSync(compiler, [`${file}.ts`, '--format=esm', '--target=es2021', '--charset=utf8', '--legal-comments=inline', `--banner:js=${banner}`, '--log-level=error'], { cwd: root });
+  const destination = path.join(root, `${file}.js`);
+  // Do not rewrite unchanged generated files owned by another scoped workstream.
+  if (!fs.existsSync(destination) || !fs.readFileSync(destination).equals(output)) fs.writeFileSync(destination, output);
 }
 console.log(`Built ${selected.length} MIT/Abito modules with esbuild ${version} (offline)`);

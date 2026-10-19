@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn targeted_defaults_and_persistence() {
+    let desktop = HotkeyConfig::default_for(Target::DesktopToggle);
+    assert_eq!(desktop.combo.to_string(), "Ctrl+Alt+D");
+    assert!(desktop.enabled);
+    assert_eq!(HotkeyConfig::default_for(Target::ToggleIsland), HotkeyConfig::default());
+    for target in [Target::ToggleIsland, Target::DesktopToggle] {
+        let mut cfg = HotkeyConfig::default_for(target);
+        assert_eq!(HotkeyConfig::from_text_for(None, target), cfg);
+        assert_eq!(HotkeyConfig::from_text_for(Some("junk"), target), cfg);
+        cfg.combo = Combo::parse("Super+F8").unwrap();
+        cfg.enabled = false;
+        assert_eq!(HotkeyConfig::from_text_for(Some(&cfg.to_text()), target), cfg);
+    }
+}
+
+#[test]
+fn targeted_schema_preserves_legacy_and_rejects_extra_keys() {
+    use serde_json::json;
+    for action in ["view", "enable", "disable", "reset", "suspend", "resume", "set"] {
+        let mut p = json!({"action":action});
+        if action == "set" { p["combo"] = json!("Ctrl+K"); }
+        let legacy = parse_command(&p).unwrap();
+        assert_eq!(parse_targeted(&p), Ok((Target::ToggleIsland, legacy.clone())));
+        p["id"] = json!("desktopToggle");
+        assert_eq!(parse_targeted(&p), Ok((Target::DesktopToggle, legacy)));
+        assert_eq!(parse_command(&p), Err(CommandError::InvalidSchema));
+        p["extra"] = json!(true);
+        assert_eq!(parse_targeted(&p), Err(CommandError::InvalidSchema));
+    }
+    for id in [json!(null), json!(1), json!(true), json!("toggleIsland"), json!("unknown")] {
+        assert_eq!(parse_targeted(&json!({"action":"view","id":id})), Err(CommandError::InvalidSchema));
+    }
+    assert_eq!(parse_targeted(&json!({"action":"set","id":"desktopToggle","combo":"A"})), Err(CommandError::NeedsModifier));
+}
+
+#[test]
+fn targeted_combos_cannot_clash_even_when_other_is_disabled() {
+    let other = HotkeyConfig { enabled: false, ..HotkeyConfig::default() };
+    assert_eq!(check_combo_available(other.combo, &other), Err(CommandError::ComboInUse));
+    assert_eq!(CommandError::ComboInUse.code(), "combo_in_use");
+    assert_eq!(check_combo_available(HotkeyConfig::default_for(Target::DesktopToggle).combo, &other), Ok(()));
+}
+
+#[test]
+fn targeted_portal_activation_does_not_cross_bindings() {
+    use portal::{is_our_activation_for, ShortcutSignal};
+    let desktop = ShortcutSignal { shortcut_id: "toggle-desktop-character".into(), activated: true };
+    assert!(is_our_activation_for(&desktop, "toggle-desktop-character"));
+    assert!(!is_our_activation_for(&desktop, portal::SHORTCUT_ID));
+    assert!(!is_our_activation_for(&ShortcutSignal { activated: false, ..desktop }, "toggle-desktop-character"));
+}
+
+
+#[test]
 fn default_is_a_valid_global_combo() {
     let c = Combo::default_combo();
     assert_eq!(c.to_string(), "Ctrl+Alt+A");

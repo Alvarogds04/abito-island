@@ -19,12 +19,13 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   let prefs={mainPill:'integration_claude',declaredPills:[],pillColors:{}}, ui, fail=false;
   const calls=[], events={};
   let hotkey={combo:'Ctrl+Space',enabled:true,status:'active'};
+  const desktopHotkey={combo:'Ctrl+Alt+D',enabled:true,status:'active'};
   const invoke=async(cmd,{payload:p})=>{
     if(cmd==='secret_action'&&p.action!=='present') assert.equal(all(ui).find(e=>e.id===`integration-key-${p.key}`).value,'','clear BEFORE IPC');
     calls.push([cmd,p]);
     if(fail) throw Error('fixture');
     if(cmd==='secret_action') return {present:p.action==='set'};
-    if(cmd==='hotkey_action') { if(p.action==='set')hotkey.combo=p.combo;if(p.action==='disable')hotkey.enabled=false;if(p.action==='enable')hotkey.enabled=true;return {...hotkey}; }
+    if(cmd==='hotkey_action') { const binding=p.id==='desktopToggle'?desktopHotkey:hotkey; if(p.action==='set')binding.combo=p.combo;if(p.action==='disable')binding.enabled=false;if(p.action==='enable')binding.enabled=true;return {...binding}; }
     if(cmd==='recap_action')return p.action==='prefs'?{enabled:true}:{ok:true};
     if(p.action==='toggle_declared_pill')prefs.declaredPills=P.toggle(P.normalize(prefs),p.id).declaredPills;
     if(p.action==='set_pill_color')prefs.pillColors[p.id]=p.color;
@@ -83,7 +84,15 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const {SHORTCUTS,ISLAND_SHORTCUTS,displayKeys}=await import(pathToFileURL(path.resolve(base,'../core/shortcuts.js')));
   const globalRows=find('global-shortcuts');assert.equal(globalRows.children.length,SHORTCUTS.filter(d=>d.ported).length);
   assert.equal(find('island-shortcuts').children.length,ISLAND_SHORTCUTS.length);
-  for(const d of SHORTCUTS.filter(d=>d.ported&&d.id!=='toggleIsland')){
+  assert.equal(find('shortcut-desktopToggle').children[0].disabled,false,'desktopToggle is supported');
+  assert(text(find('shortcut-desktopToggle')).includes(displayKeys('Ctrl+Alt+D')));
+  assert.equal(typeof events['hotkey-desktop:state'],'function','desktop status updates are subscribed');
+  events['hotkey-desktop:state']({payload:{...desktopHotkey,status:'permission_denied'}});
+  assert(text(find('shortcut-desktopToggle')).includes('Tu escritorio no lo activó'));
+  assert(!text(find('shortcut-toggleIsland')).includes('Tu escritorio no lo activó'));
+  events['hotkey-desktop:state']({payload:{...desktopHotkey}});
+  for(const d of SHORTCUTS.filter(d=>d.ported&&!['toggleIsland','desktopToggle'].includes(d.id))){
+
     const row=find(`shortcut-${d.id}`);assert(all(row).filter(e=>e.tagName==='button').every(e=>e.disabled));assert(text(row).includes(displayKeys(d.defaultKeys)));
     calls.length=0;for(const b of all(row).filter(e=>e.tagName==='button'))click(b);await ui.settled();assert.deepEqual(calls,[],'unavailable row never writes');
   }
@@ -96,7 +105,16 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   calls.length=0;click(record(),false);assert(!text(ui).includes('Pulsa las teclas…'));click(record());
   record().fire('keydown',false,{key:'K',code:'KeyK',ctrlKey:true});await ui.settled();assert.deepEqual(calls,[]);
   record().fire('keydown',true,{key:'K',code:'KeyK',ctrlKey:true});await ui.settled();assert.deepEqual(calls,[['hotkey_action',{action:'set',combo:'Ctrl+K'}]]);
-  calls.length=0;click(find('shortcut-reset'),false);await ui.settled();assert.deepEqual(calls,[]);click(find('shortcut-reset'));await ui.settled();assert.deepEqual(calls,[['hotkey_action',{action:'reset'}]]);ui.dispose();
+  calls.length=0;click(find('shortcut-desktopToggle').children[0],false);await ui.settled();assert.deepEqual(calls,[]);
+  click(find('shortcut-desktopToggle').children[0]);await ui.settled();assert.deepEqual(calls,[['hotkey_action',{action:'disable',id:'desktopToggle'}]]);
+  assert.equal(hotkey.enabled,true,'desktop switch does not change island binding');
+  click(find('shortcut-desktopToggle').children[0]);await ui.settled();assert.deepEqual(calls.at(-1),['hotkey_action',{action:'enable',id:'desktopToggle'}]);
+  const desktopRecord=()=>find('shortcut-desktopToggle').children.at(-1);
+  calls.length=0;click(desktopRecord());desktopRecord().fire('keydown',true,{key:'J',code:'KeyJ',ctrlKey:true});await ui.settled();
+  assert.deepEqual(calls,[['hotkey_action',{action:'set',combo:'Ctrl+J',id:'desktopToggle'}]]);
+  assert.equal(hotkey.combo,'Ctrl+K','desktop recording does not change island binding');
+  calls.length=0;click(find('shortcut-reset'),false);await ui.settled();assert.deepEqual(calls,[]);click(find('shortcut-reset'));await ui.settled();assert.deepEqual(calls,[['hotkey_action',{action:'reset'}],['hotkey_action',{action:'reset',id:'desktopToggle'}]]);ui.dispose();
+  desktopHotkey.status='taken';ui=await renderShortcuts(opts);await ui.settled();assert(text(find('shortcut-desktopToggle')).includes('En uso por otra app'));ui.dispose();desktopHotkey.status='active';
   hotkey.status='taken';ui=await renderShortcuts(opts);await ui.settled();assert(text(find('shortcut-toggleIsland')).includes('En uso por otra app'));ui.dispose();hotkey.status='active';
   ui=await renderRecapRows(opts);await ui.settled();assert.equal(ui.children.length,3);assert(text(ui).includes('Resumen semanal'));
   calls.length=0;click(find('hub-recap'),false);await ui.settled();assert.deepEqual(calls,[]);click(find('hub-recap'));await ui.settled();assert.deepEqual(calls,[['recap_action',{action:'set_enabled',enabled:false}]]);

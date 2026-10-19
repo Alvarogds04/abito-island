@@ -75,6 +75,16 @@ test('malformed events are ignored', async () => {
 // ---- island.js hook ----
 const src = read('island.js');
 
+test('desktop toggle event flies out or home and is safe without the adapter', () => {
+  const hook = src.match(/listen\('desktop-character-toggle',\s*\(\)\s*=>\s*\{([\s\S]*?)\}\)/);
+  assert.ok(hook, 'island subscribes to the desktop shortcut event');
+  let presses = 0;
+  const run = new Function('desktopCharacter', hook[1]);
+  run(null);
+  run({ flyOutOrHome() { presses++; } });
+  assert.equal(presses, 1);
+});
+
 test('index.html loads the logic and the adapter before island.js', () => {
   const html = read('index.html');
   const scripts = [...html.matchAll(/<script\s+defer\s+src="([^"]+)"/g)].map(m => m[1]);
