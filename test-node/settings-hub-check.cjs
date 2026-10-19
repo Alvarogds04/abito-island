@@ -198,5 +198,24 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   const abitoCss = fs.readFileSync(path.join(base, 'abito.css'), 'utf8');
   assert(/\.hub-empty svg\s*\{[^}]*width:\s*64px[^}]*height:\s*64px/.test(abitoCss), 'D2: the empty-state character is sized like Coucou\'s canvas (64px)');
   assert.equal(fs.readFileSync(path.join(base, 'i18n-es.ts'), 'utf8').match(/'Dictation is off': '([^']*)'/)[1], 'Dictado desactivado', 'D5: Coucou\'s own Spanish string');
+  // D1: the band's colour and particles are code (Coucou's backdrop), not an Abito flat black.
+  {
+    const props = [];
+    const mk = tag => { const e = new Element(tag); e.style = { setProperty: (k, v) => props.push([tag, k, v]) }; e.getContext = () => null; return e; };
+    global.document = { createElement: mk, createElementNS: (_, t) => mk(t), documentElement: { lang: 'es' }, body: new Element('body'), addEventListener() {}, visibilityState: 'hidden' };
+    const heroMod = await import(pathToFileURL(path.join(base, 'hero.js')) + '?d1');
+    const band = heroMod.hero('dictation', 'Hola', null);
+    assert(props.some(([, k, v]) => k === '--hero-line' && v === 'rgba(251,146,60,0.16)'), 'D1: dictation band line is its orange at .16 alpha');
+    assert(all(band).some(e => e.tagName === 'canvas' && e.className === 'backdrop'), 'D1: backdrop canvas present');
+    props.length = 0; heroMod.hero('chat', 'Chat', null);
+    assert(props.some(([, k, v]) => k === '--hero-line' && v === 'rgba(224,121,80,0.16)'), 'D1: chat band uses the chat colour');
+    props.length = 0; heroMod.hero('unknown-page', 'x', null);
+    assert(props.some(([, k, v]) => k === '--hero-line' && v === 'rgba(142,147,156,0.16)'), 'D1: unknown pages fall back to the general colour');
+    props.length = 0; heroMod.glowCard('#FB923C', new Element('div'));
+    assert(props.some(([, k, v]) => k === '--glow-line' && v === 'rgba(251,146,60,0.18)'), 'D1: glow card line from its colour');
+    const src = fs.readFileSync(path.join(base, 'hero.ts'), 'utf8');
+    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+    assert(!/wardrobe|outfit|roundGlasses|sunglasses|partyHat|BotEngine/.test(code), 'D1: no Coucou characters or wardrobe in the ported code');
+  }
   console.log('PASS settings-hub: sidebar parity, CSP, page gate, trusted gestures, bridge payloads, volume commit, unavailable motion');
 })().catch(e => { console.error(e); process.exitCode = 1; });
