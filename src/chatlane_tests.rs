@@ -96,3 +96,15 @@ fn availability_maps_the_preflight_honestly() {
     assert!(!Availability::unchecked().can_send());
     assert_eq!(Availability::unchecked().state, "unchecked");
 }
+
+/// Human L52: «quiero que me hable español neutro». The persona speaks neutral
+/// Spanish (no voseo) and names itself plainly, so the model never answers «Me llamo Sos Abito».
+#[test]
+fn system_prompt_asks_for_neutral_spanish_and_names_abito_plainly() {
+    let p = super::SYSTEM_PROMPT;
+    assert!(p.contains("español neutro"), "{p}");
+    assert!(p.starts_with("Te llamas Abito"), "{p}");
+    for voseo in ["rioplatense", "Sos ", "Respondé", "Corrés", "podés", "explicá"] {
+        assert!(!p.contains(voseo), "voseo left in the prompt: {voseo}");
+    }
+}

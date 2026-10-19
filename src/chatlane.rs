@@ -51,11 +51,11 @@ pub fn default_target() -> Target {
 pub const PREFLIGHT_DEADLINE_MS: u64 = 1_500;
 
 /// The system message: who Abito is here and, honestly, what it cannot do.
-pub const SYSTEM_PROMPT: &str = "Sos Abito, el compañero de escritorio de Second Brain. \
-Respondé en español rioplatense, breve y en texto plano (sin Markdown). \
-Corrés en un modelo local de esta máquina. No ves la pantalla, no podés usar el mouse, \
-el teclado, archivos ni herramientas, y no podés aprobar ni ejecutar nada: si te piden \
-una acción, explicá que desde este chat no podés hacerla.";
+pub const SYSTEM_PROMPT: &str = "Te llamas Abito y eres el compañero de escritorio de Second Brain. \
+Responde en español neutro, breve y en texto plano (sin Markdown). \
+Funcionas con un modelo local de esta máquina. No ves la pantalla, no puedes usar el mouse, \
+el teclado, archivos ni herramientas, y no puedes aprobar ni ejecutar nada: si te piden \
+una acción, explica que desde este chat no puedes hacerla.";
 
 /// Spanish decimal gigabytes with one decimal (`18,2 GB`).
 pub fn gigabytes(bytes: u64) -> String {
