@@ -127,7 +127,8 @@ test('every non-pending view has a visible word or is an explicit dot/ring', () 
 // ---- connection ----------------------------------------------------------
 test('no Pi -> unplugged icon + "Sin motor" (design ov-error chip; the duplicate sentence is gone)', () => {
   const v = O.connectionView({ unavailable: false, connections: 0 });
-  assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin motor', 'red']);
+  // L37: no Pi session is Coucou's normal idle, not an error: the word stays (honest), the tone is the quiet one (settings' «Sin motor» is faint too)
+  assert.deepEqual([v.kind, v.icon, v.word, v.tone], ['down', 'plug-off', 'Sin motor', 'faint']);
   assert.doesNotMatch(JSON.stringify(v), /Sin conexión con Pi/);
   // T7.3 design diet: the visible detail is one short line; the long honest
   // sentence stays reachable in aria (was a two-sentence visible disclaimer).
@@ -158,25 +159,31 @@ test('connection view tolerates a missing snapshot', () => {
   assert.equal(O.connectionView(null).kind, 'down');
 });
 
-// ---- T7.3: the transport error band (design isla-ov-error) -----------------
-test('transport error band: short title "Sin conexión" (the chip keeps "Sin motor"), red ring, NO invented action', () => {
-  const band = O.connectionBandView(O.connectionView({ unavailable: false, connections: 0 }));
-  assert.ok(band, 'the down connection carries the band');
-  // Human report: the old title («Sin conexión con el motor», 25 chars) was too long for the band.
-  // It must stay short and must not repeat the chip word «Sin motor» that sits beside it.
-  assert.equal(band.title, 'Sin conexión');
-  assert.ok(band.title.length <= 14, 'short enough for the band');
-  assert.notEqual(band.title, O.connectionView({ unavailable: false, connections: 0 }).word, 'the band and the chip do not repeat each other');
-  assert.equal(band.tone, 'red', 'the band wears the red ring (#notices[data-tone=red])');
-  assert.equal(band.grouped, false);
-  assert.equal(band.action, null, 'the facade has no retry verb for a Pi-session transport; a dead button would lie');
-  assert.match(band.aria, /Sin motor|sesión/i);
-  // the design band is ONLY the engine-unreachable state: a healthy connection
-  // and the pinned "Avisos caídos" channel failure keep their own surfaces
-  assert.equal(O.connectionBandView(O.connectionView({ unavailable: false, connections: 1 })), null);
-  assert.equal(O.connectionBandView(O.connectionView({ unavailable: true, connections: 0 })), null);
-  assert.equal(O.connectionBandView(null), null);
+// ---- L37: «no Pi session» is Coucou's idle, never an error band ------------------------------------------------------
+test('L37: with no Pi session connected there is NO red band and no «Sin conexión» title; the honest status stays quiet (word + aria)', () => {
+  const down = O.connectionView({ unavailable: false, connections: 0 });
+  assert.equal(down.tone, 'faint', 'quiet, not red');
+  assert.equal(down.word, 'Sin motor', 'the honest word stays');
+  assert.match(down.aria, /Sin motor: no hay una sesión conectada/, 'the aria sentence is kept verbatim');
+  assert.equal(down.detail, 'Conectá una sesión de Pi.');
+  // the band that used to be built for it is gone (Coucou has no «disconnected» state: nothing running is idle)
+  assert.equal(typeof O.connectionBandView, 'undefined', 'no transport-error band for an idle island');
+  for (const f of ['overview-view.js', 'island.js']) assert.doesNotMatch(fs.readFileSync(path.join(frontend, f), 'utf8'), /Sin conexión'|connectionBandView/, f);
+  // a missing snapshot is the same idle, not an error
+  assert.equal(O.connectionView(null).tone, 'faint');
 });
+
+test('L37: the ONLY red is a real failure: the receiver that failed to start keeps its red tone, word and the error notice', () => {
+  const failed = O.connectionView({ unavailable: true, connections: 0 });
+  assert.deepEqual([failed.kind, failed.tone, failed.word], ['unavailable', 'red', 'Avisos caídos']);
+  assert.match(failed.aria, /no pudo iniciarse/);
+  // Rust queues an error-severity transport notice for it: that notice keeps the red tone through the band view
+  const band = O.noticeBandView([{ id: 'transport-1', kind: 'transport', title: 'Avisos caídos', detail: '', severity: 'error', at: 1000, expiresAt: Number.MAX_SAFE_INTEGER }], 2000);
+  assert.equal(band.tone, 'red'); assert.equal(band.title, 'Avisos caídos');
+  // a healthy connection is the calm green (nothing drawn), unchanged
+  assert.equal(O.connectionView({ connections: 1 }).tone, 'go');
+});
+
 
 // ---- notice pill ---------------------------------------------------------
 test('notice pill: short text, badge, 60 s ring fraction, full text in aria', () => {
@@ -465,9 +472,9 @@ test('R5: two stacked notices stay inside the fixed 44px band and never reach th
   assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/,
     'overflow scrolls INSIDE the band instead of growing the box');
   // model of two stacked notices, from the real boxes: row + gap + band (#437: the
-  // design's 40 px band replaces the old 44 px pill — D11, the design wins)
+  // design's 40 px band replaces the old 44 px pill — D11, the design wins; L37: Coucou's 28px .pill capsule replaces the 40px band)
   const stacked = px(decls('#notice-row')['min-height']) + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
-  assert.equal(stacked, 92, 'model: chips row + gap + 40px design band stack to 92px');
+  assert.equal(stacked, 80, 'model: chips row + gap + Coucou 28px pill capsule stack to 80px');
   assert.ok(stacked > px(n.height), 'the stacked content exceeds the band, so it must scroll');
   assert.ok(px(n.top) - OV_TOP + px(n.height) <= px(p.top), 'even stacked, the band box ends before the grid: zero touch');
   assert.equal(px(decls('#notice-info').top), 0, 'the «i» fits the band: no phantom 4px scroll');

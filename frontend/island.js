@@ -686,6 +686,8 @@
   function paintBand(notices) {
     const view = O.noticeBandView(notices, Date.now());
     if (view) putIcon($('notice-ring'), iconNode(ICONS.ring(view.fraction)));
+    // L37: Coucou's 2px countdown bar under the capsule is drawn from the same 60 s window the ring used
+    if (view) $('notice-pill').style.setProperty('--left', String(view.fraction));
     return view;
   }
   function renderNotices(snapshot) {
@@ -720,7 +722,7 @@
     // T7.3 (design isla-ov-error): with no host notice, an unreachable engine
     // itself carries the band — red ring, one short title, no action (the
     // facade has no verb that reconnects a Pi-session transport).
-    const view = paintBand(notices) || O.connectionBandView(conn);
+    const view = paintBand(notices); // L37: no notice = no band; «no Pi session» is Coucou's idle, never an error band
     noticeBand = view;
     // #373 GD032: the strip carries the view's severity tone (error → red,
     // warning → sun); plain dataset writes below, never markup.
@@ -733,6 +735,8 @@
     // S10 (L22): Coucou's overview has no connection strip. A healthy connection with nothing to say draws nothing here;
     // a problem (no engine, bridge down, hotkey) or a notice keeps its honest strip.
     noticesEl.dataset.calm = (!first && conn.tone === 'go' && !bridge && !view) ? 'true' : 'false';
+    // quiet: only the connection status line is left (no band, no list): Coucou draws its status as a line, not a card
+    noticesEl.dataset.quiet = !view ? 'true' : 'false';
     noticesEl.dataset.grouped = view && view.grouped ? 'true' : 'false';
     noticesEl.dataset.list = noticeListOpen ? 'open' : 'closed';
     if (capsule.dataset.noticeList !== noticesEl.dataset.list) capsule.dataset.noticeList = noticesEl.dataset.list;

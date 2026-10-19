@@ -65,6 +65,24 @@ export function buildStates(f) {
     { id: 'dictation', title: 'Dictation pill (hands-free)', w: 720, h: 140, expected: 'Coucou draws the pill in its own window on a screen edge; Abito draws it in the expanded island header: compare the look, not the %.',
       coucou: { page: 'pill', run: `setTimeout(()=>__vcEmit('pill-bands',[0.2,0.5,0.9,0.4,0.7,0.3,0.8,0.1,0.6]),600);`, settle: 2000 },
       abito: { label: 'main', run: `window.__VC_DICTATION=true; ` + aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `setTimeout(()=>{__vcEmit('dictation:phase',{phase:'locked'});__vcEmit('dictation:bands',{bands:[0.2,0.5,0.9,0.4,0.7,0.3,0.8,0.1,0.6]});},1500);`, settle: 3500 } },
+    // ── L37 notices: every notice surface of the island against Coucou's idle / badge / error look ──
+    { id: 'notice-down', title: 'Notices · no Pi session connected (idle)', ...ISLAND,
+      expected: 'Coucou has no «connection» notion: nothing running is its normal empty state (L37: no red band).',
+      coucou: { page: 'island', run: `__vcCoucou.island.expand('overview');`, settle: 2000 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, snapshot:{ state:'expanded', connections:0, notices:[] } }`, 'overview'), settle: 3000 } },
+    { id: 'notice-failed', title: 'Notices · receiver failed to start (real error)', ...ISLAND,
+      expected: 'The only red: Coucou shows an error as its red ✗ badge / error view.',
+      coucou: { page: 'island', run: cAll(f) + cHook({ hook_event_name: 'StopFailure', session_id: f.agents[1].sessionId, cwd: f.agents[1].cwd, coucou_agent: 'codex' }) + `__vcCoucou.island.expand('overview');`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions}, snapshot:{ state:'expanded', unavailable:true, connections:0, notices:[{ id:__vcAbitoUuid(21), kind:'transport', title:'Avisos caídos', detail:'El canal local de avisos no pudo iniciarse.', severity:'error', at:Date.now(), expiresAt:Date.now()+3.15e11 }] } }`, 'overview'), settle: 3500 } },
+    { id: 'notice-single', title: 'Notices · one notice (finished)', ...ISLAND,
+      coucou: { page: 'island', run: cAll(f) + cHook({ hook_event_name: 'Stop', session_id: f.agents[1].sessionId, cwd: f.agents[1].cwd, coucou_agent: 'codex', last_assistant_message: 'done' }) + `__vcCoucou.island.expand('overview');`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions}, snapshot:{ state:'expanded', notices:[{ id:__vcAbitoUuid(22), kind:'settled', title:'Pi terminó su turno', detail:'', severity:'info', at:Date.now()-120000, expiresAt:Date.now()+55000 }] } }`, 'overview'), settle: 3500 } },
+    { id: 'notice-warning', title: 'Notices · one warning', ...ISLAND,
+      coucou: { page: 'island', run: cAll(f) + cHook({ hook_event_name: 'PermissionRequest', request_id: 'rq-w', session_id: f.agents[1].sessionId, cwd: f.agents[1].cwd, coucou_agent: 'codex', tool_name: 'Bash', tool_input: { command: 'ls' } }) + `__vcCoucou.island.expand('overview');`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions}, snapshot:{ state:'expanded', notices:[{ id:__vcAbitoUuid(23), kind:'settled', title:'Atajo limitado (sin permiso)', detail:'', severity:'warning', at:Date.now()-30000, expiresAt:Date.now()+55000 }] } }`, 'overview'), settle: 3500 } },
+    { id: 'notice-grouped', title: 'Notices · three notices grouped', ...ISLAND,
+      coucou: { page: 'island', run: cAll(f) + cHook({ hook_event_name: 'Stop', session_id: f.agents[1].sessionId, cwd: f.agents[1].cwd, coucou_agent: 'codex', last_assistant_message: 'done' }) + `__vcCoucou.island.expand('overview');`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions}, snapshot:{ state:'expanded', notices:[{ id:__vcAbitoUuid(24), kind:'settled', title:'Pi terminó su turno', detail:'', severity:'info', at:Date.now()-60000, expiresAt:Date.now()+55000 },{ id:__vcAbitoUuid(25), kind:'settled', title:'Pi espera tu decisión', detail:'', severity:'warning', at:Date.now()-30000, expiresAt:Date.now()+55000 },{ id:__vcAbitoUuid(26), kind:'settled', title:'Atajo limitado (sin permiso)', detail:'', severity:'warning', at:Date.now()-10000, expiresAt:Date.now()+55000 }] } }`, 'overview'), settle: 3500 } },
   ];
   // Pages are matched by Coucou's sidebar id (same ids in Abito's window): [data-page] when the shell exposes it, else the sidebar slot of that id.
   const click = (i, id) => `(document.querySelector('[data-page="${id}"]') || document.querySelectorAll('.hub-item')[${i}]).click();`;
