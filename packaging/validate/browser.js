@@ -111,8 +111,11 @@
       const card=byId('overview-view');
       const rows=s.sessions?.rows || [];
       const count=card.querySelector('.who .count');
-      const truthfulSteps=rows.length===0 || (card.textContent.includes('Pasos de herramientas no disponibles') && (!count || count.hidden || count.textContent===''));
-      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')) && truthfulSteps,reason:'sesiones no disponibles con daemon conectado o metadatos de procesos presentados como pasos',connection:s.connection,rows:s.sessions?.rows,truthfulSteps,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:card.textContent};
+      const internal=rows.find(r=>r.tools?.total===2);
+      const truthfulSteps=!!internal && internal.tools.steps.map(s=>s.name).join(',')==='read,bash' && internal.tools.steps.every(s=>s.state==='done') && count && !count.hidden && count.textContent==='2/2' && card.textContent.includes('read') && card.textContent.includes('bash');
+      const external=rows.find(r=>!r.tools);
+      const externalHonest=!external || window.AbitoSessionsTicker.feed(window.AbitoSessionsTicker.newMemory(),{state:'ready',rows:[external],truncated:false}).who.count==='';
+      return {ok:!seen.some(t=>t.includes('Sesiones no disponibles')) && truthfulSteps && externalHonest,reason:'faltan dos herramientas reales proyectadas y contador 2/2, o se inventan pasos externos',connection:s.connection,rows:s.sessions?.rows,truthfulSteps,externalHonest,observations:seen.length,unavailable_seen:seen.some(t=>t.includes('Sesiones no disponibles')),empty_state:card.textContent};
     } finally { observer.disconnect(); }
   }
   async function connection(connected) {

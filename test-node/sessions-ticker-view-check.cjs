@@ -163,4 +163,20 @@ test('poll opens the lazy connection and treats an unanswered scan as pending, n
 });
 
 // ---- tiny harness result (functions defined above) -----------------------------
+test('real tool history drives n/m; missing and malformed streams remain honest', () => {
+  const tools = { total: 2, steps: [{ index: 1, name: 'read', state: 'done' }, { index: 2, name: 'bash', state: 'running' }] };
+  const v = T.sessionsView(frame({ sessions: [row(), row({ id: 's-abcdef01', tools })] }));
+  const m = T.newMemory();
+  const r = T.feed(m, v);
+  assert.deepEqual(r.task.steps, ['read', 'bash']);
+  assert.equal(r.task.stepSeq, 1);
+  assert.equal(r.who.count, '2/2');
+  const external = T.focus(m, v, 's-0123abcd');
+  assert.equal(external.who.count, '');
+  assert.match(external.task.steps[0], /no disponibles/);
+  assert.equal(T.focus(m, v, 'not-a-session'), null);
+  const malformed = T.sessionsView(frame({ sessions: [row({ tools: { total: 2, steps: [] } })] }));
+  assert.match(T.feed(T.newMemory(), malformed).task.steps[0], /no disponibles/);
+});
+
 Promise.all(async).then(() => { console.log(`sessions-ticker-view-check: ${passed} checks ok`); process.exit(0); }, (e) => { console.error(e); process.exit(1); });

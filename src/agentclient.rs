@@ -579,7 +579,9 @@ impl ClientState {
                         cell(r, "cwd", 64),
                         cell(r, "origin", 32),
                     ) else { return None };
-                    Some(json!({"id": id, "kind": kind, "cwd": cwd, "state": state, "origin": origin}))
+                    let mut row = json!({"id": id, "kind": kind, "cwd": cwd, "state": state, "origin": origin});
+                    if let Some(tools) = r.get("tools").and_then(session_tools_view) { row["tools"] = tools; }
+                    Some(row)
                 }).collect();
                 self.sessions = json!({"rows": rows, "truncated": truncated});
             }
@@ -841,4 +843,26 @@ fn private_account_file(meta: &std::fs::Metadata) -> bool {
 }
 fn account_error(code: &str) -> crate::bridge::BridgeError {
     crate::bridge::BridgeError { code: code.into(), message: "No se pudo guardar la cuenta. Revisá los datos y la URL (HTTPS remota o HTTP de loopback local).".into() }
+}
+
+// Additive internal-Pi tool stream. Malformed streams stay unavailable; session
+// discovery itself remains useful. Rebuild every field, never carry arguments.
+fn session_tools_view(raw: &Value) -> Option<Value> {
+    let total = raw.get("total")?.as_u64().filter(|n| *n <= 4096)?;
+    let steps = raw.get("steps")?.as_array()?;
+    if steps.len() != total.min(20) as usize { return None; }
+    let steps: Option<Vec<Value>> = steps.iter().enumerate().map(|(i, step)| {
+        let index = step.get("index")?.as_u64()?;
+        let name = step.get("name")?.as_str()?;
+        let state = step.get("state")?.as_str()?;
+        if index != total - steps.len() as u64 + i as u64 + 1 || name.is_empty() || name.len() > 64
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+            || !matches!(state, "running" | "done" | "error") { return None; }
+        Some(json!({"index":index,"name":name,"state":state}))
+    }).collect();
+    let mut tools = json!({"total":total,"steps":steps?});
+    if let Some(epoch) = raw.get("epoch") {
+        tools["epoch"] = json!(epoch.as_u64().filter(|n| *n <= 9_007_199_254_740_991)?);
+    }
+    Some(tools)
 }

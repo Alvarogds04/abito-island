@@ -45,7 +45,12 @@
     // Plain text row: `Pi · mi-proyecto · inactiva · en herdr`. An unknown cwd is
     // an honest «—»; an unknown origin simply has no segment.
     const text = [kindLabel, cwd ?? '—', stateLabel].concat(origin ? [`en ${origin}`] : []).join(' · ');
-    return { id, kindLabel, cwd, stateLabel, origin, text };
+    const row = { id, kindLabel, cwd, stateLabel, origin, text };
+    const tools = raw.tools;
+    if (isObject(tools) && (tools.epoch === undefined || (Number.isSafeInteger(tools.epoch) && tools.epoch >= 0)) && Number.isSafeInteger(tools.total) && tools.total >= 0 && tools.total <= 4096 && Array.isArray(tools.steps) && tools.steps.length === Math.min(20, tools.total) && tools.steps.every((s, i) => isObject(s) && s.index === tools.total - tools.steps.length + i + 1 && typeof s.name === 'string' && /^[a-zA-Z0-9_.-]{1,64}$/.test(s.name) && ['running', 'done', 'error'].includes(s.state))) {
+      row.tools = { ...(tools.epoch === undefined ? {} : { epoch: tools.epoch }), total: tools.total, steps: tools.steps.map(s => ({ index: s.index, name: s.name, state: s.state })) };
+    }
+    return row;
   }
 
   /**
@@ -124,17 +129,24 @@
   }
 
   // ---- the feed of Coucou's Ticker (S10) --------------------------------------------
-  // Process discovery is NOT a tool-event stream. Until the daemon projects real
-  // tools, keep the session identity but explicitly report missing steps instead
-  // of fabricating work from changes of cwd, process state or the session list.
-  const newMemory = () => ({ log: [], seq: 0, focus: null });
+  // Only the daemon's internal Pi has a tool stream. Other discovered agents
+  // remain useful identities, but process metadata must never invent steps.
+  const newMemory = () => ({ log: [], seq: 0, focus: null, selected: false });
+  function focus(memory, view, id) {
+    const row = view?.state === 'ready' && view.rows.find(r => r.id === id);
+    if (!row) return null;
+    memory.focus = row; memory.selected = true;
+    return feed(memory, view);
+  }
   function feed(memory, view) {
     if (view && view.state === 'pending') return { active: false, task: null, who: null };
     const previous = memory.log.join('\n');
     if (!view || view.state !== 'ready') {
       memory.log = [errorText()]; memory.focus = null;
     } else {
-      memory.focus = view.rows.find(r => r.id === memory.focus?.id) || view.rows[0] || null;
+      const remembered = view.rows.find(r => r.id === memory.focus?.id);
+      if (!remembered) memory.selected = false;
+      memory.focus = (memory.selected && remembered) || view.rows.find(r => r.tools?.total > 0) || remembered || view.rows[0] || null;
       if (!view.rows.length) {
         memory.log = []; memory.seq = 0; memory.focus = null;
         return { active: false, task: null, who: null };
@@ -145,14 +157,18 @@
     // Ticker.sync uses a monotonic index, not text equality, to detect updates.
     // Advance on notice transitions too, without counting process metadata.
     if (memory.log.join('\n') !== previous) memory.seq += memory.log.length;
+    const f = memory.focus;
+    if (f?.tools?.total > 0) {
+      const { total, steps } = f.tools;
+      return { active: true, task: { steps: steps.map(s => s.name), stepSeq: total - 1, finalLine: steps.some(s => s.state === 'running') ? null : steps.at(-1).name }, who: { name: f.cwd ?? '—', tool: f.kindLabel, count: `${steps.at(-1).index}/${total}` } };
+    }
     const steps = memory.log.slice();
     // Neither the availability notice nor the bounded-list notice is a tool.
-    const f = memory.focus;
     const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: '' } : null;
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
   }
 
-  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, requestSessions };
+  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -174,7 +190,7 @@ function mount(V) {
   const whoName = mkEl('span', 'name'), whoTool = mkEl('span', 'tool'), whoCount = mkEl('span', 'count');
   who.append(mkEl('span', 'who-dot'), whoName, whoTool, whoCount);
   leftCard.append(who);
-  let ticker = null, raf = 0;
+  let ticker = null, raf = 0, shownSession = null;
   const memory = V.newMemory();
   const frame = now => { raf = 0; if (ticker) { ticker.tick(now); if (ticker.animating && !document.hidden) raf = requestAnimationFrame(frame); } };
   import('./vendor/coucou/views/ticker.js').then(mod => { ticker = new mod.Ticker(); ticker.el.hidden = true; leftCard.append(ticker.el); }).catch(() => {});
@@ -200,6 +216,8 @@ function mount(V) {
   function show(view) {
     if (!ticker) return;
     const { active, task, who: w } = V.feed(memory, view);
+    const session = memory.focus ? `${memory.focus.id}:${!!memory.focus.tools?.total}:${memory.focus.tools?.epoch ?? 0}` : null;
+    if (session !== shownSession) { ticker.sync(null); shownSession = session; }
     paintMiniGrid(view);
     ticker.el.hidden = !active;
     who.hidden = !active || !w;
