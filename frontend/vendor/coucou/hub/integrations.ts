@@ -16,10 +16,13 @@ const INTEGRATIONS = [
   {id:'integration_github',name:'GitHub',color:'#F4505E',fields:[['github-token','Token','ghp_…']],hint:'Classic token with the repo scope, or fine-grained with read access to Pull requests, Commit statuses and Actions.'},
   {id:'integration_vercel',name:'Vercel',color:'#7C5CFF',fields:[['vercel-token','Token','…']]},
   {id:'integration_n8n',name:'n8n',color:'#F29B38',fields:[['n8n-url','Instance URL','https://n8n.example.com'],['n8n-api-key','API key','…']]},
-  {id:'integration_resend',name:'Resend',color:'#22C55E',fields:[['resend-api-key','API key','re_…']]},
+  {id:'integration_resend',name:'Resend',color:'#22C55E',fields:[['resend-api-key','API key','re_…'],['resend-from','Sender address','Abito <you@yourdomain.com>']],hint:'Sender must belong to a domain verified in Resend. It is used when you send mail from the island.'},
   {id:'integration_notion',name:'Notion',color:'#8C8C8C',fields:[['notion-api-key','Integration token','ntn_…']]},
   {id:'integration_calcom',name:'Cal.com',color:'#C9956A',fields:[['calcom-api-key','API key','cal_…']]},
   {id:'integration_spotify',name:'Spotify',color:'#1DB954',fields:[]},
+  // Abito-owned (#490): not a pill. The user's own SMTP account for sending mail from the island when Resend is not set.
+  {id:'mail_smtp',name:'Mail (SMTP)',color:'#8C8C8C',noPill:true,fields:[['smtp-host','Server (port 465 = TLS, otherwise STARTTLS)','smtp.example.com:587'],['smtp-user','User','you@example.com'],['smtp-password','Password','…'],['smtp-from','Sender (optional)','Abito <you@example.com>']],hint:'Used to send mail from the island when no Resend key and sender are saved. The connection is always encrypted.'},
+  {id:'mail_imap',name:'Mail (IMAP)',color:'#8C8C8C',noPill:true,fields:[['imap-host','Server (TLS, port 993 by default)','imap.example.com'],['imap-user','User','you@example.com'],['imap-password','Password','…']],hint:'Your inbox in the island: unread, sender, time and preview. Abito only reads; it changes a message only when you press Mark as read. The connection is always encrypted.'},
 ];
 export async function renderIntegrations({ invoke, V, P, C, listen, timers }: any) {
   const s = session(invoke, listen, timers), { root, call, work, watch } = s;
@@ -48,13 +51,14 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
   }
   const offered = new Set(C.available().map((p:any)=>p.id));
   const upstream = new Set(availablePills().map(p=>p.id));
-  for(const def of INTEGRATIONS.filter(d=>offered.has(d.id)&&upstream.has(d.id))) {
+  for(const def of INTEGRATIONS.filter(d=>(d as any).noPill||(offered.has(d.id)&&upstream.has(d.id)))) {
+    const noPill = !!(def as any).noPill;
     const sw = trusted(h('button',{id:`declare-${def.id}`,class:'switch','aria-label':def.name})) as HTMLButtonElement;
     sw.addEventListener('click',e=>{
       if(!e.isTrusted || sw.disabled)return;
       if(!P.toggle(P.normalize(prefs),def.id))return;
       save({action:'toggle_declared_pill',id:def.id});
-    });switches.set(def.id,sw);
+    });if(!noPill)switches.set(def.id,sw);
     const rows=h('div',{style:'display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0'});
     for(const [key,label,placeholder] of def.fields) {
       const supported=V.KEY_IDS.includes(key);
@@ -87,6 +91,11 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
     if(def.hint)rows.append(hint(t(def.hint)));
     // spotify_action is NOT reachable from settings: preserve the hint slot, not a fabricated state.
     if(def.id==='integration_spotify')rows.append(h('div',{class:'hint',style:'padding-top:5px'}));
+    if(noPill){
+      list.append(h('div',{id:def.id,style:'display:flex;gap:12px;align-items:flex-start'},
+        h('div',{style:'display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px'},h('span',{style:'font-size:12.5px',text:def.name})),rows));
+      continue;
+    }
     const dot=colorDot(def,'',()=>prefs.pillColors,next=>{
       if(!known||busy)return;
       const color=next[def.id];save(color?{action:'set_pill_color',id:def.id,color}:{action:'clear_pill_color',id:def.id});

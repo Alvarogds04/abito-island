@@ -36,6 +36,7 @@ mod tray;
 mod trayhost;
 mod fileshost;
 mod githubhost;
+mod mailhost;
 mod monitorshost;
 mod secretshost;
 mod soundshost;
@@ -1863,6 +1864,7 @@ fn main() {
             secretshost::secret_action,
             fileshost::open_action,
             githubhost::github_action,
+            mailhost::mail_action,
             monitorshost::monitor_action,
             soundshost::sound_action,
             recaphost::recap_action,

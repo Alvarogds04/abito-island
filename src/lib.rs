@@ -53,6 +53,10 @@ pub mod integrations;
 pub mod integrations_net;
 pub mod servicedetail;
 pub mod localmodel;
+pub mod imapcmd;
+pub mod mailcmd;
+#[cfg(target_os = "linux")]
+pub mod phone_link;
 pub mod models;
 pub mod monitors;
 pub mod nativedialog;
