@@ -33,10 +33,16 @@ pub struct Response {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetError(pub String);
 
-/// The HTTP seam: GET, and a JSON POST for the services that need one (Notion search).
+/// The HTTP seam. `send` takes GET, POST, PUT or PATCH (anything else is refused by the real
+/// client); `get` and `post_json` are conveniences over it.
 pub trait Http {
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError>;
-    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError>;
+    fn send(&self, method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<Response, NetError>;
+    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError> {
+        self.send("GET", url, headers, None)
+    }
+    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError> {
+        self.send("POST", url, headers, Some(body))
+    }
 }
 
 /// What the island receives. `event` is set only when something actually changed: it drives

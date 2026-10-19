@@ -6,7 +6,8 @@
 //! that pill (main or declared) and saved its key: no declared pill, no request. The last update
 //! of each service is cached so the card opens with data. The island window only.
 use abito_island::bridge::{self, BridgeError};
-use abito_island::integrations::{self as integ, Command, Http, NetError, Response, Seen, Update};
+use abito_island::integrations::{self as integ, Command, Seen, Update};
+use abito_island::integrations_net::Net;
 use abito_island::secrets::Keychain;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -16,9 +17,6 @@ use tauri::{AppHandle, Emitter, Manager, Webview};
 
 use crate::AppState;
 
-const TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_BODY: usize = 1024 * 1024;
-
 fn cache() -> &'static Mutex<HashMap<&'static str, Update>> {
     static CACHE: OnceLock<Mutex<HashMap<&'static str, Update>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -27,64 +25,6 @@ fn cache() -> &'static Mutex<HashMap<&'static str, Update>> {
 fn seen() -> &'static Seen {
     static SEEN: OnceLock<Seen> = OnceLock::new();
     SEEN.get_or_init(Seen::default)
-}
-
-/// Real HTTP: https only (the loopback-http n8n is the one exception the poller itself
-/// validated), no redirects, 10 s, body capped at 1 MiB, no cookies. Linux only for now.
-struct Net;
-
-#[cfg(target_os = "linux")]
-impl Http for Net {
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError> {
-        send(url, headers, None)
-    }
-    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError> {
-        send(url, headers, Some(body))
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn send(url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<Response, NetError> {
-    {
-        use std::str::FromStr;
-        let client = reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("Abito/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|_| NetError("client".into()))?;
-        let mut request = match body {
-            Some(b) => client.post(url).body(b.to_string()),
-            None => client.get(url),
-        };
-        for (name, value) in headers {
-            let name = reqwest::header::HeaderName::from_str(name).map_err(|_| NetError("header".into()))?;
-            let value = reqwest::header::HeaderValue::from_str(value).map_err(|_| NetError("header".into()))?;
-            request = request.header(name, value);
-        }
-        tauri::async_runtime::block_on(async move {
-            let mut response = request.send().await.map_err(|_| NetError("request".into()))?;
-            let status = response.status().as_u16();
-            let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(|_| NetError("body".into()))? {
-                if body.len() + chunk.len() > MAX_BODY {
-                    return Err(NetError("too large".into()));
-                }
-                body.extend_from_slice(&chunk);
-            }
-            Ok(Response { status, body: String::from_utf8_lossy(&body).into_owned() })
-        })
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-impl Http for Net {
-    fn get(&self, _: &str, _: &[(&str, &str)]) -> Result<Response, NetError> {
-        Err(NetError("unsupported".into()))
-    }
-    fn post_json(&self, _: &str, _: &[(&str, &str)], _: &str) -> Result<Response, NetError> {
-        Err(NetError("unsupported".into()))
-    }
 }
 
 fn is_declared(app: &AppHandle, id: &str) -> bool {

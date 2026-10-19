@@ -25,11 +25,10 @@ impl Fake {
     fn urls(&self) -> Vec<String> { self.log.borrow().iter().map(|(u, _)| u.clone()).collect() }
 }
 impl Http for Fake {
-    fn post_json(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, NetError> {
-        self.bodies.borrow_mut().push(body.to_string());
-        self.get(url, headers)
-    }
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, NetError> {
+    fn send(&self, _method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<Response, NetError> {
+        if let Some(b) = body {
+            self.bodies.borrow_mut().push(b.to_string());
+        }
         self.log.borrow_mut().push((url.to_string(), headers.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()));
         self.routes.iter().find(|(p, _, _)| url.contains(p)).map(|(_, s, b)| Response { status: *s, body: b.clone() })
             .ok_or(NetError("offline".into()))
