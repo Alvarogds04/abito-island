@@ -183,6 +183,15 @@
   }
 
   const lerp = (a, b, t) => a + (b - a) * t;
+  // #493: a write only when the value changed. The viewBox is constant, and a frame that moves one of the island's edges does not
+  // touch the others; an unchanged attribute/style write still invalidates style and (for the SVG) its layout.
+  const written = new WeakMap();
+  const put = (el, key, value) => {
+    let m = written.get(el); if (!m) { m = new Map(); written.set(el, m); }
+    if (m.get(key) === value) return;
+    m.set(key, value);
+    if (key === 'viewBox') el.setAttribute(key, value); else el.style[key] = value;
+  };
 
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
@@ -195,29 +204,29 @@
     // the confirmed finished-notice lane (pane starts at x=108) uses the small R6 too, or the 128px blob covers the pane
     const ov = (noticeLane && noticeLane.view === 'notices') ? OVERVIEW_CARD : ovBase;
     const cs = lerp(COMPACT.clay, ov.clay, p);
-    island.style.width = w + 'px';
-    island.style.height = h + 'px';
-    island.style.borderRadius = `${rTop}px ${rTop}px ${rBottom}px ${rBottom}px`;
+    put(island, 'width', w + 'px');
+    put(island, 'height', h + 'px');
+    put(island, 'borderRadius', `${rTop}px ${rTop}px ${rBottom}px ${rBottom}px`);
     // Anchored to the docked edge: grows downward from the top, upward from
     // the bottom — matching the native grow anchoring done by Rust.
     if (edge === 'top') {
-      island.style.top = gap + 'px';
-      island.style.bottom = 'auto';
+      put(island, 'top', gap + 'px');
+      put(island, 'bottom', 'auto');
     } else {
-      island.style.bottom = gap + 'px';
-      island.style.top = 'auto';
+      put(island, 'bottom', gap + 'px');
+      put(island, 'top', 'auto');
     }
     // R6 is only scaled and positioned (never redrawn): centred in the
     // overview, small at the left of the header in the chat view.
     const csv = lerp(cs, CHAT.clay, q.x);
     const overviewTop = lerp(COMPACT.h / 2 - COMPACT.drop, ov.cy - cs * BLOB_DROP, p) - cs / 2;
     const z = 1; // tight framing in the dot, the overview AND the chat (the dot's character fills the disc, #302)
-    clayEl.setAttribute('viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
-    clayEl.style.width = csv + 'px';
-    clayEl.style.height = csv + 'px';
-    clayEl.style.left = lerp(lerp(COMPACT.clayX, ov.clayX, p), CHAT.clayLeft, q.x) + 'px'; // chat: the bot sits at the composer's left, inside the 640 island
+    put(clayEl, 'viewBox', BASE_VB.map((b, i) => +(b + (OVERVIEW_VB[i] - b) * z).toFixed(2)).join(' '));
+    put(clayEl, 'width', csv + 'px');
+    put(clayEl, 'height', csv + 'px');
+    put(clayEl, 'left', lerp(lerp(COMPACT.clayX, ov.clayX, p), CHAT.clayLeft, q.x) + 'px'); // chat: the bot sits at the composer's left, inside the 640 island
     // Coucou companion follows the live composer, not a demo success pose.
-    clayEl.style.top = lerp(overviewTop, CHAT.h - 76, q.x) + 'px';
+    put(clayEl, 'top', lerp(overviewTop, CHAT.h - 76, q.x) + 'px');
     // Coucou's badge sits on the character's top-left (core/layout.ts botPosition: centre - (20, 21)); 16px circle.
     const badge = $('clay-badge');
     if (badge) {
@@ -255,11 +264,9 @@
   function tick(now) {
     raf = 0;
     if (mode === 'spring') {
-      const dt = Math.min(1 / 30, last ? (now - last) / 1000 : 1 / 60);
+      const dt = last ? (now - last) / 1000 : 1 / 60; // #493: sub-stepped and capped at 50 ms inside springStep (Coucou's Spring)
       last = now;
-      const a = -2 * ZETA * W0 * v - W0 * W0 * (p - target);
-      v += a * dt;
-      p += v * dt;
+      ({ p, v } = O.springStep(p, v, target, dt, W0, ZETA));
       if (Math.abs(p - target) < 0.002 && Math.abs(v) < 0.03) {
         p = target; v = 0; mode = 'idle';
       }
@@ -269,11 +276,9 @@
       if (t >= 1) { p = target; mode = 'idle'; }
     }
     if (q.mode === 'spring') {
-      const dt = Math.min(1 / 30, q.last ? (now - q.last) / 1000 : 1 / 60);
+      const dt = q.last ? (now - q.last) / 1000 : 1 / 60;
       q.last = now;
-      const a = -2 * ZETA * W0 * q.v - W0 * W0 * (q.x - q.target);
-      q.v += a * dt;
-      q.x += q.v * dt;
+      ({ p: q.x, v: q.v } = O.springStep(q.x, q.v, q.target, dt, W0, ZETA));
       if (Math.abs(q.x - q.target) < 0.002 && Math.abs(q.v) < 0.03) {
         q.x = q.target; q.v = 0; q.mode = 'idle';
       }
