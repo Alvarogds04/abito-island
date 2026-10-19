@@ -33,6 +33,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "github-token",
     "stripe-api-key",
     "resend-api-key",
+    "resend-from",
     "notion-api-key",
     "calcom-api-key",
     "elevenlabs-api-key",

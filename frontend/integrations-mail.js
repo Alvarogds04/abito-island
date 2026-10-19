@@ -4,14 +4,10 @@
    pure view-model, textContent-only renderer, a FAKE provider, browser-only
    mount at the tail.
 
-   FAKE DATA ONLY: nothing here talks to a network, opens an account, holds a
-   token or touches a real service. Every rendered view carries the visible
-   «datos de ejemplo» marker while the frame is fake.
-
-   SENDING IS NOT WIRED: compose is a pure form model (bounded fields +
-   validation). `send` validates and then ALWAYS refuses with a closed
-   «no conectado» result — it never reports success, never stores the draft and
-   never leaves the page.
+   SEND IS LIVE (#490): `send` validates the draft and then calls the closed host verb
+   `mail_action {action:'send', to, subject, body, attachment?}` (src/mailcmd.rs, Resend with the
+   user's own key from the keychain). The page never sees a key. The READ-LIST below is still the
+   FAKE provider (visible «datos de ejemplo» marker) until the IMAP inbox slice replaces it.
 
    ---- MOUNT CONTRACT (index.html wiring — coordinator's approval needed) ----
    1. one container inside the Ajustes body:  <section id="integrations-mail" hidden></section>
@@ -36,7 +32,16 @@
   const MAX_TO = 254;
   const MAX_AGO = 60 * 24 * 365; // minutes
   const FAKE_BANNER = 'Datos de ejemplo — nada está conectado todavía.';
-  const NOT_CONNECTED = 'No conectado: el envío todavía no está disponible.';
+  const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+  const SENT = 'Mensaje enviado.';
+  const REFUSALS = Object.freeze({
+    not_configured: 'Falta configurar el envío: guardá tu clave de Resend y el remitente en Ajustes.',
+    no_sender: 'Falta el remitente: guardalo en Ajustes.',
+    keychain_unavailable: 'No se pudo leer el llavero del sistema.',
+    rejected: 'Resend rechazó el mensaje: revisá la clave y el remitente.',
+    network: 'No se pudo conectar con Resend.',
+    failed: 'No se pudo enviar el mensaje.',
+  });
   const ID_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;
   const FIELDS = Object.freeze(['to', 'subject', 'body']);
   const FIELD_MAX = Object.freeze({ to: MAX_TO, subject: MAX_SUBJECT, body: MAX_BODY });
@@ -134,23 +139,44 @@
     const errors = {};
     if (!isDraft(draft)) return Object.freeze({ ok: false, errors: Object.freeze({ to: 'El borrador no es válido.' }) });
     const to = draft.to.replace(/^ +| +$/g, ''); // only plain spaces are forgiven; a pasted line break is an error
+    // NotchBuddy only requires the recipient: an empty subject falls back to the file name, an empty body is sent as a space.
     if (!to.trim()) errors.to = 'Falta el destinatario.';
     else if (to.length > MAX_TO || CONTROL.test(to) || !ADDRESS_RE.test(to)) errors.to = 'El destinatario no es una dirección válida.';
-    if (!draft.subject.trim()) errors.subject = 'Falta el asunto.';
-    else if (CONTROL.test(draft.subject)) errors.subject = 'El asunto no admite saltos de línea ni caracteres de control.';
-    if (!draft.body.trim()) errors.body = 'Falta el mensaje.';
-    else if (BODY_CONTROL.test(draft.body)) errors.body = 'El mensaje contiene caracteres de control.';
+    if (CONTROL.test(draft.subject)) errors.subject = 'El asunto no admite saltos de línea ni caracteres de control.';
+    if (BODY_CONTROL.test(draft.body)) errors.body = 'El mensaje contiene caracteres de control.';
     return Object.freeze({ ok: Object.keys(errors).length === 0, errors: Object.freeze(errors) });
   }
 
+  /** A picked file to the closed `{name,data}` (base64 of the bytes); empty, oversized or unnamed → null. */
+  function attachmentFromBytes(name, bytes) {
+    if (!isStr(name) || !name.trim() || !bytes || !Number.isInteger(bytes.length) || bytes.length < 1 || bytes.length > MAX_ATTACHMENT_BYTES) return null;
+    const base = name.split(/[\\/]/).pop();
+    if (!base.trim() || typeof btoa !== 'function' && typeof Buffer === 'undefined') return null;
+    let data;
+    if (typeof Buffer !== 'undefined') data = Buffer.from(bytes).toString('base64');
+    else { let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); data = btoa(bin); }
+    return Object.freeze({ name: base, data });
+  }
+
+  const refusal = reason => Object.freeze({ ok: false, reason, message: REFUSALS[reason] });
+
   /**
-   * Sending is NOT wired. An invalid draft reports its validation errors; a valid
-   * one is refused «no conectado». Never ok, never stored, never sent.
+   * Validates, then asks the host to send. `invoke` is Tauri's; the answer is closed
+   * ({ok:true} or {ok:false, reason}); anything else, or a throw, is a plain «failed».
+   * An invalid draft never reaches the host.
    */
-  function send(draft) {
+  async function send(draft, attachment, invoke) {
     const v = validateDraft(draft);
     if (!v.ok) return Object.freeze({ ok: false, reason: 'invalid', errors: v.errors });
-    return Object.freeze({ ok: false, reason: 'not_connected', message: NOT_CONNECTED });
+    if (typeof invoke !== 'function') return refusal('failed');
+    const payload = { action: 'send', to: draft.to.replace(/^ +| +$/g, ''), subject: draft.subject, body: draft.body };
+    if (attachment) payload.attachment = { name: attachment.name, data: attachment.data };
+    let answer;
+    try { answer = await invoke('mail_action', { payload }); } catch (_) { return refusal('failed'); }
+    if (isObject(answer) && answer.ok === true && Object.keys(answer).length === 1) return Object.freeze({ ok: true, message: SENT });
+    if (isObject(answer) && answer.ok === false && Object.keys(answer).length === 2 && isStr(answer.reason) &&
+      Object.prototype.hasOwnProperty.call(REFUSALS, answer.reason) && answer.reason !== 'failed') return refusal(answer.reason);
+    return refusal('failed');
   }
 
   // ---- fake provider (LOUD, deterministic, no network) ------------------------
@@ -198,7 +224,7 @@
   };
 
   /** `result` is the last send() outcome (or null); the draft re-fills the form. */
-  function render(host, v, draft, result) {
+  function render(host, v, draft, result, attachment, sending) {
     if (!(host && typeof host.appendChild === 'function')) return;
     host.textContent = '';
     if (!v || !Array.isArray(v.rows)) { host.hidden = true; return; }
@@ -237,11 +263,17 @@
     const body = el('textarea'); body.value = d.body; body.maxLength = MAX_BODY; body.rows = 4;
     form.append(field('to', 'Para', to, errors.to), field('subject', 'Asunto', subject, errors.subject),
       field('body', 'Mensaje', body, errors.body));
-    const send = el('button', 'ml-send', 'Enviar');
+    const pick = el('input'); pick.type = 'file'; pick.dataset.field = 'attachment'; pick.id = 'ml-attachment';
+    const pickLabel = el('label', 'ml-label', 'Adjunto'); pickLabel.htmlFor = pick.id;
+    const pickWrap = el('div', 'ml-field'); pickWrap.append(pickLabel, pick);
+    if (attachment) pickWrap.append(el('p', 'ml-attached', attachment.name));
+    form.append(pickWrap);
+    const send = el('button', 'ml-send', sending ? 'Enviando…' : 'Enviar');
     send.type = 'submit';
+    send.disabled = !!sending;
     form.append(send);
-    if (result && result.reason === 'not_connected') {
-      const note = el('p', 'ml-refusal', result.message);
+    if (result && result.message) {
+      const note = el('p', result.ok ? 'ml-sent' : 'ml-refusal', result.message);
       note.setAttribute('role', 'status');
       form.append(note);
     }
@@ -249,7 +281,7 @@
   }
 
   return { SCHEMA, MAX_MESSAGES, MAX_FROM, MAX_SUBJECT, MAX_BODY, MAX_PREVIEW, MAX_TO,
-    storeFromFrame, openMessage, closeMessage, view, createDraft, setField, validateDraft, send, fakeFrame, render };
+    storeFromFrame, openMessage, closeMessage, view, createDraft, setField, validateDraft, send, attachmentFromBytes, MAX_ATTACHMENT_BYTES, fakeFrame, render };
 });
 
 // ---- browser-only wiring: self-mount into #integrations-mail, FAKE provider only ----
@@ -257,10 +289,14 @@ function mount(V) {
   if (typeof document === 'undefined') return;
   const host = document.getElementById('integrations-mail');
   if (!host) return; // inert until index.html carries the container (mount contract)
-  let store = V.storeFromFrame(V.fakeFrame());
+  let store = V.storeFromFrame(V.fakeFrame()); // inbox: still the FAKE provider until the IMAP slice
   let draft = V.createDraft();
   let result = null;
-  const paint = () => V.render(host, V.view(store), draft, result);
+  let attachment = null;
+  let sending = false;
+  const internals = typeof window !== 'undefined' ? window.__TAURI_INTERNALS__ : undefined;
+  const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) || (internals && internals.invoke);
+  const paint = () => V.render(host, V.view(store), draft, result, attachment, sending);
 
   host.addEventListener('click', e => {
     if (!e || e.isTrusted !== true) return; // only trusted gestures change anything
@@ -275,11 +311,27 @@ function mount(V) {
     const next = V.setField(draft, e.target.dataset.field, e.target.value);
     if (next) draft = next;
   });
+  host.addEventListener('change', e => {
+    if (!e || e.isTrusted !== true || !e.target || !e.target.dataset || e.target.dataset.field !== 'attachment') return;
+    const file = e.target.files && e.target.files[0];
+    if (!file) { attachment = null; paint(); return; }
+    if (file.size < 1 || file.size > V.MAX_ATTACHMENT_BYTES) { attachment = null; result = { ok: false, reason: 'failed', message: 'El adjunto está vacío o supera los 10 MB.' }; paint(); return; }
+    file.arrayBuffer().then(buf => {
+      attachment = V.attachmentFromBytes(file.name, new Uint8Array(buf));
+      result = attachment ? null : { ok: false, reason: 'failed', message: 'No se pudo leer el adjunto.' };
+      if (!draft.subject.trim() && attachment) draft = V.setField(draft, 'subject', attachment.name.slice(0, V.MAX_SUBJECT)) || draft;
+      paint();
+    }, () => { attachment = null; paint(); });
+  });
   host.addEventListener('submit', e => {
-    if (e) e.preventDefault(); // never a navigation, never a network request
-    if (!e || e.isTrusted !== true) return;
-    result = V.send(draft); // closed refusal: «no conectado»
-    paint();
+    if (e) e.preventDefault(); // never a navigation
+    if (!e || e.isTrusted !== true || sending) return;
+    sending = true; result = null; paint();
+    V.send(draft, attachment, invoke).then(r => {
+      sending = false; result = r;
+      if (r.ok) { draft = V.createDraft(); attachment = null; }
+      paint();
+    });
   });
   paint();
 }

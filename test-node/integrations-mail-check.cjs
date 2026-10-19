@@ -11,9 +11,8 @@ const frontend = path.join(__dirname, '..', 'frontend');
 const M = require(path.join(frontend, 'integrations-mail.js'));
 
 let passed = 0;
-const test = (name, fn) => {
-  try { fn(); passed += 1; } catch (e) { console.error(`FAIL: ${name}`); throw e; }
-};
+const queue = [];
+const test = (name, fn) => { queue.push([name, fn]); };
 const store0 = () => M.storeFromFrame(M.fakeFrame());
 const goodDraft = () => ({ to: 'ana@example.com', subject: 'Hola', body: 'Texto de ejemplo.' });
 
@@ -109,7 +108,7 @@ test('setField: closed fields, strings only, bounded; rejected input leaves the 
   assert.equal(M.setField({ to: 1 }, 'to', 'a'), null, 'not a draft');
 });
 
-test('validateDraft: a good draft passes; each rule reports its own Spanish error', () => {
+test('validateDraft: like NotchBuddy only the recipient is required; each rule reports its own Spanish error', () => {
   assert.deepEqual(M.validateDraft(goodDraft()), { ok: true, errors: {} });
   const e = (over) => M.validateDraft({ ...goodDraft(), ...over });
   assert.equal(e({ to: '' }).errors.to, 'Falta el destinatario.');
@@ -117,43 +116,74 @@ test('validateDraft: a good draft passes; each rule reports its own Spanish erro
     assert.equal(e({ to: bad }).errors.to, 'El destinatario no es una dirección válida.', JSON.stringify(bad));
   }
   assert.equal(e({ to: '  ana@example.com ' }).ok, true, 'surrounding spaces are forgiven');
-  assert.equal(e({ subject: '   ' }).errors.subject, 'Falta el asunto.');
+  assert.equal(e({ subject: '   ' }).ok, true, 'an empty subject falls back to the file name or «File» in Rust');
+  assert.equal(e({ body: '' }).ok, true, 'an empty body is sent as one space');
   assert.equal(e({ subject: 'a\nb' }).errors.subject, 'El asunto no admite saltos de línea ni caracteres de control.');
-  assert.equal(e({ body: '  ' }).errors.body, 'Falta el mensaje.');
   assert.equal(e({ body: 'ok\nlínea\ttab' }).ok, true, 'the body keeps newlines and tabs');
   assert.equal(e({ body: 'a\u0000b' }).errors.body, 'El mensaje contiene caracteres de control.');
   const all = M.validateDraft(M.createDraft());
   assert.equal(all.ok, false);
-  assert.deepEqual(Object.keys(all.errors).sort(), ['body', 'subject', 'to']);
+  assert.deepEqual(Object.keys(all.errors), ['to']);
   assert.equal(M.validateDraft(null).ok, false);
   assert.equal(M.validateDraft({ to: 1, subject: 2, body: 3 }).ok, false);
 });
 
-test('send is NOT wired: a valid draft is refused «no conectado», never a success, nothing changes', () => {
-  const d = Object.freeze(goodDraft());
-  const before = JSON.stringify(d);
-  const r = M.send(d);
-  assert.deepEqual(r, { ok: false, reason: 'not_connected', message: 'No conectado: el envío todavía no está disponible.' });
-  assert.match(r.message, /no conectado/i);
-  assert.equal(JSON.stringify(d), before);
+const answers = (a) => { const calls = []; return { calls, invoke: (cmd, args) => { calls.push([cmd, args]); return a instanceof Error ? Promise.reject(a) : Promise.resolve(a); } }; };
+
+test('send: a valid draft goes through mail_action with the closed payload and reports success', async () => {
+  const f = answers({ ok: true });
+  const r = await M.send(Object.freeze(goodDraft()), null, f.invoke);
+  assert.deepEqual(r, { ok: true, message: 'Mensaje enviado.' });
+  assert.deepEqual(f.calls, [['mail_action', { payload: { action: 'send', to: 'ana@example.com', subject: 'Hola', body: 'Texto de ejemplo.' } }]]);
   assert.ok(Object.isFrozen(r));
 });
 
-test('send: an invalid draft reports validation first, still never ok', () => {
-  const r = M.send(M.createDraft());
+test('send: the attachment rides as {name,data} and the recipient is trimmed', async () => {
+  const f = answers({ ok: true });
+  await M.send({ ...goodDraft(), to: ' ana@example.com ' }, { name: 'r.txt', data: 'QQ==' }, f.invoke);
+  assert.deepEqual(f.calls[0][1].payload.attachment, { name: 'r.txt', data: 'QQ==' });
+  assert.equal(f.calls[0][1].payload.to, 'ana@example.com');
+});
+
+test('send: an invalid draft reports validation and never calls the host', async () => {
+  const f = answers({ ok: true });
+  const r = await M.send(M.createDraft(), null, f.invoke);
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'invalid');
-  assert.ok(r.errors.to && r.errors.subject && r.errors.body);
-  assert.equal(M.send(null).ok, false);
-  assert.equal(M.send(undefined).reason, 'invalid');
+  assert.ok(r.errors.to);
+  assert.equal((await M.send(null, null, f.invoke)).reason, 'invalid');
+  assert.equal(f.calls.length, 0);
+});
+
+test('send: every refusal has its own Spanish message; a thrown or off-shape answer is a plain failure', async () => {
+  const msg = async (a) => (await M.send(goodDraft(), null, answers(a).invoke));
+  for (const reason of ['not_configured', 'no_sender', 'keychain_unavailable', 'rejected', 'network']) {
+    const r = await msg({ ok: false, reason });
+    assert.equal(r.ok, false); assert.equal(r.reason, reason); assert.ok(r.message.length > 10, reason);
+  }
+  assert.match((await msg({ ok: false, reason: 'no_sender' })).message, /remitente/i);
+  assert.equal((await msg(new Error('x'))).reason, 'failed');
+  assert.equal((await msg({ ok: true, extra: 1 })).reason, 'failed');
+  assert.equal((await msg({ ok: false, reason: 'weird' })).reason, 'failed');
+  assert.equal((await msg(null)).reason, 'failed');
+  assert.equal((await M.send(goodDraft(), null, undefined)).reason, 'failed');
+});
+
+test('attachmentFromFile: bounded by size, name and base64 of the bytes', () => {
+  const ok = M.attachmentFromBytes('../r.txt', new Uint8Array([65]));
+  assert.deepEqual(ok, { name: 'r.txt', data: 'QQ==' });
+  assert.equal(M.attachmentFromBytes('a', new Uint8Array(0)), null);
+  assert.equal(M.attachmentFromBytes('a', { length: M.MAX_ATTACHMENT_BYTES + 1 }), null);
+  assert.equal(M.attachmentFromBytes('', new Uint8Array([1])), null);
 });
 
 // ---- source hygiene ---------------------------------------------------------------
-test('source: textContent only, no network, no window.open, no raw colours, mount inert', () => {
+test('source: textContent only, only the closed mail_action, no window.open, no raw colours, mount inert', () => {
   const src = fs.readFileSync(path.join(frontend, 'integrations-mail.js'), 'utf8');
   assert.doesNotMatch(src, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/);
   assert.doesNotMatch(src, /window\.open|fetch\(|XMLHttpRequest|WebSocket|localStorage|open_chat_url/);
-  assert.match(src, /Datos de ejemplo/);
+  assert.match(src, /mail_action/);
+  assert.doesNotMatch(src, /NOT WIRED|no conectado/i);
   assert.match(src, /getElementById\('integrations-mail'\)/);
   assert.match(src, /if \(!host\) return/);
   assert.match(src, /isTrusted !== true/, 'synthetic events never act');
@@ -175,4 +205,9 @@ test('render (DOM-guarded): list, open message and compose form; invalid view hi
   assert.equal(host.hidden, true);
 });
 
-console.log(`integrations-mail-check: ${passed} checks ok`);
+(async () => {
+  for (const [name, fn] of queue) {
+    try { await fn(); passed += 1; } catch (e) { console.error(`FAIL: ${name}`); throw e; }
+  }
+  console.log(`integrations-mail-check: ${passed} checks ok`);
+})();

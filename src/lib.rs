@@ -48,6 +48,7 @@ pub mod hotkey;
 pub mod http;
 pub mod identity;
 pub mod localmodel;
+pub mod mailcmd;
 pub mod models;
 pub mod monitors;
 pub mod nativedialog;

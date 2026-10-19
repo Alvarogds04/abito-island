@@ -470,7 +470,7 @@
   const KEY_LABELS = Object.freeze({
     'anthropic-api-key': 'Anthropic', 'openai-api-key': 'OpenAI', 'google-api-key': 'Google', 'openrouter-api-key': 'OpenRouter',
     'openai-compatible-key': 'Compatible con OpenAI', 'n8n-url': 'n8n (dirección)', 'n8n-api-key': 'n8n (clave)',
-    'vercel-token': 'Vercel', 'github-token': 'GitHub', 'stripe-api-key': 'Stripe', 'resend-api-key': 'Resend',
+    'vercel-token': 'Vercel', 'github-token': 'GitHub', 'stripe-api-key': 'Stripe', 'resend-api-key': 'Resend', 'resend-from': 'Resend (remitente)',
     'notion-api-key': 'Notion', 'calcom-api-key': 'Cal.com', 'elevenlabs-api-key': 'ElevenLabs',
   });
   const KEY_IDS = Object.freeze(Object.keys(KEY_LABELS));
