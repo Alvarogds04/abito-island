@@ -25,9 +25,9 @@ mod tests;
 pub const FOLDER: &str = "sounds";
 
 /// The cues that can be replaced: `frontend/sound-engine.js` ids minus `snd.`.
-pub const STEMS: [&str; 10] = [
+pub const STEMS: [&str; 17] = [
     "notice", "attention", "confirm", "reject", "error", "sent", "think", "reply", "listen",
-    "expired",
+    "expired", "open", "close", "peek", "hover", "pop", "tick", "love",
 ];
 
 /// Formats a webview can usually decode, as (extension, MIME), looked for in this order.

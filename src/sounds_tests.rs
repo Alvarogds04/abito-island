@@ -93,5 +93,8 @@ fn every_cue_of_the_sound_engine_has_a_stem() {
     for stem in STEMS {
         assert!(js.contains(&format!("'snd.{stem}'")), "{stem} is not a cue");
     }
-    assert_eq!(STEMS.len(), 10);
+    assert_eq!(STEMS.len(), 17);
+    for new in ["open", "close", "peek", "hover", "pop", "tick", "love"] {
+        assert!(STEMS.contains(&new), "{new} is an overridable cue (L42)");
+    }
 }

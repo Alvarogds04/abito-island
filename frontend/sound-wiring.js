@@ -11,6 +11,11 @@
      ready(). If a cue is dropped for one of those two reasons the page logs engine.state() ONCE, so a forgotten
      condition is visible instead of silently muting everything.
    - It never listens to the character's pose and never to «Enviada»/«Sin confirmar»: those do not sound.
+   Page cue contract (no bubbling required):
+   document.dispatchEvent(new CustomEvent('abito:cue', { detail: 'snd.pop' }));
+   detail is the exact cue-id string, not an object. Use snd.pop after picking an option,
+   snd.tick on attachment progress / shortcut toggle-on. Producers are not installed here.
+   All cues pass through engine preference, gain, quiet, priority and rate gates.
    Loaded as a classic script (window.AbitoSoundWiring) and by test-node/sound-wiring-check.cjs. */
 (function (root, factory) {
   const api = factory();
@@ -24,12 +29,31 @@
     const o = options || {};
     const engine = o.engine;
     const doc = o.document;
-    const listen = typeof o.listen === 'function' ? o.listen : null;
+    let disposed = false;
+    const cleanups = [];
+    const listen = typeof o.listen === 'function' ? (name, fn) => {
+      const subscription = o.listen(name, e => { if (!disposed) fn(e); });
+      Promise.resolve(subscription).then(off => {
+        if (typeof off !== 'function') return;
+        if (disposed) off(); else cleanups.push(off);
+      }).catch(() => {});
+      return subscription;
+    } : null;
+    const now = typeof o.now === 'function' ? o.now : Date.now;
+    const setTimer = typeof o.setTimer === 'function' ? o.setTimer : (fn, ms) => setTimeout(fn, ms);
+    const clearTimer = typeof o.clearTimer === 'function' ? o.clearTimer : h => clearTimeout(h);
+    function onDocument(name, fn) {
+      if (!doc || typeof doc.addEventListener !== 'function') return;
+      const handler = e => { if (!disposed) fn(e); };
+      doc.addEventListener(name, handler);
+      cleanups.push(() => { if (typeof doc.removeEventListener === 'function') doc.removeEventListener(name, handler); });
+    }
     const log = typeof o.log === 'function' ? o.log : () => {};
     let warned = false;
 
     // ---- the engine never rejects, but a dropped cue for a WIRING reason is worth ONE line --------------------
     function request(id) {
+      if (disposed) return undefined;
       let result;
       try { result = engine.play(id); } catch { return undefined; }
       if (result && typeof result.then === 'function') {
@@ -44,9 +68,7 @@
     }
 
     // ---- 1) the page's own events become `engine.play` ------------------------------------------------------------
-    if (doc && typeof doc.addEventListener === 'function') {
-      doc.addEventListener('abito:cue', e => { request(e && e.detail); });
-    }
+    onDocument('abito:cue', e => { request(e && e.detail); });
 
     // The host DTO is deliberately unversioned; adapt only this seam, not other consumers.
     // Explicit versions still fail closed unless v1. Gain uses the engine's separate API.
@@ -65,18 +87,21 @@
     }
 
     // Optional custom files: closed stems, <=2 MiB (the host's MAX_BYTES), no paths or MIME trust.
-    const stems = ['notice', 'attention', 'confirm', 'reject', 'error', 'sent', 'think', 'reply', 'listen', 'expired'];
+    const stems = ['notice', 'attention', 'confirm', 'reject', 'error', 'sent', 'think', 'reply', 'listen', 'expired',
+      'open', 'close', 'peek', 'hover', 'pop', 'tick', 'love'];
     const invoke = typeof o.invoke === 'function' ? o.invoke : null;
     let sampleLoad = Promise.resolve();
     async function reloadSamples() {
+      if (disposed) return;
       try {
         engine.clearSamples(); // removal, read/decode/list failure all restore built-ins
         const c = o.getAudioContext();
         if (!c || typeof c.decodeAudioData !== 'function') return;
         const listed = await invoke('sound_action', { payload: { action: 'list' } });
         const names = listed && Array.isArray(listed.names) ? listed.names : [];
-        // Iterate our list, not host input: bounded to ten unique reads.
+        // Iterate our list, not host input: bounded to seventeen unique reads.
         for (const name of stems) {
+          if (disposed) return;
           if (!names.includes(name)) continue;
           try {
             const file = await invoke('sound_action', { payload: { action: 'read', name } });
@@ -88,7 +113,7 @@
             const bytes = new Uint8Array(raw.length);
             for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
             const buffer = await c.decodeAudioData(bytes.buffer);
-            engine.setSample('snd.' + name, buffer);
+            if (!disposed) engine.setSample('snd.' + name, buffer);
           } catch { /* a missing or undecodable file leaves the synthesized cue */ }
         }
       } catch { /* host/audio unavailable: never break the island */ }
@@ -109,6 +134,8 @@
     let chatSeen = null;   // turn_id -> last state we saw; null = no baseline yet
     let noticeTop;         // undefined = no baseline yet
     let cardSeen;          // undefined = no baseline yet
+    let desktopSeen;
+    let cancelHover = () => {};
     let started = false;
     function firstSnapshotRendered() {
       if (started) return;
@@ -117,7 +144,53 @@
     }
     function reconnected() {
       try { engine.quiet(RECONNECT_QUIET_MS); engine.resetTransitions(); } catch { /* silence */ }
-      chatSeen = null; noticeTop = undefined; cardSeen = undefined;
+      chatSeen = null; noticeTop = undefined; cardSeen = undefined; desktopSeen = undefined;
+      cancelHover();
+    }
+
+    // Host Snapshot.state, not animated data-phase or Snapshot.view.
+    function observeDesktop(payload) {
+      if (disposed || !payload || typeof payload !== 'object' || Array.isArray(payload)
+          || !['compact', 'expanded', 'hidden'].includes(payload.state)) return;
+      const next = payload.state, before = desktopSeen;
+      desktopSeen = next;
+      if (before === undefined || before === next) return;
+      if (before === 'hidden') request('snd.peek'); // reveal wins over open; one cue only
+      else if (before === 'expanded') request('snd.close');
+      else if (next === 'expanded') request('snd.open');
+    }
+    if (listen) { try { listen('desktop:state', e => observeDesktop(e && e.payload)); } catch { /* optional */ } }
+
+    // Character hover is an edge of --hover, never the character's pose.
+    const clay = doc && typeof doc.getElementById === 'function' ? doc.getElementById('clay') : null;
+    const Observer = o.MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
+    if (clay && typeof Observer === 'function') {
+      const isHovered = () => Number(clay.style.getPropertyValue('--hover')) > 1;
+      let hovered = isHovered(), timer = null, lastLove = -Infinity;
+      const cancel = () => { if (timer !== null) clearTimer(timer); timer = null; };
+      cancelHover = () => { cancel(); hovered = isHovered(); };
+      const observer = new Observer(() => {
+        if (disposed) return;
+        const next = isHovered();
+        if (next === hovered) return;
+        hovered = next;
+        cancel();
+        if (!next) return;
+        request('snd.hover'); // the engine's same-id gate bounds quick reentries
+        timer = setTimer(() => {
+          timer = null;
+          if (disposed || !hovered || !isHovered() || now() - lastLove < 6000) return;
+          lastLove = now(); // one attempt per entry, no delayed replay after quiet/off
+          request('snd.love');
+        }, 1900);
+      });
+      observer.observe(clay, { attributes: true, attributeFilter: ['style'] });
+      cleanups.push(() => { cancel(); observer.disconnect(); });
+    }
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const off of cleanups.splice(0)) { try { off(); } catch { /* best effort */ } }
     }
 
     // ---- 4) chat: the model going down, and the turns ------------------------------------------------------------
@@ -175,12 +248,10 @@
         });
       } catch { /* optional */ }
     }
-    if (doc && typeof doc.addEventListener === 'function') {
-      // the island coming back from hidden is a resume: no sound for what piled up meanwhile
-      doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') reconnected(); });
-    }
+    // The page resuming re-baselines without replaying accumulated events.
+    onDocument('visibilitychange', () => { if (doc.visibilityState === 'visible') reconnected(); });
 
-    return { firstSnapshotRendered, reconnected, observeChat, observeNotices, observeCard, applyPrefs,
+    return { firstSnapshotRendered, reconnected, observeChat, observeNotices, observeCard, applyPrefs, observeDesktop, dispose,
       samplesLoaded: () => sampleLoad };
   }
 
