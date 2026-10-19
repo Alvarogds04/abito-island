@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { classify, extraScenes, hubPages } = require('../packaging/validate/scenes.cjs');
-const expected = ['chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta'];
+const expected = ['integracion-github', 'correo-keyring', 'spotify-reproductor', 'sonidos-controles', 'sonidos-audible', 'dictado-sin-modelo', 'voz-sin-modelo', 'voz-reconocimiento', 'bandeja-menu', 'autoinicio', 'personaje-escritorio', 'chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta'];
 for (const name of expected) assert(extraScenes.includes(name), `missing ${name}`);
 for (const page of ['general','agents','pills','chat','integrations','shortcuts','voice','dictation','flowsettings','dictionary','snippets','styles','insights','notes','phone']) assert(hubPages.includes(page), `missing hub page ${page}`);
 assert.equal(classify({ok:true}).verdict, 'pass');
@@ -19,4 +19,4 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../frontend/vendor/coucou/hub/shell.js'), 'utf8');
 const ids = [...source.matchAll(/\{ id: "([a-z]+)", icon:/g)].map(m => m[1]);
 assert.deepEqual([...hubPages].sort(), ids.sort());
-console.log('validate-scenes: 33 behavior/catalog checks passed');
+console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.length + 6} scenes)`);

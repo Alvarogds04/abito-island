@@ -2786,6 +2786,53 @@ fn feature_validation(app: &AppHandle) {
     if let Err(error)=producer {
         emit(&json!({"step":"validation_producer_error","reason":error}));
     }
+    // T5 uses the production IPC and real exported tray menu, never private handlers.
+    record("integracion-github",run(&win,"AbitoValidate.github()"));
+    record("correo-keyring",run(&win,"AbitoValidate.mail()"));
+    record("sonidos-controles",run(&win,"AbitoValidate.sounds()"));
+    record("sonidos-audible",json!({"ok":true,"unverifiable":"sin salida de audio privada: no se puede afirmar que se oye"}));
+    #[cfg(target_os="linux")]
+    {
+        let calls=Arc::new(Mutex::new(Vec::new()));
+        let fake=validator_spotify::fake(calls.clone());
+        let mut observation=run(&win,"AbitoValidate.spotify()");
+        let received=calls.lock().expect("fake calls").clone();
+        observation["ok"]=json!(observation["ok"]==true && received.iter().filter(|s|s.as_str()=="PlayPause").count()==2);
+        observation["fake_received"]=json!(received);
+        record("spotify-reproductor",observation);
+        drop(fake);
+    }
+    let tray=|action:&str| -> serde_json::Value {
+        let output=std::process::Command::new("timeout").args(["12s","/usr/bin/python3"])
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"),"/packaging/validate/tray.py")).arg(action).output();
+        match output { Ok(out) => serde_json::from_slice(&out.stdout).unwrap_or_else(|_|json!({"ok":false,"reason":String::from_utf8_lossy(&out.stderr)})), Err(e)=>json!({"ok":false,"reason":e.to_string()}) }
+    };
+    let mut menu=tray("hide");
+    sleep(Duration::from_millis(350));
+    let hidden=!win.is_visible().unwrap_or(true);
+    let shown=tray("show");
+    sleep(Duration::from_millis(350));
+    menu["ok"]=json!(menu["ok"]==true && shown["ok"]==true && hidden && win.is_visible().unwrap_or(false));
+    menu["hidden_after_hide"]=json!(hidden);
+    menu["shown_after_show"]=json!(win.is_visible().unwrap_or(false));
+    record("bandeja-menu",menu);
+    let entry=std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").expect("private config")).join("autostart/abito-island.desktop");
+    let on=tray("autostart");
+    sleep(Duration::from_millis(350));
+    let text=std::fs::read_to_string(&entry).unwrap_or_default();
+    let off=tray("autostart");
+    sleep(Duration::from_millis(350));
+    record("autoinicio",json!({"ok":on["ok"]==true && off["ok"]==true && text.lines().any(|s|s=="Name=Abito") && !entry.exists(),"written":text,"removed":!entry.exists(),"on":on,"off":off}));
+    let mut character=run(&win,"AbitoValidate.character(true)");
+    sleep(Duration::from_millis(250));
+    let mapped=app.get_webview_window("character").map(|w|w.is_visible().unwrap_or(false) && w.is_always_on_top().unwrap_or(false)).unwrap_or(false);
+    let off=run(&win,"AbitoValidate.character(false)");
+    let unmapped=app.get_webview_window("character").is_none_or(|w|!w.is_visible().unwrap_or(true));
+    character["ok"]=json!(character["ok"]==true && off["ok"]==true && mapped && unmapped);
+    character["mapped_and_above"]=json!(mapped);character["unmapped_after_off"]=json!(unmapped);
+    record("personaje-escritorio",character);
+    let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
+    sleep(Duration::from_millis(500));
     let gear=run(&win,"AbitoValidate.gear()");
     let end=Instant::now()+Duration::from_secs(10);
     let settings=loop {
@@ -2799,12 +2846,90 @@ fn feature_validation(app: &AppHandle) {
     if let Some(page)=settings {
         sleep(Duration::from_millis(1000));
         install(&page);
+        let _ = page.eval(concat!("window.__validatePages=",include_str!("../packaging/validate/pages.json"),";"));
         let catalog:serde_json::Value=serde_json::from_str(include_str!("../packaging/validate/pages.json")).expect("page catalog");
         for (index,id) in catalog.as_array().expect("pages").iter().enumerate() {
             let id=id.as_str().expect("page id");
             record(&format!("ajustes-{id}"),run(&page,&format!("AbitoValidate.hub({index},{id:?})")));
         }
+        record("dictado-sin-modelo",run(&page,"AbitoValidate.noModel('dictation')"));
+        record("voz-sin-modelo",run(&page,"AbitoValidate.noModel('voice')"));
+        record("voz-reconocimiento",json!({"ok":true,"unverifiable":"sin micrófono ni modelos: dictado real, wake word y reconocimiento no comprobables"}));
         record("ajustes-cuentas-keyring",json!({"ok":true,"unverifiable":"sin servicio de secretos privado; no se leen claves del usuario"}));
     }
     app.unlisten(result_listener); app.unlisten(input_listener);
+}
+
+// Fake adapted from tests/spotify_mpris.rs and Coucou src-tauri/src/spotify.rs
+// @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT. Private validator bus only.
+#[cfg(target_os = "linux")]
+mod validator_spotify {
+use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc,Mutex};
+use zbus::blocking::{connection, Connection};
+use zbus::zvariant::{ObjectPath,OwnedValue,Value};
+/// What the fake Spotify remembers and was asked.
+struct Fake { calls: Arc<Mutex<Vec<String>>>, playing: bool, position: i64, shuffle: bool, volume: f64, conn: std::sync::OnceLock<Connection> }
+
+#[zbus::interface(name = "org.mpris.MediaPlayer2.Player")]
+impl Fake {
+    fn play_pause(&mut self) {
+        self.calls.lock().unwrap().push("PlayPause".into());
+        self.playing = !self.playing;
+        self.position += 1_000_000;
+        let conn = self.conn.get().unwrap().clone();
+        let status = if self.playing { "Playing" } else { "Paused" };
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            let mut changed: HashMap<&str, Value<'_>> = HashMap::new();
+            changed.insert("PlaybackStatus", Value::from(status));
+            let _ = conn.emit_signal(None::<&str>, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "PropertiesChanged",
+                &("org.mpris.MediaPlayer2.Player", changed, Vec::<String>::new()));
+        });
+    }
+    fn next(&self) { self.calls.lock().unwrap().push("Next".into()); }
+    fn previous(&self) { self.calls.lock().unwrap().push("Previous".into()); }
+    fn set_position(&mut self, track: ObjectPath<'_>, us: i64) {
+        self.calls.lock().unwrap().push(format!("SetPosition {track} {us}"));
+        self.position = us;
+    }
+    #[zbus(property)]
+    fn shuffle(&self) -> bool { self.shuffle }
+    #[zbus(property)]
+    fn set_shuffle(&mut self, on: bool) { self.calls.lock().unwrap().push(format!("Shuffle {on}")); self.shuffle = on; }
+    #[zbus(property)]
+    fn volume(&self) -> f64 { self.volume }
+    #[zbus(property)]
+    fn set_volume(&mut self, v: f64) { self.calls.lock().unwrap().push(format!("Volume {v}")); self.volume = v; }
+    #[zbus(property)]
+    fn loop_status(&self) -> String { "None".into() }
+    #[zbus(property)]
+    fn set_loop_status(&mut self, v: String) { self.calls.lock().unwrap().push(format!("Loop {v}")); }
+    #[zbus(property)]
+    fn playback_status(&self) -> String { if self.playing { "Playing" } else { "Paused" }.into() }
+    #[zbus(property)]
+    fn position(&self) -> i64 { self.position }
+    #[zbus(property)]
+    fn metadata(&self) -> HashMap<String, OwnedValue> {
+        let mut m: HashMap<String, OwnedValue> = HashMap::new();
+        m.insert("mpris:trackid".into(), Value::from(ObjectPath::try_from("/com/spotify/track/fake1").unwrap()).try_into().unwrap());
+        m.insert("mpris:length".into(), Value::from(180_000_000u64).try_into().unwrap());
+        m.insert("xesam:title".into(), Value::from("Fake Song (Live)").try_into().unwrap());
+        m.insert("xesam:artist".into(), Value::from(vec!["Fake Artist".to_string(), "Guest".to_string()]).try_into().unwrap());
+        m.insert("xesam:album".into(), Value::from("Fake Album").try_into().unwrap());
+        m
+    }
+}
+
+pub fn fake(calls: Arc<Mutex<Vec<String>>>) -> Connection {
+    let conn = connection::Builder::session().unwrap()
+        .serve_at("/org/mpris/MediaPlayer2", Fake { calls, playing: true, position: 30_000_000, shuffle: false, volume: 0.8, conn: Default::default() })
+        .unwrap().name("org.mpris.MediaPlayer2.spotify").unwrap().build().unwrap();
+    let iface = conn.object_server().interface::<_, Fake>("/org/mpris/MediaPlayer2").unwrap();
+    iface.get().conn.set(conn.clone()).ok();
+    conn
+}
+
+
 }

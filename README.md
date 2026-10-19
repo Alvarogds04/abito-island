@@ -143,6 +143,83 @@ main blob: it can never be created or deleted.
   `cargo test --lib prefs::` + `settingshost::settings_view_tests::f415_` pin
   round trips, byte preservation, hostile drops and the projection.
 
+## Validador de pantalla y puerta de preview (#502)
+
+**Antes de entregar una preview, usar esta puerta** desde `apps/desktop-tauri`:
+
+```sh
+node packaging/preview.cjs --out /tmp/abito-preview-nueva
+# Repetir sin recompilar la variante de validación, sólo si sus fuentes no cambiaron:
+node packaging/preview.cjs --skip-build --out /tmp/abito-preview-otra
+```
+
+El destino debe ser nuevo y estar bajo `/tmp`; nunca se sobrescribe una preview.
+Primero se ejecuta el validador. Si alguna escena falla, imprime el informe español,
+sale con código distinto de cero y **no crea el destino ni ofrece un comando de
+lanzamiento**. Si no hay fallos, Cargo reutiliza la compilación offline de producción
+(sin `probe`), se rechazan marcadores de validación en el binario, se prepara una
+preview con sus helpers y se imprime su comando. No la inicia ni instala nada.
+Esto es una preview de candidato con procedencia y huella en `preview.json`, **no un
+paquete de distribución**: las puertas de árbol limpio y receipt de
+`packaging/build.cjs` siguen intactas. Los scripts antiguos de desarrollo no son
+esta puerta y no deben usarse para entregar una preview validada.
+
+Para obtener sólo el informe y las capturas:
+
+```sh
+node packaging/validate.cjs
+node packaging/validate.cjs --skip-build
+node test-node/validate-gate-check.cjs
+```
+
+Requisitos locales: toolchain Cargo y dependencias ya disponibles offline, Node,
+Xvfb, openbox, dbus-daemon, xprop, ffmpeg, Python 3 con Xlib y `/usr/bin/python3`
+con PyGObject/Gio. Usar la configuración `SHERPA_ONNX_LIB_DIR` de la compilación
+local. `--skip-build` rechaza binarios obsoletos por HEAD, huella de fuentes y hash.
+
+### Qué demuestra
+
+41 escenas con un PNG por escena e informe `report.json` y `probe.jsonl` en
+`/tmp/abito-validate-*`. Cada línea dice **anda**, **falla (motivo)** o
+**no verificable aquí (motivo)**. La última categoría no se cuenta como éxito ni
+bloquea por sí sola la puerta; una escena ausente, un error de consola o una captura
+ausente sí la bloquean.
+
+| Área | Evidencia |
+| --- | --- |
+| Isla | Compactar, expandir, minimizar por clic y ocultar/mostrar sobre una ventana rival; siempre encima. |
+| Chat y Pi | Dos turnos con modelo HTTP falso; snapshot tardío; sesiones, etiqueta de conexión, aviso y respuesta a pregunta por el socket real. |
+| Ajustes | Engranaje público y las 15 páginas; controles reales y efectos observados. |
+| GitHub | `gh` privado en PATH llama a un HTTP falso loopback; dato recibido y pill visible exigidos, nunca una cuenta real. |
+| Spotify | MPRIS falso en el bus privado; título y estado en pantalla, dos clics play/pausa que llegan al falso. |
+| Sonidos | `sound_action` list/reload y recepción de `sounds:changed`, sin errores de consola. |
+| Dictado y voz | Estado de modelos ausentes y botón Descargar en sus páginas de Ajustes; no se descargan modelos. |
+| Bandeja y autoinicio | Menú D-Bus real: Mostrar/Ocultar, cuatro opciones; toggle escribe y retira `.desktop` privado con `Name=Abito`. No pulsa Salir. |
+| Personaje | Salida/regreso por los comandos compartidos con el toggle; ventana visible encima y luego oculta. |
+
+El validador usa **otra pantalla Xvfb, nunca `DISPLAY=:0`**, con WM, bus D-Bus,
+HOME y XDG privados. Los sockets Pi viven sólo en
+`/run/user/1000/abito-validator-pi/<aleatorio>` (0700, retirado al terminar);
+no toca `/run/user/1000/abito-island`. Los clics XTest pertenecen al proceso de
+validación, nunca al binario entregado. El atajo comprueba el callback compartido,
+no la entrega física de teclas por GNOME; el menú se activa por su exportación
+D-Bus, no por un panel GNOME.
+
+### Qué significa «no verificable aquí»
+
+- **Correo y cuentas:** no hay keyring privado. Se exige la respuesta honesta
+  `keychain_unavailable`; no se leen claves reales ni se afirma que IMAP/SMTP funcionen.
+- **Audio audible:** list/reload no demuestra que una persona oye el sonido.
+- **Reconocimiento y micrófono:** sin modelos ni micrófono privado no se demuestra
+  transcripción, wake word ni voz hablada. El portal de GNOME y la integración
+  con su panel requieren una sesión de escritorio real.
+- **Notas y teléfono:** la página se comprueba, pero sus controles están deshabilitados
+  por el producto y no se atribuye funcionamiento a esas capacidades.
+
+Un fallo real del producto permanece rojo con PNG y motivo; no se rebaja a
+«no verificable» para entregar la preview. Por ejemplo, una pill declarada que no
+aparece pese a recibir datos del servicio falso bloquea la puerta.
+
 ## Run
 
 ```sh

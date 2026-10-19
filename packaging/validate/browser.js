@@ -132,6 +132,8 @@
     return {ok:true,text,input:'XTest sobre opción real de la isla'};
   }
   async function gear() {
+    await invoke('desktop_action',{action:'expand'});
+    await new Promise(resolve=>setTimeout(resolve,500));
     await click(visible(byId('open-settings')) ? byId('open-settings') : byId('open-screen-settings'));
     return {ok:true,input:'XTest sobre engranaje público'};
   }
@@ -191,6 +193,64 @@
     }
     return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
   }
+  async function github() {
+    await invoke('desktop_action',{action:'expand'});
+    const prefs=await invoke('prefs_action',{action:'view'});
+    if(!prefs.declaredPills.includes('integration_github')) await invoke('prefs_action',{action:'toggle_declared_pill',id:'integration_github'});
+    const data=await invoke('github_action',{action:'refresh',section:'activity'});
+    let pill;
+    try {pill=await wait(()=>{const p=byId('pill-choice-integration_github');return visible(p) && p;},'pill GitHub declarada con gh falso');}
+    catch {return {ok:false,reason:'GitHub devuelve datos del gh falso pero la pill declarada no aparece en la isla',data,prefs:await invoke('prefs_action',{action:'view'})};}
+    await click(pill);
+    const card=await wait(()=>{const c=document.querySelector('.gh-card');return visible(c) && c.textContent.includes('GitHub') && !c.textContent.includes('Cargando') && c;},'tarjeta GitHub desde gh falso');
+    return {ok:data.available===true && data.activity.total===17,text:card.textContent,data};
+  }
+  async function mail() {
+    const answer=await invoke('mail_action',{action:'inbox'});
+    return {ok:answer.ok===false && answer.reason==='keychain_unavailable',reason:'correo no explicó la falta de keyring privado',answer,unverifiable:'IMAP/SMTP requieren claves en keyring; sin servicio de secretos privado ni credenciales del usuario'};
+  }
+  async function sounds() {
+    const before=await invoke('sound_action',{action:'list'});
+    let changed=false;
+    const off=await window.__TAURI__.event.listen('sounds:changed',()=>{changed=true;});
+    try {
+      const reload=await invoke('sound_action',{action:'reload'});
+      await wait(()=>changed,'sounds:changed tras reload');
+      const after=await invoke('sound_action',{action:'list'});
+      return {ok:Array.isArray(before.names) && Array.isArray(after.names) && reload.ok===true,before,after,changed};
+    } finally {off();}
+  }
+  async function spotify() {
+    const prefs=await invoke('prefs_action',{action:'view'});
+    if(!prefs.declaredPills.includes('integration_spotify')) {
+      if(prefs.declaredPills.length>=4) await invoke('prefs_action',{action:'toggle_declared_pill',id:prefs.declaredPills[0]});
+      await invoke('prefs_action',{action:'toggle_declared_pill',id:'integration_spotify'});
+    }
+    const card=byId('spotify-card');
+    await wait(()=>visible(card) && card.textContent.includes('Fake Song') && card.dataset.playing==='true','MPRIS falso dibujado');
+    await click(card.querySelector('[data-action="play_pause"]'));
+    await wait(()=>card.dataset.playing==='false','pausa reflejada');
+    await click(card.querySelector('[data-action="play_pause"]'));
+    await wait(()=>card.dataset.playing==='true','reproducción reflejada');
+    const answer=await invoke('spotify_action',{action:'view'});
+    return {ok:answer.ok && answer.state.playing && answer.state.track.title==='Fake Song',text:card.textContent,state:answer.state};
+  }
+  async function character(on) {
+    const value=on ? await window.__TAURI__.core.invoke('character_fly_out',{anywhere:true}) : await window.__TAURI__.core.invoke('character_fly_home',{forget:true});
+    const info=await window.__TAURI__.core.invoke('character_info');
+    return {ok:value===true && info.onDesktop===on,info};
+  }
+  async function noModel(page) {
+    const index=window.__validatePages.indexOf(page);
+    if(index < 0) throw Error(`página desconocida: ${page}`);
+    const buttons=[...document.querySelectorAll('.hub-side .hub-item')];
+    await click(buttons[index]);
+    await wait(()=>document.querySelector('.hub-page')?.textContent.includes('Descargar'),`aviso de modelo ausente ${page}`);
+    const status=await invoke(page==='voice'?'voice_action':'dictation_action',{action:'status'});
+    const text=document.querySelector('.hub-page').textContent;
+    const missing=page==='voice' ? status.vad?.state==='missing' && status.parakeet?.state==='missing' && status.listening===false : JSON.stringify(status).includes('missing');
+    return {ok:missing && [...document.querySelectorAll('.hub-page button')].some(b=>b.textContent.includes('Descargar')),reason:'sin modelo no se muestra Descargar o se afirma escucha activa',status,text};
+  }
   async function run(expression) {
     let result;
     try { result=await expression(); }
@@ -198,5 +258,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,answerQuestion,gear,hub};
+  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,answerQuestion,gear,hub,github,mail,sounds,spotify,character,noModel};
 })();

@@ -27,7 +27,8 @@ function inputs() {
     if (st.isDirectory()) for (const entry of fs.readdirSync(file).sort()) visit(path.join(file, entry));
     else hash.update(path.relative(crate, file)).update(fs.readFileSync(file));
   }
-  for (const name of ['src', 'frontend', 'packaging/validate', 'capabilities', 'Cargo.toml', 'Cargo.lock', 'build.rs', 'tauri.conf.json']) visit(path.join(crate, name));
+  for (const name of ['src', 'frontend', 'packaging/validate', 'packaging/validate.cjs', 'packaging/preview.cjs', 'capabilities', 'Cargo.toml', 'Cargo.lock', 'build.rs', 'tauri.conf.json']) visit(path.join(crate, name));
+  for (const [dir, files] of [['desktop-daemon', L.DAEMON_FILES], ['desktop-harness', L.HARNESS_FILES]]) for (const file of files) visit(path.join(crate, '..', dir, file));
   return hash.digest('hex');
 }
 async function main(args = process.argv.slice(2)) {
@@ -36,7 +37,7 @@ async function main(args = process.argv.slice(2)) {
   const started = Date.now();
   const out = fs.mkdtempSync('/tmp/abito-validate-');
   const children = [];
-  let piRuntime;
+  let piRuntime, github;
   let interrupted = false;
   // Each direct child owns a fresh process group, so a timed-out app cannot
   // leave its ffmpeg (or any activated helper) attached to the private display.
@@ -123,6 +124,7 @@ async function main(args = process.argv.slice(2)) {
         fs.copyFileSync(path.join(crate, '..', dir, file), dest);
       }
     }
+    github = await require('./validate/github.cjs').start(out, env);
     const app = launch(candidate, ['--probe'], env, 'app.stderr.log');
     const jsonl = fs.openSync(path.join(out, 'probe.jsonl'), 'a', 0o600);
     let buffer = '';
@@ -140,7 +142,10 @@ async function main(args = process.argv.slice(2)) {
         }
         if (row.step === 'visual') visuals.set(row.name, row);
         if (row.step === 'validation_scene') rows.push(row);
-        if (row.step === 'validation_observation') rows.push({ name: row.name, ...classify(row.observation) });
+        if (row.step === 'validation_observation') {
+          if (row.name === 'integracion-github' && github.requests.length === 0) row.observation = {ok:false,reason:'gh no llegó al HTTP falso'};
+          rows.push({ name: row.name, ...classify(row.observation) });
+        }
       } catch { /* native diagnostics may be non-JSON */ }
     };
     const onData = data => {
@@ -154,7 +159,7 @@ async function main(args = process.argv.slice(2)) {
         if (interrupted) throw new Error('interrumpido');
         if (app.launchError) throw app.launchError;
         return exited(app);
-      }, 420000, 'escenas T1–T4 (420 s)');
+      }, 420000, 'escenas T1–T5 (420 s)');
       if (app.exitCode !== 0) throw new Error(`Abito terminó con ${app.exitCode ?? app.signalCode}`);
       // exit may precede the final pipe data; close means all evidence is drained.
       await until(() => app.stdout.readableEnded, 3000, 'JSONL final');
@@ -173,6 +178,7 @@ async function main(args = process.argv.slice(2)) {
       stopGroup(child, 'SIGKILL');
       if (!exited(child)) await until(() => exited(child), 3000, 'terminar proceso propio').catch(() => {});
     }
+    if (github) await github.close();
     if (piRuntime) fs.rmSync(piRuntime, { recursive: true, force: true });
     process.off('SIGINT', signal); process.off('SIGTERM', signal);
   }
@@ -185,10 +191,10 @@ async function main(args = process.argv.slice(2)) {
     return { ...row, png: visual.path };
   });
   if (failure && scenes.every(s => s.verdict !== 'fail')) scenes.push({ name: 'harness', verdict: 'fail', reason: failure });
-  const report = buildReport(scenes, { ...provenance, durationMs: Date.now() - started, outputDir: out, scope: 'T1/T2 S1 S3; T3 S4 S5; T4 S5 interfaz pública #455 S8', input: 'shared shortcut/action handlers + validator-owned XTest header click' });
+  const report = buildReport(scenes, { ...provenance, durationMs: Date.now() - started, outputDir: out, scope: 'T1–T5 S1 S3 S4 S5; T6 S2 mediante packaging/preview.cjs', input: 'shared shortcut/action handlers + validator-owned XTest header click' });
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
   console.log(spanishSummary(report)); console.log(`Informe: ${out}/report.json`);
   return exitCode(report);
 }
 if (require.main === module) main().then(code => { process.exitCode = code; }).catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { main, sceneNames };
+module.exports = { main, sceneNames, inputs };
