@@ -163,8 +163,8 @@ exec "$here/abito-island"
 function desktopText() {
   return `[Desktop Entry]
 Type=Application
-Name=Abito (Tauri)
-Comment=Abito island (user-local build, side by side with the Preview)
+Name=Abito
+Comment=Abito
 Exec="@INSTALL_DIR@/abito-island-launcher"
 Icon=@INSTALL_DIR@/abito-island.png
 Terminal=false

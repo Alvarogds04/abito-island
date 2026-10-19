@@ -108,3 +108,18 @@ fn system_prompt_asks_for_neutral_spanish_and_names_abito_plainly() {
         assert!(!p.contains(voseo), "voseo left in the prompt: {voseo}");
     }
 }
+
+/// Human L54: «el agente de abito no tiene en contexto todas las funciones nuevas [...] que siempre
+/// se llame abito y la app se llamara abito». The prompt names only Abito (app and assistant) and
+/// knows every feature the app ships, so it can explain where each one is.
+#[test]
+fn system_prompt_names_only_abito_and_knows_the_app_features() {
+    let p = super::SYSTEM_PROMPT;
+    assert!(!p.contains("Second Brain"), "{p}");
+    assert!(p.contains("la app Abito"), "{p}");
+    for feature in ["dictado", "OK Abito", "Spotify", "GitHub", "Vercel", "Stripe", "n8n", "Notion",
+        "Cal.com", "correo", "teléfono", "personaje de escritorio", "Claude Code", "Codex", "Pi",
+        "especialistas", "Ajustes", "ventana activa"] {
+        assert!(p.contains(feature), "the prompt does not mention {feature}");
+    }
+}

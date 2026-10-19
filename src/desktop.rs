@@ -71,7 +71,7 @@ pub struct Branding {
 }
 
 pub const BRANDING: Branding = Branding {
-    product: "Second Brain",
+    product: "Abito",
     assistant: "Abito",
 };
 
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(value["notices"], serde_json::json!([]));
         assert_eq!(value["connections"], 0);
         assert_eq!(value["motionOverride"], false);
-        assert_eq!(value["branding"]["product"], "Second Brain");
+        assert_eq!(value["branding"]["product"], "Abito");
         assert_eq!(value["branding"]["assistant"], "Abito");
         assert_eq!(value["bridgeStatus"]["state"], "disabled");
     }

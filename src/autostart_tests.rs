@@ -27,8 +27,8 @@ fn entry_is_the_closed_template() {
     let rest: Vec<&str> = lines.collect();
     for key in [
         "Type=Application",
-        "Name=Abito (Tauri)",
-        "Comment=Abito island",
+        "Name=Abito",
+        "Comment=Abito",
         "Exec=\"/opt/abito/bin/abito-island\"",
         "Icon=/opt/abito/bin/abito-island.png",
         "Terminal=false",
@@ -153,4 +153,13 @@ fn enable_creates_a_missing_autostart_directory() {
     set_enabled_at(&path, true, std::path::Path::new(EXE)).expect("enable creates the dir");
     assert!(is_enabled_at(&path));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Human L54: «la app se llamara abito»: the visible launcher name is just «Abito».
+#[test]
+fn the_visible_app_name_is_abito() {
+    let text = super::desktop_entry(std::path::Path::new("/opt/abito/abito-island-launcher")).unwrap();
+    assert!(text.contains("\nName=Abito\n"), "{text}");
+    assert!(text.contains("\nComment=Abito\n"), "{text}");
+    assert!(!text.contains("Tauri"), "{text}");
 }

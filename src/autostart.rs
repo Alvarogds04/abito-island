@@ -58,8 +58,8 @@ pub fn desktop_entry(exe: &Path) -> Option<String> {
     Some(format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=Abito (Tauri)\n\
-         Comment=Abito island\n\
+         Name=Abito\n\
+         Comment=Abito\n\
          Exec={exec}\n\
          Icon={icon}\n\
          Terminal=false\n\
