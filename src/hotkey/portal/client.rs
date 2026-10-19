@@ -17,6 +17,23 @@ const DEST: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 const IFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
 const REQUEST_IFACE: &str = "org.freedesktop.portal.Request";
+/// `org.freedesktop.host.portal.Registry`: how an app that is NOT sandboxed tells the portal its app id.
+const REGISTRY_IFACE: &str = "org.freedesktop.host.portal.Registry";
+/// The id of Abito's installed `.desktop` (`com.abitog.AbitoTauri.desktop`, the tauri identifier).
+const APP_ID: &str = "com.abitog.AbitoTauri";
+
+/// GNOME's portal refuses a `GlobalShortcuts.CreateSession` from a connection with no app id ("An app id is
+/// required"), and a process started from a `.desktop` file is not given one. Without this the session was
+/// refused, the shortcut fell back to the limited X11 grab (blind while another app has the focus on Wayland)
+/// and the human's global shortcut never worked. Best effort: an older portal without the Registry, an id the
+/// portal already knows (Flatpak, systemd scope) or a `.desktop` it cannot find all answer an error, and none of
+/// those is a reason to give up the session: it is attempted exactly as before.
+fn register_app_id(conn: &Connection) {
+    if let Ok(registry) = Proxy::new(conn, DEST, PATH, REGISTRY_IFACE) {
+        let options: HashMap<&str, Value<'_>> = HashMap::new();
+        let _: zbus::Result<()> = registry.call("Register", &(APP_ID, options));
+    }
+}
 /// How long the human gets to answer the OS dialog before we stop waiting.
 pub const PERMISSION_WAIT: Duration = Duration::from_secs(120);
 
@@ -121,6 +138,7 @@ impl PortalGrabber {
         let thread = std::thread::spawn(move || {
             let fail = |s: u8| t_status.store(s, Ordering::SeqCst);
             let Ok(conn) = connect(addr.as_deref()) else { return fail(S_UNSUPPORTED) };
+            register_app_id(&conn);
             let Ok(proxy) = Proxy::new(&conn, DEST, PATH, IFACE) else { return fail(S_UNSUPPORTED) };
             let deadline = Instant::now() + PERMISSION_WAIT;
 
