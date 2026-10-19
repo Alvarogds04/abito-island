@@ -381,7 +381,7 @@ pub(crate) mod tests {
         let (mut s, dir) = temp_store();
         let payload = serde_json::json!({"action":"set_words","words":{
             "words":["Claude Code"],"replacements":[{"id":"r","from":"cloud code","to":"Claude Code"}]}});
-        let command = crate::dictation_cmd::parse_command(&payload, &[]).unwrap();
+        let command = crate::dictation_cmd::parse_command(&payload, &[], false).unwrap();
         assert_eq!(crate::dictation_cmd::data_action(command, &mut s, today()), serde_json::json!({"ok":true}));
         let loaded = Store::load_from(dir.clone());
         assert_eq!(serde_json::to_value(loaded.words).unwrap(), payload["words"]);

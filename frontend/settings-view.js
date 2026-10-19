@@ -501,7 +501,7 @@
   // ---- agents: connect Claude Code / Codex / OpenCode with ONE click (no terminal) -------------------------------------
   // The state comes from the engine's `agents` frame. Names and sentences are OURS: nothing the engine sends is
   // shown as text, only chosen from these closed tables.
-  const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' });
+  const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', recap: 'Resumen semanal', statusline: 'Uso del plan (relay)' });
   const AGENT_IDS = Object.freeze(Object.keys(AGENT_NAMES));
   // #436 T6.5 (D7): all SEVEN hook clients the daemon's `hooks` frame may name. The three extra
   // ones are DISPLAY-ONLY (no install/remove exists for them; a dead button would be a lie),
@@ -544,7 +544,8 @@
   // the hooks frame fills the rest with honest state, and what nobody knows stays unknown.
   const mergeSix = (rows, hooks) => {
     const byId = new Map(rows.map(r => [r.id, r]));
-    return HOOK_IDS.map(id => byId.get(id) || (hooks && hooks.get(id) ? hookRowOf(hooks.get(id)) : unknownRow(id)));
+    const extra = rows.filter(r => r.id === 'recap' || r.id === 'statusline'); // L32e: engine-only integrations, after the six
+    return [...HOOK_IDS, ...extra.map(r => r.id)].map(id => byId.get(id) || (hooks && hooks.get(id) ? hookRowOf(hooks.get(id)) : unknownRow(id)));
   };
   const AGENT_STATES = Object.freeze({
     not_connected: ['Sin conectar', 'plug-off', 'faint'], connected: ['Conectado', 'check', 'go'], outdated: ['Desactualizado', 'info', 'sun'],
@@ -563,7 +564,20 @@
   // The engine prints a CLOSED English template for the plan. The page never shows engine text: it recognises
   // the template and says the same thing in Spanish; anything else becomes one generic, true sentence.
   const PLAN_RE = /^(Adds|Updates) the Abito hooks (?:\(PermissionRequest, Stop\) )?(?:to|in) (~\/[\w.\/-]{1,120}|\/[\w.\/-]{1,200})\. A backup is made first\.( Codex will ask you to trust them in \/hooks\.)?( This change is large: review it in the file\.)?$/;
+  // L32e: the two notify-only integrations have their own closed summaries (daemon agents.cjs); only these exact
+  // sentences (optionally followed by the one large-change line) are shown, in Spanish. Anything else falls back.
+  const NOTIFY_PLANS = Object.freeze({
+    'Adds notify-only hooks that only count activity for the weekly recap. No command text, path or prompt is kept. A backup is made first.':
+      'Agrega ganchos que solo cuentan tu actividad para el resumen semanal; no guardan comandos, rutas ni prompts. Antes se hace un respaldo.',
+    'Adds the status-line relay in ~/.claude/settings.json. An existing status line keeps working (the relay prints it). A backup is made first.':
+      'Agrega el relay de línea de estado en ~/.claude/settings.json. Si ya tenés una línea de estado, sigue funcionando (el relay la imprime). Antes se hace un respaldo.',
+  });
   function planSummary(text) {
+    if (typeof text === 'string') {
+      const large = ' This change is large: review it in the file.';
+      const base = text.endsWith(large) ? text.slice(0, -large.length) : text;
+      if (Object.prototype.hasOwnProperty.call(NOTIFY_PLANS, base)) return NOTIFY_PLANS[base] + (base === text ? '' : ' Es un cambio grande: revisalo en el archivo.');
+    }
     const m = typeof text === 'string' && text.length <= 400 ? PLAN_RE.exec(text) : null;
     if (!m) return PLAN_FALLBACK;
     const verb = m[1] === 'Adds' ? 'Agrega los hooks de Abito' : 'Actualiza los hooks de Abito';

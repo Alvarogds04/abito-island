@@ -51,6 +51,20 @@ export function buildStates(f) {
       coucou: { page: 'island', settings: { activeIntegrations: ['integration_spotify'], mainPill: 'integration_spotify' },
         run: `__vcEmit('spotify', { running:true, installed:true, track:{ id:'t1', title:${JSON.stringify(spot.title)}, artist:${JSON.stringify(spot.artist)}, album:${JSON.stringify(spot.album)}, durationSec:${spot.durationSec}, artUrl:'' }, playing:true, position:${spot.positionSec}, positionAt:Date.now(), shuffle:false, repeat:false, volume:50 });__vcCoucou.State.setFocus('integration_spotify');__vcCoucou.island.expand('overview');` },
       abito: { label: 'main', run: aSet(`{ ${expanded}, spotify:${spotState}, prefs:{ ...__vcAbito.prefs, mainPill:'integration_spotify', declaredPills:['integration_spotify'] } }`, 'overview'), settle: 1500 } },
+    // ── L32 zones: usage pill + card, GitHub card, weekly recap, dictation pill ──
+    { id: 'usage', title: 'Plan usage pill + card', ...ISLAND,
+      coucou: { page: 'island', run: cAll(f) + `const S=__vcCoucou.State; S.settings={...S.settings,showPlanInNotch:true,planRelayInstalled:true}; S.planUsage={updatedAt:Date.now(),fiveHour:{usedPct:42,resetsAt:Date.now()+3600e3},sevenDay:{usedPct:61,resetsAt:Date.now()+2*86400e3}}; S.planDetailIsCodex=false; S.showingPlanDetail=true; __vcCoucou.island.expand('overview'); S.notify();`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions}, prefs:{ ...__vcAbito.prefs, showPlanInNotch:true } }`, 'overview') + `setTimeout(()=>{const b=[...document.querySelectorAll('.plan-pill')].find(x=>x.style.display!=='none'); if(b) b.click();},2500);`, settle: 4500 } },
+    { id: 'github', title: 'GitHub card', ...ISLAND,
+      coucou: { page: 'island', settings: { activeIntegrations: ['integration_github'], mainPill: 'integration_github' },
+        run: cAll(f) + `__vcEmit('integration',{id:'integration_github',data:__vcGithub(),error:null,event:null}); __vcCoucou.island.expand('overview'); __vcCoucou.State.setFocus('integration_github');`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions}, prefs:{ ...__vcAbito.prefs, mainPill:'integration_github', declaredPills:['integration_github'] } }`, 'overview'), settle: 4500 } },
+    { id: 'recap', title: 'Weekly recap card', ...ISLAND,
+      coucou: { page: 'island', run: cAll(f) + `(async()=>{await __vcCoucou.Recap.load(); __vcCoucou.island.expand('recap');})();`, settle: 2500 },
+      abito: { label: 'main', run: aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `setTimeout(()=>window.AbitoIslandRecap && window.AbitoIslandRecap.open(),1500);`, settle: 4000 } },
+    { id: 'dictation', title: 'Dictation pill (hands-free)', w: 720, h: 140, expected: 'Coucou draws the pill in its own window on a screen edge; Abito draws it in the expanded island header: compare the look, not the %.',
+      coucou: { page: 'pill', run: `setTimeout(()=>__vcEmit('pill-bands',[0.2,0.5,0.9,0.4,0.7,0.3,0.8,0.1,0.6]),600);`, settle: 2000 },
+      abito: { label: 'main', run: `window.__VC_DICTATION=true; ` + aSet(`{ ${expanded}, sessions:${sessions} }`, 'overview') + `setTimeout(()=>{__vcEmit('dictation:phase',{phase:'locked'});__vcEmit('dictation:bands',{bands:[0.2,0.5,0.9,0.4,0.7,0.3,0.8,0.1,0.6]});},1500);`, settle: 3500 } },
   ];
   // Pages are matched by Coucou's sidebar id (same ids in Abito's window): [data-page] when the shell exposes it, else the sidebar slot of that id.
   const click = (i, id) => `(document.querySelector('[data-page="${id}"]') || document.querySelectorAll('.hub-item')[${i}]).click();`;

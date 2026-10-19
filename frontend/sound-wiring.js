@@ -64,6 +64,47 @@
       try { listen('prefs:state', e => applyPrefs(e && e.payload)); } catch { /* no event bus: stays silent */ }
     }
 
+    // Optional custom files: closed stems, <=2 MiB (the host's MAX_BYTES), no paths or MIME trust.
+    const stems = ['notice', 'attention', 'confirm', 'reject', 'error', 'sent', 'think', 'reply', 'listen', 'expired'];
+    const invoke = typeof o.invoke === 'function' ? o.invoke : null;
+    let sampleLoad = Promise.resolve();
+    async function reloadSamples() {
+      try {
+        engine.clearSamples(); // removal, read/decode/list failure all restore built-ins
+        const c = o.getAudioContext();
+        if (!c || typeof c.decodeAudioData !== 'function') return;
+        const listed = await invoke('sound_action', { payload: { action: 'list' } });
+        const names = listed && Array.isArray(listed.names) ? listed.names : [];
+        // Iterate our list, not host input: bounded to ten unique reads.
+        for (const name of stems) {
+          if (!names.includes(name)) continue;
+          try {
+            const file = await invoke('sound_action', { payload: { action: 'read', name } });
+            const data = file && file.data;
+            if (typeof data !== 'string' || !data.length || data.length > 4 * Math.ceil(2097152 / 3)
+                || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) continue;
+            const raw = o.decodeBase64(data);
+            if (!raw.length || raw.length > 2097152) continue;
+            const bytes = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+            const buffer = await c.decodeAudioData(bytes.buffer);
+            engine.setSample('snd.' + name, buffer);
+          } catch { /* a missing or undecodable file leaves the synthesized cue */ }
+        }
+      } catch { /* host/audio unavailable: never break the island */ }
+    }
+    // Serialize reloads so a slow earlier decode cannot resurrect a removed override.
+    function queueSamples() { sampleLoad = sampleLoad.then(reloadSamples, reloadSamples); }
+    if (invoke && typeof o.getAudioContext === 'function' && typeof o.decodeBase64 === 'function') {
+      queueSamples();
+      if (listen) {
+        try {
+          const subscription = listen('sounds:changed', queueSamples);
+          if (subscription && typeof subscription.catch === 'function') subscription.catch(() => {});
+        } catch { /* optional event bus */ }
+      }
+    }
+
     // ---- 3) start-up / reconnect --------------------------------------------------------------------------------
     let chatSeen = null;   // turn_id -> last state we saw; null = no baseline yet
     let noticeTop;         // undefined = no baseline yet
@@ -139,18 +180,28 @@
       doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') reconnected(); });
     }
 
-    return { firstSnapshotRendered, reconnected, observeChat, observeNotices, observeCard, applyPrefs };
+    return { firstSnapshotRendered, reconnected, observeChat, observeNotices, observeCard, applyPrefs,
+      samplesLoaded: () => sampleLoad };
   }
 
   // ---- the real page: one instance, started on load ----------------------------------------------------------------
   function boot(win) {
     const E = win.AbitoSound;
     if (!E || typeof E.createSoundEngine !== 'function') return null;
-    const engine = E.createSoundEngine({ enabled: false, onDiagnostic: reason => { try { console.debug('sound:', reason); } catch { /* none */ } } });
+    let context = null;
+    const C = win.AudioContext || win.webkitAudioContext;
+    const getAudioContext = () => {
+      if (!context) { if (!C) return null; context = new C(); }
+      return context;
+    };
+    const engine = E.createSoundEngine({ enabled: false, createContext: getAudioContext, onDiagnostic: reason => { try { console.debug('sound:', reason); } catch { /* none */ } } });
     const listen = win.__TAURI__ && win.__TAURI__.event && win.__TAURI__.event.listen;
     const invoke = (win.__TAURI__ && win.__TAURI__.core && win.__TAURI__.core.invoke)
       || (win.__TAURI_INTERNALS__ && win.__TAURI_INTERNALS__.invoke) || null;
-    const wiring = wire({ engine, document: win.document, listen: listen ? (n, f) => listen(n, f) : null, log: line => console.debug(line) });
+    const wiring = wire({ engine, document: win.document, listen: listen ? (n, f) => listen(n, f) : null,
+      invoke, getAudioContext: C ? getAudioContext : null,
+      decodeBase64: typeof win.atob === 'function' ? s => win.atob(s) : null,
+      log: line => console.debug(line) });
     // the persisted preference, once: `prefs:state` only arrives on a CHANGE
     if (invoke) invoke('prefs_action', { payload: { action: 'view' } }).then(p => wiring.applyPrefs(p), () => {});
     win.AbitoSoundWiringInstance = wiring;

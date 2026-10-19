@@ -34,7 +34,7 @@ fn build(store: Arc<Mutex<flow::store::Store>>, app: AppHandle) -> Running {
         let (name, payload) = cmd::event(update);
         let _ = app.emit(name, payload);
     });
-    let dict = flow::Dictation::start(store, flow::System, notify);
+    let dict = flow::Dictation::start(store, flow::ClaudeSystem, notify);
     let key = flow::portal::listen(dict.sender(), "Mantén pulsada la tecla para dictar", "CTRL+ALT+v");
     Running { dict, key }
 }
@@ -88,7 +88,10 @@ pub async fn dictation_action(
         // Device enumeration and model files are slow: none of it happens under the host lock.
         let devices = if matches!(payload["action"].as_str(), Some("set_prefs" | "status")) { speech::audio::input_devices() } else { vec![] };
         let names = devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>();
-        let command = cmd::parse_command(&payload, &names).ok_or_else(|| err("invalid_schema"))?;
+        use abito_island::secrets::{Keychain, SecretStore};
+        let has_claude_key = matches!(payload["action"].as_str(), Some("set_prefs" | "status"))
+            && Keychain.read("anthropic-api-key").ok().flatten().is_some_and(|v| !v.is_empty());
+        let command = cmd::parse_command(&payload, &names, has_claude_key).ok_or_else(|| err("invalid_schema"))?;
         let slot = app.state::<Mutex<Host>>();
         match command {
             Command::Status => {
@@ -98,8 +101,9 @@ pub async fn dictation_action(
                     let prefs = host.store.lock().expect("dictation store").prefs.clone();
                     (key, prefs)
                 };
-                Ok(cmd::status_json(&prefs, speech::status(), key, devices))
+                Ok(cmd::status_json(&prefs, speech::status(), key, devices, has_claude_key))
             }
+            Command::RunningApps => Ok(cmd::running_apps_json(flow::running_apps())),
             Command::SetPrefs(prefs) => {
                 {
                     let shared = slot.lock().expect("dictation host").store.clone();

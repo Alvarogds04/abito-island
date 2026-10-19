@@ -77,11 +77,11 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     setInvoke() {}, dictationPage() {}, flowSettingsPage() {}, dictionaryPage() {}, snippetsPage() {}, stylesPage() {}, insightsPage() {}, inactivePages: {}, startHub: async () => {}, TextEncoder };
   require('node:vm').runInNewContext(entry.replace(/^import .*;\n/gm, '') + '\nglobalThis.closedInvoke = invoke;', guardContext);
   const seven = { enabled:true,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:false,defaultStyle:'natural' };
-  for (const payload of [{action:'status'}, {action:'download_model'}, {action:'remove_model'}, {action:'set_prefs',prefs:seven}]) {
+  for (const payload of [{action:'status'}, {action:'download_model'}, {action:'remove_model'}, {action:'running_apps'}, {action:'set_prefs',prefs:seven}, {action:'set_prefs',prefs:{...seven,cleanup:true}}]) {
     await guardContext.closedInvoke('dictation_action', {payload}); assert.deepEqual(guardCalls.pop(), ['dictation_action',{payload}]);
   }
   for (const payload of [{action:'hands_free'}, {action:'finish'}, {action:'cancel'}, {action:'status',extra:1}, {action:'download_model',prefs:seven},
-    {action:'set_prefs',prefs:{...seven,cleanup:true}}, {action:'set_prefs',prefs:{...seven,summaryEngine:'off'}}, {action:'set_prefs',prefs:{...seven,voice:false}},
+    {action:'set_prefs',prefs:{...seven,cleanup:'true'}}, {action:'set_prefs',prefs:{...seven,cleanup:1}}, {action:'running_apps',extra:1}, {action:'set_prefs',prefs:{...seven,summaryEngine:'off'}}, {action:'set_prefs',prefs:{...seven,voice:false}},
     {action:'set_prefs',prefs:{...seven,keepDays:90}}, {action:'set_prefs',prefs:{...seven,enabled:1}}, {action:'set_prefs',prefs:{...seven,key:'wayland'}},
     {action:'set_prefs',prefs:{...seven,edge:'top'}}, {action:'set_prefs',prefs:{...seven,mic:'é'.repeat(101)}}, {action:'set_prefs',prefs:{...seven,defaultStyle:'other'}},
     {action:'set_prefs',prefs:Object.fromEntries(Object.entries(seven).filter(([k])=>k!=='mic'))}, {action:'set_prefs',prefs:[]}, {action:'set_prefs',prefs:seven,extra:0}]) await assert.rejects(guardContext.closedInvoke('dictation_action',{payload}));

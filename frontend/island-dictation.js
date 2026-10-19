@@ -5,8 +5,10 @@
    centred. Mochi is not copied (LICENSE-ASSETS.md): the small character in the pill is Abito's clay engine.
    What it shows comes whole from Rust: `dictation:phase {phase}`, `dictation:bands {bands:[9]}` (about 30×/s while you
    speak) and `dictation:note {note}`; it sends only the closed verbs of `dictation_action`: status, hands_free, finish,
-   cancel. It never starts the microphone by itself and never auto-expands the island: with the island folded, a live
-   dictation shows as a ring on the dot (see island.css) and the pill is there as soon as the island opens.
+   cancel. It never starts the microphone by itself. #479 (human L32): when a dictation STARTS on a folded or hidden island it
+   opens it (the closed host verb `expand`, like a new notice does) so the pill shows, and when the dictation ends it gives the
+   island back with `close` — but only if THIS page opened it and the human has not pressed on the island since. A folded island
+   that is not opened (dictation off) still shows a live dictation as a ring on the dot (island.css).
    Pure view-model first (Node-testable), then the browser-only mount at the tail (house pattern). */
 (function (root, factory) {
   const api = factory();
@@ -64,9 +66,26 @@
   }
   /** `dictation_action status` → whether the pill exists at all: only with the feature on. */
   const enabledOf = s => isObject(s) && isObject(s.prefs) && s.prefs.enabled === true;
+  const LIVE = Object.freeze(['listening', 'locked', 'thinking']);
+  /** #479: should this phase change open the island? Only the START of a dictation (idle/copied/failed → listening or locked)
+      on a folded or hidden island, with dictation on. Same closed host verb as the notice reveal (`expand`). */
+  function revealPlan({ phase, was, enabled, island }) {
+    if (!enabled || !isObject(island)) return 'none';
+    if (phase !== 'listening' && phase !== 'locked') return 'none';
+    if (LIVE.includes(was)) return 'none';
+    return island.state === 'hidden' || island.phase === 'compact' ? 'expand' : 'none';
+  }
+  /** #479: should this phase change give the island back? Only when WE opened it, the dictation is over (`idle`), the human has
+      not touched the island since, and it still shows the plain overview (no chat, card, question or open settings). */
+  function restorePlan({ phase, was, weExpanded, touched, island }) {
+    if (!weExpanded || touched || phase !== 'idle' || !isObject(island)) return 'none';
+    if (!LIVE.includes(was) && was !== 'copied' && was !== 'failed') return 'none';
+    const calm = island.phase === 'expanded' && island.view === 'overview' && !island.card && island.settings !== 'open' && !['pending', 'expired', 'outcome'].includes(island.question);
+    return calm ? 'collapse' : 'none';
+  }
   /** The verbs the pill sends (closed). */
   const VERBS = Object.freeze({ handsFree: 'hands_free', finish: 'finish', cancel: 'cancel', status: 'status' });
-  return { BANDS, PHASES, NOTES, NOTE_MS, VERBS, phaseOf, noteOf, bandsOf, lookOf, messageOf, lengthOf, barSize, dotGoal, enabledOf };
+  return { revealPlan, restorePlan, BANDS, PHASES, NOTES, NOTE_MS, VERBS, phaseOf, noteOf, bandsOf, lookOf, messageOf, lengthOf, barSize, dotGoal, enabledOf };
 });
 
 function mount(api) {
@@ -177,10 +196,30 @@ function mount(api) {
   host.addEventListener('pointerenter', () => setHovered(true));
   host.addEventListener('pointerleave', () => setHovered(false));
 
+  // #479: a dictation that starts on a folded island opens it so the pill shows; when it ends, the island goes back to what it
+  // was — but only if WE opened it and the human has not taken it since (a trusted press on the island).
+  let weExpanded = false, touched = false, flight = false, current = null;
+  const island = () => ({ phase: capsuleEl.dataset.phase, view: capsuleEl.dataset.view, card: capsuleEl.dataset.card, question: capsuleEl.dataset.question, settings: capsuleEl.dataset.settings, state: current && current.state });
+  const desktop = () => root.desktop;
+  try { desktop() && desktop().snapshot && desktop().snapshot().then(s => { current = s; }, () => {}); desktop() && desktop().onState && desktop().onState(s => { current = s; }); } catch { /* the facade is optional */ }
+  capsuleEl.addEventListener('pointerdown', e => { if (e.isTrusted === true) touched = true; }, true);
+  function hostCall(verb, done) {
+    if (flight) return; const d = desktop();
+    if (!d || typeof d[verb] !== 'function') return;
+    flight = true;
+    d[verb]().then(snap => { if (snap) current = snap; flight = false; done && done(true); }, () => { flight = false; done && done(false); });
+  }
   listen('dictation:phase', e => {
     const next = api.phaseOf(e && e.payload);
     if (next === null) return;
     if (next === 'listening') target.fill(0);
+    if (api.revealPlan({ phase: next, was: phase, enabled, island: island() }) === 'expand') {
+      touched = false;
+      hostCall('expand', ok => { if (ok) weExpanded = true; });
+    } else if (api.restorePlan({ phase: next, was: phase, weExpanded, touched, island: island() }) === 'collapse') {
+      weExpanded = false;
+      hostCall('close');
+    } else if (next === 'idle') weExpanded = weExpanded && capsuleEl.dataset.phase === 'expanded' && !touched;
     phase = next; render();
   }).catch(() => {});
   listen('dictation:bands', e => { const b = api.bandsOf(e && e.payload); if (!b) return; for (let i = 0; i < api.BANDS; i++) target[i] = b[i]; wake(); }).catch(() => {});

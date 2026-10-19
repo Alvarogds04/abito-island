@@ -12,6 +12,7 @@ impl Recording for FakeRec {
 }
 
 struct Fake {
+    focus: Arc<Mutex<Option<(String, String)>>>,
     ready: bool,
     mic_ok: bool,
     said: &'static str,
@@ -23,6 +24,7 @@ struct Fake {
 }
 
 impl Backend for Fake {
+    fn foreground_app(&self) -> Option<(String, String)> { self.focus.lock().unwrap().clone() }
     fn cleanup_provider(&self) -> Option<&dyn cleanup::CleanupProvider> {
         self.provider.as_deref()
     }
@@ -58,7 +60,7 @@ fn rig(ready: bool, mic_ok: bool, said: &'static str, outcome: paste::Outcome) -
     let (delivered, recorded, downloads) = (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
     let l = log.clone();
     let notify: Notify = Arc::new(move |u| l.lock().unwrap().push(u));
-    let backend = Fake { ready, mic_ok, said, outcome, delivered: delivered.clone(), recorded: recorded.clone(), downloads: downloads.clone(), provider: None };
+    let backend = Fake { focus: Arc::new(Mutex::new(None)), ready, mic_ok, said, outcome, delivered: delivered.clone(), recorded: recorded.clone(), downloads: downloads.clone(), provider: None };
     Rig { d: Dictation::start(store.clone(), backend, notify), log, delivered, recorded, downloads, store }
 }
 
@@ -149,12 +151,13 @@ fn run_with_provider(cleanup_on: bool) -> (Vec<String>, usize) {
     let calls = Arc::new(AtomicUsize::new(0));
     let delivered = Arc::new(Mutex::new(Vec::new()));
     let backend = Fake {
+        focus: Arc::new(Mutex::new(None)),
         ready: true, mic_ok: true, said: "uno dos tres cuatro", outcome: paste::Outcome::Copied,
         delivered: delivered.clone(), recorded: Arc::new(AtomicUsize::new(0)), downloads: Arc::new(AtomicUsize::new(0)),
         provider: Some(Box::new(Upper(calls.clone()))),
     };
     let notify: Notify = Arc::new(|_| {});
-    process(&backend, &store, &notify, &[0.1; 16_000], 1.0);
+    process(&backend, &store, &notify, &[0.1; 16_000], 1.0, None);
     let out = delivered.lock().unwrap().clone();
     (out, calls.load(Ordering::SeqCst))
 }
@@ -165,4 +168,47 @@ fn the_cleanup_runs_only_when_the_user_turned_it_on() {
     assert_eq!((out, calls), (vec!["uno dos tres cuatro".to_string()], 0));
     let (out, calls) = run_with_provider(true);
     assert_eq!((out, calls), (vec!["UNO DOS TRES CUATRO".to_string()], 1));
+}
+
+#[test]
+fn sampled_app_style_survives_focus_change_before_transcription() {
+    struct Check(store::Style, &'static str, Arc<AtomicUsize>);
+    impl cleanup::CleanupProvider for Check {
+        fn clean(&self, r: &cleanup::Request<'_>) -> Result<String, String> {
+            assert_eq!(r.style, self.0);
+            assert_eq!(r.app, Some(self.1));
+            self.2.fetch_add(1, Ordering::SeqCst);
+            Ok(r.text.to_uppercase())
+        }
+    }
+    for (id, name, style, expected_calls) in [("slack", "Slack", store::Style::Natural, 1),
+        ("claude", "Claude", store::Style::Verbatim, 0), ("outlook", "Outlook", store::Style::Polished, 1)] {
+        let (mut st, _) = store::tests::temp_store(); st.prefs.cleanup = true;
+        let shared = Arc::new(Mutex::new(st));
+        let focus = Arc::new(Mutex::new(Some((id.into(), name.into()))));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let delivered = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::new(Mutex::new(Vec::new())); let updates = log.clone();
+        let backend = Fake { focus: focus.clone(), ready: true, mic_ok: true,
+            said: "hello there my good friend", outcome: paste::Outcome::Copied,
+            delivered: delivered.clone(), recorded: Arc::new(AtomicUsize::new(0)), downloads: Arc::new(AtomicUsize::new(0)),
+            provider: Some(Box::new(Check(style, name, calls.clone()))) };
+        let d = Dictation::start(shared.clone(), backend, Arc::new(move |u| updates.lock().unwrap().push(u)));
+        d.send(KeyEvent::HandsFree);
+        assert!(wait_for(|| log.lock().unwrap().contains(&Update::Phase(Phase::Locked))));
+        *focus.lock().unwrap() = Some(("other-app".into(), "Other App".into()));
+        d.send(KeyEvent::Finish);
+        assert!(wait_for(|| log.lock().unwrap().contains(&Update::Phase(Phase::Copied))));
+        assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
+        assert_eq!(delivered.lock().unwrap()[0], if expected_calls == 0 { "hello there my good friend" } else { "HELLO THERE MY GOOD FRIEND" });
+        assert_eq!(shared.lock().unwrap().history[0].app.as_deref(), Some(name));
+    }
+}
+
+#[test]
+fn x11_class_uses_class_not_instance_and_skips_own_window() {
+    assert_eq!(app_class(b"instance\0Slack\0"), Some(("slack".into(), "Slack".into())));
+    assert_eq!(app_class(b"instance\0AbItO\0"), None);
+    assert_eq!(app_class(b"\0\0"), None);
+    assert_eq!(app_class(b"instance\0customApp\0"), Some(("customapp".into(), "CustomApp".into())));
 }
