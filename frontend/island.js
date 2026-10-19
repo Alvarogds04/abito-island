@@ -84,6 +84,8 @@
   if (typeof AbitoClay !== 'undefined') {
     clay = AbitoClay.create(clayEl, { seed: 505, viewBox: '0 20 200 160' });
   }
+  // #486: the desktop character (island-desktop.js); null where it is unavailable.
+  const desktopCharacter = window.AbitoIslandDesktop || null;
   // #347: presentation-only producers; pending human requests outrank decorations.
   const character = window.AbitoCharacter.create({
     clay, applyState: next => { if (clay && clay.state !== next) clay.setState(next); }, choosePose: (chat, host) => O.choosePose(chat, host), validCard, setTimer: setTimeout, clearTimer: clearTimeout,
@@ -108,6 +110,7 @@
     hostTracker = r.tracker;
     hostPose = r.pose;
     character.snapshot(snapshot);
+    if (desktopCharacter) desktopCharacter.snapshot(snapshot); // #486: an alert sends the desktop character home
     clearTimeout(hostTimer);
     if (r.pose && r.expiresAt) hostTimer = setTimeout(() => refreshHost(current), Math.max(50, r.expiresAt - Date.now() + 50));
     applyPose();
@@ -361,6 +364,8 @@
 
   // ---- pointer tracking (webview reports; Rust decides) ------------------
   let pressed = false;
+  let botPress = null; // #486: a press on the character not yet decided: pick-up or (below the threshold) a click
+  let botCarry = false;
   // #336 L18: one press may carry a spent hover engagement (see release).
   let hoverEngagePress = false;
   let lastPoint = { x: 0, y: 0 };
@@ -372,6 +377,18 @@
   const release = (pt, cancelled) => {
     if (!pressed) return;
     pressed = false;
+    // #486: the drag out to the desktop ends here; a press that never moved was a click on the character.
+    if (botCarry) {
+      botCarry = false;
+      desktopCharacter.carryEnd(pt.x, pt.y);
+      character.dragEnd(); document.body.classList.remove('is-dragging'); syncInteraction();
+      return;
+    }
+    if (botPress) {
+      // the press was held back from drag_press: replay it so Rust sees the same press/release pair as ever
+      send('drag_press', { x: botPress.x, y: botPress.y });
+      botPress = null;
+    }
     // #336 L18: a spent hover engagement cancels ONLY this release — core.rs
     // release() applies the snap first and then skips the toggle on
     // cancelled, so the island keeps open; every later press is legacy.
@@ -384,6 +401,8 @@
     send('drag_release', { x: pt.x, y: pt.y, cancelled });
     syncInteraction();
   };
+  const onCharacter = e => !!(e.target && e.target.closest && e.target.closest('#clay'));
+  const PICKUP_THRESHOLD = 3; // Coucou DRAG_THRESHOLD
   window.addEventListener('pointerdown', e => {
     if (e.button !== 0 || !e.isPrimary) return;
     // Interactive elements own their clicks: a press on the dismiss button
@@ -402,7 +421,11 @@
     document.body.classList.add('is-dragging');
     try { if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId); }
     catch { /* pointer capture is best-effort; X11 has an implicit grab */ }
-    send('drag_press', { x: e.clientX, y: e.clientY });
+    // #486: a press that starts ON the character may become a drag out to the desktop (Coucou); it is held
+    // back from the island's own drag until it moves. Everywhere else, and whenever the desktop character is
+    // unavailable, the island drag is exactly as before.
+    if (onCharacter(e) && desktopCharacter && desktopCharacter.canPickUp()) botPress = { x: e.clientX, y: e.clientY };
+    else send('drag_press', { x: e.clientX, y: e.clientY });
   });
   // §9.2 hover on the character: scale only (pure O.hoverScale), no state.
   function updateHover(point) {
@@ -420,6 +443,14 @@
     if (!pressed) { updateHover({ x: e.clientX, y: e.clientY }); return; }
     updateHover(null);
     lastPoint = { x: e.clientX, y: e.clientY };
+    if (botCarry) { desktopCharacter.carry(e.clientX, e.clientY); return; }
+    if (botPress) {
+      if (Math.hypot(e.clientX - botPress.x, e.clientY - botPress.y) <= PICKUP_THRESHOLD) return;
+      const at = botPress; botPress = null; botCarry = true;
+      character.dragEnd(); document.body.classList.remove('is-dragging');
+      desktopCharacter.pickUp(at.x, at.y);
+      return;
+    }
     character.dragMove(e.screenX);
     send('drag_move', { x: e.clientX, y: e.clientY });
   });
@@ -603,6 +634,7 @@
   // call the verb, so nothing restores on start-up.
   const revealGate = NV && NV.createRevealGate ? NV.createRevealGate() : null;
   let revealFlight = false;
+  if (desktopCharacter) desktopCharacter.attach({ clay, reveal: () => revealIsland() }); // #486
   function revealIsland() {
     if (!NV || typeof NV.revealAction !== 'function' || revealFlight) return;
     if (NV.revealAction({ state: current && current.state, phase: capsule.dataset.phase }) !== 'expand') return;

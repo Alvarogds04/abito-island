@@ -40,6 +40,9 @@
        BEFORE island.js (defer keeps document order) and creates no listener,
        timer or host call by itself. -->
   <script defer src="island-interaction.js"></script>
+  <!-- #486: the desktop character (Coucou DesktopMochi); loads before island.js, creates nothing until the host answers. -->
+  <script defer src="character-desktop-logic.js"></script>
+  <script defer src="island-desktop.js"></script>
   <script defer src="island.js"></script>
   <!-- S10: Coucou header icons + the "+" and mute controls (loaded after island.js). -->
   <script defer src="island-header.js"></script>

@@ -154,3 +154,17 @@ fn a_pick_up_centres_the_window_on_the_pointer() {
 fn island_client_points_map_to_screen_physical_pixels() {
     assert_eq!(client_to_screen((10.0, 5.0), (800.0, 0.0), 2.0), (820.0, 10.0));
 }
+
+#[test]
+fn the_island_may_push_only_known_states_and_emotes() {
+    for s in ["idle", "listen", "think", "speak", "reject", "confirm", "error", "working", "searching", "approval", "question", "finished", "ratelimit", "sleeping", "dizzy"] {
+        assert!(valid_state(s), "{s}");
+    }
+    for s in ["", "Idle", "idle ", "<script>", "sleeping\n", "x".repeat(64).as_str()] {
+        assert!(!valid_state(s), "{s:?}");
+    }
+    for e in ["love", "surprised", "proud", "wink", "yawn", "happy", "annoyed"] {
+        assert!(valid_emote(e), "{e}");
+    }
+    assert!(!valid_emote("greeting") && !valid_emote("") && !valid_emote("Happy"));
+}

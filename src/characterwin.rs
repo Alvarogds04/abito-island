@@ -157,3 +157,16 @@ pub fn centred_on(center: (f64, f64), size: f64, scale: f64) -> (f64, f64) {
 pub fn client_to_screen(client: (f64, f64), island_origin: (f64, f64), scale: f64) -> (f64, f64) {
     (island_origin.0 + client.0 * scale, island_origin.1 + client.1 * scale)
 }
+
+/// The clay states the island may ask the character window to show (closed list).
+pub fn valid_state(s: &str) -> bool {
+    matches!(
+        s,
+        "idle" | "listen" | "think" | "speak" | "reject" | "confirm" | "error" | "working" | "searching" | "approval" | "question" | "finished" | "ratelimit" | "sleeping" | "dizzy"
+    )
+}
+
+/// The emotes the island may trigger on the character window (closed list).
+pub fn valid_emote(s: &str) -> bool {
+    matches!(s, "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed")
+}

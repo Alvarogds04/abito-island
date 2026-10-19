@@ -388,3 +388,16 @@ pub async fn character_home(webview: tauri::Webview, app: AppHandle, c: State<'_
     go_home(&app, &c, true).await;
     Ok(())
 }
+
+/// Island → character window: its clay state or one emote. Closed lists; main only.
+#[tauri::command]
+pub fn character_push(webview: tauri::Webview, app: AppHandle, state: Option<String>, emote: Option<String>) -> Result<(), ()> {
+    crate::settingswindow::main_window_only(webview.label()).map_err(|_| ())?;
+    if let Some(s) = state.filter(|s| cw::valid_state(s)) {
+        let _ = app.emit_to(cw::LABEL, "desktop-character-state", serde_json::json!({ "state": s }));
+    }
+    if let Some(e) = emote.filter(|e| cw::valid_emote(e)) {
+        let _ = app.emit_to(cw::LABEL, "desktop-character-emote", serde_json::json!({ "emote": e }));
+    }
+    Ok(())
+}

@@ -1946,6 +1946,7 @@ fn main() {
             characterhost::character_drag_end,
             characterhost::character_home,
             characterhost::character_pick_up,
+            characterhost::character_push,
             characterhost::character_carry,
             characterhost::character_carry_end,
             chathost::chat_action,
