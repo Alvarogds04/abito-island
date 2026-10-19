@@ -65,17 +65,21 @@ test('view: list rows in order with unread count, ago, bounded preview; banner i
   assert.equal(M.view(null), null);
 });
 
-test('openMessage: opens one message, marks it read; unknown ids change nothing', () => {
+test('openMessage: opens one message WITHOUT marking it read (NotchBuddy has an explicit button); setRead marks it; unknown ids change nothing', () => {
   const s = store0();
   const unreadId = s.messages.find(x => !x.read).id;
   const opened = M.openMessage(s, unreadId);
   assert.equal(opened.openId, unreadId);
-  assert.equal(opened.messages.find(x => x.id === unreadId).read, true);
+  assert.equal(opened.messages.find(x => x.id === unreadId).read, false, 'opening is not reading');
+  const marked = M.setRead(opened, unreadId);
+  assert.equal(marked.messages.find(x => x.id === unreadId).read, true);
+  assert.equal(marked.openId, unreadId);
+  assert.equal(M.setRead(opened, 'nope'), null); assert.equal(M.setRead({}, unreadId), null);
   assert.equal(s.messages.find(x => x.id === unreadId).read, false, 'the old store is untouched');
   const v = M.view(opened);
   assert.equal(v.open.id, unreadId);
   assert.equal(typeof v.open.body, 'string');
-  assert.equal(v.unread, M.view(s).unread - 1);
+  assert.equal(M.view(marked).unread, M.view(s).unread - 1);
   for (const bad of ['nope', '', '__proto__', 'constructor', null, undefined, 7]) assert.equal(M.openMessage(s, bad), null, String(bad));
   assert.equal(M.openMessage({}, unreadId), null);
 });
@@ -85,7 +89,7 @@ test('closeMessage returns to the list and keeps the read state', () => {
   const id = s.messages[0].id;
   const closed = M.closeMessage(M.openMessage(s, id));
   assert.equal(closed.openId, null);
-  assert.equal(closed.messages.find(x => x.id === id).read, true);
+  assert.equal(M.closeMessage(M.setRead(M.openMessage(s, id), id)).messages.find(x => x.id === id).read, true);
   assert.equal(M.closeMessage({}), null);
 });
 
@@ -177,12 +181,64 @@ test('attachmentFromFile: bounded by size, name and base64 of the bytes', () => 
   assert.equal(M.attachmentFromBytes('', new Uint8Array([1])), null);
 });
 
+// ---- live inbox (IMAP via mail_action) -------------------------------------------------------
+const liveAnswer = () => ({ ok: true, messages: [
+  { uid: 7, from: 'Ana', address: 'ana@example.com', subject: 'Hola', preview: 'Texto', minutesAgo: 4, read: false },
+  { uid: 5, from: 'Bruno', address: 'bruno@example.com', subject: 'Re: algo', preview: 'Otro', minutesAgo: 90, read: true }] });
+
+test('inboxFromAnswer: a closed answer becomes a real (not fake) frame plus a private id→uid/address map', () => {
+  const r = M.inboxFromAnswer(liveAnswer());
+  assert.equal(r.frame.fake, false);
+  assert.deepEqual(r.frame.messages.map(m => m.id), ['u7', 'u5']);
+  assert.ok(M.storeFromFrame(r.frame), 'accepted by the store validator');
+  assert.deepEqual(r.meta.u7, { uid: 7, address: 'ana@example.com' });
+  assert.equal(r.frame.messages[0].body, 'Texto');
+  assert.equal(M.view(M.storeFromFrame(r.frame)).banner, null);
+  const bad = a => assert.equal(M.inboxFromAnswer(a), null, JSON.stringify(a).slice(0, 70));
+  bad(null); bad({ ok: true }); bad({ ok: true, messages: 'x' }); bad({ ok: true, messages: [], extra: 1 });
+  bad({ ok: true, messages: Array.from({ length: M.MAX_MESSAGES + 1 }, (_, i) => ({ ...liveAnswer().messages[0], uid: i + 1 })) });
+  for (const over of [{ uid: 0 }, { uid: 1.5 }, { uid: '7' }, { from: '' }, { address: 5 }, { read: 'no' }, { minutesAgo: -1 }, { token: 1 }])
+    bad({ ok: true, messages: [{ ...liveAnswer().messages[0], ...over }] });
+  bad({ ok: true, messages: [liveAnswer().messages[0], liveAnswer().messages[0]] });
+  assert.deepEqual(M.inboxFromAnswer({ ok: true, messages: [] }).frame.messages, []);
+});
+
+test('loadInbox: asks the host for the inbox; refusals have their own Spanish message; throws are plain failures', async () => {
+  const f = answers(liveAnswer());
+  const ok = await M.loadInbox(f.invoke);
+  assert.equal(ok.ok, true);
+  assert.deepEqual(f.calls, [['mail_action', { payload: { action: 'inbox' } }]]);
+  for (const reason of ['imap_not_configured', 'imap_config', 'imap_auth', 'imap_tls', 'imap_network', 'imap_protocol', 'keychain_unavailable']) {
+    const r = await M.loadInbox(answers({ ok: false, reason }).invoke);
+    assert.equal(r.ok, false); assert.equal(r.reason, reason); assert.ok(r.message.length > 10, reason);
+  }
+  assert.match((await M.loadInbox(answers({ ok: false, reason: 'imap_not_configured' }).invoke)).message, /IMAP/);
+  assert.equal((await M.loadInbox(answers(new Error('x')).invoke)).reason, 'failed');
+  assert.equal((await M.loadInbox(answers({ ok: false, reason: 'weird' }).invoke)).reason, 'failed');
+  assert.equal((await M.loadInbox(answers({ ok: true, messages: [{}] }).invoke)).reason, 'failed');
+  assert.equal((await M.loadInbox(undefined)).reason, 'failed');
+});
+
+test('markRead / reply / openClient send exactly the closed payloads', async () => {
+  const f = answers({ ok: true });
+  assert.equal((await M.markRead(f.invoke, 7)).ok, true);
+  assert.equal((await M.reply(f.invoke, 'ana@example.com', 'Hola')).ok, true);
+  assert.equal((await M.openClient(f.invoke)).ok, true);
+  assert.deepEqual(f.calls.map(c => c[1].payload), [
+    { action: 'mark_read', uid: 7 }, { action: 'reply', to: 'ana@example.com', subject: 'Hola' }, { action: 'open_client' }]);
+  for (const bad of [0, -1, 1.5, '7', null, 2 ** 32]) assert.equal((await M.markRead(f.invoke, bad)).ok, false, String(bad));
+  assert.equal((await M.reply(f.invoke, 'nope', 'x')).ok, false);
+  assert.equal(f.calls.length, 3, 'invalid input never reaches the host');
+  assert.equal((await M.markRead(answers(new Error('x')).invoke, 7)).ok, false);
+});
+
 // ---- source hygiene ---------------------------------------------------------------
 test('source: textContent only, only the closed mail_action, no window.open, no raw colours, mount inert', () => {
   const src = fs.readFileSync(path.join(frontend, 'integrations-mail.js'), 'utf8');
   assert.doesNotMatch(src, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/);
   assert.doesNotMatch(src, /window\.open|fetch\(|XMLHttpRequest|WebSocket|localStorage|open_chat_url/);
   assert.match(src, /mail_action/);
+  assert.doesNotMatch(src.slice(src.indexOf('function mount')), /fakeFrame/, 'the live card never shows invented mail');
   assert.doesNotMatch(src, /NOT WIRED|no conectado/i);
   assert.match(src, /getElementById\('integrations-mail'\)/);
   assert.match(src, /if \(!host\) return/);

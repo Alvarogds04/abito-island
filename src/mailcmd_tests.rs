@@ -301,3 +301,167 @@ fn the_smtp_password_never_shows_in_debug_or_answers() {
     let a = outcome(run(send_smtp(&smtp_cfg(port), Security::Plain, &d)));
     assert!(!a.to_string().contains("pw-secret"));
 }
+
+// ---- inbox / mark read / reply requests (slice 3) ---------------------------------------------
+
+#[test]
+fn the_other_requests_are_closed_too() {
+    assert_eq!(parse_request(&json!({"action":"inbox"})).unwrap(), Request::Inbox);
+    assert_eq!(parse_request(&json!({"action":"mark_read","uid":5})).unwrap(), Request::MarkRead(5));
+    assert_eq!(parse_request(&json!({"action":"open_client"})).unwrap(), Request::OpenClient);
+    assert_eq!(
+        parse_request(&json!({"action":"reply","to":"a@b.com","subject":"Hola"})).unwrap(),
+        Request::Reply { to: "a@b.com".into(), subject: "Re: Hola".into() }
+    );
+    assert_eq!(
+        parse_request(&json!({"action":"reply","to":"a@b.com","subject":"Re: Hola"})).unwrap(),
+        Request::Reply { to: "a@b.com".into(), subject: "Re: Hola".into() },
+        "no double Re:"
+    );
+    assert!(matches!(parse_request(&good()).unwrap(), Request::Send(_)));
+    for bad in [
+        json!({"action":"inbox","x":1}),
+        json!({"action":"mark_read"}),
+        json!({"action":"mark_read","uid":0}),
+        json!({"action":"mark_read","uid":-1}),
+        json!({"action":"mark_read","uid":"5"}),
+        json!({"action":"mark_read","uid":4294967296u64}),
+        json!({"action":"mark_read","uid":5,"x":1}),
+        json!({"action":"reply","to":"nope","subject":"s"}),
+        json!({"action":"reply","to":"a@b.com","subject":"a\nb"}),
+        json!({"action":"reply","to":"a@b.com"}),
+        json!({"action":"open_client","x":1}),
+        json!({"action":"delete"}),
+        json!("inbox"),
+    ] {
+        assert!(parse_request(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn the_mailto_url_is_built_by_the_host_with_everything_encoded() {
+    assert_eq!(mailto("ana@example.com", "Re: Hola & más"), "mailto:ana@example.com?subject=Re%3A%20Hola%20%26%20m%C3%A1s");
+    assert_eq!(mailto_open(), "mailto:");
+}
+
+#[test]
+fn the_imap_account_comes_from_the_keychain_and_is_always_tls_993_by_default() {
+    let ok = Fake::with(&[("imap-host", "Imap.X.com"), ("imap-user", "me@x.com"), ("imap-password", "pw")]);
+    let c = imap_config(&ok).unwrap();
+    assert_eq!((c.host.as_str(), c.port, c.user.as_str()), ("imap.x.com", 993, "me@x.com"));
+    let port = Fake::with(&[("imap-host", "imap.x.com:1993"), ("imap-user", "u"), ("imap-password", "pw")]);
+    assert_eq!(imap_config(&port).unwrap().port, 1993);
+    assert_eq!(imap_config(&Fake::with(&[("imap-host", "imap.x.com")])).unwrap_err(), json!({"ok":false,"reason":"imap_not_configured"}));
+    let bad = Fake::with(&[("imap-host", "http://x"), ("imap-user", "u"), ("imap-password", "pw")]);
+    assert_eq!(imap_config(&bad).unwrap_err(), json!({"ok":false,"reason":"imap_config"}));
+    let down = Fake { down: true, ..Fake::default() };
+    assert_eq!(imap_config(&down).unwrap_err(), json!({"ok":false,"reason":"keychain_unavailable"}));
+}
+
+#[test]
+fn the_inbox_answer_is_closed_and_carries_no_server_text() {
+    use crate::imapcmd::{ImapError, Message};
+    let m = Message { uid: 5, from_name: "Ana".into(), address: "ana@x.com".into(), subject: "S".into(), preview: "P".into(), minutes_ago: 3, read: false };
+    assert_eq!(
+        inbox_answer(Ok(vec![m])),
+        json!({"ok":true,"messages":[{"uid":5,"from":"Ana","address":"ana@x.com","subject":"S","preview":"P","minutesAgo":3,"read":false}]})
+    );
+    for (e, r) in [(ImapError::Auth, "imap_auth"), (ImapError::Tls, "imap_tls"), (ImapError::Network, "imap_network"),
+        (ImapError::Timeout, "imap_network"), (ImapError::Protocol, "imap_protocol"), (ImapError::TooLarge, "imap_protocol")] {
+        assert_eq!(inbox_answer(Err(e)), json!({"ok":false,"reason":r}));
+    }
+    assert_eq!(read_answer(Ok(())), json!({"ok":true}));
+    assert_eq!(read_answer(Err(ImapError::Auth)), json!({"ok":false,"reason":"imap_auth"}));
+}
+
+// ---- SMTP over real TLS (STARTTLS upgrade), injected root --------------------------------------
+
+fn tls_smtp_server(p: &crate::imapcmd::tests::Pki, offer_starttls: bool) -> (u16, mpsc::Receiver<String>) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let acceptor = crate::imapcmd::tests::acceptor(p);
+    let (tx, rx) = mpsc::channel();
+    let (ptx, prx) = mpsc::channel();
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            ptx.send(listener.local_addr().unwrap().port()).unwrap();
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut log = String::new();
+            let mut r = BufReader::new(tcp);
+            r.get_mut().write_all(b"220 fake ESMTP\r\n").await.unwrap();
+            let mut line = String::new();
+            // Plain phase: EHLO, then STARTTLS.
+            loop {
+                line.clear();
+                if r.read_line(&mut line).await.unwrap_or(0) == 0 { let _ = tx.send(log); return; }
+                log.push_str(&format!("plain:{line}"));
+                if line.to_ascii_uppercase().starts_with("EHLO") {
+                    let caps = if offer_starttls { "250-fake\r\n250-STARTTLS\r\n250 AUTH PLAIN\r\n" } else { "250-fake\r\n250 AUTH PLAIN\r\n" };
+                    r.get_mut().write_all(caps.as_bytes()).await.unwrap();
+                } else if line.to_ascii_uppercase().starts_with("STARTTLS") {
+                    r.get_mut().write_all(b"220 go\r\n").await.unwrap();
+                    break;
+                } else {
+                    r.get_mut().write_all(b"502 no\r\n").await.unwrap();
+                }
+            }
+            let Ok(tls) = acceptor.accept(r.into_inner()).await else { let _ = tx.send(log + "TLS-FAILED"); return };
+            let mut r = BufReader::new(tls);
+            let mut in_data = false;
+            loop {
+                line.clear();
+                if r.read_line(&mut line).await.unwrap_or(0) == 0 { break; }
+                log.push_str(&format!("tls:{line}"));
+                let up = line.to_ascii_uppercase();
+                let w = r.get_mut();
+                if in_data { if line == ".\r\n" { in_data = false; w.write_all(b"250 queued\r\n").await.unwrap(); } continue; }
+                if up.starts_with("EHLO") { w.write_all(b"250-fake\r\n250 AUTH PLAIN\r\n").await.unwrap(); }
+                else if up.starts_with("AUTH PLAIN") { w.write_all(b"235 ok\r\n").await.unwrap(); }
+                else if up.starts_with("DATA") { in_data = true; w.write_all(b"354 go\r\n").await.unwrap(); }
+                else if up.starts_with("QUIT") { w.write_all(b"221 bye\r\n").await.unwrap(); break; }
+                else { w.write_all(b"250 ok\r\n").await.unwrap(); }
+            }
+            let _ = tx.send(log);
+        });
+    });
+    (prx.recv().unwrap(), rx)
+}
+
+fn tls_params(root_der: &[u8]) -> lettre::transport::smtp::client::TlsParameters {
+    use lettre::transport::smtp::client::{Certificate, TlsParameters};
+    TlsParameters::builder("localhost".into())
+        .add_root_certificate(Certificate::from_der(root_der.to_vec()).unwrap())
+        .build_rustls()
+        .unwrap()
+}
+
+#[test]
+fn smtp_starttls_upgrades_before_any_credential_and_verifies_the_certificate() {
+    let p = crate::imapcmd::tests::pki();
+    let (port, rx) = tls_smtp_server(&p, true);
+    let mut c = smtp_cfg(port);
+    c.host = "localhost".into();
+    let d = parse_mail(&good()).unwrap();
+    run(send_smtp_with(&c, Security::StartTls, Some(tls_params(&p.root_der)), &d)).unwrap();
+    let log = rx.recv().unwrap();
+    let auth = log.find("AUTH PLAIN").expect(&log);
+    assert!(log.find("plain:STARTTLS").unwrap() < auth, "{log}");
+    assert!(!log[..log.find("plain:STARTTLS").unwrap()].contains("AUTH"), "no credential before TLS: {log}");
+    assert!(log.contains("tls:AUTH PLAIN") && log.contains("tls:DATA"), "{log}");
+}
+
+#[test]
+fn smtp_starttls_refuses_an_untrusted_certificate_and_a_server_without_starttls() {
+    let p = crate::imapcmd::tests::pki();
+    let other = crate::imapcmd::tests::pki();
+    let d = parse_mail(&good()).unwrap();
+    let (port, rx) = tls_smtp_server(&p, true);
+    let mut c = smtp_cfg(port);
+    c.host = "localhost".into();
+    assert!(run(send_smtp_with(&c, Security::StartTls, Some(tls_params(&other.root_der)), &d)).is_err());
+    assert!(!rx.recv().unwrap().contains("AUTH PLAIN"), "never authenticates over an untrusted channel");
+    let (port, rx) = tls_smtp_server(&p, false);
+    c.port = port;
+    assert!(run(send_smtp_with(&c, Security::StartTls, Some(tls_params(&p.root_der)), &d)).is_err(), "STARTTLS is required, never silently skipped");
+    assert!(!rx.recv().unwrap().contains("AUTH PLAIN"));
+}

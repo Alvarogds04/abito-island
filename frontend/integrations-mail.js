@@ -6,8 +6,9 @@
 
    SEND IS LIVE (#490): `send` validates the draft and then calls the closed host verb
    `mail_action {action:'send', to, subject, body, attachment?}` (src/mailcmd.rs: Resend, or the user's
-   own SMTP account, with credentials from the keychain). The page never sees a key. The READ-LIST below is still the
-   FAKE provider (visible «datos de ejemplo» marker) until the IMAP inbox slice replaces it.
+   own SMTP account, with credentials from the keychain). The page never sees a key. The READ-LIST is the user's own IMAP inbox
+   through `mail_action {action:'inbox'|'mark_read'|'reply'|'open_client'}` (src/imapcmd.rs); `fakeFrame` survives
+   only for the pure checks and is never mounted.
 
    ---- MOUNT CONTRACT (index.html wiring — coordinator's approval needed) ----
    1. one container inside the Ajustes body:  <section id="integrations-mail" hidden></section>
@@ -43,6 +44,17 @@
     network: 'No se pudo conectar con el servicio de correo.',
     failed: 'No se pudo enviar el mensaje.',
   });
+  const INBOX_REFUSALS = Object.freeze({
+    imap_not_configured: 'Falta configurar la bandeja: guardá el servidor IMAP, el usuario y la contraseña en Ajustes.',
+    imap_config: 'La cuenta IMAP no es válida: revisá el servidor en Ajustes.',
+    imap_auth: 'El servidor IMAP rechazó el usuario o la contraseña.',
+    imap_tls: 'No se pudo establecer una conexión segura con el servidor IMAP.',
+    imap_network: 'No se pudo conectar con el servidor IMAP.',
+    imap_protocol: 'El servidor IMAP respondió algo inesperado.',
+    keychain_unavailable: 'No se pudo leer el llavero del sistema.',
+    failed: 'No se pudo leer la bandeja.',
+  });
+  const UID_MAX = 4294967295;
   const ID_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;
   const FIELDS = Object.freeze(['to', 'subject', 'body']);
   const FIELD_MAX = Object.freeze({ to: MAX_TO, subject: MAX_SUBJECT, body: MAX_BODY });
@@ -89,13 +101,21 @@
   const isStore = s => isObject(s) && typeof s.fake === 'boolean' && Array.isArray(s.messages) &&
     (s.openId === null || isStr(s.openId));
 
-  /** Opens one message (and marks it read). Unknown ids change nothing (null). */
+  /** Opens one message. Like NotchBuddy, opening does NOT mark it read: that is the explicit «Marcar como leído». Unknown ids change nothing (null). */
   function openMessage(store, id) {
     if (!isStore(store) || !isStr(id)) return null;
     const at = store.messages.findIndex(m => m.id === id);
     if (at < 0) return null;
+    return Object.freeze({ fake: store.fake, messages: store.messages, openId: id });
+  }
+
+  /** Marks one message read in the store (after the host confirmed it). Unknown ids change nothing (null). */
+  function setRead(store, id) {
+    if (!isStore(store) || !isStr(id)) return null;
+    const at = store.messages.findIndex(m => m.id === id);
+    if (at < 0) return null;
     const messages = store.messages.map((m, i) => (i === at ? Object.freeze({ ...m, read: true }) : m));
-    return Object.freeze({ fake: store.fake, messages: Object.freeze(messages), openId: id });
+    return Object.freeze({ fake: store.fake, messages: Object.freeze(messages), openId: store.openId });
   }
 
   /** Back to the list; the read state stays. */
@@ -120,7 +140,7 @@
     return Object.freeze({
       fake: store.fake, banner: store.fake ? FAKE_BANNER : null,
       unread: rows.filter(r => !r.read).length, rows: Object.freeze(rows),
-      open: opened ? Object.freeze({ id: opened.id, from: opened.from, subject: opened.subject,
+      open: opened ? Object.freeze({ id: opened.id, read: opened.read, from: opened.from, subject: opened.subject,
         body: opened.body, ago: agoLabel(opened.minutesAgo) }) : null,
     });
   }
@@ -180,6 +200,45 @@
     return refusal('failed');
   }
 
+  // ---- live inbox (IMAP through the closed host verb) ---------------------------------------
+  const isUid = u => Number.isInteger(u) && u >= 1 && u <= UID_MAX;
+  /** A closed `inbox` answer → { frame (real, not fake), meta: id → { uid, address } }; anything off-shape is null. */
+  function inboxFromAnswer(a) {
+    if (!isObject(a) || a.ok !== true || !onlyKeys(a, ['ok', 'messages']) || !Array.isArray(a.messages) || a.messages.length > MAX_MESSAGES) return null;
+    const meta = {};
+    const messages = [];
+    for (const m of a.messages) {
+      if (!isObject(m) || Object.keys(m).length !== 7 || !onlyKeys(m, ['uid', 'from', 'address', 'subject', 'preview', 'minutesAgo', 'read'])) return null;
+      if (!isUid(m.uid) || !isStr(m.address) || chars(m.address) > MAX_TO || CONTROL.test(m.address) || typeof m.read !== 'boolean') return null;
+      const id = `u${m.uid}`;
+      if (Object.prototype.hasOwnProperty.call(meta, id)) return null;
+      meta[id] = Object.freeze({ uid: m.uid, address: m.address });
+      messages.push({ id, from: m.from, subject: m.subject, body: m.preview, minutesAgo: m.minutesAgo, read: m.read });
+    }
+    const frame = { type: 'mail', schema: SCHEMA, fake: false, messages };
+    return storeFromFrame(frame) ? Object.freeze({ frame, meta: Object.freeze(meta) }) : null;
+  }
+  const inboxRefusal = reason => Object.freeze({ ok: false, reason, message: INBOX_REFUSALS[reason] });
+  async function call(invoke, payload) {
+    if (typeof invoke !== 'function') return undefined;
+    try { return await invoke('mail_action', { payload }); } catch (_) { return undefined; }
+  }
+  async function loadInbox(invoke) {
+    const a = await call(invoke, { action: 'inbox' });
+    const live = inboxFromAnswer(a);
+    if (live) return Object.freeze({ ok: true, frame: live.frame, meta: live.meta });
+    if (isObject(a) && a.ok === false && Object.keys(a).length === 2 && isStr(a.reason) &&
+      Object.prototype.hasOwnProperty.call(INBOX_REFUSALS, a.reason) && a.reason !== 'failed') return inboxRefusal(a.reason);
+    return inboxRefusal('failed');
+  }
+  const okAnswer = a => Object.freeze({ ok: isObject(a) && a.ok === true && Object.keys(a).length === 1 });
+  async function markRead(invoke, uid) { return isUid(uid) ? okAnswer(await call(invoke, { action: 'mark_read', uid })) : okAnswer(null); }
+  async function reply(invoke, to, subject) {
+    if (!isStr(to) || !ADDRESS_RE.test(to) || !isStr(subject) || chars(subject) > MAX_SUBJECT || CONTROL.test(subject)) return okAnswer(null);
+    return okAnswer(await call(invoke, { action: 'reply', to, subject }));
+  }
+  async function openClient(invoke) { return okAnswer(await call(invoke, { action: 'open_client' })); }
+
   // ---- fake provider (LOUD, deterministic, no network) ------------------------
   const FAKE_MESSAGES = Object.freeze([
     ['m1', 'Lucía Fernández', 'Reunión del jueves', 'Hola, te confirmo la reunión del jueves a las 10. Llevá el resumen del trimestre así lo repasamos juntos.', 6, false],
@@ -225,7 +284,7 @@
   };
 
   /** `result` is the last send() outcome (or null); the draft re-fills the form. */
-  function render(host, v, draft, result, attachment, sending) {
+  function render(host, v, draft, result, attachment, sending, inbox, canReply) {
     if (!(host && typeof host.appendChild === 'function')) return;
     host.textContent = '';
     if (!v || !Array.isArray(v.rows)) { host.hidden = true; return; }
@@ -233,15 +292,19 @@
     const d = isDraft(draft) ? draft : createDraft();
     const errors = result && result.reason === 'invalid' ? result.errors : {};
     const head = el('div', 'ml-head');
-    head.append(el('span', 'ml-title', 'Mail'), el('span', 'ml-unread', `${v.unread} sin leer`));
+    head.append(el('span', 'ml-title', 'Mail'), el('span', 'ml-unread', `${v.unread} sin leer`), button('ml-refresh', 'refresh', 'Actualizar'));
     host.append(head);
+    if (inbox && inbox.note) { const n = el('p', 'ml-refusal', inbox.note); n.setAttribute('role', 'status'); host.append(n); }
     if (v.banner) host.append(el('p', 'ml-fake', v.banner));
+    else if (!v.rows.length && !(inbox && inbox.note)) host.append(el('p', 'ml-empty', inbox && inbox.loading ? 'Cargando…' : 'No hay mensajes.'));
     if (v.open) {
       const art = el('article', 'ml-open');
       art.append(el('h3', 'ml-open-subject', v.open.subject),
         el('p', 'ml-open-meta', `${v.open.from} · ${v.open.ago}`),
         el('p', 'ml-open-body', v.open.body));
-      art.append(button('ml-back', 'close', 'Volver a la lista'));
+      if (!v.open.read && canReply) art.append(button('ml-markread', 'markread', 'Marcar como leído'));
+      if (canReply) art.append(button('ml-reply', 'reply', 'Responder'));
+      art.append(button('ml-client', 'client', 'Abrir el correo'), button('ml-back', 'close', 'Volver a la lista'));
       host.append(art);
     } else {
       const list = el('ul', 'ml-list');
@@ -282,7 +345,7 @@
   }
 
   return { SCHEMA, MAX_MESSAGES, MAX_FROM, MAX_SUBJECT, MAX_BODY, MAX_PREVIEW, MAX_TO,
-    storeFromFrame, openMessage, closeMessage, view, createDraft, setField, validateDraft, send, attachmentFromBytes, MAX_ATTACHMENT_BYTES, fakeFrame, render };
+    storeFromFrame, openMessage, setRead, closeMessage, view, createDraft, setField, validateDraft, send, attachmentFromBytes, MAX_ATTACHMENT_BYTES, inboxFromAnswer, loadInbox, markRead, reply, openClient, fakeFrame, render };
 });
 
 // ---- browser-only wiring: self-mount into #integrations-mail, FAKE provider only ----
@@ -290,21 +353,56 @@ function mount(V) {
   if (typeof document === 'undefined') return;
   const host = document.getElementById('integrations-mail');
   if (!host) return; // inert until index.html carries the container (mount contract)
-  let store = V.storeFromFrame(V.fakeFrame()); // inbox: still the FAKE provider until the IMAP slice
+  let store = V.storeFromFrame({ type: 'mail', schema: V.SCHEMA, fake: false, messages: [] });
+  let meta = {};
+  let inbox = { note: '', loading: true };
+  let polling = false;
   let draft = V.createDraft();
   let result = null;
   let attachment = null;
   let sending = false;
   const internals = typeof window !== 'undefined' ? window.__TAURI_INTERNALS__ : undefined;
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) || (internals && internals.invoke);
-  const paint = () => V.render(host, V.view(store), draft, result, attachment, sending);
+  const paint = () => V.render(host, V.view(store), draft, result, attachment, sending, inbox, !!(store.openId && meta[store.openId] && meta[store.openId].address));
+  async function refresh() {
+    if (polling) return;
+    polling = true;
+    const r = await V.loadInbox(invoke);
+    polling = false;
+    if (r.ok) {
+      const next = V.storeFromFrame(r.frame);
+      const keep = store.openId && next.messages.some(m => m.id === store.openId) ? store.openId : null;
+      store = keep ? V.openMessage(next, keep) : next;
+      meta = r.meta; inbox = { note: '', loading: false };
+    } else {
+      inbox = { note: r.message, loading: false, stop: r.reason === 'imap_not_configured' };
+    }
+    paint();
+  }
+  const visible = () => !host.hidden && typeof document !== 'undefined' && document.visibilityState !== 'hidden' && host.offsetParent !== null;
+  setInterval(() => { if (visible() && !(inbox && inbox.stop)) refresh(); }, 60000);
+  setTimeout(() => { if (visible()) refresh(); }, 0);
 
   host.addEventListener('click', e => {
     if (!e || e.isTrusted !== true) return; // only trusted gestures change anything
     const t = e.target && typeof e.target.closest === 'function' ? e.target.closest('[data-action]') : null;
     if (!t || !host.contains(t)) return;
-    const next = t.dataset.action === 'open' ? V.openMessage(store, t.dataset.id)
-      : t.dataset.action === 'close' ? V.closeMessage(store) : null;
+    const action = t.dataset.action;
+    if (action === 'refresh') { inbox = { note: '', loading: true }; refresh(); return; }
+    if (action === 'markread') {
+      const id = store.openId;
+      if (id && meta[id]) V.markRead(invoke, meta[id].uid).then(r => { if (r.ok) { const n = V.setRead(store, id); if (n) { store = n; paint(); } } });
+      return;
+    }
+    if (action === 'client') { V.openClient(invoke); return; }
+    if (action === 'reply') {
+      const m = store.messages.find(x => x.id === store.openId);
+      const info = m && meta[m.id];
+      if (info && info.address) V.reply(invoke, info.address, m.subject);
+      return;
+    }
+    const next = action === 'open' ? V.openMessage(store, t.dataset.id)
+      : action === 'close' ? V.closeMessage(store) : null;
     if (next) { store = next; paint(); }
   });
   host.addEventListener('input', e => {

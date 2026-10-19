@@ -40,10 +40,10 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   assert(text(ui).includes('Las claves se quedan en el llavero del sistema.'));
   assert(text(ui).includes('Secret Service (GNOME Keyring, KWallet)'));
   assert(!/nunca en el disco|never on disk/i.test(text(ui)),'approved truthful-copy exception');
-  const keys=['stripe-api-key','github-token','vercel-token','n8n-url','n8n-api-key','resend-api-key','resend-from','notion-api-key','calcom-api-key','smtp-host','smtp-user','smtp-password','smtp-from'];
+  const keys=['stripe-api-key','github-token','vercel-token','n8n-url','n8n-api-key','resend-api-key','resend-from','notion-api-key','calcom-api-key','smtp-host','smtp-user','smtp-password','smtp-from','imap-host','imap-user','imap-password'];
   assert.deepEqual(calls.filter(([c])=>c==='secret_action').map(([,p])=>p),keys.map(key=>({action:'present',key})));
-  const list=find('integration-list');assert.equal(list.children.length,9);
-  assert.deepEqual(list.children.map(e=>e.id),[...['stripe','github','vercel','n8n','resend','notion','calcom','spotify'].map(id=>`integration_${id}`),'mail_smtp']);
+  const list=find('integration-list');assert.equal(list.children.length,10);
+  assert.deepEqual(list.children.map(e=>e.id),[...['stripe','github','vercel','n8n','resend','notion','calcom','spotify'].map(id=>`integration_${id}`),'mail_smtp','mail_imap']);
   for(const key of keys){
     const input=find(`integration-key-${key}`);assert.equal(input.type,'password','all keystore fields masked, including URL');
     const row=all(ui).find(e=>e.children.includes(input));assert.equal(row.children[0].tagName,'label');

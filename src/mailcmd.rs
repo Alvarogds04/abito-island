@@ -274,7 +274,14 @@ pub fn build_message(from: &str, d: &Draft) -> Result<lettre::Message, MailError
 /// Sends through the user's SMTP account (TLS always; credentials only inside the TLS session).
 /// `security` is explicit so tests can reach a loopback fake; production uses `cfg.security()`.
 pub async fn send_smtp(cfg: &SmtpConfig, security: Security, d: &Draft) -> Result<(), MailError> {
+    send_smtp_with(cfg, security, None, d).await
+}
+
+/// Same as [`send_smtp`] with an optional TLS configuration (tests inject their own root; the
+/// shipped path passes `None` and lettre uses the bundled webpki roots).
+pub async fn send_smtp_with(cfg: &SmtpConfig, security: Security, tls: Option<lettre::transport::smtp::client::TlsParameters>, d: &Draft) -> Result<(), MailError> {
     use lettre::transport::smtp::authentication::Credentials;
+    use lettre::transport::smtp::client::Tls;
     use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
     let message = build_message(&cfg.from, d)?;
     let builder = match security {
@@ -284,6 +291,11 @@ pub async fn send_smtp(cfg: &SmtpConfig, security: Security, d: &Draft) -> Resul
         Security::Plain => Ok(AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)),
     }
     .map_err(|_| MailError::Network)?;
+    let builder = match (tls, security) {
+        (Some(p), Security::StartTls) => builder.tls(Tls::Required(p)),
+        (Some(p), Security::Implicit) => builder.tls(Tls::Wrapper(p)),
+        _ => builder,
+    };
     let transport = builder
         .port(cfg.port)
         .credentials(Credentials::new(cfg.user.clone(), cfg.password.clone()))
@@ -310,5 +322,104 @@ pub async fn send_answer(store: &dyn SecretStore, endpoint: &str, d: &Draft) -> 
     match route(store) {
         Ok(r) => send_route(&r, endpoint, d).await,
         Err(answer) => answer,
+    }
+}
+
+// ---- the other verbs: inbox, mark read, reply, open the client (slice 3) --------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    Send(Draft),
+    Inbox,
+    MarkRead(u32),
+    /// Opens the user's own mail client with a prepared reply (nothing is sent by Abito).
+    Reply { to: String, subject: String },
+    OpenClient,
+}
+
+/// Closed schema for every `mail_action` verb.
+pub fn parse_request(payload: &Value) -> Result<Request, BridgeError> {
+    let map = payload.as_object().ok_or_else(bad)?;
+    match map.get("action").and_then(Value::as_str) {
+        Some("send") => parse_mail(payload).map(Request::Send),
+        Some("inbox") if map.len() == 1 => Ok(Request::Inbox),
+        Some("open_client") if map.len() == 1 => Ok(Request::OpenClient),
+        Some("mark_read") if map.len() == 2 => {
+            let uid = map.get("uid").and_then(Value::as_u64).filter(|u| (1..=u64::from(u32::MAX)).contains(u)).ok_or_else(bad)?;
+            Ok(Request::MarkRead(uid as u32))
+        }
+        Some("reply") if map.len() == 3 => {
+            let to = map.get("to").and_then(Value::as_str).ok_or_else(bad)?.trim_matches(' ').to_owned();
+            let subject = map.get("subject").and_then(Value::as_str).ok_or_else(bad)?;
+            if !address_ok(&to) || subject.chars().count() > MAX_SUBJECT || has_control(subject, false) {
+                return Err(bad());
+            }
+            let subject = if subject.len() >= 3 && subject[..3].eq_ignore_ascii_case("re:") { subject.to_owned() } else { format!("Re: {subject}") };
+            Ok(Request::Reply { to, subject })
+        }
+        _ => Err(bad()),
+    }
+}
+
+fn pct(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// `mailto:` for a reply. `to` is already a validated plain address, so `@` stays readable.
+pub fn mailto(to: &str, subject: &str) -> String {
+    format!("mailto:{}?subject={}", pct(to).replace("%40", "@"), pct(subject))
+}
+
+pub fn mailto_open() -> &'static str {
+    "mailto:"
+}
+
+/// The user's IMAP account (`imap-host[:port]`, `imap-user`, `imap-password`); port 993 = implicit TLS.
+pub fn imap_config(store: &dyn SecretStore) -> Result<crate::imapcmd::ImapConfig, Value> {
+    let read = |k: &str| match store.read(k) {
+        Ok(v) => Ok(v.filter(|s| !s.is_empty())),
+        Err(StoreError::Unavailable | StoreError::Failed) => Err(json!({"ok": false, "reason": "keychain_unavailable"})),
+    };
+    let (host, user, password) = (read("imap-host")?, read("imap-user")?, read("imap-password")?);
+    let (Some(host), Some(user), Some(password)) = (host, user, password) else {
+        return Err(json!({"ok": false, "reason": "imap_not_configured"}));
+    };
+    let hostport = if host.contains(':') { host } else { format!("{host}:993") };
+    let Some((host, port)) = parse_host(&hostport) else { return Err(json!({"ok": false, "reason": "imap_config"})) };
+    Ok(crate::imapcmd::ImapConfig { host, port, user, password })
+}
+
+fn imap_reason(e: crate::imapcmd::ImapError) -> &'static str {
+    use crate::imapcmd::ImapError::*;
+    match e {
+        Auth => "imap_auth",
+        Tls => "imap_tls",
+        Network | Timeout => "imap_network",
+        Protocol | TooLarge => "imap_protocol",
+    }
+}
+
+pub fn inbox_answer(r: Result<Vec<crate::imapcmd::Message>, crate::imapcmd::ImapError>) -> Value {
+    match r {
+        Ok(list) => json!({"ok": true, "messages": list.iter().map(|m| json!({
+            "uid": m.uid, "from": m.from_name, "address": m.address, "subject": m.subject,
+            "preview": m.preview, "minutesAgo": m.minutes_ago, "read": m.read,
+        })).collect::<Vec<_>>()}),
+        Err(e) => json!({"ok": false, "reason": imap_reason(e)}),
+    }
+}
+
+pub fn read_answer(r: Result<(), crate::imapcmd::ImapError>) -> Value {
+    match r {
+        Ok(()) => json!({"ok": true}),
+        Err(e) => json!({"ok": false, "reason": imap_reason(e)}),
     }
 }
