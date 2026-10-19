@@ -60,6 +60,7 @@ function mount(api) {
   function paint() {
     const show = open && !!mod && api.calm(capsule.dataset);
     host.hidden = !show; host.inert = !show;
+    doc.dispatchEvent(new CustomEvent('abito:recap', { detail: { show } })); // island.js grows to Coucou's 184px recap island
     if (show) capsule.dataset.recap = 'on'; else delete capsule.dataset.recap;
   }
   function close() { open = false; paint(); }

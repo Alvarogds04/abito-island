@@ -90,5 +90,10 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   assert.equal((html.match(/src="island-recap\.js"/g) || []).length, 1);
   const css = fs.readFileSync(path.join(vendor, 'island/island.css'), 'utf8');
   assert.match(css, /\.recap-chip \.v \{ font: 700 17px var\(--font\)/); assert.match(css, /#recap-card \.btn::after \{[^}]*inset: 7px 0/);
+  // L32: Coucou's recap view is 184 high; the card asks island.js for that island and gives it back on close
+  const island = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  assert.match(island, /const RECAP_H = 184;/); assert.match(island, /recapShown \? RECAP_H : questionShown \? QUESTION_H : OVERVIEW\.h/);
+  assert.match(island, /document\.addEventListener\('abito:recap'/); assert.match(src, /new CustomEvent\('abito:recap', \{ detail: \{ show \} \}\)/);
+  assert.match(css, /#recap-card \{[^}]*height: 132px; z-index: 3;/, 'the card sits under the character (z 4)');
   console.log('PASS island-recap');
 })().catch(e => { console.error('FAIL', e.stack); process.exit(1); });

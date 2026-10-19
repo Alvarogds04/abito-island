@@ -120,6 +120,7 @@ function mount(api) {
     next: 'M2.5 6.2c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2zm10 0c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2z',
     play: 'M7 4.6c0-.8.9-1.3 1.6-.9l11 6.9c.6.4.6 1.4 0 1.8l-11 6.9c-.7.4-1.6-.1-1.6-.9V4.6z',
     pause: 'M6 4.5h4v15H6zM14 4.5h4v15h-4z',
+    volume: 'M11 4.5 6.5 8.2H3.4v7.6h3.1L11 19.5v-15zm3.2 3a5.3 5.3 0 0 1 0 9 .9.9 0 0 0 .9 1.55 7.1 7.1 0 0 0 0-12.1.9.9 0 0 0-.9 1.55z',
   };
   const NS = 'http://www.w3.org/2000/svg';
   const glyph = (name, size) => {
@@ -187,7 +188,8 @@ function mount(api) {
   bar.prepend(shuffle); bar.append(repeat);
   const volume = barOf('Volumen', f => ctl.control('volume', Math.round(f * 100)));
   volume.el.classList.add('np-volume-bar');
-  const volBox = mk('div', 'np-volume'); volBox.append(volume.el);
+  const volIcon = mk('span', 'np-vol-icon'); volIcon.setAttribute('aria-hidden', 'true'); volIcon.append(glyph('volume', 10));
+  const volBox = mk('div', 'np-volume'); volBox.append(volIcon, volume.el);
   const spacer = mk('div', 'grow');
   const controls = mk('div', 'np-controls'); controls.append(bar, spacer, volBox);
   const card = mk('div', 'np-card'); card.append(head, progressRow, controls);

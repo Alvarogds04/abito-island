@@ -57,8 +57,8 @@ async function shot(browser, st, side) {
     const settings = spec.settings ? `window.__VC_SETTINGS=${JSON.stringify(spec.settings)};` : '';
     if (side === 'coucou') {
       await page.addInitScript(pre('coucou', spec.page === 'settings' ? 'settings' : 'main', settings));
-      if (spec.page === 'island') await page.addInitScript(flatBg);
-      await page.goto(`http://127.0.0.1:${VITE_PORT}/${spec.page === 'settings' ? 'settings.html' : `dev/${HARNESS}.html`}`);
+      if (spec.page === 'island' || spec.page === 'pill') await page.addInitScript(flatBg);
+      await page.goto(`http://127.0.0.1:${VITE_PORT}/${spec.page === 'settings' ? 'settings.html' : spec.page === 'pill' ? 'pill.html' : `dev/${HARNESS}.html`}`);
       if (spec.page === 'island') for (let i = 0; i < 40 && !(await page.eval('!!window.__vcReady')); i++) await sleep(250);
       else await sleep(1500);
     } else {
