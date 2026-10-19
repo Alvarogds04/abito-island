@@ -278,5 +278,6 @@ async function dictationPage(page, ctx) {
 export {
   dictationPage,
   flowSettingsPage,
-  modelsControl
+  modelsControl,
+  mount
 };

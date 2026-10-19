@@ -5,6 +5,7 @@ import { card, row, button, keyLabel, label, divider, toggle, segmented } from '
 import { notchSection, notchRow, notchHint } from './notch.js';
 import { t } from './i18n-es.js';
 import { glowCard, emptyState } from './hero.js';
+import { mount, modelsControl } from './dictation-pages.js';
 import type { FlowPageRenderer, PageId } from './shell.js';
 const definitions: Record<string, [string, string | null, string]> = {
   voice: ['OK Abito', 'Say « OK Abito », then ask anything: add a pill, play music, the weather, an email to prepare.', 'Enable'],
@@ -26,13 +27,19 @@ export function renderUnavailable(page: string): HTMLElement {
 // control disabled. Abito has no call-recording backend: it needs notes_state / notes_start / notes_stop and a
 // diarisation model, none of which exist.
 const NOT_YET = 'No disponible todavía';
+// L42: the voice model is the SAME Parakeet the dictation uses, so these pages show the real control (download with
+// progress, «Instalado», remove) and follow dictation:models; before, a static disabled «Descargar» read as «not installed».
+function modelControl(container: HTMLElement, ctx: any): HTMLElement {
+  const life = mount(container, ctx);
+  return modelsControl(ctx, life);
+}
 function notesPage(container: HTMLElement, ctx: any) {
   const off = <T extends HTMLElement>(el: T): T => { (el as any).disabled = true; el.title = NOT_YET; return el; };
   container.append(ctx.hero('notes', t('Notetaker'), t('Your calls transcribed person by person, with a summary and the to-dos. No bot in the meeting.'), [], true));
   container.append(glowCard('#3B9EFF',
     h('div', { style: 'font:700 15px var(--font)', text: t('One download, then offline') }),
     h('div', { class: 'hub-note', style: 'color:#b7bbc2', text: t('Coucou writes your calls on this computer with Parakeet, and tells the voices apart with a second small model. Both are downloaded once (about {0} MB), then everything works offline.', { 0: 700 }) }),
-    off(button(t('Download'), () => {}, 'primary'))));
+    modelControl(container, ctx)));
   const record = off(button(t('Record a call'), () => {}, 'primary'));
   record.prepend(h('span', { class: 'hub-rec', style: 'background:#170c04;box-shadow:none;margin-inline-end:8px' }));
   record.style.setProperty('width', '100%');
@@ -49,13 +56,13 @@ export const inactivePages: Partial<Record<PageId, FlowPageRenderer>> = Object.f
       // Adapted from Coucou src/hub/pages/voice.ts @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
       // Full default (voice off / system output) layout, no microphone, model or secret commands.
       const off = toggle(false, () => {}); (off as HTMLButtonElement).disabled = true;
-      const download = button(t('Download'), () => {}, 'primary'); download.disabled = true;
+      const download = modelControl(container, ctx);
       const output = segmented([['system', t('System voice')], ['elevenlabs', 'ElevenLabs'], ['off', t('Text only')]], 'system', () => {});
       for (const b of output.querySelectorAll('button')) (b as HTMLButtonElement).disabled = true;
       container.append(ctx.hero('voice', 'OK Abito', t(subtitle!)),
         label(t('Listening')),
         card(row(t('Listen for « OK Abito »'), t('The microphone stays open; only what follows « OK Abito » goes further.'), off), divider(),
-          row(t('Parakeet, on your computer'), t('Hears « OK Abito » here, without the internet.'), h('div', {style:'display:flex;align-items:center;gap:8px'}, download))),
+          row(t('Parakeet, on your computer'), t('Hears « OK Abito » here, without the internet.'), download)),
         label(t('Answers')), card(row(t('Abito answers out loud'), null, output)),
         label(t('Privacy')), card(
           h('div', {class:'hub-note',text:t('Your voice never leaves this computer: Parakeet turns it into text here. Only the words after « OK Abito » go to Anthropic with your Claude key, and to ElevenLabs if you picked it for the answers.')}), divider(),
