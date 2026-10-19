@@ -67,69 +67,6 @@ pub fn with_question_click<T>(state: &AppState, id: &str, operation: impl FnOnce
     let t = transport.as_ref().ok_or_else(|| BridgeError::denied("notice is not current"))?;
     t.with_question_click(id, operation)
 }
-/// Run on the main thread, never from inside with_pending. The transport
-/// establishes its barrier before invoking actual runtime resize work.
-pub fn compact_resize_request(
-    app: &AppHandle,
-    generation: u64,
-    expected: (u32, u32),
-    operation: &mut dyn FnMut(bool),
-) {
-    let state = app.state::<AppState>();
-    let current = || {
-        // Separate guards: never retain phase while acquiring core.
-        let compact =
-            *state.phase.lock().expect("phase lock") == abito_island::desktop::IslandState::Compact;
-        let expanded = state.core.lock().expect("core lock").expanded;
-        !QUITTING.load(Ordering::SeqCst)
-            && state.generation.load(Ordering::SeqCst) == generation
-            && compact
-            && !expanded
-    };
-    let observed = || {
-        main_window(app)
-            .inner_size()
-            .ok()
-            .map(|s| (s.width, s.height))
-    };
-    let guard = state.transport.lock().expect("transport lock");
-    match guard.as_ref() {
-        Some(t) => {
-            t.compact_resize(generation, expected, current, observed, operation);
-        }
-        None => {
-            if current() {
-                operation(true);
-            }
-        } // unavailable receiver cannot admit questions
-    }
-}
-pub fn native_resized(app: &AppHandle, size: (u32, u32)) {
-    let state = app.state::<AppState>();
-    let guard = state.transport.lock().expect("transport lock");
-    if let Some(t) = guard.as_ref() {
-        t.native_resize_observed_current(size, || {
-            let generation = state.generation.load(Ordering::SeqCst);
-            let core = state.core.lock().expect("core lock");
-            let win = main_window(app);
-            let scale = win.scale_factor().ok()?;
-            if !scale.is_finite() || scale <= 0.0 {
-                return None;
-            }
-            let area_h = state.work_area.lock().expect("work area lock").h;
-            let desired = questioncmd::desired_native_size_for(core.expanded, core.chat, scale, area_h, core.chat_height());
-            let actual = win.inner_size().ok()?;
-            if (actual.width, actual.height) != size
-                || state.generation.load(Ordering::SeqCst) != generation
-            {
-                return None;
-            }
-            // Actual event + getter + current target, NOT an OS causal ID or
-            // permission to accept an arbitrary old compact observation.
-            Some((generation, desired))
-        });
-    }
-}
 pub fn pending_error() -> BridgeError {
     BridgeError {
         code: "question_pending".into(),

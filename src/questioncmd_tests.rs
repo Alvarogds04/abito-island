@@ -71,9 +71,9 @@ fn questioncmd_guarded_click_preserves_pending_chat_and_clears_press() {
     struct Io;
     impl WindowIo for Io {
         fn outer_position(&self) -> (i32, i32) { (0, 0) }
-        fn size(&self) -> (i32, i32) { (672, 256) }
+        fn size(&self) -> (i32, i32) { (672, 340) }
         fn scale(&self) -> f64 { 1.0 }
-        fn set_outer_position(&self, _x: i32, _y: i32) {}
+        fn set_outer_position(&self, _x: i32, _y: i32) { panic!("a click must not move the native window"); }
     }
     let area = Rect { x:0, y:0, w:1920, h:1080 };
     for (expanded, pending) in [(true,true), (true,false), (false,true)] {
@@ -81,104 +81,13 @@ fn questioncmd_guarded_click_preserves_pending_chat_and_clears_press() {
         core.press(&Io, (20.0, 20.0));
         let result = guarded_release(&mut core, &Io, area, (20.0, 20.0), false, pending);
         assert!(!core.press_active());
-        if expanded && pending {
+        if expanded {
             assert!(matches!(result, ReleaseOutcome::Cancelled));
             assert!(core.expanded); assert!(core.chat);
         } else {
             assert!(matches!(result, ReleaseOutcome::Toggle(_)));
             assert_eq!(core.expanded, !expanded);
         }
-    }
-}
-#[test]
-fn questioncmd_queued_compact_apply_checks_and_applies_inside_admission_guard() {
-    use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}};
-    // The fake main queue deliberately runs only after a possible admission or
-    // plan invalidation. try_lock proves both check and apply retain the guard.
-    for (pending_after_queue, current_after_queue) in [(false,true), (true,true), (false,false)] {
-        let admission = Arc::new(Mutex::new(false));
-        let current = Arc::new(AtomicBool::new(true));
-        let applied = Arc::new(AtomicUsize::new(0));
-        let (guard_lock, check_lock, apply_lock) = (admission.clone(), admission.clone(), admission.clone());
-        let (check_current, apply_count) = (current.clone(), applied.clone());
-        let mut queued = None;
-        queue_compact_apply(|task| queued = Some(task), move |operation| {
-            let guard = guard_lock.lock().unwrap();
-            assert!(check_lock.try_lock().is_err(), "plan checked outside admission guard");
-            if !*guard && check_current.load(Ordering::SeqCst) {
-                let mut barrier = NativeResizeBarrier::default();
-                assert_eq!(barrier.begin(1, (304,44), None, 0), ResizeStart::Request);
-                assert_eq!(barrier.state(), NativeTransition::NativeTransitionBusy);
-                operation(true);
-            }
-        }, move |resize| {
-            assert!(resize);
-            assert!(apply_lock.try_lock().is_err(), "resize applied outside admission guard");
-            apply_count.fetch_add(1, Ordering::SeqCst);
-        });
-        assert_eq!(applied.load(Ordering::SeqCst), 0, "no work before main queue execution");
-        *admission.lock().unwrap() = pending_after_queue;
-        current.store(current_after_queue, Ordering::SeqCst);
-        queued.unwrap()();
-        assert_eq!(applied.load(Ordering::SeqCst), usize::from(!pending_after_queue && current_after_queue));
-        assert!(admission.try_lock().is_ok(), "guard released after application");
-    }
-}
-#[test]
-fn questioncmd_native_resize_requires_matching_observation_and_bounds_timeout() {
-    let mut barrier = NativeResizeBarrier::default();
-    assert_eq!(barrier.begin(7, (304,44), Some((672,176)), 100), ResizeStart::Request);
-    assert_eq!(barrier.state(), NativeTransition::NativeTransitionBusy);
-    assert!(!barrier.observe(6, (304,44)));
-    assert!(!barrier.observe(7, (304,45)));
-    assert!(!barrier.timeout(7, 2099));
-    assert!(barrier.timeout(7, 2100));
-    assert_eq!(barrier.state(), NativeTransition::NativeTransitionDegraded);
-    assert!(!barrier.timeout(7, 9999)); // one deadline, not repeated invalidation
-    assert!(barrier.observe(7, (304,44))); // late matching actual observation
-    assert_eq!(barrier.state(), NativeTransition::Idle);
-}
-#[test]
-fn questioncmd_native_resize_known_size_never_bypasses_unsettled_generation() {
-    let mut barrier = NativeResizeBarrier::default();
-    assert_eq!(barrier.begin(1, (304,44), Some((304,44)), 0), ResizeStart::Stable);
-    assert_eq!(barrier.state(), NativeTransition::Idle);
-    assert_eq!(barrier.begin(2, (304,44), None, 10), ResizeStart::Request);
-    assert_eq!(barrier.begin(3, (304,44), Some((304,44)), 20), ResizeStart::Request);
-    assert!(!barrier.timeout(2, 9999));
-    assert!(!barrier.observe(2, (304,44)));
-    assert_eq!(barrier.begin(2, (304,44), Some((304,44)), 30), ResizeStart::Stale);
-    assert_eq!(barrier.state(), NativeTransition::NativeTransitionBusy);
-    assert!(barrier.timeout(3, 2020));
-    assert_eq!(barrier.state(), NativeTransition::NativeTransitionDegraded);
-    assert_eq!(barrier.begin(4, (304,44), Some((304,44)), 2030), ResizeStart::Request);
-    assert!(barrier.observe(4, (304,44)));
-}
-#[test]
-fn questioncmd_native_recovery_only_accepts_current_plan_physical_size() {
-    // the chat column follows the work area height (physical px): 1048 -> 672x656, 2096@2x -> same logical
-    for (expanded, chat, expected) in [(false,false,(288,32)),(false,true,(288,32)),
-                                     (true,false,(672,208)),(true,true,(672,256))] {
-        assert_eq!(desired_native_size(expanded, chat, 1.0, 1048), expected);
-        assert_eq!(desired_native_size(expanded, chat, 2.0, 2096), (expected.0*2, expected.1*2));
-    }
-    // a shorter screen gets a shorter column, and only the chat depends on it
-    assert_eq!(desired_native_size(true, true, 1.0, 600), (672, 256));
-    assert_eq!(desired_native_size(true, false, 1.0, 600), (672, 208));
-    for timed_out in [false,true] {
-        let mut barrier = NativeResizeBarrier::default();
-        barrier.begin(7, (304,44), None, 0);
-        if timed_out { assert!(barrier.timeout(7, 2000)); }
-        // Merely advancing the host view never proves the window has resized.
-        assert!(!barrier.observe_current(8, (672,176), (304,44)));
-        assert!(!barrier.observe_current(8, (672,176), (672,177)));
-        assert_ne!(barrier.state(), NativeTransition::Idle);
-        assert!(barrier.observe_current(8, (672,176), (672,176)));
-        assert_eq!(barrier.state(), NativeTransition::Idle);
-        assert!(!barrier.timeout(7, 9999));
-        barrier.begin(9, (304,44), None, 10000);
-        assert!(!barrier.observe_current(8, (672,176), (672,176)));
-        assert_eq!(barrier.state(), NativeTransition::NativeTransitionBusy);
     }
 }
 #[test]
@@ -219,15 +128,4 @@ fn questioncmd_budget_literal_escaping_validation_and_privacy() {
     let v = serde_json::to_string(&text_budget(&slot, ID, "secret", NOW).unwrap()).unwrap();
     for secret in ["secret","session-1","private-a","project","source"] { assert!(!v.contains(secret)); }
     assert!(slot.active().is_some());
-}
-
-#[test]
-fn the_desired_native_size_follows_the_chat_height_the_page_asked_for() {
-    // S10 (L35): a growing chat is a bigger native window, so the recovery check must expect that one, not the 256 at rest
-    for (asked, window_h) in [(240, 256), (280, 296), (300, 316), (999, 316), (0, 256)] {
-        assert_eq!(desired_native_size_for(true, true, 1.0, 1048, asked), (672, window_h), "asked {asked}");
-    }
-    assert_eq!(desired_native_size_for(true, false, 1.0, 1048, 300), (672, 208), "the overview never takes the chat height");
-    assert_eq!(desired_native_size_for(false, true, 1.0, 1048, 300), (288, 32));
-    assert_eq!(desired_native_size_for(true, true, 2.0, 2096, 300), (1344, 632));
 }

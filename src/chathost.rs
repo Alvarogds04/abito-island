@@ -25,7 +25,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     main_window, now_ms, publish, refresh_work_area, specialistshost, store_requested, AppState, TauriIo,
-    CHAT_SETTLE_DELAY_MS, COLLAPSE_RESIZE_DELAY_MS, QUITTING,
+    QUITTING,
 };
 
 /// #343 hardening: paths the OS reported DROPPING on the main window,
@@ -72,14 +72,8 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     // #431: off-main caller (chat_action, lane locks taken): read the
     // main-thread scale cache, never the blocking window scale getter.
     let scale = crate::cached_scale();
-    let settings_open = state.core.lock().expect("core lock").settings;
-    let (cw, ch) = if settings_open {
-        geometry::settings_visible(area.w, area.h, scale)
-    } else {
-        // S10 (L35): Coucou's growing chat — the height the page last asked for, clamped in Rust
-        let asked = state.core.lock().expect("core lock").chat_height();
-        geometry::chat_visible_for(area.h, scale, asked)
-    };
+    let asked = state.core.lock().expect("core lock").chat_height();
+    let (cw, ch) = geometry::chat_visible_for(area.h, scale, asked);
     v["chat_visible"] = json!([cw, ch]);
     v["target"] = match current_target(state) {
         Some(t) => json!({
@@ -109,44 +103,25 @@ pub fn publish_chat(app: &AppHandle) {
     }
 }
 
-/// Apply an overview <-> chat plan: growing resizes first, then the
-/// frontend animates; shrinking animates first and resizes after the 340 ms
-/// shrink (generation-guarded, the same rule as `apply_plan`).
+/// Apply an overview <-> chat plan inside the fixed native window.
+/// Only the page animates its visible island; input-shape reports follow it.
 pub fn apply_view(app: &AppHandle, state: &AppState, plan: ViewPlan) {
     let ViewPlan {
         chat,
         size: (w, h),
         rect: r,
-        stage,
         visible: (vw, vh),
         ..
     } = plan;
     store_requested(state, if chat { "chat" } else { "overview" }, Some((r.x, r.y)), Some((w, h)));
-    let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    state.generation.fetch_add(1, Ordering::SeqCst);
     let win = main_window(app);
     let push = format!(
         "window.__islandSetView && window.__islandSetView('{}',{vw},{vh});",
         if chat { "chat" } else { "overview" }
     );
-    // #309: overview and column move in opposite directions per axis (672x208 <-> 672x656), so the
-    // window first becomes the STAGE that holds both views, the page animates inside it, and the
-    // window settles on the final rectangle once the animation is over. Opening: stage now, final
-    // after the grow spring; closing: stage now, final after the 340 ms shrink (same generation
-    // guard as every other deferred resize, so a newer plan always wins).
-    TauriIo(&win).set_size(stage.w, stage.h);
-    TauriIo(&win).set_outer_position(stage.x, stage.y);
+    crate::ensure_island_window(app);
     let _ = win.eval(push);
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(if chat { CHAT_SETTLE_DELAY_MS } else { COLLAPSE_RESIZE_DELAY_MS }));
-        let state = app.state::<AppState>();
-        if state.generation.load(Ordering::SeqCst) != generation {
-            return;
-        }
-        let win = main_window(&app);
-        TauriIo(&win).set_size(w, h);
-        TauriIo(&win).set_outer_position(r.x, r.y);
-    });
 }
 
 /// Switch the expanded island to the chat (`true`) or the overview.
@@ -203,22 +178,6 @@ fn capture_window_context(app: &AppHandle) {
         let mut cx = state.chat_context.lock().expect("chat context lock");
         cx.on_chat_open(enabled, || abito_island::contextwin::capture(None, None));
     });
-}
-
-/// #408: give the chat column the Settings size while Ajustes is open (`open`) and take it back on close.
-/// Only from the chat view; anchored to the docked edge and clamped to the work area like every view.
-pub fn switch_settings(app: &AppHandle, state: &AppState, open: bool) {
-    if *state.phase.lock().expect("phase lock") != IslandState::Expanded {
-        return;
-    }
-    let area = refresh_work_area(app, state);
-    let win = main_window(app);
-    let io = TauriIo(&win);
-    let plan = state.core.lock().expect("core lock").plan_settings(&io, area, open);
-    if let Some(plan) = plan {
-        apply_view(app, state, plan);
-        publish_chat(app);
-    }
 }
 
 /// Submit one message: validated, accepted with native ids, then ONE

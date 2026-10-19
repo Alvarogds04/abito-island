@@ -7,14 +7,9 @@ pub(crate) fn enabled() -> bool {
     std::env::var("ABITO_NATIVE_AUDIT").as_deref() == Ok("1")
 }
 
-pub(crate) fn expected(view: &str, scale: f64, area_h: i32) -> (i32, i32) {
+pub(crate) fn expected(_view: &str, scale: f64, _area_h: i32) -> (i32, i32) {
     use abito_island::geometry;
-    let logical = match view {
-        "overview" => geometry::LOGICAL_OVERVIEW,
-        "chat" => geometry::chat_window(area_h, scale),
-        _ => geometry::LOGICAL_COMPACT,
-    };
-    geometry::scaled_size(logical, scale)
+    geometry::scaled_size(geometry::ISLAND_WINDOW, scale)
 }
 
 fn widgets(widget: &gtk::Widget, depth: usize, out: &mut Vec<Value>) {

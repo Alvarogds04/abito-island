@@ -7,7 +7,6 @@ use crate::question;
 use crate::questioncmd::NativeTransition;
 use std::fmt;
 use std::path::PathBuf;
-use std::time::Instant;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -128,13 +127,10 @@ pub struct TransportOptions {
     pub on_connections: Box<dyn Fn(u32) + Send + Sync>,
     /// Invalidation only; callbacks run after all transport locks are dropped.
     pub on_question_change: Box<dyn Fn() + Send + Sync>,
-    /// Monotonic native transition clock; Rust-only deterministic test seam.
-    pub native_resize_clock: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
 impl TransportOptions {
     pub fn new(runtime: impl Into<PathBuf>, project: impl Into<String>) -> Self {
-        let started = Instant::now();
         TransportOptions {
             runtime: runtime.into(),
             project: project.into(),
@@ -143,7 +139,6 @@ impl TransportOptions {
             on_notice: Box::new(|_| {}),
             on_connections: Box::new(|_| {}),
             on_question_change: Box::new(|| {}),
-            native_resize_clock: Box::new(move || started.elapsed().as_millis() as u64),
         }
     }
 
@@ -165,10 +160,6 @@ impl TransportOptions {
     pub fn on_connections(mut self, callback: impl Fn(u32) + Send + Sync + 'static) -> Self {
         self.on_connections = Box::new(callback);
         self
-    }
-
-    pub fn native_resize_clock(mut self, clock: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
-        self.native_resize_clock = Box::new(clock); self
     }
 
     pub fn on_question_change(mut self, callback: impl Fn() + Send + Sync + 'static) -> Self {

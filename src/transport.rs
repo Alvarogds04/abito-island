@@ -40,7 +40,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{self, Message};
 use crate::question::{self, Admission, HumanAnswer, Inbound, QuestionSlot, ResolutionStatus};
-use crate::questioncmd::{NativeResizeBarrier, NativeTransition, ResizeStart};
+use crate::questioncmd::NativeTransition;
 pub use crate::transport_view::{
     DeliveryState, HumanReplyError, PendingQuestionView, PreviewScan, QuestionDeliveryView,
     QuestionOptionView, QuestionOutcome, QuestionSnapshot, TransportError, TransportOptions,
@@ -57,7 +57,7 @@ struct Delivery { connection: u64, view: QuestionDeliveryView, expected: Resolut
 #[derive(Default)]
 struct Questions {
     slot: QuestionSlot, origin: Option<QuestionOrigin>, deliveries: Vec<Delivery>,
-    ready: HashSet<u64>, notice: Option<QuestionOutcome>, native_resize: NativeResizeBarrier,
+    ready: HashSet<u64>, notice: Option<QuestionOutcome>,
 }
 impl Questions {
     fn snapshot(&self) -> QuestionSnapshot {
@@ -70,12 +70,11 @@ impl Questions {
                 agent: q.agent().into(), agent_label: q.agent_label() }
         });
         QuestionSnapshot { pending, deliveries: self.deliveries.iter().map(|d| d.view.clone()).collect(),
-            ready_connections: self.ready.len(), notice: self.notice, native_transition: self.native_resize.state() }
+            ready_connections: self.ready.len(), notice: self.notice, native_transition: NativeTransition::Idle }
     }
     /// No expiry wire reply is necessary. Frozen producer deadline only; no
     /// answer/default and no serialization failure can retain private text.
-    fn prune(&mut self, now: u64, native_now: u64) -> bool {
-        let native_changed = self.native_resize.tick(native_now);
+    fn prune(&mut self, now: u64) -> bool {
         let expired = self.slot.active().filter(|a| now >= a.question().expires_at()).map(|a| a.connection_id());
         let before = self.deliveries.len();
         self.deliveries.retain(|d| now < d.view.expires_at);
@@ -85,7 +84,7 @@ impl Questions {
             self.slot.disconnect(connection); self.origin = None;
             self.notice = Some(QuestionOutcome::Expired);
         }
-        expired.is_some() || lost || native_changed
+        expired.is_some() || lost
     }
     fn revoke(&mut self, connection: u64, outcome: QuestionOutcome) -> bool {
         let pending = self.slot.disconnect(connection);
@@ -420,7 +419,6 @@ struct Inner {
     on_connections: Box<dyn Fn(u32) + Send + Sync>,
     questions: Mutex<Questions>,
     on_question_change: Box<dyn Fn() + Send + Sync>,
-    native_resize_clock: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
 impl Inner {
@@ -429,7 +427,7 @@ impl Inner {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.on_question_change)()));
     }
     fn expire_questions(&self) {
-        let changed = self.questions.lock().expect("questions lock").prune(now_ms(), (self.native_resize_clock)());
+        let changed = self.questions.lock().expect("questions lock").prune(now_ms());
         if changed { self.question_changed(); }
     }
     /// `transport.cjs report()`: clients that completed the handshake.
@@ -464,7 +462,7 @@ impl Transport {
     pub fn question_snapshot(&self) -> QuestionSnapshot {
         let (snapshot, changed) = {
             let mut q = self.inner.questions.lock().expect("questions lock");
-            let changed = q.prune(now_ms(), (self.inner.native_resize_clock)()); (q.snapshot(), changed)
+            let changed = q.prune(now_ms()); (q.snapshot(), changed)
         };
         if changed { self.inner.question_changed(); }
         snapshot
@@ -495,40 +493,6 @@ impl Transport {
         let q = self.inner.questions.lock().expect("questions lock");
         operation(q.slot.active().is_some())
     }
-    /// Check, establish the barrier and call/enqueue native work under the SAME
-    /// admission mutex. Callbacks run after unlocking; closures must not reenter
-    /// transport. `apply(false)` may reposition but MUST NOT request a resize.
-    pub fn compact_resize(&self, generation: u64, expected: (u32,u32), current: impl FnOnce() -> bool,
-        observed: impl FnOnce() -> Option<(u32,u32)>, apply: impl FnOnce(bool)) -> bool {
-        let changed = {
-            let mut q = self.inner.questions.lock().expect("questions lock");
-            if q.slot.active().is_some() || !current() { return false; }
-            let before = q.native_resize.state();
-            let start = q.native_resize.begin(generation, expected, observed(), (self.inner.native_resize_clock)());
-            if start == ResizeStart::Stale { return false; }
-            apply(start == ResizeStart::Request);
-            before != q.native_resize.state()
-        };
-        if changed { self.inner.question_changed(); }
-        true
-    }
-    /// Actual physical Resized observation only; no getter, synthetic ACK or
-    /// receipt is substituted. A matching late observation can clear degraded.
-    pub fn native_resize_observed(&self, generation: u64, size: (u32,u32)) {
-        let changed = self.inner.questions.lock().expect("questions lock").native_resize.observe(generation, size);
-        if changed { self.inner.question_changed(); }
-    }
-    /// Recovery under a newer host plan requires that plan's current physical
-    /// target, not the old compact size. `current` must validate the actual
-    /// observation and a consistent generation/geometry snapshot under this
-    /// lock; callbacks stay outside it. This is observation, not causal proof.
-    pub fn native_resize_observed_current(&self, size: (u32,u32), current: impl FnOnce() -> Option<(u64,(u32,u32))>) {
-        let changed = {
-            let mut q = self.inner.questions.lock().expect("questions lock");
-            current().is_some_and(|(generation, desired)| q.native_resize.observe_current(generation, desired, size))
-        };
-        if changed { self.inner.question_changed(); }
-    }
     /// Host-only entry points. UI supplies exactly an id and index/text, never
     /// scope/source/connection or an opaque wire token. Trusted human input must
     /// still be enforced by the later closed IPC/UI gate; this is not attestation.
@@ -544,7 +508,7 @@ impl Transport {
     fn human_reply(&self, id: &str, answer: Option<HumanAnswer>) -> Result<(), HumanReplyError> {
         let (result, changed) = {
             let mut q = self.inner.questions.lock().expect("questions lock");
-            let pruned = q.prune(now_ms(), (self.inner.native_resize_clock)());
+            let pruned = q.prune(now_ms());
             let result = q.human_with(id, answer, now_ms(), |origin, line| write_line(&origin.writer, line));
             let changed = pruned || result.is_ok() || result == Err(HumanReplyError::OutcomeUnknown);
             (result, changed)
@@ -738,7 +702,6 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
         on_notice,
         on_connections,
         on_question_change,
-        native_resize_clock,
     } = options;
 
     prepare_runtime(&runtime)?;
@@ -831,7 +794,6 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
         on_notice,
         on_connections,
         on_question_change,
-        native_resize_clock,
         questions: Mutex::new(Questions::default()),
     });
 
@@ -969,25 +931,16 @@ fn receive_question(inner: &Inner, connection: u64, identity: &protocol::Identit
     let (valid, changed) = {
         let mut state = inner.questions.lock().expect("questions lock");
         let now = now_ms();
-        let mut changed = state.prune(now, (inner.native_resize_clock)());
+        let mut changed = state.prune(now);
         let valid = match inbound {
             Inbound::Question(q) => {
                 // Capacity is deliberately bounded: admission is busy, never
                 // evict a sent receipt early or build an unbounded transcript.
                 let duplicate = state.deliveries.iter().any(|d| d.view.id == q.id());
-                // Only the originating connection's negotiated capability can
-                // disclose this closed native code. Ordinary global busy has
-                // no extra fields; level 1 always retains its exact old shape.
-                let native_reason = match state.native_resize.state() {
-                    NativeTransition::NativeTransitionBusy => Some(question::BusyReason::NativeTransitionBusy),
-                    NativeTransition::NativeTransitionDegraded => Some(question::BusyReason::NativeTransitionDegraded),
-                    NativeTransition::Idle => None,
-                };
-                let admission = if native_reason.is_some() || state.deliveries.len() >= DELIVERY_LIMIT || duplicate {
-                    match native_reason.filter(|_| *busy_reason_supported) {
-                        Some(reason) => question::busy_line_with_reason(identity, q.id(), now, reason),
-                        None => question::busy_line(identity, q.id(), now),
-                    }.map(Admission::Busy)
+                // Fixed native geometry never blocks admission. Preserve bounded receipts,
+                // duplicate rejection and the original minimal global-busy wire reply.
+                let admission = if state.deliveries.len() >= DELIVERY_LIMIT || duplicate {
+                    question::busy_line(identity, q.id(), now).map(Admission::Busy)
                 } else { state.slot.admit(connection, identity, q, now) };
                 match admission {
                     Ok(Admission::Accepted) => {

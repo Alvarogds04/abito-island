@@ -54,7 +54,9 @@ const source = fs.readFileSync(path.join(__dirname, '../frontend/desktop.js'), '
   assert(click.includes('desktop::plan_click_open('));
   assert(!/approval::|dispatch_verb\(|dispatch_action\(/.test(click), 'click must not reuse authority-bearing legacy expansion');
   assert(click.indexOf('publish(app, state)') < click.indexOf('app.emit("desktop:notice-open"'));
-  assert(click.includes('click_native_current(&state, generation)'), 'deferred native settle is fenced');
+  assert(click.includes('click_native_current(state, generation)'), 'native application is fenced');
+  assert(click.includes('ensure_island_window(app)'), 'clicks use the fixed-window funnel');
+  assert(!click.includes('std::thread::spawn'), 'there is no deferred native resize to fence');
   assert(main.includes('desktop::click_plan_is_current('));
   process.stdout.write('notice-click-check: 6 facade groups + native wiring checks passed\n');
 })().catch(error => { process.stderr.write(`${error.stack || String(error)}\n`); process.exitCode = 1; });

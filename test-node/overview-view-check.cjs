@@ -533,7 +533,7 @@ test('§3: a card never hides a missing Pi / downed notices channel', () => {
 
 test('R6 visible size: Coucou botDiameter 58 plain overview, 56 with a card (scale/viewBox only; S10 L19)', () => {
   const num = re => { const m = re.exec(islandSrc); assert.ok(m, String(re)); return m.slice(1).map(Number); };
-  const [units] = num(/R6_VISIBLE_UNITS = (\d+)/);
+  const units = 112; // R6 artwork's measured extent; not an unused runtime constant.
   const vb = num(/OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/);
   const [plain] = num(/OVERVIEW = \{[^}]*clay: (\d+)/);
   const [card] = num(/OVERVIEW_CARD = \{ clay: (\d+)/);
@@ -783,15 +783,15 @@ test('#304 wiring: the page decides motion itself (data-motion on <html>), start
   assert.match(islandSrc, /AbitoClay\.setForced\(!honorSystem\)/);
 });
 
-test('L34 Coucou\'s bar: the collapsed island is 288x32 with corners 0 0 14 14, in step with the native 288x32 window, the character where Coucou puts its bot', () => {
+test('L34 Coucou\'s bar: the collapsed island is 288x32 with corners 0 0 14 14 inside the fixed native window', () => {
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
   assert.match(geo, /pub const COMPACT_BAR: \(i32, i32\) = \(288, 32\);/);
-  assert.match(geo, /pub const LOGICAL_COMPACT: \(i32, i32\) = COMPACT_BAR;/);
+  assert.match(geo, /pub const ISLAND_WINDOW: \(i32, i32\) = \(672, 340\);/);
   assert.doesNotMatch(geo, /pub const DOT_DIAMETER/, 'the disc is gone');
   const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), clayX: (\d+), drop: (\d+) \}/.exec(islandSrc);
   assert.ok(m, 'COMPACT constant');
   const [w, h, r, gap, clay, clayX] = m.slice(1, 7).map(Number);
-  assert.deepEqual([w, h, r, gap], [288, 32, 14, 0], 'the visible bar is the native window: no margin');
+  assert.deepEqual([w, h, r, gap], [288, 32, 14, 0], 'the visible bar remains flush with the top edge');
   assert.equal(clayX, 40, 'Coucou botPosition(compact): cx 40');
   const vbx = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   const visible = clay * 112 / vbx[2];
@@ -823,10 +823,10 @@ test('L34 mini grid: up to four small characters on the bar, 13px cells 3px apar
   assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /<div id="mini-grid" aria-hidden="true"><\/div>/);
 });
 
-test('#302 drag/snap/edge memory are untouched: the native window is still a plain rectangle and nothing in the frontend decides docking', () => {
+test('fixed-window gestures retain click reporting and character pick-up without frontend docking policy', () => {
   assert.doesNotMatch(islandSrc, /snap_to_edge|nearest_vertical_edge|anchor_toggle/);
   assert.match(islandSrc, /send\('drag_press'/); assert.match(islandSrc, /send\('drag_release'/);
-  assert.match(islandSrc, /island\.style\.borderRadius = `\$\{rTop\}px \$\{rTop\}px \$\{rBottom\}px \$\{rBottom\}px`/, 'S10: square top corners (the notch meets the edge), r14 below');
+  assert.match(islandSrc, /put\(island, 'borderRadius', `\$\{rTop\}px \$\{rTop\}px \$\{rBottom\}px \$\{rBottom\}px`\)/, 'S10: square top corners (the notch meets the edge), r14 below');
 });
 
 test('CSS structure: braces balance (no stray «}» swallowing the next rule) and every critical top-level rule exists', () => {
@@ -847,7 +847,7 @@ test('CSS structure: braces balance (no stray «}» swallowing the next rule) an
   assert.ok(top.some(t => t.startsWith('html[data-motion="reduce"] #notices')), 'the reduced-motion rules are top-level rules');
 });
 
-test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = geometry::LOGICAL_COMPACT), so there is no 304x44 transparent flash with the disc clipped', () => {
+test('the window is BORN at ISLAND_WINDOW, independent of the visible compact bar', () => {
   let conf;
   try {
     conf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tauri.conf.json'), 'utf8')).app.windows[0];
@@ -855,9 +855,9 @@ test('#302 follow-up: the window is BORN at the compact size (tauri.conf.json = 
     assert.fail(`tauri.conf.json unreadable: ${error}`);
   }
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
-  const bar = /pub const COMPACT_BAR: \(i32, i32\) = \((\d+), (\d+)\);/.exec(geo).slice(1).map(Number);
-  assert.deepEqual([conf.width, conf.height], bar, 'L34: the window is the bar');
-  assert.deepEqual([conf.width, conf.height], [288, 32]);
+  const fixed = /pub const ISLAND_WINDOW: \(i32, i32\) = \((\d+), (\d+)\);/.exec(geo).slice(1).map(Number);
+  assert.deepEqual([conf.width, conf.height], fixed);
+  assert.deepEqual([conf.width, conf.height], [672, 340]);
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
   assert.doesNotMatch(readme, /All sizes land exactly 304x44/, 'README must not document the old compact size as the contract');
 });

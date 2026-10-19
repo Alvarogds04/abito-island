@@ -90,7 +90,6 @@ body.probe-capture-bg { background: #d8c9a3; }
   left: 50%;
   transform: translateX(-50%);
   background: var(--island);
-  will-change: width, height;
 }
 #compact-flag { position: absolute; z-index: 2; left: 40px; top: 1px; width: 14px; height: 14px; display: none; place-items: center; pointer-events: none; }
 #compact-flag .ico svg { width: 11px; height: 11px; }

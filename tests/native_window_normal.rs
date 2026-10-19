@@ -135,7 +135,7 @@ fn number(output: &str, label: &str) -> i32 {
         .expect("xwininfo numeric field")
 }
 
-// The contract is LOGICAL: compact 304x44, overview 672x176, chat 432x(work area - 40, max 656).
+// The native contract is LOGICAL: one 672x340 window for compact, overview and chat.
 // Physical scale varies between sessions: real GTK/Tauri factors 2 and 1
 // were observed, without attributing the difference to an environment cause.
 // Use this run's SDK scale, never fixed physical dimensions. NOAUDIT is a

@@ -334,5 +334,24 @@
     const detail = clean(notice && notice.detail);
     return { name, verb, message: detail || title, terminal: { label: 'Abrir terminal', available: true, target: 'terminal', hint: '' }, ok: { label: 'OK' } };
   }
-  return { finishedCardView, expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  // ---- #493 (human L38): Coucou's Spring, frame-rate independent ---------------------------------------------------------
+  // Coucou advances its spring in fixed 1/240 s sub-steps and treats a frame longer than 50 ms as 50 ms (core/anim.ts `Spring`,
+  // island.ts @434d6a2b). Abito's loop took ONE explicit step of up to 1/30 s per frame, so a 30 Hz or a late frame moved the island
+  // differently from a 60 Hz one (and a stall slowed it). Semi-implicit Euler, same equation as before: v += a*dt; p += v*dt.
+  const SPRING_MAX_DT = 0.05, SPRING_SUBSTEP = 1 / 240;
+  function springSubsteps(dt) {
+    if (!Number.isFinite(dt) || dt <= 0) return 0;
+    return Math.ceil(Math.min(dt, SPRING_MAX_DT) / SPRING_SUBSTEP - 1e-9);
+  }
+  function springStep(p, v, target, dt, w0, zeta) {
+    const n = springSubsteps(dt);
+    if (n === 0) return { p, v };
+    const h = Math.min(dt, SPRING_MAX_DT) / n; // never longer than 1/240, and the frame's time is spent exactly (no 144 Hz speed-up)
+    for (let i = 0; i < n; i++) {
+      v += (-2 * zeta * w0 * v - w0 * w0 * (p - target)) * h;
+      p += v * h;
+    }
+    return { p, v };
+  }
+  return { springStep, springSubsteps, SPRING_MAX_DT, SPRING_SUBSTEP, finishedCardView, expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

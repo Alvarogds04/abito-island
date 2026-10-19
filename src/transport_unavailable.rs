@@ -44,33 +44,9 @@ impl Transport {
         match self.never {}
     }
 
-    /// Host geometry transaction: admission cannot race the pending check and
-    /// inline runtime resize call. This does not await queued backend/WM work.
-    /// The closure MUST NOT reenter transport or publish questions.
-    /// Conservative: an unpruned expired slot also blocks until normal expiry.
+    /// Atomic pending-question guard. The closure must not reenter transport
+    /// or publish questions; an unpruned expired slot blocks until normal expiry.
     pub fn with_question_pending<T>(&self, _operation: impl FnOnce(bool) -> T) -> T {
-        match self.never {}
-    }
-
-    /// Check, establish the barrier and call/enqueue native work under the SAME
-    /// admission mutex. Callbacks run after unlocking; closures must not reenter
-    /// transport. `apply(false)` may reposition but MUST NOT request a resize.
-    pub fn compact_resize(&self, _generation: u64, _expected: (u32, u32), _current: impl FnOnce() -> bool,
-        _observed: impl FnOnce() -> Option<(u32, u32)>, _apply: impl FnOnce(bool)) -> bool {
-        match self.never {}
-    }
-
-    /// Actual physical Resized observation only; no getter, synthetic ACK or
-    /// receipt is substituted. A matching late observation can clear degraded.
-    pub fn native_resize_observed(&self, _generation: u64, _size: (u32, u32)) {
-        match self.never {}
-    }
-
-    /// Recovery under a newer host plan requires that plan's current physical
-    /// target, not the old compact size. `current` must validate the actual
-    /// observation and a consistent generation/geometry snapshot under this
-    /// lock; callbacks stay outside it. This is observation, not causal proof.
-    pub fn native_resize_observed_current(&self, _size: (u32, u32), _current: impl FnOnce() -> Option<(u64, (u32, u32))>) {
         match self.never {}
     }
 

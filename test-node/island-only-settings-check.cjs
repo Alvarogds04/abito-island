@@ -90,7 +90,7 @@ async function page(legacy) {
   if (process.argv.includes('--motion')) {
     const p = await page(false);
     const failures = [];
-    for (const edge of ['top','bottom']) for (const [w,h] of [[400,640],[720,680]]) {
+    for (const edge of ['top']) for (const [w,h] of [[640,240],[640,300]]) {
       await p.evaluate(`__islandSetState('overview',${JSON.stringify(edge)}); __islandSetView('chat',${w},${h})`); await p.settled();
       const frames = await p.evaluate(`(() => {
         const e=document.querySelector('#island'), read=() => ({w:parseFloat(e.style.width),h:parseFloat(e.style.height),top:e.style.top,bottom:e.style.bottom});
@@ -101,16 +101,17 @@ async function page(legacy) {
       await p.settled();
       const final = await p.evaluate(`({w:parseFloat(document.querySelector('#island').style.width),h:parseFloat(document.querySelector('#island').style.height)})`);
       assert.deepEqual(final, {w:640,h:160});
-      assert.equal(frames.first[edge], '8px', `${edge} anchoring retained`);
+      assert.equal(frames.first.top, '0px', 'fixed top anchoring retained');
+      assert.equal(frames.first.bottom, 'auto', 'no bottom docking branch');
     }
     await p.command('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     await p.evaluate(`host.motionOverride=false; push([])`);
-    for (const [view,w,h] of [['chat',400,640],['overview',640,160],['chat',720,680],['overview',640,160]]) {
+    for (const [view,w,h] of [['chat',640,240],['overview',640,160],['chat',640,300],['overview',640,160]]) {
       const instant = await p.evaluate(`__islandSetView('${view}',${w},${h}); ({w:parseFloat(document.querySelector('#island').style.width),h:parseFloat(document.querySelector('#island').style.height)})`);
       assert.deepEqual(instant, {w,h}, 'reduced motion snaps to final dimensions');
     }
     await p.close(); assert.deepEqual(failures, []);
-    console.log('motion: top/bottom retain outgoing chat geometry before shrink and land on overview PASS');
+    console.log('motion: fixed top anchoring retains outgoing chat geometry before shrink and lands on overview PASS');
     return;
   }
   if (process.argv.includes('--notices')) {
@@ -125,7 +126,7 @@ async function page(legacy) {
       fs.writeFileSync(path.join(dir, name + '.png'), Buffer.from(shot.data, 'base64'));
       console.log(`Chromium DPR1 screenshot: ${path.join(dir, name + '.png')}`);
     };
-    await p.command('Emulation.setDeviceMetricsOverride', { width:672, height:176, deviceScaleFactor:1, mobile:false });
+    await p.command('Emulation.setDeviceMetricsOverride', { width:672, height:340, deviceScaleFactor:1, mobile:false });
     await p.evaluate(`__islandSetState('overview','top')`); await p.settled();
     for (const count of [0,1,2,8]) {
       await p.evaluate(`push(Array.from({length:${count}},(_,i) => ({id:'00000000-0000-4000-8000-'+String(i).padStart(12,'0'),kind:'settled',title:'Pi terminó Revisar PR '+i,detail:'Completado',at:Date.now(),expiresAt:Date.now()+60000})))`);
@@ -151,7 +152,7 @@ async function page(legacy) {
       if (count > 1) {
         check(Math.abs(geometry.list.w - 416) < 1, `${count} notices: list must span 416 logical px, got ${geometry.list.w}`);
         check(geometry.list.h >= 100, `${count} notices: list needs visible room for rows, got ${geometry.list.h}`);
-        check(geometry.list.y + geometry.list.h <= 176, `${count} notices: list stays within native 176 logical px`);
+        check(geometry.list.y + geometry.list.h <= 340, `${count} notices: list stays within the fixed native 340 logical px`);
         check(geometry.rows.every(r => Math.abs(r.h - 32) < 1), 'list rows are 32 logical px');
         check(await p.evaluate(`!calls.some(c => c.cmd === 'desktop_action' && c.p.action === 'click')`), 'Ver does not bypass native notice admission');
         if (count === 2) {
