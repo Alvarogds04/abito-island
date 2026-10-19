@@ -5,8 +5,8 @@
    mount at the tail.
 
    SEND IS LIVE (#490): `send` validates the draft and then calls the closed host verb
-   `mail_action {action:'send', to, subject, body, attachment?}` (src/mailcmd.rs, Resend with the
-   user's own key from the keychain). The page never sees a key. The READ-LIST below is still the
+   `mail_action {action:'send', to, subject, body, attachment?}` (src/mailcmd.rs: Resend, or the user's
+   own SMTP account, with credentials from the keychain). The page never sees a key. The READ-LIST below is still the
    FAKE provider (visible «datos de ejemplo» marker) until the IMAP inbox slice replaces it.
 
    ---- MOUNT CONTRACT (index.html wiring — coordinator's approval needed) ----
@@ -35,11 +35,12 @@
   const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
   const SENT = 'Mensaje enviado.';
   const REFUSALS = Object.freeze({
-    not_configured: 'Falta configurar el envío: guardá tu clave de Resend y el remitente en Ajustes.',
+    not_configured: 'Falta configurar el envío: guardá tu clave de Resend y el remitente, o tu cuenta SMTP, en Ajustes.',
+    smtp_config: 'La cuenta SMTP no es válida: revisá el servidor y el remitente en Ajustes.',
     no_sender: 'Falta el remitente: guardalo en Ajustes.',
     keychain_unavailable: 'No se pudo leer el llavero del sistema.',
-    rejected: 'Resend rechazó el mensaje: revisá la clave y el remitente.',
-    network: 'No se pudo conectar con Resend.',
+    rejected: 'El servicio de correo rechazó el mensaje: revisá las credenciales y el remitente.',
+    network: 'No se pudo conectar con el servicio de correo.',
     failed: 'No se pudo enviar el mensaje.',
   });
   const ID_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;

@@ -20,11 +20,11 @@ pub async fn mail_action(
     bridge::sender_ok(webview.label(), &origin)?;
     let draft = mailcmd::parse_mail(&payload)?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
-    let creds = tauri::async_runtime::spawn_blocking(|| mailcmd::resend_credentials(&Keychain))
+    let creds = tauri::async_runtime::spawn_blocking(|| mailcmd::route(&Keychain))
         .await
         .map_err(|_| BridgeError::denied("mail aborted"))?;
     Ok(match creds {
-        Ok((key, from)) => mailcmd::outcome(mailcmd::send_resend(mailcmd::RESEND_URL, &key, &from, &draft).await),
+        Ok(route) => mailcmd::send_route(&route, mailcmd::RESEND_URL, &draft).await,
         Err(answer) => answer,
     })
 }

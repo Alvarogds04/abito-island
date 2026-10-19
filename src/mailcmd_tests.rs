@@ -166,3 +166,138 @@ fn the_answer_depends_on_what_is_configured_and_never_carries_the_key() {
     assert_eq!(a, json!({"ok":false,"reason":"rejected"}));
     assert!(!a.to_string().contains("re_secret"));
 }
+
+// ---- SMTP (lettre) against a local fake server --------------------------------------------
+
+/// Minimal SMTP server: EHLO (advertises AUTH PLAIN), AUTH, MAIL, RCPT, DATA, QUIT.
+/// `reject_auth` answers 535. Hands back the whole transcript client→server.
+fn fake_smtp(reject_auth: bool) -> (u16, mpsc::Receiver<String>) {
+    use std::io::{BufRead, BufReader};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (s, _) = listener.accept().unwrap();
+        let mut w = s.try_clone().unwrap();
+        let mut r = BufReader::new(s);
+        let mut log = String::new();
+        write!(w, "220 fake ESMTP\r\n").unwrap();
+        let mut in_data = false;
+        loop {
+            let mut line = String::new();
+            if r.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            log.push_str(&line);
+            if in_data {
+                if line == ".\r\n" {
+                    in_data = false;
+                    write!(w, "250 queued\r\n").unwrap();
+                }
+                continue;
+            }
+            let up = line.to_ascii_uppercase();
+            if up.starts_with("EHLO") || up.starts_with("HELO") {
+                write!(w, "250-fake\r\n250 AUTH PLAIN LOGIN\r\n").unwrap();
+            } else if up.starts_with("AUTH PLAIN") {
+                if reject_auth { write!(w, "535 bad credentials\r\n").unwrap(); } else { write!(w, "235 ok\r\n").unwrap(); }
+            } else if up.starts_with("AUTH LOGIN") {
+                write!(w, "334 VXNlcm5hbWU6\r\n").unwrap();
+            } else if up.starts_with("DATA") {
+                in_data = true;
+                write!(w, "354 go\r\n").unwrap();
+            } else if up.starts_with("QUIT") {
+                write!(w, "221 bye\r\n").unwrap();
+                break;
+            } else {
+                write!(w, "250 ok\r\n").unwrap();
+            }
+        }
+        tx.send(log).unwrap();
+    });
+    (port, rx)
+}
+
+fn smtp_cfg(port: u16) -> SmtpConfig {
+    SmtpConfig { host: "127.0.0.1".into(), port, user: "me@x.com".into(), password: "pw-secret".into(), from: "Abito <me@x.com>".into() }
+}
+
+#[test]
+fn smtp_delivers_the_message_with_auth() {
+    let (port, rx) = fake_smtp(false);
+    let d = parse_mail(&json!({"action":"send","to":"ana@example.com","subject":"Hólá","body":"Texto","attachment":{"name":"r.txt","data":"QQ=="}})).unwrap();
+    run(send_smtp(&smtp_cfg(port), Security::Plain, &d)).unwrap();
+    let log = rx.recv().unwrap();
+    assert!(log.contains("AUTH PLAIN"), "{log}");
+    assert!(log.contains("MAIL FROM:<me@x.com>"), "{log}");
+    assert!(log.contains("RCPT TO:<ana@example.com>"), "{log}");
+    assert!(log.contains("Subject: =?utf-8?"), "non-ASCII subjects are encoded: {log}");
+    assert!(log.contains("multipart/mixed") && log.contains("filename=\"r.txt\""), "{log}");
+}
+
+#[test]
+fn smtp_without_attachment_is_a_plain_message_and_an_empty_body_is_a_space() {
+    let (port, rx) = fake_smtp(false);
+    let d = parse_mail(&json!({"action":"send","to":"a@b.com","subject":"S","body":""})).unwrap();
+    run(send_smtp(&smtp_cfg(port), Security::Plain, &d)).unwrap();
+    let log = rx.recv().unwrap();
+    assert!(!log.contains("multipart"), "{log}");
+}
+
+#[test]
+fn smtp_bad_credentials_are_rejected_and_a_dead_server_is_a_network_error() {
+    let (port, _rx) = fake_smtp(true);
+    let d = parse_mail(&good()).unwrap();
+    assert_eq!(run(send_smtp(&smtp_cfg(port), Security::Plain, &d)), Err(MailError::Rejected));
+    assert_eq!(run(send_smtp(&smtp_cfg(1), Security::Plain, &d)), Err(MailError::Network));
+}
+
+#[test]
+fn production_security_is_always_tls() {
+    let mut c = smtp_cfg(465);
+    assert_eq!(c.security(), Security::Implicit);
+    for p in [587, 25, 2525] {
+        c.port = p;
+        assert_eq!(c.security(), Security::StartTls, "{p}");
+    }
+}
+
+#[test]
+fn smtp_host_parsing_is_strict() {
+    assert_eq!(parse_host("smtp.Example.com"), Some(("smtp.example.com".into(), 587)));
+    assert_eq!(parse_host(" smtp.example.com:465 "), Some(("smtp.example.com".into(), 465)));
+    for bad in ["", ":25", "a b", "a..b", "-a.com", "a.com:0", "a.com:99999", "a.com:x", "http://a.com", "a.com/x", "a_b.com", "a.com:25:26"] {
+        assert_eq!(parse_host(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn routing_prefers_resend_then_smtp_then_explains_what_is_missing() {
+    let smtp = [("smtp-host", "mail.x.com:465"), ("smtp-user", "me@x.com"), ("smtp-password", "pw")];
+    assert!(matches!(route(&Fake::with(&[("resend-api-key", "k"), ("resend-from", "f@x.com")])), Ok(Route::Resend { .. })));
+    let both: Vec<_> = smtp.iter().copied().chain([("resend-api-key", "k"), ("resend-from", "f@x.com")]).collect();
+    assert!(matches!(route(&Fake::with(&both)), Ok(Route::Resend { .. })), "Resend wins like NotchBuddy");
+    match route(&Fake::with(&smtp)) {
+        Ok(Route::Smtp(c)) => assert_eq!((c.host.as_str(), c.port, c.from.as_str()), ("mail.x.com", 465, "me@x.com"), "from defaults to the user"),
+        other => panic!("{other:?}"),
+    }
+    let with_key: Vec<_> = smtp.iter().copied().chain([("resend-api-key", "k")]).collect();
+    assert!(matches!(route(&Fake::with(&with_key)), Ok(Route::Smtp(_))), "an incomplete Resend yields to a complete SMTP account");
+    assert_eq!(route(&Fake::with(&[("resend-api-key", "k")])).unwrap_err(), json!({"ok":false,"reason":"no_sender"}));
+    assert_eq!(route(&Fake::with(&[("smtp-host", "mail.x.com")])).unwrap_err(), json!({"ok":false,"reason":"not_configured"}));
+    let bad_host = [("smtp-host", "http://x"), ("smtp-user", "me@x.com"), ("smtp-password", "pw")];
+    assert_eq!(route(&Fake::with(&bad_host)).unwrap_err(), json!({"ok":false,"reason":"smtp_config"}));
+    let bad_from = [("smtp-host", "mail.x.com"), ("smtp-user", "login-name"), ("smtp-password", "pw")];
+    assert_eq!(route(&Fake::with(&bad_from)).unwrap_err(), json!({"ok":false,"reason":"smtp_config"}), "a login that is not an address needs smtp-from");
+    let ok_from: Vec<_> = bad_from.iter().copied().chain([("smtp-from", "Abito <me@x.com>")]).collect();
+    assert!(route(&Fake::with(&ok_from)).is_ok());
+}
+
+#[test]
+fn the_smtp_password_never_shows_in_debug_or_answers() {
+    assert!(!format!("{:?}", smtp_cfg(25)).contains("pw-secret"));
+    let (port, _rx) = fake_smtp(true);
+    let d = parse_mail(&good()).unwrap();
+    let a = outcome(run(send_smtp(&smtp_cfg(port), Security::Plain, &d)));
+    assert!(!a.to_string().contains("pw-secret"));
+}

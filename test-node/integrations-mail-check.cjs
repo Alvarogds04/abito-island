@@ -157,7 +157,7 @@ test('send: an invalid draft reports validation and never calls the host', async
 
 test('send: every refusal has its own Spanish message; a thrown or off-shape answer is a plain failure', async () => {
   const msg = async (a) => (await M.send(goodDraft(), null, answers(a).invoke));
-  for (const reason of ['not_configured', 'no_sender', 'keychain_unavailable', 'rejected', 'network']) {
+  for (const reason of ['not_configured', 'smtp_config', 'no_sender', 'keychain_unavailable', 'rejected', 'network']) {
     const r = await msg({ ok: false, reason });
     assert.equal(r.ok, false); assert.equal(r.reason, reason); assert.ok(r.message.length > 10, reason);
   }

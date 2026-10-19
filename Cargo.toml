@@ -73,6 +73,11 @@ tokio = { version = "1", default-features = false, features = ["rt", "time"] }
 # PulseAudio server) for the device list on Linux.
 cpal = { version = "0.18", features = ["pulseaudio"] }
 
+# #490 mail: SMTP + MIME for sending from the island with the user's own account (owner decision:
+# a mature implementation beats a hand-written one for AUTH, TLS and MIME encoding). rustls only
+# (no native-tls/openssl), no default features.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1", "tokio1-rustls-tls"] }
+
 [target.'cfg(windows)'.dependencies]
 # #467 key store: Windows Credential Manager.
 keyring = { version = "3", features = ["windows-native"] }

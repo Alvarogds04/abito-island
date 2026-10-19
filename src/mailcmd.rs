@@ -163,20 +163,82 @@ pub async fn send_resend(_: &str, _: &str, _: &str, _: &Draft) -> Result<(), Mai
     Err(MailError::Network)
 }
 
-/// What the keychain holds for Resend, or the answer to give instead of sending.
-pub fn resend_credentials(store: &dyn SecretStore) -> Result<(String, String), Value> {
+/// Where a mail goes, decided from what the keychain holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Route {
+    Resend { key: String, from: String },
+    Smtp(SmtpConfig),
+}
+
+/// The user's own SMTP account. `host` is `name` or `name:port`; port 465 means implicit TLS,
+/// anything else (587 by default) means STARTTLS, which is REQUIRED: there is no plaintext mode.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub password: String,
+    pub from: String,
+}
+
+impl std::fmt::Debug for SmtpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SmtpConfig {{ host: {:?}, port: {}, password: <redacted> }}", self.host, self.port)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Security {
+    Implicit,
+    StartTls,
+    /// Loopback fake servers in tests only.
+    #[cfg(test)]
+    Plain,
+}
+
+impl SmtpConfig {
+    pub fn security(&self) -> Security {
+        if self.port == 465 { Security::Implicit } else { Security::StartTls }
+    }
+}
+
+/// `host` or `host:port` → (host, port). Hostname characters only; a port is 1..=65535.
+pub fn parse_host(raw: &str) -> Option<(String, u16)> {
+    let raw = raw.trim();
+    let (host, port) = match raw.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().ok().filter(|p| *p != 0)?),
+        None => (raw, 587),
+    };
+    let ok = !host.is_empty()
+        && host.len() <= 253
+        && host.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    ok.then(|| (host.to_ascii_lowercase(), port))
+}
+
+/// Keychain → route, or the answer to give instead of sending. Resend (key + sender) wins,
+/// as in NotchBuddy; otherwise a complete SMTP account; otherwise a precise refusal.
+pub fn route(store: &dyn SecretStore) -> Result<Route, Value> {
     let read = |k: &str| match store.read(k) {
         Ok(v) => Ok(v.filter(|s| !s.is_empty())),
         Err(StoreError::Unavailable | StoreError::Failed) => Err(json!({"ok": false, "reason": "keychain_unavailable"})),
     };
-    let key = read(KEY_ID)?;
-    let from = read(FROM_ID)?;
-    match (key, from) {
-        (Some(k), Some(f)) => Ok((k, f)),
-        // NotchBuddy: «Set sender address in Settings.» when only the key is set.
-        (Some(_), None) => Err(json!({"ok": false, "reason": "no_sender"})),
-        _ => Err(json!({"ok": false, "reason": "not_configured"})),
+    let (key, from) = (read(KEY_ID)?, read(FROM_ID)?);
+    if let (Some(key), Some(from)) = (&key, &from) {
+        return Ok(Route::Resend { key: key.clone(), from: from.clone() });
     }
+    if let (Some(host), Some(user), Some(password)) = (read("smtp-host")?, read("smtp-user")?, read("smtp-password")?) {
+        let Some((host, port)) = parse_host(&host) else { return Err(json!({"ok": false, "reason": "smtp_config"})) };
+        let from = read("smtp-from")?.unwrap_or_else(|| user.clone());
+        if !address_ok(from.rsplit_once('<').map_or(from.as_str(), |(_, a)| a.trim_end_matches('>')).trim()) {
+            return Err(json!({"ok": false, "reason": "smtp_config"}));
+        }
+        return Ok(Route::Smtp(SmtpConfig { host, port, user, password, from }));
+    }
+    // NotchBuddy: «Set sender address in Settings.» when only the key is set.
+    if key.is_some() {
+        return Err(json!({"ok": false, "reason": "no_sender"}));
+    }
+    Err(json!({"ok": false, "reason": "not_configured"}))
 }
 
 pub fn outcome(r: Result<(), MailError>) -> Value {
@@ -187,10 +249,66 @@ pub fn outcome(r: Result<(), MailError>) -> Value {
     }
 }
 
+/// Builds the RFC 5322 message (lettre encodes headers and the attachment; it rejects header injection).
+pub fn build_message(from: &str, d: &Draft) -> Result<lettre::Message, MailError> {
+    use lettre::message::{header::ContentType, Attachment as Part, MultiPart, SinglePart};
+    let b = lettre::Message::builder()
+        .from(from.parse().map_err(|_| MailError::Rejected)?)
+        .to(d.to.parse().map_err(|_| MailError::Rejected)?)
+        .subject(d.subject.clone());
+    let text = if d.body.is_empty() { " ".to_owned() } else { d.body.clone() };
+    let built = match &d.attachment {
+        None => b.body(text),
+        Some(a) => {
+            let bytes = base64::engine::general_purpose::STANDARD.decode(&a.data).map_err(|_| MailError::Rejected)?;
+            b.multipart(
+                MultiPart::mixed()
+                    .singlepart(SinglePart::plain(text))
+                    .singlepart(Part::new(a.name.clone()).body(bytes, ContentType::parse("application/octet-stream").map_err(|_| MailError::Rejected)?)),
+            )
+        }
+    };
+    built.map_err(|_| MailError::Rejected)
+}
+
+/// Sends through the user's SMTP account (TLS always; credentials only inside the TLS session).
+/// `security` is explicit so tests can reach a loopback fake; production uses `cfg.security()`.
+pub async fn send_smtp(cfg: &SmtpConfig, security: Security, d: &Draft) -> Result<(), MailError> {
+    use lettre::transport::smtp::authentication::Credentials;
+    use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
+    let message = build_message(&cfg.from, d)?;
+    let builder = match security {
+        Security::Implicit => AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.host),
+        Security::StartTls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host),
+        #[cfg(test)]
+        Security::Plain => Ok(AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)),
+    }
+    .map_err(|_| MailError::Network)?;
+    let transport = builder
+        .port(cfg.port)
+        .credentials(Credentials::new(cfg.user.clone(), cfg.password.clone()))
+        .timeout(Some(std::time::Duration::from_secs(30)))
+        .build();
+    match transport.send(message).await {
+        Ok(r) if r.is_positive() => Ok(()),
+        Ok(_) => Err(MailError::Rejected),
+        Err(e) if e.is_permanent() || e.is_transient() => Err(MailError::Rejected),
+        Err(_) => Err(MailError::Network),
+    }
+}
+
+/// Runs the chosen route.
+pub async fn send_route(route: &Route, resend_endpoint: &str, d: &Draft) -> Value {
+    outcome(match route {
+        Route::Resend { key, from } => send_resend(resend_endpoint, key, from, d).await,
+        Route::Smtp(cfg) => send_smtp(cfg, cfg.security(), d).await,
+    })
+}
+
 /// Credentials → one send → the page's answer (`{ok}` or `{ok:false, reason}`; no secrets).
 pub async fn send_answer(store: &dyn SecretStore, endpoint: &str, d: &Draft) -> Value {
-    match resend_credentials(store) {
-        Ok((key, from)) => outcome(send_resend(endpoint, &key, &from, d).await),
+    match route(store) {
+        Ok(r) => send_route(&r, endpoint, d).await,
         Err(answer) => answer,
     }
 }

@@ -17,7 +17,9 @@ const INTEGRATIONS = [
   { id: "integration_resend", name: "Resend", color: "#22C55E", fields: [["resend-api-key", "API key", "re_…"], ["resend-from", "Sender address", "Abito <you@yourdomain.com>"]], hint: "Sender must belong to a domain verified in Resend. It is used when you send mail from the island." },
   { id: "integration_notion", name: "Notion", color: "#8C8C8C", fields: [["notion-api-key", "Integration token", "ntn_…"]] },
   { id: "integration_calcom", name: "Cal.com", color: "#C9956A", fields: [["calcom-api-key", "API key", "cal_…"]] },
-  { id: "integration_spotify", name: "Spotify", color: "#1DB954", fields: [] }
+  { id: "integration_spotify", name: "Spotify", color: "#1DB954", fields: [] },
+  // Abito-owned (#490): not a pill. The user's own SMTP account for sending mail from the island when Resend is not set.
+  { id: "mail_smtp", name: "Mail (SMTP)", color: "#8C8C8C", noPill: true, fields: [["smtp-host", "Server (port 465 = TLS, otherwise STARTTLS)", "smtp.example.com:587"], ["smtp-user", "User", "you@example.com"], ["smtp-password", "Password", "…"], ["smtp-from", "Sender (optional)", "Abito <you@example.com>"]], hint: "Used to send mail from the island when no Resend key and sender are saved. The connection is always encrypted." }
 ];
 async function renderIntegrations({ invoke, V, P, C, listen, timers }) {
   const s = session(invoke, listen, timers), { root, call, work, watch } = s;
@@ -52,14 +54,15 @@ async function renderIntegrations({ invoke, V, P, C, listen, timers }) {
   }
   const offered = new Set(C.available().map((p) => p.id));
   const upstream = new Set(availablePills().map((p) => p.id));
-  for (const def of INTEGRATIONS.filter((d) => offered.has(d.id) && upstream.has(d.id))) {
+  for (const def of INTEGRATIONS.filter((d) => d.noPill || offered.has(d.id) && upstream.has(d.id))) {
+    const noPill = !!def.noPill;
     const sw = trusted(h("button", { id: `declare-${def.id}`, class: "switch", "aria-label": def.name }));
     sw.addEventListener("click", (e) => {
       if (!e.isTrusted || sw.disabled) return;
       if (!P.toggle(P.normalize(prefs), def.id)) return;
       save({ action: "toggle_declared_pill", id: def.id });
     });
-    switches.set(def.id, sw);
+    if (!noPill) switches.set(def.id, sw);
     const rows = h("div", { style: "display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0" });
     for (const [key, label, placeholder] of def.fields) {
       const supported = V.KEY_IDS.includes(key);
@@ -102,6 +105,15 @@ async function renderIntegrations({ invoke, V, P, C, listen, timers }) {
     }
     if (def.hint) rows.append(hint(t(def.hint)));
     if (def.id === "integration_spotify") rows.append(h("div", { class: "hint", style: "padding-top:5px" }));
+    if (noPill) {
+      list.append(h(
+        "div",
+        { id: def.id, style: "display:flex;gap:12px;align-items:flex-start" },
+        h("div", { style: "display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px" }, h("span", { style: "font-size:12.5px", text: def.name })),
+        rows
+      ));
+      continue;
+    }
     const dot = colorDot(def, "", () => prefs.pillColors, (next) => {
       if (!known || busy) return;
       const color = next[def.id];
