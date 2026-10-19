@@ -1649,10 +1649,8 @@ test('#455 S8 replaces island settings with the standalone window and preserves 
   assert.doesNotMatch(native, /crate::open_settings_in_island\(&app, &state\)/);
   assert.doesNotMatch(native, /if !opens_own_window/);
   const main = fs.readFileSync(path.join(frontend, '../src/main.rs'), 'utf8');
-  const route = main.slice(main.indexOf('fn open_settings_in_island('), main.indexOf('fn open_chat_and_type('));
-  assert.ok(route.indexOf('Action::Expand') < route.indexOf('abito:settings-select'), 'native entry expands/reveals before opening Settings');
-  assert.match(route, /win\.show\(\)/);
-  assert.match(route, /sync_host_visible/);
+  // #498: the in-island Settings route was dead code (no caller) and is gone for good.
+  assert.doesNotMatch(main, /fn open_settings_in_island\(/);
   assert.match(native, /bridge::sender_ok\(webview.label\(\), &url\)\?/);
   assert.match(native, /chat_rate[\s\S]*?\.check\(crate::now_ms\(\)\)\?/);
   assert.match(native, /parse_settings_window_action\(&payload\)/);

@@ -34,7 +34,6 @@ mod hotkeyhost;
 mod hotkeyhost;
 mod tray;
 mod trayhost;
-mod fileshost;
 mod githubhost;
 mod mailhost;
 mod monitorshost;
@@ -55,7 +54,6 @@ mod modelshost;
 mod nativeaudit;
 mod nativewindow;
 mod islandshape;
-mod nativedialoghost;
 #[cfg(any(debug_assertions, feature = "probe"))]
 mod probe;
 mod platform;
@@ -811,20 +809,6 @@ fn restore_without_question(app: &AppHandle, state: &AppState) {
     publish(app, state);
 }
 
-/// #444 L12: native Settings entries reveal/expand the MAIN island first,
-/// including Compact/Hidden, then use the same public Settings event as the
-/// keyboard. Called by the synchronous command on the main thread (#431).
-fn open_settings_in_island(app: &AppHandle, state: &AppState) -> Result<(), BridgeError> {
-    dispatch_verb(app, state, Action::Expand, None)?;
-    let win = main_window(app);
-    let failed = |_| BridgeError { code: "window_failed".into(), message: "No se pudo abrir Ajustes en la isla.".into() };
-    win.unminimize().map_err(failed)?;
-    win.show().map_err(failed)?;
-    sync_host_visible(&win);
-    win.eval("document.dispatchEvent(new CustomEvent('abito:settings-select',{detail:'open'}));")
-        .map_err(failed)
-}
-
 /// Q1: the deliberate "Open Abito chat and type" activation (second launch
 /// with `--chat`): expand, switch to the chat view, take focus, and put the
 /// caret in the composer. The ONLY path that calls `set_focus`.
@@ -1022,32 +1006,6 @@ async fn focus_host(
         &mut rate,
         now_ms(),
         abito_island::focushost::focus_running_window,
-    )
-}
-
-/// F100: only a trusted local sender may ask the island to launch Claude
-/// Desktop. The probe is CLOSED (see `focushost`): the payload takes no
-/// parameters at all, the desktop entry is looked up among fixed names in
-/// the XDG application directories, and the only argument ever spawned is a
-/// path the probe itself resolved. An absent entry or an unwilling platform
-/// is an honest Spanish reason — never a false success, never a spawn with a
-/// caller-influenced argument.
-#[tauri::command]
-async fn launch_claude(
-    webview: tauri::Webview,
-    state: State<'_, AppState>,
-    payload: Value,
-) -> Result<(), BridgeError> {
-    crate::settingswindow::main_window_only(webview.label())?;
-    let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
-    let mut rate = state.rate.lock().expect("rate lock");
-    abito_island::focushost::launch_command(
-        webview.label(),
-        &origin,
-        &payload,
-        &mut rate,
-        now_ms(),
-        abito_island::focushost::launch_claude_app,
     )
 }
 
@@ -1863,7 +1821,6 @@ fn main() {
             integrationshost::integration_action,
             spotifyhost::spotify_action,
             secretshost::secret_action,
-            fileshost::open_action,
             githubhost::github_action,
             mailhost::mail_action,
             monitorshost::monitor_action,
@@ -1876,12 +1833,10 @@ fn main() {
             settingshost::daemon_action,
             settingswindow::settings_window_action,
             specialistshost::specialists_action,
-            nativedialoghost::native_dialog_action,
             record_facade_evidence,
             record_chat_evidence,
             record_frontend_evidence,
-            focus_host,
-            launch_claude
+            focus_host
         ])
         // Electron `win.webContents.on('did-finish-load', publish)`.
         .on_page_load(|webview, _payload| {

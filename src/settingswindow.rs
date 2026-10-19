@@ -154,11 +154,6 @@ pub(crate) fn parse_settings_window_action(payload: &Value) -> Option<&'static s
     }
 }
 
-/// #455: every legacy placement opens the same window (pure, testable).
-pub(crate) fn opens_own_window(_pref: Option<bool>) -> bool {
-    true
-}
-
 /// The window, created or shown by Rust only. A repeat `open` shows and
 /// focuses the existing window instead of building a second one. The URL is
 /// the dedicated `settings.html` page (the closed settings-label entry); the window is
@@ -233,7 +228,7 @@ pub async fn settings_window_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{main_window_only, opens_own_window, parse_settings_window_action, SETTINGS_LABEL};
+    use super::{main_window_only, parse_settings_window_action, SETTINGS_LABEL};
     use serde_json::json;
 
     /// #366 F093: the command payload is closed — exactly the two actions.
@@ -381,14 +376,6 @@ mod tests {
             all.len() >= 20,
             "the scan must see every command, saw {all:?}"
         );
-    }
-
-    /// #455 S8: stored placement never sends Settings back into the island.
-    #[test]
-    fn f455_every_legacy_preference_opens_the_own_window() {
-        for pref in [Some(true), Some(false), None] {
-            assert!(opens_own_window(pref));
-        }
     }
 
     /// #366 F093: the label is the exact one the (narrowly extended) sender

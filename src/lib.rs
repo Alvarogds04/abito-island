@@ -59,7 +59,6 @@ pub mod mailcmd;
 pub mod phone_link;
 pub mod models;
 pub mod monitors;
-pub mod nativedialog;
 pub mod claude_plan;
 pub mod codex_plan;
 pub mod plan_cmd;

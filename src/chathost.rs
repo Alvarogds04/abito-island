@@ -10,7 +10,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use abito_island::bridge::{self, BridgeError};
 use abito_island::chat::{self, Command};

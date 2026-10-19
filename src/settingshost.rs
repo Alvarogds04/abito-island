@@ -176,15 +176,6 @@ pub fn abito_instructions(host: &SettingsHost) -> Option<String> {
     host.prefs.lock().expect("prefs lock").abito_instructions.clone()
 }
 
-/// #366 F093: the effective Ajustes placement, read by the settings window host
-/// (the field is private to this module; the projection and this accessor are
-/// the only readers outside `prefs.rs`).
-pub fn settings_window_on(host: &SettingsHost) -> bool {
-    crate::settingswindow::opens_own_window(Some(
-        host.prefs.lock().expect("prefs lock").settings_window_on(),
-    ))
-}
-
 /// T6.2: the remembered inner size of the own Ajustes window (logical px), read
 /// when the window opens. Read-only: the WebView never receives it — the size is
 /// Rust's own decision (event payload only), like #264's position.
@@ -198,16 +189,6 @@ pub fn settings_window_size(app: &AppHandle) -> Option<(u32, u32)> {
         .expect("prefs lock")
         .settings_window_size;
     size
-}
-
-/// #264 (GD049): the position the human last dragged the island to, read for the
-/// FIRST geometry decision of a launch (before the window is placed) and for the
-/// post-load pin. Read-only; the WebView never receives it.
-pub fn saved_position(app: &AppHandle) -> Option<(i32, i32)> {
-    let state = app.state::<AppState>();
-    // the guard must drop before `state`: a tail expression would hold the borrow
-    let position = state.settings.prefs.lock().expect("prefs lock").position;
-    position
 }
 
 /// #389 (GD012): the monitor the human chose for the island, read for the FIRST
@@ -224,23 +205,6 @@ pub fn chosen_monitor(app: &AppHandle) -> Option<String> {
         .monitor
         .clone();
     monitor
-}
-
-/// #264: commit the origin a drag release decided, through the SAME `prefs::transact`
-/// gate, file and atomic writer as every other preference — so a settings change
-/// after a drag can never drop this, and this write can never drop a settings change.
-/// No publication: the position is not part of the settings view the WebView reads.
-/// Failure leaves the previous position in memory (and on disk) for this launch.
-pub fn save_position(app: &AppHandle, x: i32, y: i32) -> bool {
-    let state = app.state::<AppState>();
-    prefs::transact(
-        &state.settings.prefs_serial,
-        &state.settings.prefs,
-        &prefs::Command::SetPosition(x, y),
-        |p| persist_prefs(app, p),
-        |_| {},
-    )
-    .is_ok()
 }
 
 /// #486: the desktop character's saved state (Coucou `desktopMochi`), read-only.

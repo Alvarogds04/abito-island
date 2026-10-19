@@ -1479,15 +1479,6 @@ removes exactly our files and the entry. Tests: `test-node/install-check.cjs`
 - **Non-Linux** is an honest stub (the same Spanish platform reason); nothing is attempted.
 - **Tests:** `src/focushost_tests.rs` — closed enum, payload shapes, gate order and budget, classification table, topmost pick, and the honest no-match / failed-activation decisions.
 
-## #368 / F100 — closed, gated launch of Claude Desktop
-
-- **One command, no parameters:** `launch_claude` accepts exactly `null` or `{}` — every other payload shape is a public Spanish reason («Este comando no acepta parámetros.»), spends no rate budget and reaches no effect.
-- **Closed desktop-entry probe:** the command never receives an app name, a path or a command. The probe looks ONLY for the closed entry list (`src/focushost.rs`: `CLAUDE_DESKTOP_ENTRIES` — `claude.desktop`, `claude-code.desktop`, `Claude.desktop`, in that order) inside the closed XDG application directories (`$XDG_DATA_HOME/applications` or `~/.local/share/applications`, then `~/.local/share/applications`, `/usr/local/share/applications`, `/usr/share/applications`). An unrelated file like `evil.desktop` is invisible; the first directory with a hit wins; absent everywhere → «Claude Desktop no está instalado en esta máquina.»
-- **Launch:** the probe-resolved path is handed to `gio launch` (no shell, no caller-influenced argument, stdio detached). A failed spawn or non-success exit → «No pude abrir Claude Desktop.», never a false success.
-- **Gate order mirrors `focus_host`:** sender → payload validation → rate limiter → effect.
-- **Non-Linux** is an honest stub («Esta plataforma no permite abrir Claude Desktop.»); nothing is attempted.
-- **Tests:** `src/focushost_tests.rs` — closed payload shapes, gate order and budget, the not-installed / failed-launch decisions, and the closed deterministic probe (entry order, directory order, unrelated files invisible).
-
 ## #366 / F093 — the typed Ajustes placement pref
 
 - **One optional v1 field.** `prefs.json` gains an optional `settings_window` bool (absent = the
