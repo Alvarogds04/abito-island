@@ -44,6 +44,7 @@ mod planhost;
 mod dictationhost;
 mod settingshost;
 mod settingswindow;
+mod integrationshost;
 mod spotifyhost;
 mod specialists;
 mod specialistshost;
@@ -1965,6 +1966,7 @@ fn main() {
             hotkeyhost::hotkey_action,
             settingshost::agent_action,
             settingshost::prefs_action,
+            integrationshost::integration_action,
             spotifyhost::spotify_action,
             secretshost::secret_action,
             fileshost::open_action,
@@ -2063,6 +2065,7 @@ fn main() {
             dictationhost::start(&handle);
             characterhost::manage(&handle);
             characterhost::restore_on_launch(&handle);
+            integrationshost::start(&handle);
             let wa = workarea::current(&win);
             let scale = win.scale_factor().unwrap_or(1.0);
             store_scale(scale); // #431: seed the off-main scale cache

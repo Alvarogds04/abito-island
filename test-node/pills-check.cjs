@@ -1040,3 +1040,51 @@ test('S13 Blobs disposes real instances on Models and Connections exits and remo
     assert.ok(resumed[0].sample().t > before.t); assert.notEqual(resumed[0].sample().d, before.d);
   }
 });
+
+test('#489 declared integration pills with a live poller show with their colour; click focuses the card, leaves the grid and never selects a target', async () => {
+  const b = boot({ specs: SPECS, prefs: { declaredPills: ['integration_n8n', 'integration_vercel', 'integration_github'], pillColors: { integration_n8n: 'orange' } } }); b.load('specialists.js'); await flush();
+  const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
+  const base = ids(); assert.deepEqual(base, ['abito', 'esp-a', 'esp-b'], 'no poller answer yet: specialists only (unchanged)');
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_github', '__proto__'] } });
+  assert.deepEqual(ids(), [...base, 'integration_n8n'], 'only declared + card-capable + answered');
+  const n8n = b.get('pill-choices').children[3];
+  assert.equal(n8n.dataset.color, 'orange');
+  const focus = []; b.events['abito:integration-focus'] = [e => focus.push(e.detail.id)];
+  n8n.fire('click', { isTrusted: false }); assert.deepEqual(focus, []);
+  n8n.fire('click'); assert.deepEqual(focus, ['integration_n8n']);
+  assert.deepEqual(ids(), base, 'Coucou: the focused pill is the card, not a grid cell');
+  assert.equal(b.backend.specCalls.length, 0, 'never a chat target');
+  assert.equal(b.get('pill-name').textContent, 'Abito');
+  b.click('pill-choice-esp-a'); await flush();
+  assert.deepEqual(focus, ['integration_n8n', null], 'choosing a chat target releases the integration card');
+  assert.deepEqual(ids(), [...base, 'integration_n8n'], 'and the pill returns to the grid');
+  n8n.fire('click');
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: [] } });
+  assert.equal(focus.at(-1), null, 'a vanished service releases the card');
+  assert.deepEqual(ids(), base);
+});
+
+test('#489 an unseen event puts a badge on an unfocused integration pill; focusing clears it', async () => {
+  const b = boot({ prefs: { declaredPills: ['integration_vercel'] } }); await flush();
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_vercel'] } });
+  const pill = () => b.get('pill-choices').children[1];
+  assert.equal(pill().dataset.badge, 'false');
+  b.doc.dispatchEvent({ type: 'abito:integration-badge', detail: { id: 'integration_vercel' } });
+  assert.equal(pill().dataset.badge, 'true');
+  assert.match(pill().getAttribute('aria-label'), /con novedades/);
+  pill().fire('click');
+  b.doc.dispatchEvent({ type: 'abito:integration-focus', detail: { id: null } });
+  assert.equal(b.get('pill-choices').children.length, 1, 'focused: out of the grid');
+  b.click('pill-choice-abito'); await flush();
+  assert.equal(pill().dataset.badge, 'false', 'focusing cleared it');
+});
+
+test('#489 the grid shows at most four pills, Coucou rule (otherTasks.slice(0, 4)); the focused one is the card (main + 4 in total)', async () => {
+  const b = boot({ specs: SPECS, prefs: { declaredPills: ['integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'] } }); b.load('specialists.js'); await flush();
+  b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'] } });
+  const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
+  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_n8n'], 'a fifth never enters the 2x2 grid');
+  b.get('pill-choices').children[3].fire('click');
+  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_vercel'], 'the focused one leaves a free cell for the next');
+  assert.match(read('style.css'), /#pill-choices \.pill-choice:nth-child\(n\+5\)\s*\{\s*display:\s*none/, 'CSS belt unchanged');
+});

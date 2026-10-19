@@ -36,14 +36,34 @@
   }
   const syncVisibility = () => { for (const item of mounted.values()) syncClay(item); };
   function choose(id) {
+    if (focused) { focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } })); paint(); }
     if (busy || !owner()) return;
     busy = true;
     owner().act({ action: 'select', id: id === A.PRINCIPAL_ID ? null : id }).then(() => {
       busy = false; paint(); say('Destino elegido. No se inició ninguna tarea.');
     }, () => { busy = false; paint(); say('No se pudo elegir el destino; se mantuvo el anterior.'); });
   }
+  // Coucou (views.ts otherTasks.slice(0, 4)): the grid shows every pill but the focused one, at most four; the focused
+  // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
+  const MAX_PILLS = 4;
+  const gridRows = all => all.filter(r => r.id !== focused).slice(0, MAX_PILLS);
+  const CARD_PILLS = Object.freeze({ integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
+  let focused = null; const badges = new Set(), connected = new Set();
+  const integrationRows = () => {
+    const ids = [prefs.mainPill, ...(Array.isArray(prefs.declaredPills) ? prefs.declaredPills : [])];
+    const colors = prefs.pillColors && typeof prefs.pillColors === 'object' ? prefs.pillColors : {};
+    return [...new Set(ids)].filter(id => Object.prototype.hasOwnProperty.call(CARD_PILLS, id) && connected.has(id)).map(id => ({
+      id, name: CARD_PILLS[id], integration: true,
+      color: typeof colors[id] === 'string' && A.normalizeChosenColor(colors[id]) ? colors[id] : 'blue',
+    }));
+  };
+  function focusIntegration(id) {
+    focused = id; badges.delete(id);
+    doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: focused } }));
+    paint();
+  }
   function paint() {
-    const focused = doc.activeElement && host.contains(doc.activeElement) ? doc.activeElement.id : null;
+    const focusedEl = doc.activeElement && host.contains(doc.activeElement) ? doc.activeElement.id : null;
     const currentStore = store();
     const agents = root.AbitoSpecialists?.agentsView(currentStore, prefs, A).agents || [];
     const rows = [{ id: A.PRINCIPAL_ID, name: 'Abito', color: A.resolveColor(A.PRINCIPAL_ID, prefs.avatarColors) }, ...agents];
@@ -54,9 +74,14 @@
     state.textContent = storedActive && !rows.some(r => r.id === selected) ? 'Fuera de la isla' : 'En reposo';
     detail.textContent = 'Elegir un destino no inicia tareas.';
     detail.setAttribute('aria-label', `${picked.name}: destino de conversación. No se inició ninguna tarea.`);
-    const alive = new Set(rows.map(r => r.id));
+    const alive = new Set(gridRows([...rows, ...integrationRows()]).map(r => r.id));
     for (const [id, item] of mounted) if (!alive.has(id)) { item.clay?.destroy(); mounted.delete(id); }
-    const buttons = rows.map(row => {
+    // #489: declared integration pills with a card (Coucou's declared pills): their pill colour, the unseen-event
+    // badge, and a click that only focuses the card (abito:integration-focus). They never become the chat target.
+    const integ = integrationRows();
+    const rowIds = new Set(gridRows([...rows, ...integ]).map(r => r.id));
+    for (const [id, item] of mounted) if (id.startsWith('integration_') && !rowIds.has(id)) { item.clay?.destroy(); mounted.delete(id); }
+    const buttons = gridRows([...rows, ...integ]).map(row => {
       let item = mounted.get(row.id);
       if (!item) {
         const button = doc.createElement('button'); button.type = 'button'; button.className = 'pill-choice';
@@ -66,12 +91,22 @@
         svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('width', '28'); svg.setAttribute('height', '28');
         const label = doc.createElement('span'); button.append(svg, label);
         item = { button, label, svg, clay: null, mode: null }; mounted.set(row.id, item);
-        button.addEventListener('click', event => { if (event.isTrusted === true && onScreen()) choose(row.id); });
+        button.addEventListener('click', event => {
+          if (event.isTrusted !== true || !onScreen()) return;
+          if (row.integration) focusIntegration(row.id); else choose(row.id);
+        });
       }
+      item.row = row;
       item.label.textContent = row.name; item.button.dataset.color = row.color; item.svg.dataset.color = row.color;
       paintChosenColor(item.button, row.color); paintChosenColor(item.svg, row.color);
-      item.button.setAttribute('aria-pressed', selected === row.id ? 'true' : 'false');
-      item.button.setAttribute('aria-label', `${row.name}${row.id === A.PRINCIPAL_ID ? ', principal' : ''}: destino de conversación`);
+      if (row.integration) {
+        item.button.setAttribute('aria-pressed', focused === row.id ? 'true' : 'false');
+        item.button.setAttribute('aria-label', `${row.name}: integración${badges.has(row.id) ? ', con novedades' : ''}`);
+        item.button.dataset.badge = badges.has(row.id) ? 'true' : 'false';
+      } else {
+        item.button.setAttribute('aria-pressed', selected === row.id ? 'true' : 'false');
+        item.button.setAttribute('aria-label', `${row.name}${row.id === A.PRINCIPAL_ID ? ', principal' : ''}: destino de conversación`);
+      }
       syncClay(item);
       return item.button;
     });
@@ -79,10 +114,13 @@
     if (host.children.length !== buttons.length || buttons.some((button, i) => host.children[i] !== button)) {
       host.replaceChildren(...buttons);
     }
-    if (focused) (get(focused) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
+    if (focusedEl) (get(focusedEl) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
   }
   function apply(raw) { prefs = raw && typeof raw === 'object' ? raw : {}; paint(); }
   doc.addEventListener('abito:specialists-changed', paint);
+  // A service shows its pill once its poller answered (declared + key saved on the host); a pill with no key never appears.
+  doc.addEventListener('abito:integration-seen', e => { const ids = e && e.detail && Array.isArray(e.detail.ids) ? e.detail.ids : []; const next = new Set(ids.filter(id => typeof id === 'string' && Object.prototype.hasOwnProperty.call(CARD_PILLS, id))); if (next.size !== connected.size || [...next].some(id => !connected.has(id))) { connected.clear(); next.forEach(id => connected.add(id)); if (focused && !connected.has(focused)) { focused = null; doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } })); } paint(); } });
+  doc.addEventListener('abito:integration-badge', e => { const id = e && e.detail && e.detail.id; if (typeof id === 'string' && id !== focused) { badges.add(id); paint(); } });
   doc.addEventListener('visibilitychange', syncVisibility);
   if (typeof MutationObserver !== 'undefined') {
     const visibility = new MutationObserver(syncVisibility);
