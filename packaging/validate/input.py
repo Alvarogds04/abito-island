@@ -19,19 +19,21 @@ if not display:
 try:
     if len(sys.argv) == 3 and sys.argv[1] == 'key':
         key = sys.argv[2]
-        if key not in ('Down', 'Up', 'Return', 'Escape'):
+        if key not in ('Down', 'Up', 'Return', 'Escape', 'BackSpace', 'Ctrl+F8', 'Ctrl+Alt+A'):
             raise SystemExit('key not allowlisted')
         x.XStringToKeysym.argtypes = [C.c_char_p]
         x.XStringToKeysym.restype = C.c_ulong
         x.XKeysymToKeycode.argtypes = [C.c_void_p, C.c_ulong]
         x.XKeysymToKeycode.restype = C.c_uint
         t.XTestFakeKeyEvent.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_ulong]
-        code = x.XKeysymToKeycode(display, x.XStringToKeysym(key.encode('ascii')))
-        if not code:
+        names = {'Ctrl': 'Control_L', 'Alt': 'Alt_L'}
+        codes = [x.XKeysymToKeycode(display, x.XStringToKeysym(names.get(k, k).encode('ascii'))) for k in key.split('+')]
+        if not all(codes):
             raise SystemExit('key unavailable')
-        for pressed in [1, 0]:
-            if not t.XTestFakeKeyEvent(display, code, pressed, 0):
-                raise SystemExit('XTest key failed')
+        for pressed, ordered in [(1, codes), (0, list(reversed(codes)))]:
+            for code in ordered:
+                if not t.XTestFakeKeyEvent(display, code, pressed, 0):
+                    raise SystemExit('XTest key failed')
     else:
         px, py = map(int, sys.argv[1:3])
         if not (0 <= px < 1280 and 0 <= py < 900):

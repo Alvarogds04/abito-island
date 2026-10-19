@@ -38,6 +38,8 @@ pub enum Key {
     Digit(u8),  // b'0'..=b'9'
     F(u8),      // 1..=12
     Space,
+    Left,
+    Right,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +102,8 @@ impl Combo {
                 [c @ b'a'..=b'z'] => Key::Letter(c.to_ascii_uppercase()),
                 [c @ b'0'..=b'9'] => Key::Digit(*c),
                 _ if lower == "space" => Key::Space,
+                _ if lower == "left" => Key::Left,
+                _ if lower == "right" => Key::Right,
                 [b'f', rest @ ..] if !rest.is_empty() && rest.iter().all(u8::is_ascii_digit) => {
                     let n: u8 = lower[1..].parse().map_err(|_| ComboError::UnknownToken)?;
                     if !(1..=12).contains(&n) || (rest.len() > 1 && rest[0] == b'0') {
@@ -150,6 +154,8 @@ impl Combo {
             Key::Digit(c) => out.push(c as char),
             Key::F(n) => out.push_str(&format!("F{n}")),
             Key::Space => out.push_str("space"),
+            Key::Left => out.push_str("Left"),
+            Key::Right => out.push_str("Right"),
         }
         out
     }
@@ -159,6 +165,8 @@ impl Combo {
             Key::Letter(c) => u32::from(c.to_ascii_lowercase()),
             Key::Digit(c) => u32::from(c),
             Key::Space => 0x20,
+            Key::Left => 0xff51,
+            Key::Right => 0xff53,
             Key::F(n) => 0xffbe + u32::from(n) - 1,
         }
     }
@@ -184,6 +192,8 @@ impl Combo {
             Key::Letter(c) => u32::from(c.to_ascii_uppercase()),
             Key::Digit(c) => u32::from(c),
             Key::Space => 0x20,
+            Key::Left => 0x25,
+            Key::Right => 0x27,
             Key::F(n) => 0x70 + u32::from(n) - 1,
         }
     }
@@ -206,6 +216,8 @@ impl fmt::Display for Combo {
             Key::Letter(c) | Key::Digit(c) => write!(f, "{}", c as char),
             Key::F(n) => write!(f, "F{n}"),
             Key::Space => f.write_str("Space"),
+            Key::Left => f.write_str("Left"),
+            Key::Right => f.write_str("Right"),
         }
     }
 }
@@ -217,11 +229,40 @@ pub fn lock_variants() -> [u16; 4] {
     [0, 0x02, 0x10, 0x12]
 }
 
-/// The two independently persisted global bindings.
+/// The independently persisted global bindings. IDs are also the dispatch contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     ToggleIsland,
     DesktopToggle,
+    OpenChat,
+    GoToAlert,
+    JumpToTerminal,
+    NextPill,
+    PrevPill,
+    MuteToggle,
+    WardrobeToggle,
+}
+
+impl Target {
+    pub const ALL: [Self; 9] = [Self::ToggleIsland, Self::DesktopToggle, Self::OpenChat,
+        Self::GoToAlert, Self::JumpToTerminal, Self::NextPill, Self::PrevPill,
+        Self::MuteToggle, Self::WardrobeToggle];
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::ToggleIsland => "toggleIsland", Self::DesktopToggle => "desktopToggle",
+            Self::OpenChat => "openChat", Self::GoToAlert => "goToAlert",
+            Self::JumpToTerminal => "jumpToTerminal", Self::NextPill => "nextPill",
+            Self::PrevPill => "prevPill", Self::MuteToggle => "muteToggle",
+            Self::WardrobeToggle => "wardrobeToggle",
+        }
+    }
+    pub fn portal_id(self) -> &'static str {
+        match self {
+            Self::ToggleIsland => portal::SHORTCUT_ID,
+            Self::DesktopToggle => "toggle-desktop-character",
+            _ => self.id(),
+        }
+    }
 }
 
 // ---- persisted config ------------------------------------------------------------
@@ -229,11 +270,13 @@ pub enum Target {
 pub struct HotkeyConfig {
     pub combo: Combo,
     pub enabled: bool,
+    /// False after an explicit unbind; disabled-but-bound still reserves its combo.
+    pub bound: bool,
 }
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
-        HotkeyConfig { combo: Combo::default_combo(), enabled: true }
+        HotkeyConfig { combo: Combo::default_combo(), enabled: true, bound: true }
     }
 }
 
@@ -241,7 +284,16 @@ impl HotkeyConfig {
     pub fn default_for(target: Target) -> Self {
         match target {
             Target::ToggleIsland => Self::default(),
-            Target::DesktopToggle => Self { combo: Combo { mods: CTRL | ALT, key: Key::Letter(b'D') }, enabled: true },
+            Target::DesktopToggle => Self { combo: Combo { mods: CTRL | ALT, key: Key::Letter(b'D') }, enabled: true, bound: true },
+            // Preserve Abito's existing Ctrl+Alt+A island binding. The alert gets
+            // Shift rather than silently taking that already-working shortcut.
+            Target::GoToAlert => Self { combo: Combo { mods: CTRL | ALT | SHIFT, key: Key::Letter(b'A') }, enabled: true, bound: true },
+            _ => Self { combo: Combo { mods: CTRL | ALT, key: match target {
+                Target::OpenChat => Key::Space, Target::JumpToTerminal => Key::Letter(b'T'),
+                Target::NextPill => Key::Right, Target::PrevPill => Key::Left,
+                Target::MuteToggle => Key::Letter(b'S'), Target::WardrobeToggle => Key::Letter(b'G'),
+                _ => unreachable!(),
+            } }, enabled: true, bound: true },
         }
     }
 
@@ -261,13 +313,14 @@ impl HotkeyConfig {
                 let combo = Combo::parse(v.get("combo")?.as_str()?).ok()?;
                 combo.validate().ok()?;
                 let enabled = v.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true);
-                Some(HotkeyConfig { combo, enabled })
+                let bound = v.get("bound").and_then(serde_json::Value::as_bool).unwrap_or(true);
+                Some(HotkeyConfig { combo, enabled: enabled && bound, bound })
             });
         parsed.unwrap_or_else(|| Self::default_for(target))
     }
 
     pub fn to_text(&self) -> String {
-        serde_json::json!({ "v": 1, "combo": self.combo.to_string(), "enabled": self.enabled }).to_string()
+        serde_json::json!({ "v": 1, "combo": self.combo.to_string(), "enabled": self.enabled, "bound": self.bound }).to_string()
     }
 }
 
@@ -367,6 +420,9 @@ pub enum Command {
     View,
     Enable,
     Disable,
+    // The Linux catalog host owns clear; the separate Windows host is unchanged.
+    #[cfg(not(windows))]
+    Clear,
     Reset,
     Set(Combo),
     /// #467: Ajustes is recording a new combination — let go of the grab meanwhile so the
@@ -426,15 +482,15 @@ pub fn parse_targeted(payload: &serde_json::Value) -> Result<(Target, Command), 
     let mut map = payload.as_object().ok_or(CommandError::InvalidSchema)?.clone();
     let target = match map.remove("id") {
         None => Target::ToggleIsland,
-        Some(serde_json::Value::String(id)) if id == "desktopToggle" => Target::DesktopToggle,
+        Some(serde_json::Value::String(id)) => Target::ALL.into_iter().find(|t| t.id() == id).ok_or(CommandError::InvalidSchema)?,
         _ => return Err(CommandError::InvalidSchema),
     };
     parse_command(&serde_json::Value::Object(map)).map(|command| (target, command))
 }
 
-/// Disabled bindings still reserve their combination, so enabling cannot clash.
+/// Disabled-but-bound configurations still reserve their combination; cleared ones do not.
 pub fn check_combo_available(combo: Combo, other: &HotkeyConfig) -> Result<(), CommandError> {
-    if combo == other.combo { Err(CommandError::ComboInUse) } else { Ok(()) }
+    if other.bound && combo == other.combo { Err(CommandError::ComboInUse) } else { Ok(()) }
 }
 
 pub fn parse_command(payload: &serde_json::Value) -> Result<Command, CommandError> {
@@ -445,6 +501,8 @@ pub fn parse_command(payload: &serde_json::Value) -> Result<Command, CommandErro
         "view" => exact(1).map(|_| Command::View),
         "enable" => exact(1).map(|_| Command::Enable),
         "disable" => exact(1).map(|_| Command::Disable),
+        #[cfg(not(windows))]
+        "clear" => exact(1).map(|_| Command::Clear),
         "reset" => exact(1).map(|_| Command::Reset),
         "suspend" => exact(1).map(|_| Command::Suspend),
         "resume" => exact(1).map(|_| Command::Resume),

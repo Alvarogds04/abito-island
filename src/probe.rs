@@ -2852,6 +2852,8 @@ fn feature_validation(app: &AppHandle) {
             let id=id.as_str().expect("page id");
             record(&format!("ajustes-{id}"),run(&page,&format!("AbitoValidate.hub({index},{id:?})")));
         }
+        record("atajos-catalogo",run(&page,"AbitoValidate.hotkeys()"));
+        record("atajos-grabar-borrar",run(&page,"AbitoValidate.recordHotkey()"));
         record("dictado-sin-modelo",run(&page,"AbitoValidate.noModel('dictation')"));
         record("voz-sin-modelo",run(&page,"AbitoValidate.noModel('voice')"));
         record("voz-reconocimiento",json!({"ok":true,"unverifiable":"sin micrófono ni modelos: dictado real, wake word y reconocimiento no comprobables"}));
