@@ -314,4 +314,9 @@
 
 /* #489 — Abito glue: a declared integration pill with news carries a dot; the card sits in the overview's left card. */
 .pill-choice[data-badge="true"]::after { content: ""; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: #F4505E; flex: none; }
-.int-host { position: absolute; inset: 0; }
+.int-host { position: absolute; inset: 0; padding: 10px; overflow: auto; z-index: 2; pointer-events: auto; }
+#overview-view[data-integration="on"] .card-left > :not(.int-host) { visibility: hidden; pointer-events: none; }
+
+#capsule[data-integration="on"] #clay, #capsule[data-integration="on"] #clay-badge { visibility: hidden; pointer-events: none; }
+
+#capsule[data-integration="on"] #spotify-card, #capsule[data-integration="on"] #spotify-card * { visibility: hidden !important; pointer-events: none; }

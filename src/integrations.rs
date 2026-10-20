@@ -538,3 +538,45 @@ pub fn parse_command(payload: &Value) -> Option<Command> {
 pub fn declared(prefs: &crate::prefs::Prefs, id: &str) -> bool {
     prefs.main_pill() == id || prefs.declared_pills().iter().any(|p| p == id)
 }
+
+/// Snapshot envelope for the island, with explicit lifecycle metadata.
+pub fn refresh_snapshot(id: &str, http: &dyn Http, store: &dyn SecretStore, seen: &Seen, previous: Option<&Value>, now: u64) -> Value {
+    let required = match id {
+        N8N => "n8n-api-key", VERCEL => "vercel-token", STRIPE => "stripe-api-key",
+        RESEND => "resend-api-key", NOTION => "notion-api-key", CALCOM => "calcom-api-key",
+        _ => return Value::Null,
+    };
+    if key(store, required).is_none() || (id == N8N && key(store,"n8n-url").and_then(|u|n8n_base(&u)).is_none()) {
+        return json!({"id":id,"data":{},"error":null,"event":null,"state":"missing_key","updatedAt":null});
+    }
+    struct Observed<'a> { inner: &'a dyn Http, failed: std::cell::Cell<bool> }
+    impl Http for Observed<'_> {
+        fn send(&self, method: &str, url: &str, headers: &[(&str,&str)], body: Option<&str>) -> Result<Response,NetError> {
+            let result = self.inner.send(method,url,headers,body);
+            if result.as_ref().map(|r| !(200..300).contains(&r.status) || serde_json::from_str::<Value>(&r.body).is_err()).unwrap_or(true) {
+                self.failed.set(true);
+            }
+            result
+        }
+    }
+    let observed = Observed { inner:http, failed:std::cell::Cell::new(false) };
+    let update = poll(id,&observed,store,seen);
+    let error = update.as_ref().and_then(|u|u.error.clone());
+    if let Some(update) = update.filter(|u|u.error.is_none()) {
+        if !observed.failed.get() {
+            let mut value = serde_json::to_value(update).unwrap_or(Value::Null);
+            value["state"] = json!("ready"); value["updatedAt"] = json!(now);
+            return value;
+        }
+    }
+    let mut value = previous.filter(|v|v["id"]==id && v["updatedAt"].is_u64()).cloned()
+        .unwrap_or_else(||json!({"id":id,"data":{},"updatedAt":null}));
+    value["state"] = json!(if value["updatedAt"].is_u64() { "stale" } else { "error" });
+    value["error"] = json!(error.unwrap_or_else(||"No se pudo actualizar la integración.".into()));
+    value["event"] = Value::Null;
+    // n8n may report no change after a successful request; keep its last data.
+    if id == N8N && !observed.failed.get() {
+        value["state"] = json!("ready"); value["error"] = Value::Null; value["updatedAt"] = json!(now);
+    }
+    value
+}

@@ -37,7 +37,7 @@ async function main(args = process.argv.slice(2)) {
   const started = Date.now();
   const out = fs.mkdtempSync('/tmp/abito-validate-');
   const children = [];
-  let piRuntime, github;
+  let piRuntime, github, integrationFake;
   let interrupted = false;
   // Each direct child owns a fresh process group, so a timed-out app cannot
   // leave its ffmpeg (or any activated helper) attached to the private display.
@@ -140,6 +140,7 @@ async function main(args = process.argv.slice(2)) {
         fs.copyFileSync(path.join(crate, '..', dir, file), dest);
       }
     }
+    integrationFake = await require('./validate/integrations.cjs').start(out, env);
     github = await require('./validate/github.cjs').start(out, env);
     const app = launch(candidate, ['--probe'], env, 'app.stderr.log');
     const jsonl = fs.openSync(path.join(out, 'probe.jsonl'), 'a', 0o600);
@@ -206,6 +207,7 @@ async function main(args = process.argv.slice(2)) {
       if (!exited(child)) await until(() => exited(child), 3000, 'terminar proceso propio').catch(() => {});
     }
     if (github) await github.close();
+    if (integrationFake) await integrationFake.close();
     if (piRuntime) fs.rmSync(piRuntime, { recursive: true, force: true });
     process.off('SIGINT', signal); process.off('SIGTERM', signal);
   }

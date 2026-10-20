@@ -89,3 +89,27 @@ test('the renderer never uses innerHTML', () => {
   const src = fs.readFileSync(path.join(__dirname, '../frontend/island-integrations.js'), 'utf8');
   assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(src));
 });
+
+test('six services distinguish missing/error/stale/refresh and keep safe open targets', () => {
+  for (const id of M.IDS) {
+    assert.equal(M.view(id,{id,state:'missing_key',data:{}},NOW).kind,'missing_key');
+    const stale=M.view(id,{id,state:'stale',updatedAt:NOW-60000,error:'offline',data:{workflow:'saved'}},NOW);
+    assert.equal(stale.stale,true);
+    assert.equal(stale.error,'offline');
+    assert.equal(M.view(id,{id,state:'refreshing',data:{}},NOW).refreshing,true);
+    assert.match(M.openTarget(id),/^https:\/\//);
+  }
+  assert.equal(M.openTarget('integration_github'),null);
+});
+
+test('Cal.com week/day/detail filters dates across month boundaries', () => {
+  const day=Date.UTC(2026,9,31);
+  const bookings=[{id:'one',start:'2026-10-31T10:00:00Z',title:'Demo',attendeeName:'Ana',attendeeNotes:'Consulta'},
+    {id:'two',start:'2026-11-01T10:00:00Z',title:'Next'}, {id:'bad',start:'invalid'}];
+  assert.equal(M.calendarView(bookings,'week',day,null).days.length,7);
+  assert.deepEqual(M.calendarView(bookings,'week',day,null).rows.map(r=>r.id),['one','two']);
+  assert.deepEqual(M.calendarView(bookings,'day',day,null).rows.map(r=>r.id),['one']);
+  assert.equal(M.calendarView(bookings,'day',day,'one').detail.attendee,'Ana');
+  assert.equal(M.calendarView(bookings,'day',day,'one').detail.notes,'Consulta');
+  assert.equal(M.calendarView(bookings,'day',day,'foreign').detail,null);
+});

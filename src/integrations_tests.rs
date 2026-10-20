@@ -273,3 +273,28 @@ fn every_new_service_is_silent_without_its_key() {
     }
     assert!(http.urls().is_empty());
 }
+
+#[test]
+fn integration_snapshot_missing_error_stale_and_recovery() {
+    let offline = Fake::new(vec![]);
+    let seen = Seen::default();
+    for (id, key) in [(N8N,"n8n-api-key"),(VERCEL,"vercel-token"),(STRIPE,"stripe-api-key"),
+        (RESEND,"resend-api-key"),(NOTION,"notion-api-key"),(CALCOM,"calcom-api-key")] {
+        let missing = refresh_snapshot(id, &offline, &keys(&[]), &seen, None, 100);
+        assert_eq!(missing["state"], "missing_key", "{id}");
+        let configured = keys(&[(key,"fixture"),("n8n-url","http://127.0.0.1:1234")]);
+        let failure = refresh_snapshot(id, &offline, &configured, &seen, None, 200);
+        assert_eq!(failure["state"], "error", "{id}");
+        let old = json!({"id":id,"data":{"fixture":true},"state":"ready","updatedAt":100});
+        let stale = refresh_snapshot(id, &offline, &configured, &seen, Some(&old), 300);
+        assert_eq!(stale["state"], "stale", "{id}");
+        assert_eq!(stale["data"], old["data"]);
+        assert_eq!(stale["updatedAt"], 100);
+        assert_eq!(refresh_snapshot(id,&offline,&keys(&[]),&seen,Some(&old),400)["data"],json!({}));
+    }
+    let success = Fake::new(vec![("api.vercel.com",200,VERCEL_BODY)]);
+    let fresh = refresh_snapshot(VERCEL,&success,&keys(&[("vercel-token","fixture")]),&seen,None,500);
+    assert_eq!(fresh["state"], "ready");
+    assert_eq!(fresh["updatedAt"],500);
+    assert_eq!(fresh["data"]["deployments"][0]["projectName"],"web");
+}

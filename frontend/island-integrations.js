@@ -43,7 +43,7 @@
   }
 
   /** An Update (possibly absent) → the closed view the renderer draws. Never a guess: off-shape is «sin datos». */
-  function view(id, update, now = Date.now()) {
+  function dataView(id, update, now = Date.now()) {
     const base = { id, kind: 'idle', error: '', status: 'Sin datos todavía', name: NAMES[id] || id };
     if (!IDS.includes(id) || !isObject(update) || update.id !== id) return base;
     if (typeof update.error === 'string' && update.error) return { ...base, kind: 'error', error: clean(update.error), status: clean(update.error) };
@@ -88,6 +88,24 @@
       workflow: clean(ev ? ev.label : data.workflow, 120) || 'Workflow', detail: ev ? text(ev.detail) : '',
     };
   }
+  const TARGETS = Object.freeze(['https://n8n.io','https://vercel.com','https://stripe.com','https://resend.com','https://www.notion.so','https://cal.com']);
+  const openTarget = id => TARGETS[IDS.indexOf(id)] || null;
+  function view(id, update, now = Date.now()) {
+    const current = isObject(update) && update.id === id ? update : null;
+    if (current?.state === 'missing_key') return {id,name:NAMES[id],kind:'missing_key',status:'Falta configurar la clave en Ajustes',error:''};
+    const stale = current?.state === 'stale' || (Number.isFinite(current?.updatedAt) && now-current.updatedAt > (['integration_notion','integration_calcom'].includes(id)?600000:120000));
+    const result = dataView(id, stale ? {...current,error:null} : current, now);
+    return {...result,stale,refreshing:current?.state === 'refreshing',error:stale?clean(current?.error):result.error};
+  }
+  function calendarView(bookings, mode, at, selected) {
+    const d=new Date(at), day=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
+    const start=mode==='day'?day:day-((d.getUTCDay()+6)%7)*86400000;
+    const days=Array.from({length:mode==='day'?1:7},(_,i)=>start+i*86400000);
+    const rows=(Array.isArray(bookings)?bookings:[]).filter(isObject).slice(0,100)
+      .map(b=>({id:clean(String(b.id),80),at:Date.parse(b.start),title:clean(b.title,100)||'Reunión',attendee:clean(b.attendeeName,100),notes:text(b.attendeeNotes)}))
+      .filter(b=>Number.isFinite(b.at)&&b.at>=start&&b.at<start+days.length*86400000).sort((a,b)=>a.at-b.at);
+    return {days,rows,detail:rows.find(b=>b.id===selected)||null};
+  }
   /** Only https pages on notion.so / notion.site leave the island (the host re-validates). */
   function notionUrl(raw) {
     if (typeof raw !== 'string' || !raw || raw.length > 2000 || /[\s\u0000-\u001f\u007f]/.test(raw)) return null;
@@ -97,7 +115,7 @@
   const pad = n => String(n).padStart(2, '0');
   const whenOf = ms => { const d = new Date(ms); return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
   const STATE_LABEL = Object.freeze({ READY: 'Listo', CANCELED: 'Cancelado', ERROR: 'Error' });
-  return { IDS, NAMES, COLORS, KINDS, notionUrl, GREEN, RED, view, timeAgo, vercelUrl, STATE_LABEL, clean };
+  return { calendarView, openTarget, IDS, NAMES, COLORS, KINDS, notionUrl, GREEN, RED, view, timeAgo, vercelUrl, STATE_LABEL, clean };
 });
 
 function mount(api) {
@@ -115,7 +133,7 @@ function mount(api) {
   if (!invoke || label === 'settings') return;
 
   const host = doc.createElement('div'); host.className = 'int-host'; host.hidden = true; leftCard.append(host);
-  let focus = null, detail = false; const updates = {};
+  let focus = null, detail = false, calMode='week', calDate=Date.now(), calSelected=null; const updates = {}, refreshing = new Set();
   const onScreen = () => {
     const d = capsule.dataset;
     return d.phase === 'expanded' && d.view === 'overview' && !d.card && d.settings !== 'open' &&
@@ -127,7 +145,7 @@ function mount(api) {
   const back = () => { const b = el('button', 'int-back', '‹'); b.type = 'button'; b.setAttribute('aria-label', 'Volver'); b.addEventListener('click', e => { if (e.isTrusted === true) { detail = false; draw(); } }); return b; };
   const more = () => { const b = el('button', 'int-more', '…'); b.type = 'button'; b.title = 'Detalles'; b.addEventListener('click', e => { if (e.isTrusted === true) { detail = true; draw(); } }); return b; };
   const badge = (ok, txt) => { const c = ok ? api.GREEN : api.RED; const b = el('span', 'int-badge', txt); b.style.color = c; b.style.background = c + '24'; return b; };
-  const open = url => { if (url) invoke('open_chat_url', { payload: { url } }).catch(() => {}); };
+  const open = url => { if (url) invoke('open_chat_url', { payload: { url } }).then(()=>doc.dispatchEvent(new CustomEvent('abito:integration-opened',{detail:{url}})),()=>{}); };
 
   function card(v) {
     const c = el('div', 'int-card');
@@ -143,6 +161,7 @@ function mount(api) {
       });
       c.append(rows); return c;
     }
+    if(v.id==='integration_calcom' && v.kind==='bookings') return calendarCard(c,v);
     if (v.id !== 'integration_n8n') return simpleCard(c, v);
     c.append(head('#F29B38', 'n8n', 'Workflow'));
     if (v.kind !== 'workflow') { c.append(statusLine(v)); return c; }
@@ -152,6 +171,30 @@ function mount(api) {
     pill.append(dot(color), el('span', 'int-name', v.workflow), el('span', '', '…'));
     pill.addEventListener('click', e => { if (e.isTrusted === true) { detail = true; draw(); } });
     const actions = el('div', 'int-actions'); actions.append(pill); c.append(actions); return c;
+  }
+  function calendarCard(c,v) {
+    c.append(head(api.COLORS[v.id],v.name,'Agenda · UTC'));
+    const model=api.calendarView(updates[v.id]?.data?.bookings,calMode,calDate,calSelected);
+    c.dataset.calendar=calSelected&&model.detail?'detail':calMode;
+    const action=(label,fn)=>{
+      const b=el('button','int-link',label);b.type='button';
+      b.addEventListener('click',e=>{e.stopPropagation();if(e.isTrusted===true){fn();draw();}});return b;
+    };
+    const nav=el('div','int-actions');
+    nav.append(action('‹',()=>{calDate-=(calMode==='day'?1:7)*86400000;calSelected=null;}),
+      action('Semana',()=>{calMode='week';calSelected=null;}),action('Día',()=>{calMode='day';calSelected=null;}),
+      action('›',()=>{calDate+=(calMode==='day'?1:7)*86400000;calSelected=null;}));c.append(nav);
+    if(model.detail) {
+      const b=model.detail;
+      c.append(el('b','int-name',b.title),el('div','int-status',new Date(b.at).toISOString().slice(0,16).replace('T',' ')+' UTC'),
+        el('div','int-status',b.attendee||'Sin invitado'),el('div','int-status',b.notes),action('Volver a la agenda',()=>{calSelected=null;}));
+      return c;
+    }
+    const days=el('div','int-actions');
+    for(const day of model.days) days.append(action(new Date(day).toISOString().slice(5,10),()=>{calDate=day;calMode='day';}));c.append(days);
+    if(!model.rows.length)c.append(el('div','int-empty','No hay llamadas agendadas'));
+    for(const b of model.rows) c.append(action(b.title+' · '+new Date(b.at).toISOString().slice(11,16),()=>{calSelected=b.id;}));
+    return c;
   }
   function simpleCard(c, v) {
     let extra = null;
@@ -197,13 +240,39 @@ function mount(api) {
   function draw() {
     const show = api.IDS.includes(focus) && onScreen();
     host.hidden = !show;
-    if (show) overview.dataset.integration = 'on'; else delete overview.dataset.integration;
+    if (show) { if(overview.dataset.integration!=='on') overview.dataset.integration = 'on'; if(capsule.dataset.integration!=='on') capsule.dataset.integration = 'on'; }
+    else { delete overview.dataset.integration; delete capsule.dataset.integration; }
     if (!show) { detail = false; return; }
     const v = api.view(focus, updates[focus]);
+    v.refreshing = refreshing.has(focus);
     const hasDetail = (v.kind === 'list') || (v.kind === 'workflow');
     host.replaceChildren(detail && hasDetail ? detailCard(v) : card(v));
+    host.dataset.state = v.refreshing ? 'refreshing' : v.kind === 'missing_key' ? 'missing_key' : v.stale ? 'stale' : v.kind === 'error' ? 'error' : 'ready';
+    if (v.stale) host.append(el('div','int-status','Datos anteriores · '+(v.error || 'pendiente de actualizar')));
+    const id=focus, actions = el('div','int-actions');
+    const refresh = el('button','int-link',v.refreshing?'Actualizando…':'Actualizar'); refresh.type='button'; refresh.disabled=v.refreshing;
+    refresh.addEventListener('click',e=>{e.stopPropagation(); if(e.isTrusted===true) refreshFocus(id);});
+    const link = el('button','int-link','Abrir '+api.NAMES[focus]); link.type='button';
+    link.addEventListener('click',e=>{e.stopPropagation(); if(e.isTrusted===true) open(api.openTarget(id));});
+    actions.append(refresh,link); host.append(actions);
   }
-  const announce = () => doc.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: Object.keys(updates) } }));
+  async function refreshFocus(id) {
+    if (!api.IDS.includes(id) || refreshing.has(id)) return;
+    refreshing.add(id); draw();
+    try {
+      await new Promise(resolve=>requestAnimationFrame(resolve));
+      const r=await invoke('integration_action',{payload:{action:'refresh',id}});
+      for(const u of Object.values(r?.updates || {})) setUpdate(u);
+    } catch {
+      updates[id]={...updates[id],id,state:updates[id]?.updatedAt?'stale':'error',error:'No se pudo actualizar la integración.'};
+    } finally {refreshing.delete(id);draw();}
+  }
+  let announced='';
+  const announce = () => {
+    const ids=Object.keys(updates).filter(id=>!['missing_key','error'].includes(updates[id]?.state));
+    const key=ids.join('|'); if(key===announced) return; announced=key;
+    doc.dispatchEvent(new CustomEvent('abito:integration-seen',{detail:{ids}}));
+  };
   const setUpdate = u => {
     if (!u || typeof u.id !== 'string' || !api.IDS.includes(u.id)) return;
     updates[u.id] = u; announce(); draw();
@@ -211,8 +280,9 @@ function mount(api) {
   };
   doc.addEventListener('abito:integration-focus', e => {
     const id = e && e.detail && typeof e.detail.id === 'string' ? e.detail.id : null;
-    if (id !== focus) detail = false; focus = id; draw();
-    if (focus && onScreen()) invoke('integration_action', { payload: { action: 'refresh', id: focus } }).then(r => { for (const u of Object.values((r && r.updates) || {})) setUpdate(u); }, () => {});
+    const changed=id!==focus;
+    if (changed) detail = false; focus = id; draw();
+    if (changed && focus && onScreen()) void refreshFocus(focus);
   });
   if (listen) listen('integration:update', e => setUpdate(e && e.payload)).catch(() => {});
   invoke('integration_action', { payload: { action: 'view' } }).then(r => { for (const u of Object.values((r && r.updates) || {})) if (u && api.IDS.includes(u.id)) updates[u.id] = u; announce(); draw(); }, () => {});
