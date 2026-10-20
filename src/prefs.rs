@@ -270,6 +270,8 @@ pub struct Prefs {
     /// #336 T1b-a: whether a trusted mouse entry may open the settled compact island.
     /// `None` means the default (off) and is never written.
     pub open_on_hover: Option<bool>,
+    /// G16: optional whole idle minutes (1–120); absent means three minutes.
+    pub absence_minutes: Option<u16>,
     /// #415 WU2: the blobs the human created by hand (label + optional palette colour),
     /// in creation order. `None` means none, and nothing is written for it, so an
     /// untouched file keeps its bytes.
@@ -348,6 +350,7 @@ impl Default for Prefs {
             chosen_models: None,
             auto_close_seconds: None,
             open_on_hover: None,
+            absence_minutes: None,
             custom_blobs: None,
             monitor: None,
             settings_window: None,
@@ -579,6 +582,7 @@ impl Prefs {
 
     /// #336: the effective hover policy — absent means off.
     pub fn open_on_hover(&self) -> bool { self.open_on_hover.unwrap_or(false) }
+    pub fn absence_minutes(&self) -> u16 { self.absence_minutes.filter(|v| (1..=120).contains(v)).unwrap_or(3) }
 
     /// S10 (L30): the effective plan-pill policy — absent means off.
     pub fn show_plan_in_notch(&self) -> bool { self.show_plan_in_notch.unwrap_or(false) }
@@ -613,6 +617,7 @@ impl Prefs {
             auto_close_seconds: v.get("auto_close_seconds").and_then(Value::as_u64)
                 .and_then(|s| u16::try_from(s).ok()).filter(|s| *s == 0 || (5..=120).contains(s)),
             open_on_hover: v.get("open_on_hover").and_then(Value::as_bool),
+            absence_minutes: v.get("absence_minutes").and_then(Value::as_u64).and_then(|v| u16::try_from(v).ok()).filter(|v| (1..=120).contains(v)),
             custom_blobs: {
                 let blobs = custom_blobs_from(v.get(CUSTOM_BLOBS));
                 (!blobs.is_empty()).then_some(blobs)
@@ -666,6 +671,7 @@ impl Prefs {
         if let Some(seconds) = self.auto_close_seconds.filter(|s| *s == 0 || (5..=120).contains(s)) {
             v["auto_close_seconds"] = json!(seconds);
         }
+        if let Some(minutes) = self.absence_minutes.filter(|v| (1..=120).contains(v)) { v["absence_minutes"] = json!(minutes); }
         if let Some(hover) = self.open_on_hover {
             v["open_on_hover"] = json!(hover);
         }
@@ -762,6 +768,7 @@ pub enum Command {
     /// shape — integer `auto_close_seconds` 0 («Nunca», #438) or 5..=120 and
     /// `open_on_hover`.
     SetIslandInteraction { auto_close_seconds: u16, open_on_hover: bool },
+    SetAbsenceMinutes(u16),
     /// #389: the platform monitor name the island is pinned to (Ajustes → Panel).
     /// A choice is only ever one of the keys the island itself saw and offered;
     /// falling back when a stored key is no longer connected is placement's job.
@@ -944,6 +951,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             }
             Ok(Command::SetChosenModels { provider: provider.to_string(), models: clean })
         }
+        Some("set_absence_minutes") if map.len() == 2 => {
+            let minutes = map.get("minutes").and_then(Value::as_u64).ok_or(CommandError)?;
+            if !(1..=120).contains(&minutes) { return Err(CommandError); }
+            Ok(Command::SetAbsenceMinutes(minutes as u16))
+        }
         // #336 T1b-a: exactly action + auto_close_seconds + open_on_hover.
         // `as_u64` already refuses floats, strings, null and negatives; the
         // accepted set is {0} («Nunca», #438) ∪ 5..=120, matching the public
@@ -1090,6 +1102,10 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::ClearPillColor(id) => {
             if !pill_offered(id) { return Err(CommandError); }
             next.pill_colors.remove(id);
+        }
+        Command::SetAbsenceMinutes(minutes) => {
+            if !(1..=120).contains(minutes) { return Err(CommandError); }
+            next.absence_minutes = Some(*minutes);
         }
         // #336 T1b-a: both fields commit together under the same gate; the
         // range/type checks already ran at parse and run again here for

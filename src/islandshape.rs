@@ -14,6 +14,15 @@ pub(crate) fn parse(payload: &Value) -> Option<Report> {
     })
 }
 
+// Only the compact strip may be shorter than the normal compact bar.
+fn input_rect(report: Report, window: (i32, i32), protected: bool) -> (i32,i32,i32,i32) {
+    if !protected && report.w == 288 && (4..32).contains(&report.h) && report.settled {
+        let w = 288.min(window.0.max(0));
+        return ((window.0-w)/2, 0, w, report.h.min(window.1.max(0)));
+    }
+    abito_island::geometry::island_shape_rect((report.w,report.h), window)
+}
+
 #[cfg(unix)]
 static SHAPE: std::sync::Mutex<((i32, i32), Report)> = std::sync::Mutex::new(
     ((288, 32), Report { w: 288, h: 32, settled: true }));
@@ -26,6 +35,7 @@ pub(crate) fn apply(app: &tauri::AppHandle, report: Option<Report>) {
     let _ = app.run_on_main_thread(move || {
         gtk::glib::idle_add_local_once(move || {
             use gtk::prelude::*;
+            use tauri::Manager;
             use abito_island::geometry;
             let Some(win) = crate::main_window(&handle) else { return };
             let Ok(gtk_win) = win.gtk_window() else { return };
@@ -40,7 +50,11 @@ pub(crate) fn apply(app: &tauri::AppHandle, report: Option<Report>) {
                 state.0 = destination;
                 destination
             } else { geometry::transition_shape(state.0, destination, window) };
-            let (x, y, w, h) = geometry::island_shape_rect(shape, window);
+            let state = handle.state::<crate::AppState>();
+            let snap = crate::build_snapshot(&handle, &state);
+            let question = crate::questionhost::question_view(&state);
+            let protected = !snap["request"].is_null() || snap["card"]["state"] == "pending" || !question["pending"].is_null();
+            let (x, y, w, h) = input_rect(if report.settled { report } else { Report { w:shape.0,h:shape.1,settled:false } }, window, protected);
             let region = gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(x, y, w, h));
             gdk.input_shape_combine_region(&region, 0, 0);
         });
@@ -65,4 +79,13 @@ mod tests {
             assert_eq!(parse(&bad), None, "{bad}");
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn edge_input_tracks_four_pixel_strip_and_protected_cards_refuse_it() {
+    let strip = Report { w:288, h:4, settled:true };
+    assert_eq!(input_rect(strip, (672,340), false), (192,0,288,4));
+    assert_eq!(input_rect(strip, (672,340), true), (192,0,288,32));
+    assert_eq!(input_rect(Report {h:-1,..strip}, (672,340), false), (192,0,288,32));
 }

@@ -105,7 +105,7 @@ function engagementFixture(openOnHover) {
     const listeners = Object.create(null), attrs = new Map();
     return {
       hidden: true, inert: false, disabled: false, value: '', textContent: '', tabIndex: 0,
-      dataset: {},
+      dataset: {}, matches() { return false; },
       style: { width: '', height: '', top: '', bottom: '', left: '', borderRadius: '',
         setProperty() {}, getPropertyValue() { return '1'; } },
       classList: { add() {}, remove() {}, toggle() {} },
@@ -124,7 +124,7 @@ function engagementFixture(openOnHover) {
   const documentStub = {
     documentElement: makeEl(),
     body: makeEl(),
-    activeElement: makeEl(), // no matches(): not a text field, so editing stays false
+    activeElement: makeEl(), // not a text field, so editing stays false
     getElementById(id) { if (!byId.has(id)) byId.set(id, makeEl()); return byId.get(id); },
     querySelectorAll() { return []; }, querySelector() { return null; },
     createElement() { return makeEl(); }, importNode(n) { return n; },

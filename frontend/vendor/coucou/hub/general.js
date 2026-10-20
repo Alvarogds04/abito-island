@@ -118,6 +118,17 @@ async function renderGeneral({ invoke, V }) {
       }
       patch({ autoCloseInterval: value });
     });
+    const absence = identify(h("input", { type: "number", min: "1", max: "120", step: "1", value: String(prefs.absenceMinutes ?? 3), "aria-label": "Minutos sin uso antes de ocultar" }), "hub-absence");
+    absence.addEventListener("change", (e) => {
+      if (!e.isTrusted) return;
+      const minutes = Number(absence.value);
+      if (!absence.value.trim() || !Number.isInteger(minutes) || minutes < 1 || minutes > 120) {
+        issue = "Usa un entero entre 1 y 120 minutos.";
+        paint();
+        return;
+      }
+      directPrefs({ action: "set_absence_minutes", minutes });
+    });
     const theme = V.themeView(prefs);
     const themeSelect = trusted(select(theme.options.map((o) => [o.id, o.label]), theme.mode, (value) => directPrefs({ action: "set_theme", theme: value })));
     themeSelect.setAttribute("aria-label", t("Theme"));
@@ -180,6 +191,7 @@ async function renderGeneral({ invoke, V }) {
       row(t("Open on hover"), hover),
       hint(t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.")),
       row(t("Auto-close"), seconds, h("span", { class: "hint", text: t("seconds after you leave the island") })),
+      row("Ocultar tras", absence, h("span", { class: "hint", text: "minutos sin uso; vuelve al acercar el mouse o con un aviso" })),
       row(t("Island lives on"), screen),
       row(t("Theme"), themeSelect),
       row(t("Launch at startup"), (() => {

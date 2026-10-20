@@ -94,6 +94,32 @@
     const pill=document.querySelector('.dpill'), css=getComputedStyle(pill), rect=pill.getBoundingClientRect();
     return {ok:pill.hidden && css.display==='none' && rect.width===0 && rect.height===0,reason:'pill de dictado visible en idle con función habilitada',hidden:pill.hidden,display:css.display,rect:[rect.width,rect.height],phase:byId('capsule').dataset.dictation||'idle'};
   }
+  let edgeIdlePrefs;
+  async function edgeIdle() {
+    edgeIdlePrefs=await invoke('prefs_action',{action:'view'});
+    await invoke('prefs_action',{action:'set_absence_minutes',minutes:1});
+    await invoke('prefs_action',{action:'sound_on'});
+    await emit('validate-input',{kind:'move',x:20,y:500});
+    await invoke('desktop_action',{action:'close'});
+    const began=performance.now();
+    await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=4.1,'ausencia de un minuto deja franja',66000);
+    const native=await invoke('desktop_action',{action:'snapshot'});
+    return {ok:native.state==='compact' && performance.now()-began>=59000,elapsed:performance.now()-began,native:native.state,bottom:byId('island').getBoundingClientRect().bottom};
+  }
+  async function edgeWake() {
+    const o=window.__validateOrigin, r=byId('island').getBoundingClientRect();
+    const x=Math.round(o.x+(r.x+r.width/2)*o.scale);
+    await emit('validate-input',{kind:'move',x,y:Math.round(o.y+12*o.scale)});
+    await new Promise(resolve=>setTimeout(resolve,350));
+    const through=byId('capsule').dataset.edgeHidden==='true';
+    await emit('validate-input',{kind:'move',x,y:Math.round(o.y+2*o.scale)});
+    await wait(()=>byId('capsule').dataset.edgeHidden==='false' && byId('island').getBoundingClientRect().bottom>=31.9,'mouse en franja restaura barra');
+    await invoke('prefs_action',{action:'set_absence_minutes',minutes:edgeIdlePrefs.absenceMinutes});
+    await invoke('prefs_action',{action:edgeIdlePrefs.sound ? 'sound_on':'sound_off'});
+    await emit('validate-input',{kind:'move',x:20,y:500});
+    await invoke('desktop_action',{action:'expand'});
+    return {ok:through,inputBelowStripPassedThrough:through};
+  }
   async function islandHoverPin() {
     const original = await invoke('prefs_action',{action:'view'});
     const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
@@ -102,7 +128,7 @@
     const outside = () => move(20,500);
     const inside = async () => {
       const r=byId('capsule').getBoundingClientRect(), o=window.__validateOrigin;
-      await move(o.x+(r.x+r.width/2)*o.scale,o.y+(r.y+8)*o.scale);
+      await move(o.x+(r.x+r.width/2)*o.scale,o.y+(byId('capsule').dataset.edgeHidden==='true' ? 2 : r.y+8)*o.scale);
     };
     try {
       await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:5,open_on_hover:false});
@@ -132,10 +158,15 @@
       await wait(()=>!byId('island-countdown').hidden,'cuenta atrás visible');
       await wait(()=>phase()==='compact','cierre tras desfijar',7000);
       const closed=await invoke('desktop_action',{action:'snapshot'});
-      return {ok:hoverOff.state==='compact' && entered.state==='expanded' && grace.state==='expanded' && held.state==='expanded' && noCountdown && closed.state==='compact',hoverOff:hoverOff.state,entered:entered.state,grace:grace.state,held:held.state,noCountdown,closed:closed.state,
-        coverage:'XTest immediate hover-on, hover-off stays compact, leave grace, trusted pin, countdown and native phase readback; hidden peek/edge hide remains a separate transaction'};
+      await invoke('prefs_action',{action:'sound_off'});
+      await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=4.1,'mute oculta hacia borde');
+      const mutedStrip=byId('island').getBoundingClientRect().bottom;
+      await inside(); await wait(()=>byId('capsule').dataset.edgeHidden==='false','mouse despierta isla silenciada');
+      return {mutedStrip,ok:hoverOff.state==='compact' && entered.state==='expanded' && grace.state==='expanded' && held.state==='expanded' && noCountdown && closed.state==='compact',hoverOff:hoverOff.state,entered:entered.state,grace:grace.state,held:held.state,noCountdown,closed:closed.state,
+        coverage:'XTest immediate hover-on/off, leave grace, pin/countdown, mute slides to 4px strip and pointer wakes it; absence/mask covered in edgeIdle/edgeWake'};
     } finally {
       await outside();
+      await invoke('prefs_action',{action:original.sound ? 'sound_on':'sound_off'});
       await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:original.autoCloseSeconds,open_on_hover:original.openOnHover});
       await invoke('desktop_action',{action:'expand'});
       await wait(()=>phase()==='expanded','overview restaurado');
@@ -208,9 +239,27 @@
     for(let i=0;i<4;i++){words.push(word.textContent);await new Promise(resolve=>setTimeout(resolve,250));}
     return {ok:words.every(w=>connected ? w!=='Sin motor' : w==='Sin motor'),reason:'etiqueta Sin motor no coincide con conexiones reales',word:word.textContent,words,connections:snapshot.connections,aria:byId('connection')?.getAttribute('aria-label')};
   }
+  let noticeEdgeSound=true;
+  async function prepareNoticeEdge() {
+    noticeEdgeSound=(await invoke('prefs_action',{action:'view'})).sound;
+    await invoke('prefs_action',{action:'sound_off'});
+    byId('chat-input').value=''; byId('chat-input').dispatchEvent(new Event('input')); byId('chat-input').blur();
+    await invoke('desktop_action',{action:'expand'});
+    await wait(()=>byId('capsule').dataset.phase==='expanded','prepara isla antes del aviso');
+    const r=byId('island').getBoundingClientRect(),o=window.__validateOrigin;
+    await emit('validate-input',{kind:'move',x:Math.round(o.x+(r.x+r.width/2)*o.scale),y:Math.round(o.y+10*o.scale)});
+    await wait(()=>byId('capsule').matches(':hover'),'puntero entra antes de salir');
+    await emit('validate-input',{kind:'move',x:20,y:500});
+    await wait(()=>!byId('capsule').matches(':hover'),'puntero fuera antes de plegar');
+    await invoke('desktop_action',{action:'close'});
+    await wait(()=>byId('capsule').dataset.edgeHidden==='true','oculta antes de aviso real');
+    return {ok:true};
+  }
   async function notice() {
     await wait(()=>byId('notices').textContent.includes('Validador'),'aviso Pi visible');
-    return {ok:true,text:byId('notices').textContent};
+    await wait(()=>byId('capsule').dataset.edgeHidden==='false' && byId('capsule').dataset.phase==='expanded','aviso real despierta borde');
+    await invoke('prefs_action',{action:noticeEdgeSound ? 'sound_on':'sound_off'});
+    return {ok:true,text:byId('notices').textContent,edgeRevealed:true};
   }
   async function shortcutDispatch() {
     for(const id of ['openChat','goToAlert','muteToggle','jumpToTerminal']) {
@@ -246,8 +295,19 @@
     await wait(()=>byId('capsule').dataset.view==='chat','chat antes de saltar a alerta');
     await key('Ctrl+Alt+Shift+a');
     await wait(()=>byId('capsule').dataset.view==='overview' && visible(byId('question')),'alerta pendiente visible');
+    const sound=(await invoke('prefs_action',{action:'view'})).sound;
+    await invoke('prefs_action',{action:'sound_off'});
+    await emit('validate-input',{kind:'move',x:20,y:500});
+    let closeRefused=false;
+    try { await invoke('desktop_action',{action:'close'}); }
+    catch(error) { if(error.code!=='question_pending') throw error; closeRefused=true; }
+    await new Promise(resolve=>setTimeout(resolve,1800));
+    const neverConcealed=byId('capsule').dataset.edgeHidden!=='true';
+    await invoke('desktop_action',{action:'expand'});
+    await wait(()=>byId('capsule').dataset.phase==='expanded' && visible(byId('question')),'tarjeta preservada tras plegar');
+    await invoke('prefs_action',{action:sound ? 'sound_on':'sound_off'});
     const after=await invoke('question_action',{action:'view'});
-    return {ok:JSON.stringify(before.pending)===JSON.stringify(after.pending),before:before.pending,after:after.pending,text:byId('question').textContent};
+    return {ok:neverConcealed && JSON.stringify(before.pending)===JSON.stringify(after.pending),neverConcealed,closeRefused,before:before.pending,after:after.pending,text:byId('question').textContent};
   }
   async function answerQuestion() {
     const button=await wait(()=>[...document.querySelectorAll('#question-options .q-option')].find(b=>visible(b) && b.textContent.includes('Validar')),'pregunta y opción de Pi');
@@ -586,5 +646,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake};
 })();

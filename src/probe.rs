@@ -2718,7 +2718,7 @@ fn feature_validation(app: &AppHandle) {
         *result.lock().expect("validator result") = None;
         state.chat_probe.lock().expect("chat probe").clear();
         let _ = page.eval(format!("try{{window.AbitoValidate.run(async()=>({expression})).catch(e=>window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{diagnostic:String(e)}}}}))}}catch(e){{window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{diagnostic:String(e),driver:typeof window.AbitoValidate}}}})}}"));
-        let end = Instant::now() + Duration::from_secs(20);
+        let end = Instant::now() + Duration::from_secs(if expression.contains("edgeIdle") { 80 } else { 30 });
         while Instant::now() < end {
             if let Some(value) = result.lock().expect("validator result").take() { return value; }
             if let Some(value)=state.chat_probe.lock().expect("chat probe").pop() {
@@ -2745,6 +2745,8 @@ fn feature_validation(app: &AppHandle) {
     let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
     sleep(Duration::from_millis(500));
     record("dictado-inactivo", run(&win,"AbitoValidate.dictationIdle()"));
+    record("isla-ausencia", run(&win,"AbitoValidate.edgeIdle()"));
+    record("isla-borde-regreso", run(&win,"AbitoValidate.edgeWake()"));
     record("isla-hover-pin-ocultar", run(&win,"AbitoValidate.islandHoverPin()"));
     record("sesiones-motor", run(&win,"AbitoValidate.sessions()"));
     record("sesiones-foco-pildoras", run(&win,"AbitoValidate.sessionsFocus()"));
@@ -2786,8 +2788,12 @@ fn feature_validation(app: &AppHandle) {
         let ready=read(&mut reader)?;
         if ready.as_bytes()!=abito_island::protocol::READY_LINE {return Err(format!("hello: {ready}"));}
         record("sin-motor-con-productor",run(&win,"AbitoValidate.connection(true)"));
+        let notice_edge=run(&win,"AbitoValidate.prepareNoticeEdge()");
         send(&mut stream,json!({"type":"settled","id":"validator-notice","projectName":"Validador","agent":"pi"}))?;
-        record("pi-aviso",run(&win,"AbitoValidate.notice()"));
+        let mut notice=run(&win,"AbitoValidate.notice()");
+        notice["edge_before"]=notice_edge.clone();
+        notice["ok"]=json!(notice["ok"]==true && notice_edge["ok"]==true);
+        record("pi-aviso",notice);
         // A private, clearly identified terminal-class fixture, not an actual
         // session. Keep the X11 connection alive through native focus readback.
         use x11rb::connection::Connection;

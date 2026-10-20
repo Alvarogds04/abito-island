@@ -219,5 +219,47 @@
     }
     return Object.freeze({ update, setPreferences, enter, leave, engage, togglePin, reset, stop, snapshot });
   }
-  return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, validPreferences, eligible, createClock, countdown, createCountdownView, createController });
+  // L40: visual concealment only, never native Hide or card admission.
+  function createEdgeController(options) {
+    const now = createClock(options.now);
+    let facts = {}, inside = false, hidden = false, stopped = false;
+    let sound = true, minutes = 3, timer = null, generation = 0;
+    function cancel() { generation++; if (timer !== null) options.cancel(timer); timer = null; }
+    function show(value) { if (hidden !== value) { hidden = value; options.onHidden(value); } }
+    function allowed() { return clearGuards(facts) && facts.state === 'compact' && facts.notice === false && facts.pinned === false && !inside; }
+    function reconcile(restart = false) {
+      if (stopped) return;
+      if (restart) cancel();
+      if (!allowed()) { cancel(); show(false); return; }
+      if (hidden || timer !== null) return;
+      const serial = ++generation;
+      const due = now() + (sound ? minutes * 60000 : 1000);
+      function deliver() {
+        if (stopped || serial !== generation) return;
+        timer = null;
+        if (!allowed()) return;
+        const remaining = due - now();
+        // Browser timers can deliver a fraction early. Preserve the deadline,
+        // rather than silently spending the hide or restarting a full delay.
+        if (remaining > 0) timer = options.schedule(deliver, Math.max(1, remaining));
+        else show(true);
+      }
+      timer = options.schedule(deliver, Math.max(1, due - now()));
+    }
+    return Object.freeze({
+      update(next) { if (!stopped) { facts = { ...next }; if (typeof facts.pointerInside === 'boolean') inside = facts.pointerInside; reconcile(); } },
+      setPreferences(p) {
+        if (stopped) return;
+        if (!p || typeof p.sound !== 'boolean' || !Number.isInteger(p.absenceMinutes) || p.absenceMinutes < 1 || p.absenceMinutes > 120) throw new TypeError('Invalid absence preferences.');
+        const changed = sound !== p.sound || minutes !== p.absenceMinutes;
+        sound = p.sound; minutes = p.absenceMinutes; reconcile(changed);
+      },
+      enter(event) { if (!stopped && mouse(event)) { inside = true; reconcile(); } },
+      leave(event) { if (!stopped && mouse(event)) { inside = false; reconcile(true); } },
+      alert() { if (!stopped) { cancel(); show(false); reconcile(); } },
+      stop() { stopped = true; cancel(); },
+      snapshot() { return { hidden, inside }; },
+    });
+  }
+  return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, validPreferences, eligible, createClock, countdown, createCountdownView, createController, createEdgeController });
 });

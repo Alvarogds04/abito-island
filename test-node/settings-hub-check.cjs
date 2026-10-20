@@ -121,6 +121,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     if (p.action === 'clear_monitor') prefs.monitor = null;
     if (p.action === 'set_monitor') prefs.monitor = p.monitor;
     if (p.action === 'set_sound_gain') { if (rejectGain) throw Error('simulated write failure'); prefs.gain = p.gain; }
+    if (p.action === 'set_absence_minutes') prefs.absenceMinutes = p.minutes;
     if (p.action === 'set_theme') prefs.theme = p.theme;
     if (p.action === 'set_display_name') prefs.displayName = p.display_name;
     if (p.action === 'set_island_interaction') { prefs.autoCloseSeconds = p.auto_close_seconds; prefs.openOnHover = p.open_on_hover; }
@@ -133,7 +134,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   calls.length = 0;
   assert.equal(ui.firstChild.tagName, 'section', 'General uses the upstream settings section');
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' General']);
-  assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Atajo global']);
+  assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','Ocultar tras','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Atajo global']);
   assert(!all(ui).some(e => e.className === 'hub-segmented'));
   for (const id of ['hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);
@@ -143,6 +144,10 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(!text(ui).includes('0 means never'), 'D6: Coucou shows no such line under Auto-close');
   assert.equal(all(ui).find(e=>e.attrs.id==='hub-language').children.length,11);
   const field = id => all(ui).find(e => e.attrs.id === id);
+  assert.equal(String(field('hub-absence').value), '3');
+  field('hub-absence').value='5'; field('hub-absence').fire('change', false); await ui.settled(); assert.deepEqual(calls, []);
+  field('hub-absence').fire('change'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action',{action:'set_absence_minutes',minutes:5}]);
+  assert.equal(prefs.absenceMinutes, 5);
   assert(!field('hub-autostart').disabled, 'startup toggle is usable');
   field('hub-autostart').fire('click', false); await ui.settled(); assert.equal(autostart,false);
   field('hub-autostart').fire('click'); await ui.settled(); assert.equal(autostart,true);
