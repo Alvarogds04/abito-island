@@ -133,7 +133,7 @@ function mount(api) {
   if (!invoke || label === 'settings') return;
 
   const host = doc.createElement('div'); host.className = 'int-host'; host.hidden = true; leftCard.append(host);
-  let focus = null, detail = false, calMode='week', calDate=Date.now(), calSelected=null; const updates = {}, refreshing = new Set();
+  let focus = null, detail = false, calMode='week', calDate=Date.now(), calSelected=null, rendered=null; const updates = {}, refreshing = new Set();
   const onScreen = () => {
     const d = capsule.dataset;
     return d.phase === 'expanded' && d.view === 'overview' && !d.card && d.settings !== 'open' &&
@@ -242,9 +242,15 @@ function mount(api) {
     host.hidden = !show;
     if (show) { if(overview.dataset.integration!=='on') overview.dataset.integration = 'on'; if(capsule.dataset.integration!=='on') capsule.dataset.integration = 'on'; }
     else { delete overview.dataset.integration; delete capsule.dataset.integration; }
-    if (!show) { detail = false; return; }
+    if (!show) { detail = false; rendered=null; return; }
     const v = api.view(focus, updates[focus]);
     v.refreshing = refreshing.has(focus);
+    // Same-value lifecycle writes and snapshots for other services are not
+    // content changes. Detaching a pressed button loses its trusted click.
+    const calendar=focus==='integration_calcom' ? [calMode,api.calendarView(updates[focus]?.data?.bookings,calMode,calDate,calSelected)] : null;
+    const next=JSON.stringify([v,detail,calendar]);
+    if(next===rendered) return;
+    rendered=next;
     const hasDetail = (v.kind === 'list') || (v.kind === 'workflow');
     host.replaceChildren(detail && hasDetail ? detailCard(v) : card(v));
     host.dataset.state = v.refreshing ? 'refreshing' : v.kind === 'missing_key' ? 'missing_key' : v.stale ? 'stale' : v.kind === 'error' ? 'error' : 'ready';

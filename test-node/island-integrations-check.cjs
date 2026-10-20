@@ -1,5 +1,5 @@
 'use strict';
-// #489 integration cards: pure view-model only (no DOM, no network).
+// #489 integration cards: pure view-model and mounted lifecycle on a minimal DOM; no network.
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -112,4 +112,57 @@ test('Cal.com week/day/detail filters dates across month boundaries', () => {
   assert.equal(M.calendarView(bookings,'day',day,'one').detail.attendee,'Ana');
   assert.equal(M.calendarView(bookings,'day',day,'one').detail.notes,'Consulta');
   assert.equal(M.calendarView(bookings,'day',day,'foreign').detail,null);
+});
+
+test('mounted actions survive equivalent island snapshots and foreign integration updates', async () => {
+  const vm=require('node:vm'), observers=[], listeners={}, events={}, calls=[];
+  class Node {
+    constructor(tag) { this.tagName=tag;this.children=[];this.dataset={};this.style={};this.listeners={}; }
+    append(...nodes) { this.children.push(...nodes); }
+    replaceChildren(...nodes) { this.children=nodes; }
+    setAttribute() {}
+    addEventListener(type,callback) { this.listeners[type]=callback; }
+  }
+  const capsule=new Node('div'), overview=new Node('div'), left=new Node('div');
+  capsule.dataset={phase:'expanded',view:'overview'};
+  overview.querySelector=()=>left;
+  const snapshot={id:'integration_n8n',state:'ready',data:{workflow:'Stored',status:'success'}};
+  const doc={hidden:false,createElement:tag=>new Node(tag),
+    getElementById:id=>id==='capsule'?capsule:id==='overview-view'?overview:null,
+    addEventListener:(type,callback)=>listeners[type]=callback,
+    dispatchEvent:event=>listeners[event.type]?.(event)};
+  const win={__TAURI__:{core:{invoke:async (command,args)=>{calls.push({command,args});return {updates:{integration_n8n:snapshot}};}},
+    event:{listen:async(type,callback)=>{events[type]=callback;}}}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../frontend/island-integrations.js'),'utf8'),{
+    window:win,self:win,document:doc,URL,CustomEvent:class {constructor(type,opts){this.type=type;this.detail=opts.detail;}},
+    MutationObserver:class {constructor(callback){observers.push(callback);}observe(){}},requestAnimationFrame:callback=>callback()});
+  const settle=()=>new Promise(resolve=>setImmediate(resolve));
+  await settle();
+  doc.dispatchEvent({type:'abito:integration-focus',detail:{id:'integration_n8n'}});await settle();
+  const host=left.children[0], all=node=>[node,...node.children.flatMap(all)];
+  const button=()=>all(host).find(node=>node.textContent==='Abrir n8n');
+  const pressed=button();assert.ok(pressed);
+  // Same-value data-phase/data-notice-view writes are still MutationObserver records.
+  for(const observe of observers)observe([{type:'attributes',attributeName:'data-phase'}]);
+  assert.equal(button(),pressed,'a lifecycle snapshot must not replace a pressed action');
+  events['integration:update']({payload:{id:'integration_vercel',state:'error',error:'offline',data:{}}});
+  assert.equal(button(),pressed,'another service must not replace the focused action');
+  events['integration:update']({payload:structuredClone(snapshot)});
+  assert.equal(button(),pressed,'equivalent native snapshots preserve the action');
+  pressed.listeners.click({isTrusted:false,stopPropagation(){}});await settle();
+  assert.equal(calls.filter(c=>c.command==='open_chat_url').length,0);
+  pressed.listeners.click({isTrusted:true,stopPropagation(){}});await settle();
+  assert.equal(calls.filter(c=>c.command==='open_chat_url').length,1);
+  assert.equal(calls.at(-1).args.payload.url,'https://n8n.io');
+  events['integration:update']({payload:{...snapshot,state:'stale',error:'offline'}});
+  assert.equal(host.dataset.state,'stale');assert.notEqual(button(),pressed,'changed data still renders');
+  const runObservers=()=>observers.forEach(observe=>observe([]));
+  capsule.dataset.phase='compact';runObservers();assert.equal(host.hidden,true);
+  capsule.dataset.phase='expanded';runObservers();assert.equal(host.hidden,false);
+  const refresh=all(host).find(node=>node.textContent==='Actualizar');
+  refresh.listeners.click({isTrusted:true,stopPropagation(){}});
+  assert.equal(host.dataset.state,'refreshing');await settle();assert.equal(host.dataset.state,'ready');
+  const workflow=all(host).find(node=>node.className==='int-pill');
+  workflow.listeners.click({isTrusted:true});
+  assert.ok(all(host).some(node=>node.className==='int-card detail'),'detail navigation still renders');
 });

@@ -368,7 +368,13 @@
         let opened=false;
         const received=e=>{if(e.detail?.url===AbitoIntegrationCard.openTarget(id)) opened=true;};
         document.addEventListener('abito:integration-opened',received);
-        try {await click(open);await wait(()=>opened,'apertura asentada '+id);}
+        try {
+          // A real lifecycle snapshot must not detach an unchanged action.
+          await invoke('desktop_action',{action:'expand'});
+          await frame(); await frame();
+          if(!open.isConnected) throw Error('snapshot de isla desprendió Abrir '+id);
+          await click(open);await wait(()=>opened,'apertura asentada '+id);
+        }
         finally {document.removeEventListener('abito:integration-opened',received);}
       }
       if(id==='integration_calcom' && state==='ready') {
