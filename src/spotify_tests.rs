@@ -186,3 +186,22 @@ fn dbus_variants_become_plain_values() {
     // Variant-wrapped, as it arrives in a{sv}.
     assert_eq!(value_of(&Z::Value(Box::new(Z::from(7u32)))), Value::Int(7));
 }
+
+#[test]
+fn local_artwork_is_bounded_sniffed_and_remote_urls_are_never_loaded() {
+    let dir = std::env::temp_dir().join(format!("abito-artwork-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cover.png");
+    std::fs::write(&file, b"\x89PNG\r\n\x1a\nfixture").unwrap();
+    let url = tauri::Url::from_file_path(&file).unwrap().to_string();
+    let art = local_artwork(&url).unwrap();
+    assert_eq!(art["mime"], "image/png");
+    assert_eq!(art["artUrl"], url);
+    for bad in ["https://i.scdn.co/image/fixture", "http://example.com/cover.png", "file://elsewhere/cover.png", "data:image/png;base64,aA=="] {
+        assert!(local_artwork(bad).is_none(), "unsupported scheme/host");
+    }
+    std::fs::write(&file, b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
+    assert!(local_artwork(&url).is_none(), "SVG/HTML cannot enter the renderer");
+    std::fs::write(&file, vec![0u8; 2 * 1024 * 1024 + 1]).unwrap();
+    assert!(local_artwork(&url).is_none(), "bounded input");
+}

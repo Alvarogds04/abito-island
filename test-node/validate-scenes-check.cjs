@@ -27,21 +27,30 @@ console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.l
   let focused = false;
   const clicks = [];
   const element = (x, shown) => ({
-    disabled: false, textContent: 'GitHub 17', scrollIntoView() {},
+    disabled: false, textContent: 'GitHub 17', scrollIntoView() {}, addEventListener() {},
     getBoundingClientRect: () => ({ x, y: 10, width: shown() ? 20 : 0, height: shown() ? 20 : 0 }),
     closest: () => null,
   });
   const githubPill = element(10, () => !focused);
   const abitoPill = element(50, () => true);
   const card = element(90, () => focused);
+  const control = x => element(x, () => focused);
+  let section = 'pulse';
+  Object.defineProperty(card,'textContent',{get:()=>section==='pulse'?'GitHub 17 ★ 18':section==='pr'?'Fixture PR':section==='ci'?'main':'23 repos'});
+  card.querySelectorAll = selector => selector === '.gh-stat' && section === 'pulse' ? [control(100),control(120),control(140)] : [];
+  card.querySelector = selector => selector === '.gh-back' && section !== 'pulse' ? control(160) : selector === '.gh-spark' && section === 'pulse' ? control(180) : selector === '.gh-row' && ['pr','ci'].includes(section) ? control(200) : null;
   const activity = { available: true, activity: { total: 17 } };
   const window = { __validateOrigin: { x: 0, y: 0, scale: 1 }, __TAURI__: {
-    core: { invoke: async command => command === 'prefs_action' ? { declaredPills: ['integration_github'] } : command === 'github_action' ? activity : {} },
+    core: { invoke: async (command,args) => command === 'prefs_action' ? { declaredPills: ['integration_github'] } : command === 'github_action' ? (args.payload.section==='pulse'?{available:true,stats:{totalStars:18,totalRepos:23}}:activity) : {} },
     event: { emit: async (event, payload) => {
       assert.equal(event, 'validate-input'); assert.equal(payload.kind, 'click');
       clicks.push(payload.x);
       if (payload.x === 20) focused = true;
       else if (payload.x === 60) focused = false;
+      else if (payload.x === 110) section='pr';
+      else if (payload.x === 150) section='ci';
+      else if (payload.x === 170) section='pulse';
+      else if (payload.x === 190) section='activity';
       else assert.fail('unexpected click target');
     } },
   } };
@@ -55,8 +64,8 @@ console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.l
     getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
   });
   const result = await window.AbitoValidate.github();
-  assert.equal(result.ok, true); assert.equal(result.text, 'GitHub 17'); assert.equal(result.data, activity);
-  assert.equal(focused, false, 'GitHub scene must release focus before the Spotify scene');
-  assert.deepEqual(clicks, [20, 60], 'focus and cleanup both use the external trusted-click helper');
+  assert.equal(result.ok, true); assert.equal(result.text, 'GitHub 17 ★ 18'); assert.equal(result.data, activity);
+  assert.equal(focused, true, 'GitHub detail stays visible for its PNG; Spotify releases focus');
+  assert.deepEqual(clicks, [20, 110, 170, 150, 170, 190, 170, 110], 'focus and cleanup both use the external trusted-click helper');
   console.log('validate-scenes: GitHub scene isolates focus with trusted input');
 })().catch(error => { console.error(error); process.exitCode = 1; });

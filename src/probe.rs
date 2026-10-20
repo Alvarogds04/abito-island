@@ -2853,8 +2853,11 @@ fn feature_validation(app: &AppHandle) {
         emit(&json!({"step":"validation_producer_error","reason":error}));
     }
     // T5 uses the production IPC and real exported tray menu, never private handlers.
-    record("integracion-github",run(&win,"AbitoValidate.github()"));
+    let github_detail=run(&win,"AbitoValidate.github()");
+    record("integracion-github",github_detail.clone());
+    record("github-detalle",github_detail);
     record("correo-keyring",run(&win,"AbitoValidate.mail()"));
+
     // Original silent PCM fixtures, private validator config only. No reference audio.
     let sound_dir=app.path().app_config_dir().expect("private app config").join("sounds");
     std::fs::create_dir_all(&sound_dir).expect("private sounds folder");
@@ -2873,6 +2876,7 @@ fn feature_validation(app: &AppHandle) {
         observation["ok"]=json!(observation["ok"]==true && received.iter().filter(|s|s.as_str()=="PlayPause").count()==2);
         observation["fake_received"]=json!(received);
         record("spotify-reproductor",observation);
+        record("spotify-artwork-fallback",run(&win,"AbitoValidate.spotifyFallback()"));
         drop(fake);
     }
     let tray=|action:&str| -> serde_json::Value {
@@ -2956,7 +2960,7 @@ use std::sync::{Arc,Mutex};
 use zbus::blocking::{connection, Connection};
 use zbus::zvariant::{ObjectPath,OwnedValue,Value};
 /// What the fake Spotify remembers and was asked.
-struct Fake { calls: Arc<Mutex<Vec<String>>>, playing: bool, position: i64, shuffle: bool, volume: f64, conn: std::sync::OnceLock<Connection> }
+struct Fake { calls: Arc<Mutex<Vec<String>>>, art_url: String, playing: bool, position: i64, shuffle: bool, volume: f64, conn: std::sync::OnceLock<Connection> }
 
 #[zbus::interface(name = "org.mpris.MediaPlayer2.Player")]
 impl Fake {
@@ -2974,7 +2978,7 @@ impl Fake {
                 &("org.mpris.MediaPlayer2.Player", changed, Vec::<String>::new()));
         });
     }
-    fn next(&self) { self.calls.lock().unwrap().push("Next".into()); }
+    fn next(&mut self) { self.calls.lock().unwrap().push("Next".into()); self.art_url = "https://unsupported.invalid/cover.png".into(); }
     fn previous(&self) { self.calls.lock().unwrap().push("Previous".into()); }
     fn set_position(&mut self, track: ObjectPath<'_>, us: i64) {
         self.calls.lock().unwrap().push(format!("SetPosition {track} {us}"));
@@ -3004,13 +3008,14 @@ impl Fake {
         m.insert("xesam:title".into(), Value::from("Fake Song (Live)").try_into().unwrap());
         m.insert("xesam:artist".into(), Value::from(vec!["Fake Artist".to_string(), "Guest".to_string()]).try_into().unwrap());
         m.insert("xesam:album".into(), Value::from("Fake Album").try_into().unwrap());
+        m.insert("mpris:artUrl".into(), Value::from(self.art_url.clone()).try_into().unwrap());
         m
     }
 }
 
 pub fn fake(calls: Arc<Mutex<Vec<String>>>) -> Connection {
     let conn = connection::Builder::session().unwrap()
-        .serve_at("/org/mpris/MediaPlayer2", Fake { calls, playing: true, position: 30_000_000, shuffle: false, volume: 0.8, conn: Default::default() })
+        .serve_at("/org/mpris/MediaPlayer2", Fake { calls, art_url: tauri::Url::from_file_path(std::path::PathBuf::from(std::env::var("ABITO_PROBE_VISUAL_DIR").unwrap()).join("spotify-cover.png")).unwrap().to_string(), playing: true, position: 30_000_000, shuffle: false, volume: 0.8, conn: Default::default() })
         .unwrap().name("org.mpris.MediaPlayer2.spotify").unwrap().build().unwrap();
     let iface = conn.object_server().interface::<_, Fake>("/org/mpris/MediaPlayer2").unwrap();
     iface.get().conn.set(conn.clone()).ok();

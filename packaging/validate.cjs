@@ -135,6 +135,16 @@ async function main(args = process.argv.slice(2)) {
         fs.copyFileSync(path.join(crate, '..', dir, file), dest);
       }
     }
+    // Original 1px PNG fixture, private output only, no external artwork request.
+    const zlib = require('node:zlib');
+    const chunk = (type, data) => {
+      const body = Buffer.concat([Buffer.from(type), data]); let crc = 0xffffffff;
+      for (const b of body) { crc ^= b; for(let i=0;i<8;i++) crc=(crc>>>1)^((crc&1)?0xedb88320:0); }
+      const head=Buffer.alloc(4),tail=Buffer.alloc(4);head.writeUInt32BE(data.length);tail.writeUInt32BE((crc^0xffffffff)>>>0);
+      return Buffer.concat([head,body,tail]);
+    };
+    const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(1,0);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=2;
+    fs.writeFileSync(path.join(out,'spotify-cover.png'),Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',zlib.deflateSync(Buffer.from([0,29,185,84]))),chunk('IEND',Buffer.alloc(0))]));
     github = await require('./validate/github.cjs').start(out, env);
     const app = launch(candidate, ['--probe'], env, 'app.stderr.log');
     const jsonl = fs.openSync(path.join(out, 'probe.jsonl'), 'a', 0o600);

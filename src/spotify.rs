@@ -823,3 +823,38 @@ mod client {
         }
     }
 }
+
+/// Only local regular raster files. No URL is ever fetched, followed or rendered as HTML/SVG.
+pub fn local_artwork(raw: &str) -> Option<Json> {
+    use base64::Engine;
+    use std::io::Read;
+    let url = tauri::Url::parse(raw).ok()?;
+    if url.scheme() != "file" || url.host_str().is_some_and(|h| h != "localhost") ||
+        !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() { return None; }
+    let path = url.to_file_path().ok()?;
+    let meta = std::fs::symlink_metadata(&path).ok()?;
+    if !meta.file_type().is_file() || meta.len() > 2 * 1024 * 1024 { return None; }
+    let mut options = std::fs::OpenOptions::new(); options.read(true);
+    #[cfg(unix)] {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path).ok()?;
+    if !file.metadata().ok()?.is_file() { return None; }
+    let mut bytes = Vec::new();
+    file.take(2 * 1024 * 1024 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 2 * 1024 * 1024 { return None; }
+    let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { "image/png" }
+        else if bytes.starts_with(&[0xff, 0xd8, 0xff]) { "image/jpeg" }
+        else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") { "image/webp" }
+        else { return None; };
+    Some(serde_json::json!({"artUrl":raw,"mime":mime,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
+}
+
+/// Native-only enrichment: the WebView receives bytes, never permission to fetch a file/URL.
+pub fn with_artwork(state: &PlayerState) -> Json {
+    let mut value = serde_json::to_value(state).unwrap_or(Json::Null);
+    value["artwork"] = state.track.as_ref().and_then(|t| t.art_url.as_deref())
+        .and_then(local_artwork).unwrap_or(Json::Null);
+    value
+}
