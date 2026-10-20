@@ -2687,7 +2687,7 @@ fn island_validation(_app: &AppHandle) {
 fn feature_validation(app: &AppHandle) {
     use tauri::Listener;
     use std::sync::{Arc, Mutex};
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixStream;
     use abito_island::fakemodel::{FakeModel, FakeModelConfig, Reply};
     use abito_island::chatlane::{self, Target};
@@ -2714,13 +2714,18 @@ fn feature_validation(app: &AppHandle) {
         let _ = page.eval(include_str!("../packaging/validate/browser.js"));
     };
     let run = |page: &tauri::WebviewWindow, expression: &str| -> serde_json::Value {
+        let began = Instant::now();
+        emit(&json!({"step":"validation_driver_start","expression":expression}));
         install(page);
         *result.lock().expect("validator result") = None;
         state.chat_probe.lock().expect("chat probe").clear();
         let _ = page.eval(format!("try{{window.AbitoValidate.run(async()=>({expression})).catch(e=>window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{diagnostic:String(e)}}}}))}}catch(e){{window.__TAURI__.core.invoke('record_chat_evidence',{{evidence:{{diagnostic:String(e),driver:typeof window.AbitoValidate}}}})}}"));
         let end = Instant::now() + Duration::from_secs(if expression.contains("edgeIdle") { 80 } else { 30 });
         while Instant::now() < end {
-            if let Some(value) = result.lock().expect("validator result").take() { return value; }
+            if let Some(value) = result.lock().expect("validator result").take() {
+                emit(&json!({"step":"validation_driver_result","expression":expression,"elapsed_ms":began.elapsed().as_millis(),"observation":value}));
+                return value;
+            }
             if let Some(value)=state.chat_probe.lock().expect("chat probe").pop() {
                 emit(&json!({"step":"validation_diagnostic","value":value}));
                 return json!({"ok":false,"reason":value});
@@ -2797,30 +2802,32 @@ fn feature_validation(app: &AppHandle) {
     sleep(Duration::from_millis(500));
     // This is the test producer used by transport_receiver.rs, on the actual
     // receiver endpoint (the ABITO_DESKTOP_SOCKET used by the Pi adapter).
+    let producer_began = Instant::now();
     let producer = (|| -> Result<(),String> {
         let endpoint = state.transport.lock().expect("transport").as_ref().map(|t|t.endpoint().to_path_buf()).ok_or("sin receptor")?;
-        let mut stream = UnixStream::connect(endpoint).map_err(|e|e.to_string())?;
+        let stream = UnixStream::connect(endpoint).map_err(|e|e.to_string())?;
         stream.set_read_timeout(Some(Duration::from_secs(4))).map_err(|e|e.to_string())?;
         stream.set_write_timeout(Some(Duration::from_secs(4))).map_err(|e|e.to_string())?;
         let mut reader = BufReader::new(stream.try_clone().map_err(|e|e.to_string())?);
-        let send = |stream: &mut UnixStream, mut frame:serde_json::Value| -> Result<(),String> {
-            frame["v"]=json!(1);frame["project"]=json!(state.project);frame["sessionId"]=json!("validator-pi");frame["at"]=json!(crate::now_ms() as u64);
-            writeln!(stream,"{frame}").map_err(|e|e.to_string())
-        };
+        let producer = validator_producer::Producer::start(stream.try_clone().map_err(|e|e.to_string())?, state.project.clone());
         let read = |reader:&mut BufReader<UnixStream>| -> Result<String,String> {let mut line=String::new();reader.read_line(&mut line).map_err(|e|e.to_string())?;Ok(line)};
-        send(&mut stream,json!({"type":"hello"}))?;
+        producer.send(json!({"type":"hello"}))?;
         let ready=read(&mut reader)?;
         if ready.as_bytes()!=abito_island::protocol::READY_LINE {return Err(format!("hello: {ready}"));}
+        if std::env::var("ABITO_PROBE_VALIDATE_PRODUCER_FAILURE").as_deref() == Ok("1") {
+            stream.shutdown(std::net::Shutdown::Both).map_err(|e|e.to_string())?;
+            producer.send(json!({"type":"heartbeat"}))?;
+        }
         record("sin-motor-con-productor",run(&win,"AbitoValidate.connection(true)"));
         let notice_edge=run(&win,"AbitoValidate.prepareNoticeEdge()");
-        send(&mut stream,json!({"type":"settled","id":"validator-notice","projectName":"Validador","agent":"pi"}))?;
+        producer.send(json!({"type":"settled","id":"validator-notice","projectName":"Validador","agent":"pi"}))?;
         let mut notice=run(&win,"AbitoValidate.notice()");
         notice["edge_before"]=notice_edge.clone();
         notice["ok"]=json!(notice["ok"]==true && notice_edge["ok"]==true);
         record("pi-aviso",notice);
         let cycle_prepared=run(&win,"AbitoValidate.prepareNoticeCycle()");
-        send(&mut stream,json!({"type":"settled","id":"validator-cycle-1","projectName":"Ciclo uno","agent":"pi"}))?;
-        send(&mut stream,json!({"type":"settled","id":"validator-cycle-2","projectName":"Ciclo dos","agent":"pi"}))?;
+        producer.send(json!({"type":"settled","id":"validator-cycle-1","projectName":"Ciclo uno","agent":"pi"}))?;
+        producer.send(json!({"type":"settled","id":"validator-cycle-2","projectName":"Ciclo dos","agent":"pi"}))?;
         let mut cycle=run(&win,"AbitoValidate.noticeCycle()");
         cycle["prepared"]=cycle_prepared.clone();
         cycle["ok"]=json!(cycle["ok"]==true && cycle_prepared["ok"]==true);
@@ -2844,22 +2851,22 @@ fn feature_validation(app: &AppHandle) {
         let active=abito_island::hotkey::x11::active_window(None);
         shortcuts["terminal_native"]=json!({"expected":terminal,"active":active,"class_only":true});
         shortcuts["ok"]=json!(shortcuts["ok"]==true && active==Some(terminal));
-        send(&mut stream,json!({"type":"questions_hello","questionVersion":1}))?;
+        producer.send(json!({"type":"questions_hello","questionVersion":1}))?;
         let ready=read(&mut reader)?;
         if !ready.contains("questions_ready") {return Err(format!("questions hello: {ready}"));}
         let approval_id="3f2b8a42-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
-        send(&mut stream,json!({"type":"question","questionVersion":1,"id":approval_id,"kind":"approval","text":"¿Permitir la operación del validador?","options":[{"value":"allow","label":"Permitir","description":""},{"value":"deny","label":"Denegar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
+        producer.send(json!({"type":"question","questionVersion":1,"id":approval_id,"kind":"approval","text":"¿Permitir la operación del validador?","options":[{"value":"allow","label":"Permitir","description":""},{"value":"deny","label":"Denegar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
         let approval_alert=run(&win,"AbitoValidate.shortcutAlert()");
         shortcuts["approval_alert"]=approval_alert.clone();
         shortcuts["ok"]=json!(shortcuts["ok"]==true && approval_alert["ok"]==true && approval_alert["after"]["id"]==approval_id);
         // Only the producer retires this fixture; the shortcut never answers it.
-        send(&mut stream,json!({"type":"question_cancel","questionVersion":1,"id":approval_id,"reason":"cancelled"}))?;
+        producer.send(json!({"type":"question_cancel","questionVersion":1,"id":approval_id,"reason":"cancelled"}))?;
         let cancel_deadline=Instant::now()+Duration::from_secs(4);
         while !crate::questionhost::question_view(&state)["pending"].is_null() && Instant::now()<cancel_deadline {
             sleep(Duration::from_millis(40));
         }
         let id="3f2b8a41-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
-        send(&mut stream,json!({"type":"question","questionVersion":1,"id":id,"kind":"question","text":"¿Validar esta pantalla?","options":[{"value":"validate","label":"Validar","description":""},{"value":"cancel","label":"Cancelar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
+        producer.send(json!({"type":"question","questionVersion":1,"id":id,"kind":"question","text":"¿Validar esta pantalla?","options":[{"value":"validate","label":"Validar","description":""},{"value":"cancel","label":"Cancelar","description":""}],"allowFreeText":false,"expiresAt":crate::now_ms() as u64+120_000}))?;
         let pending_deadline=Instant::now()+Duration::from_secs(4);
         while crate::questionhost::question_view(&state)["pending"].is_null() && Instant::now()<pending_deadline {
             sleep(Duration::from_millis(40));
@@ -2888,7 +2895,7 @@ fn feature_validation(app: &AppHandle) {
         Ok(())
     })();
     if let Err(error)=producer {
-        emit(&json!({"step":"validation_producer_error","reason":error}));
+        emit(&json!({"step":"validation_producer_error","reason":error,"elapsed_ms":producer_began.elapsed().as_millis()}));
     }
     // T5 uses the production IPC and real exported tray menu, never private handlers.
     let github_detail=run(&win,"AbitoValidate.github()");
@@ -3154,3 +3161,7 @@ mod validator_context {
             "app":app,"styles":*styles,"delivered":*delivered,"provider":"private cleanup stub; no Anthropic request or microphone"})
     }
 }
+
+#[cfg(unix)]
+#[path = "../packaging/validate/producer.rs"]
+mod validator_producer;

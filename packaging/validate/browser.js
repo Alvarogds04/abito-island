@@ -25,9 +25,17 @@
     throw new Error(`tiempo agotado: ${description}`);
   }
   const visible = el => !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[inert]');
-  async function click(el) {
+  async function click(target) {
+    const locate = typeof target === 'function' ? target : () => target;
+    let el = typeof target === 'function'
+      ? await wait(() => { const e=locate(); return e && !e.disabled && visible(e) && e; }, 'control vivo y visible')
+      : locate();
     if (!el || el.disabled) throw new Error('control ausente o deshabilitado');
     el.scrollIntoView({ block: 'center', inline: 'center' }); await frame(); await frame();
+    // IPC-backed settings pages may repaint during the two layout frames.
+    // Re-resolve selectors; never click a detached switch from a prior render.
+    el = locate();
+    if (!el || el.disabled) throw new Error('control ausente o deshabilitado');
     const r = el.getBoundingClientRect(), o = window.__validateOrigin;
     if (!visible(el)) throw new Error(`control no visible: ${el.id || el.className}; phase=${byId('capsule')?.dataset.phase}`);
     await emit('validate-input', { kind:'click', x:Math.round(o.x + (r.x+r.width/2)*o.scale), y:Math.round(o.y + (r.y+r.height/2)*o.scale) });
@@ -405,8 +413,7 @@
       await click(target); await wait(()=>[...document.querySelectorAll('.hub-segmented button')].some(b=>b.textContent===selected && b.classList.contains('on')),'selección de vista '+page);
       effect={selected:target.textContent,observable:'selección visual local; no cambia configuración'};
     } else if(page==='dictation') {
-      const toggle=root.querySelector('.switch:not(:disabled)');
-      await click(toggle); effect=await assertChanged();
+      await click(()=>document.querySelector('.hub-page .switch:not(:disabled)')); effect=await assertChanged();
     } else if(page==='voice') {
       const segment=root.querySelector('.hub-segmented');
       const target=[...segment.querySelectorAll('button')].find(b=>b.textContent.includes('texto')) || segment.querySelector('button:last-child');

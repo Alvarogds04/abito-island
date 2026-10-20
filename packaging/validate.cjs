@@ -10,6 +10,7 @@ const crypto = require('node:crypto');
 const { buildReport, exitCode, spanishSummary } = require('./validate/report.cjs');
 const L = require('./lib.cjs');
 const { extraScenes, classify } = require('./validate/scenes.cjs');
+const { producerFailures } = require('./validate/producer.cjs');
 const crate = path.resolve(__dirname, '..');
 const sceneNames = ['isla-compacta', 'isla-siempre-encima', 'isla-expandir', 'isla-colapsar', 'isla-minimizar', 'isla-atajo-sobre-rival', ...extraScenes];
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -32,7 +33,7 @@ function inputs() {
   return hash.digest('hex');
 }
 async function main(args = process.argv.slice(2)) {
-  if (args.some(a => a !== '--skip-build')) throw new Error('uso: node packaging/validate.cjs [--skip-build]');
+  if (args.some(a => !['--skip-build', '--fail-producer'].includes(a))) throw new Error('uso: node packaging/validate.cjs [--skip-build] [--fail-producer]');
   process.umask(0o077);
   const started = Date.now();
   const out = fs.mkdtempSync('/tmp/abito-validate-');
@@ -132,6 +133,7 @@ async function main(args = process.argv.slice(2)) {
       return r.status === 0 && /window id # 0x[1-9a-f]/i.test(r.stdout);
     }, 10000, 'gestor de ventanas');
     Object.assign(env, { ABITO_PROBE: '1', ABITO_PROBE_VALIDATE: 'island', ABITO_PROBE_VISUAL: '1', ABITO_PROBE_VISUAL_DIR: out, ABITO_BRIDGE_BASE: 'http://127.0.0.1:1' });
+    if (args.includes('--fail-producer')) env.ABITO_PROBE_VALIDATE_PRODUCER_FAILURE = '1';
     // Recreate the packaged sibling layout in the private output directory.
     // The release binary's normal host startup resolves desktop-daemon beside
     // current_exe; never let it see an installed daemon or the user's HOME.
@@ -170,6 +172,7 @@ async function main(args = process.argv.slice(2)) {
           const r = cp.spawnSync('python3', [path.join(__dirname, 'validate', 'input.py'), ...argv], { env, encoding: 'utf8', timeout: 3000 });
           if (r.status !== 0) failure = `XTest: ${r.stderr || r.error?.message}`;
         }
+        if (row.step === 'validation_producer_error') rows.push(...producerFailures(row.reason, rows));
         if (row.step === 'visual') visuals.set(row.name, row);
         if (row.step === 'validation_scene') rows.push(row);
         if (row.step === 'validation_observation') {
