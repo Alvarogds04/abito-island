@@ -109,6 +109,21 @@ pub mod dbus {
         }
     }
 
+    /// Presence only: never activate the extension or ask for any window data.
+    pub fn available(bus_address: Option<&str>) -> bool {
+        let addr = bus_address.map(str::to_owned);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let answer = (|| -> Option<bool> {
+                let conn = connect(addr.as_deref()).ok()?;
+                let bus = zbus::blocking::fdo::DBusProxy::new(&conn).ok()?;
+                bus.name_has_owner(zbus::names::BusName::try_from(BUS_NAME).ok()?).ok()
+            })().unwrap_or(false);
+            let _ = tx.send(answer);
+        });
+        rx.recv_timeout(DBUS_DEADLINE).unwrap_or(false)
+    }
+
     fn ask(bus_address: Option<&str>) -> Option<Vec<Candidate>> {
         let conn = connect(bus_address).ok()?;
         // Only call a bus name somebody owns: never trigger activation of anything.

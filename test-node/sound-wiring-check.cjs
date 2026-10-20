@@ -119,7 +119,7 @@ function hostDtoFixture(host) {
       // #389: the chosen panel monitor projects as null when no choice exists
       'p.monitor': null,
     };
-    const expression = host.slice(at, end).replace(/\bp\.[a-z_]+(?:\(\))?(?:\.[a-z_]+\(\))*/g, token => {
+    const expression = host.slice(at, end).replace(/\bcontext_extension_available\(\)/g, 'false').replace(/\bp\.[a-z_]+(?:\(\))?(?:\.[a-z_]+\(\))*/g, token => {
       if (!Object.hasOwn(values, token)) throw new Error('Unmapped Host DTO expression: ' + token);
       return JSON.stringify(values[token]);
     });
@@ -135,7 +135,7 @@ test('Host DTO fixture extracts complete legacy and multiline typed projections 
   assert.deepEqual(dto, { sound: true, gain: 0, displayName: null, avatarColors: {},
     pillColors: {}, chosenModels: null,
     mainPill: 'integration_claude', declaredPills: ['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github'], theme: 'system',
-    autoCloseSeconds: 15, openOnHover: false, absenceMinutes: 3, openSettingsAtLaunch: false, settingsWindow: true, customBlobs: null, islandAgents: null, abitoInstructions: null, monitor: null, showPlanInNotch: false, showCodexPlanInNotch: false, windowContext: false });
+    autoCloseSeconds: 15, openOnHover: false, absenceMinutes: 3, openSettingsAtLaunch: false, settingsWindow: true, customBlobs: null, islandAgents: null, abitoInstructions: null, monitor: null, showPlanInNotch: false, showCodexPlanInNotch: false, windowContext: false, windowContextAvailable: false });
   const legacy = 'fn view_prefs(p: &Prefs) -> Value { json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors}) }';
   assert.deepEqual(hostDtoFixture(legacy), { sound: true, gain: 0, displayName: null, avatarColors: {} });
   const quoted = 'complete ) with "quoted" text';

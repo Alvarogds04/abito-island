@@ -2741,6 +2741,7 @@ fn feature_validation(app: &AppHandle) {
         }
         emit(&json!({"step":"validation_observation","name":name,"observation":observation}));
     };
+    let context_fixture = validator_context::start();
     install(&win);
     let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
     sleep(Duration::from_millis(500));
@@ -2768,6 +2769,29 @@ fn feature_validation(app: &AppHandle) {
         sleep(Duration::from_millis(250));
         record("chat-segundo-turno",run(&win,"AbitoValidate.chatSecond()"));
     } else { record("chat-segundo-turno",first); }
+    let mut context_results = Vec::new();
+    for enabled in [false, true, false] {
+        use std::sync::atomic::Ordering;
+        let reads_before = context_fixture.1.load(Ordering::SeqCst);
+        let seen_before = fake.seen().len();
+        let mut observation = run(&win, &format!("AbitoValidate.contextMessage({enabled})"));
+        let reads_after = context_fixture.1.load(Ordering::SeqCst);
+        let seen = fake.seen();
+        let body = seen.iter().skip(seen_before).find(|r| r.path == "/v1/chat/completions")
+            .and_then(|r| serde_json::from_str::<serde_json::Value>(&r.body).ok()).unwrap_or_default();
+        let users = body["messages"].as_array().map(|rows| rows.iter().filter(|r| r["role"] == "user").collect::<Vec<_>>()).unwrap_or_default();
+        let first = users.first().map(|r| r["content"].to_string()).unwrap_or_default();
+        let prefix = "Context — App: Writer del validador, Window: Documento privado del validador";
+        observation["ok"] = json!(observation["ok"] == true && users.len() == 1
+            && first.contains("Mensaje privado de contexto")
+            && if enabled { first.contains(prefix) && reads_after > reads_before }
+                else { !first.contains("Context — App:") && reads_after == reads_before });
+        observation["reads_before"] = json!(reads_before);
+        observation["reads_after"] = json!(reads_after);
+        observation["model_user_message"] = json!(first);
+        context_results.push(observation);
+    }
+    record("chat-contexto-ventana", json!({"ok":context_results.iter().all(|r|r["ok"]==true),"cases":context_results,"url":"unsupported: app/title only (L53 / #483 S3)","source":"fake GNOME extension on private validator bus"}));
     fake.shutdown();
     crate::chathost::switch_view(app, &state, false);
     sleep(Duration::from_millis(500));
@@ -2946,6 +2970,11 @@ fn feature_validation(app: &AppHandle) {
                 std::fs::write(&entry,legacy).expect("private legacy autostart fixture");
             }
             let mut observation=run(&page,&format!("AbitoValidate.hub({index},{id:?})"));
+            if id == "styles" {
+                let effect = validator_context::styles_effect();
+                observation["ok"] = json!(observation["ok"]==true && effect["ok"]==true);
+                observation["cleanup_stub"] = effect;
+            }
             if id == "flowsettings" {
                 let migrated=std::fs::read_to_string(&entry).unwrap_or_default().contains(" --autostart");
                 observation["legacyAutostartUpgraded"]=json!(migrated);
@@ -2968,6 +2997,10 @@ fn feature_validation(app: &AppHandle) {
         record("voz-sin-modelo",run(&page,"AbitoValidate.noModel('voice')"));
         record("voz-reconocimiento",json!({"ok":true,"unverifiable":"sin micrófono ni modelos: dictado real, wake word y reconocimiento no comprobables"}));
         record("ajustes-cuentas-keyring",json!({"ok":true,"unverifiable":"sin servicio de secretos privado; no se leen claves del usuario"}));
+        // Release only our fake name, then reload Settings through its normal IPC.
+        drop(context_fixture.0);
+        let chat_index = catalog.as_array().unwrap().iter().position(|v| v == "chat").unwrap();
+        record("ajustes-contexto-sin-extension", run(&page,&format!("AbitoValidate.contextMissing({chat_index})")));
     }
     if let Ok(origin) = std::env::var("ABITO_VALIDATE_INTEGRATIONS") {
         let mut results=Vec::new();
@@ -3057,4 +3090,67 @@ pub fn fake(calls: Arc<Mutex<Vec<String>>>) -> Connection {
 }
 
 
+}
+
+
+/// Fake extension on the validator's private bus, never the human's Shell.
+#[cfg(target_os = "linux")]
+mod validator_context {
+    use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
+    use abito_island::{contextwin, flow::{self, Backend, cleanup, store::{Store, Style}}};
+    use serde_json::{json, Value};
+    struct Extension(Arc<AtomicUsize>);
+    #[zbus::interface(name = "org.abito.Context")]
+    impl Extension {
+        fn get_recent_windows(&self) -> Vec<(String, String, String)> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            vec![("com.abitog.AbitoTauri".into(), "Abito".into(), "Abito".into()),
+                ("org.example.Writer.desktop".into(), "Writer del validador".into(), "Documento privado del validador".into())]
+        }
+    }
+    pub fn start() -> (zbus::blocking::Connection, Arc<AtomicUsize>) {
+        assert!(std::env::var("HOME").unwrap_or_default().starts_with("/tmp/abito-validate-"), "private validator HOME required");
+        assert!(std::env::var("DBUS_SESSION_BUS_ADDRESS").is_ok(), "private bus required");
+        let reads = Arc::new(AtomicUsize::new(0));
+        let conn = zbus::blocking::connection::Builder::session().unwrap().name(contextwin::BUS_NAME).unwrap()
+            .serve_at(contextwin::OBJECT_PATH, Extension(reads.clone())).unwrap().build().unwrap();
+        (conn, reads)
+    }
+    #[derive(Default)]
+    struct CleanupStub { styles: Mutex<Vec<Style>>, delivered: Mutex<Vec<String>> }
+    impl cleanup::CleanupProvider for CleanupStub {
+        fn clean(&self, request: &cleanup::Request<'_>) -> Result<String, String> {
+            self.styles.lock().unwrap().push(request.style);
+            assert_eq!(request.app, Some("Writer del validador"));
+            Ok(match request.style { Style::Polished => "Texto pulido del validador.", _ => "Texto natural del validador." }.into())
+        }
+    }
+    impl Backend for CleanupStub {
+        fn model_ready(&self) -> bool { true }
+        fn record(&self, _: &str) -> Result<Box<dyn flow::Recording>, String> { Err("no microphone in validator".into()) }
+        fn transcribe(&self, _: &[f32]) -> Option<String> { Some("texto privado del validador".into()) }
+        fn deliver(&self, text: &str) -> flow::paste::Outcome {
+            self.delivered.lock().unwrap().push(text.into()); flow::paste::Outcome::Copied
+        }
+        fn cleanup_provider(&self) -> Option<&dyn cleanup::CleanupProvider> { Some(self) }
+    }
+    pub fn styles_effect() -> Value {
+        // Load the styles saved by actual Settings IPC, not a fabricated mapping.
+        let mut store = Store::load();
+        let app = flow::System.foreground_app();
+        let matched = app.as_ref().is_some_and(|a| a.0 == "org.example.writer" && store.style_for(Some(&a.0)) == Style::Polished);
+        store.prefs.cleanup = true; // private stub: no key, provider, audio or external request
+        store.prefs.default_style = Style::Natural;
+        let store = Mutex::new(store);
+        let backend = CleanupStub::default();
+        let notify: flow::Notify = Arc::new(|_| {});
+        flow::process(&backend, &store, &notify, &[], 1.0, app.as_ref());
+        store.lock().unwrap().app_styles.retain(|s| s.id != "org.example.writer");
+        flow::process(&backend, &store, &notify, &[], 1.0, app.as_ref());
+        let styles = backend.styles.lock().unwrap();
+        let delivered = backend.delivered.lock().unwrap();
+        json!({"ok":matched && *styles == vec![Style::Polished, Style::Natural]
+            && *delivered == vec!["Texto pulido del validador.", "Texto natural del validador."],
+            "app":app,"styles":*styles,"delivered":*delivered,"provider":"private cleanup stub; no Anthropic request or microphone"})
+    }
 }

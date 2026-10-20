@@ -414,7 +414,20 @@
       await click(startup());
       await wait(async()=> (await invoke('prefs_action',{action:'autostart_view'})).enabled===false,'autoinicio retirado desde General');
       effect={liveGain:live.gain,motion:'sin interruptor inerte',autostart:'on/off mediante UI',input:'XTest sobre controles reales'};
-    } else if(page==='styles'||page==='flowsettings') {
+    } else if(page==='styles') {
+      const add=[...root.querySelectorAll('select')].find(s=>s.options[0]?.textContent.includes('Añadir') || s.options[0]?.textContent.includes('Agregar') || s.options[0]?.textContent.includes('Add an app'));
+      if(!add) throw Error('selector para añadir app ausente');
+      add.focus();
+      await wait(()=>[...add.options].some(o=>o.textContent==='Writer del validador'),'app GNOME en selector');
+      const index=[...add.options].findIndex(o=>o.textContent==='Writer del validador');
+      await click(add); await key('Home');
+      for(let i=0;i<index;i++) await key('Down');
+      await key('Return');
+      await wait(async()=> (await invoke('dictation_action',{action:'styles'})).some(s=>s.id==='org.example.writer'),'app GNOME guardada');
+      const select=await wait(()=>[...root.querySelectorAll('.hub-row')].find(r=>r.textContent.includes('Writer del validador'))?.querySelector('select'),'estilo por app');
+      await click(select); await key('Home'); await key('Down'); await key('Down'); await key('Return');
+      effect=await wait(async()=>{const styles=await invoke('dictation_action',{action:'styles'});return styles.some(s=>s.id==='org.example.writer' && s.style==='polished') && styles;},'estilo pulido guardado');
+    } else if(page==='flowsettings') {
       // Keyboard navigation on a real select produces trusted change events.
       const selects=[...root.querySelectorAll('select')].filter(s=>!s.disabled && s.options.length>1);
       const select=page==='flowsettings'?selects.at(-1):selects[0];
@@ -684,5 +697,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake,prepareNoticeCycle,noticeCycle};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake,prepareNoticeCycle,noticeCycle,action:'new'};
 })();

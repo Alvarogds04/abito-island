@@ -30,15 +30,15 @@ impl Bus {
 }
 impl Drop for Bus { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
-struct Fake(Vec<(String, String, String)>);
+struct Fake(Vec<(String, String, String)>, std::sync::Arc<AtomicU32>);
 #[zbus::interface(name = "org.abito.Context")]
 impl Fake {
-    fn get_recent_windows(&self) -> Vec<(String, String, String)> { self.0.clone() }
+    fn get_recent_windows(&self) -> Vec<(String, String, String)> { self.1.fetch_add(1, Ordering::SeqCst); self.0.clone() }
 }
 fn serve(bus: &Bus, rows: Vec<(&str, &str, &str)>) -> zbus::blocking::Connection {
     let rows = rows.into_iter().map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string())).collect();
     zbus::blocking::connection::Builder::address(bus.address.as_str()).unwrap()
-        .name(BUS_NAME).unwrap().serve_at(OBJECT_PATH, Fake(rows)).unwrap().build().unwrap()
+        .name(BUS_NAME).unwrap().serve_at(OBJECT_PATH, Fake(rows, Default::default())).unwrap().build().unwrap()
 }
 
 struct Xvfb { child: Child, display: String }
@@ -112,4 +112,41 @@ fn x11_without_a_window_manager_list_gives_no_context() {
     let bus = Bus::start();
     let x = Xvfb::start();
     assert_eq!(capture(Some(&bus.address), Some(&x.display)), None);
+}
+
+
+#[test]
+fn flow_uses_the_gnome_reader_on_wayland() {
+    let bus = Bus::start();
+    let _svc = serve(&bus, vec![("com.abitog.AbitoTauri", "Abito", "Abito"), ("org.example.Writer.desktop", "Writer", "Private title")]);
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "flow_gnome_child", "--nocapture"])
+        .env("ABITO_TEST_CONTEXT_CHILD", "1")
+        .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
+        .env("XDG_SESSION_TYPE", "wayland")
+        .env("DISPLAY", ":9999")
+        .output().unwrap();
+    assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stdout));
+}
+
+#[test]
+fn flow_gnome_child() {
+    if std::env::var("ABITO_TEST_CONTEXT_CHILD").ok().as_deref() != Some("1") { return; }
+    use abito_island::flow::{self, Backend, System};
+    assert_eq!(System.foreground_app(), Some(("org.example.writer".into(), "Writer".into())));
+    assert_eq!(flow::running_apps(), vec![("org.example.writer".into(), "Writer".into())]);
+}
+
+
+#[test]
+fn extension_availability_never_reads_windows() {
+    let bus = Bus::start();
+    assert!(!dbus::available(Some(&bus.address)));
+    let reads = std::sync::Arc::new(AtomicU32::new(0));
+    let _svc = zbus::blocking::connection::Builder::address(bus.address.as_str()).unwrap()
+        .name(BUS_NAME).unwrap().serve_at(OBJECT_PATH, Fake(vec![], reads.clone())).unwrap().build().unwrap();
+    assert!(dbus::available(Some(&bus.address)));
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+    assert_eq!(dbus::recent_windows(Some(&bus.address)), Some(vec![]));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
