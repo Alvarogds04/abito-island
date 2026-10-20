@@ -8,7 +8,7 @@ async function start(dir, env) {
   const server = http.createServer((req,res) => {
     requests.push(req.url);
     res.setHeader('Content-Type','application/json');
-    res.end(JSON.stringify({data:{viewer:{login:'validator',pullRequests:{nodes:[]},repositories:{nodes:[]},contributionsCollection:{contributionCalendar:{totalContributions:17,weeks:[]}}},search:{nodes:[]}}}));
+    res.end(JSON.stringify({data:{viewer:{login:'validator',pullRequests:{nodes:[{number:42,title:'Fixture PR',url:'https://github.com/fixture/repo/pull/42',repository:{nameWithOwner:'fixture/repo'},commits:{nodes:[{commit:{statusCheckRollup:{state:'FAILURE'}}}]}}]},repositories:{nodes:[{nameWithOwner:'fixture/repo',url:'https://github.com/fixture/repo',defaultBranchRef:{name:'main',target:{statusCheckRollup:{state:'SUCCESS'}}}}]},ownedRepos:{totalCount:23,nodes:[{stargazerCount:18}]},contributionsCollection:{contributionCalendar:{totalContributions:17,weeks:[{contributionDays:[{date:'2026-01-04',contributionCount:17,contributionLevel:'THIRD_QUARTILE',weekday:0}]}]}}},search:{nodes:[]}}}));
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   const bin = path.join(dir,'fake-bin'); fs.mkdirSync(bin,{mode:0o700});

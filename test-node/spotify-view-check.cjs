@@ -97,6 +97,22 @@ const test = async (_n, fn) => { await fn(); passed += 1; };
     assert.deepEqual(late, []);
   });
 
+  await test('artwork: only native raster bytes for the current local track, never remote URLs', () => {
+    const artwork = {artUrl:'file:///tmp/cover.png', mime:'image/png', data:'iVBORw0KGgo='};
+    const st = {running:true,track:{artUrl:artwork.artUrl},artwork};
+    assert.deepEqual(S.artworkView(st), artwork);
+    assert.equal(S.artworkView({...st,track:{artUrl:'file:///tmp/next.png'}}), null);
+    assert.equal(S.artworkView({...st,artwork:{...artwork,mime:'image/svg+xml'}}), null);
+    assert.equal(S.artworkView({...st,artwork:{...artwork,data:'<svg>'}}), null);
+    assert.equal(S.artworkView({running:true,track:{artUrl:'https://i.scdn.co/fixture'}}), null);
+  });
+  await test('seek: native readback is applied, but late controls after hide cannot repaint', async () => {
+    let release; const states=[];
+    const ctl=S.controller({invoke:(_cmd,a)=>a.payload.action==='seek'?new Promise(r=>{release=r;}):Promise.resolve({}),onState:s=>states.push(s)});
+    await ctl.show(); const pending=ctl.control('seek',90); await ctl.hide();
+    release({ok:true,state:{position:90}}); await pending; assert.deepEqual(states,[]);
+  });
+
   await test('wiring: loaded by index.html, one section, CSP untouched, no image/network use, settings window inert', () => {
     const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
     assert.equal((html.match(/src="spotify-view\.js"/g) || []).length, 1);

@@ -9,7 +9,8 @@ use serde_json::{json, Value};
 use std::sync::Mutex;
 use tauri::State;
 
-static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+// The key stays native. A credential change discards both sections, so accounts never mix.
+static CACHE: Mutex<(Option<String>, Option<Cache>)> = Mutex::new((None, None));
 
 #[tauri::command]
 pub async fn github_action(
@@ -24,8 +25,11 @@ pub async fn github_action(
     state.rate.lock().expect("rate lock").check(now_ms())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut slot = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        let cache = slot.get_or_insert_with(Cache::default);
-        match cache.refresh(section, now_ms() as u64, githubcmd::run_gh) {
+        use abito_island::secrets::{Keychain, SecretStore};
+        let token = Keychain.read("github-token").ok().flatten().filter(|t| !t.is_empty());
+        if slot.0 != token { slot.0 = token.clone(); slot.1 = None; }
+        let cache = slot.1.get_or_insert_with(Cache::default);
+        match cache.refresh(section, now_ms() as u64, |s| match token.as_deref() { Some(t) => githubcmd::run_token(s, t), None => githubcmd::run_gh(s) }) {
             Ok(v) => v,
             Err(why) => json!({ "available": false, "reason": why.code() }),
         }

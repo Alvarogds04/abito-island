@@ -371,6 +371,9 @@ pub const PULSE_QUERY: &str = r#"
 query {
   viewer {
     login
+    ownedRepos: repositories(first: 100, ownerAffiliations: [OWNER]) {
+      totalCount nodes { stargazerCount }
+    }
     pullRequests(states: OPEN, first: 20, orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
         number title url isDraft reviewDecision

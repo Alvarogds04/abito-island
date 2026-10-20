@@ -1,8 +1,7 @@
 'use strict';
 /* #467 / #470 — the Spotify card of the island (the overview's left card, where Coucou puts its now-playing card).
    Layout and wording adapted from Coucou src/views/spotify.ts (SpotifyCardView), commit 434d6a2b,
-   Copyright (c) 2026 Louis Raillé, MIT. Abito's own icons and copy; no artwork (the CSP admits img-src 'self'
-   only, so a remote art URL is never requested) and no Spotify mark.
+   Copyright (c) 2026 Louis Raillé, MIT. Abito's own icons and copy; local raster artwork decoded into a canvas (no URL fetch and no CSP relaxation) and no Spotify mark.
 
    Wire (src/spotifyhost.rs, island window ONLY — the host refuses the settings label):
      invoke('spotify_action', {payload:{action:'view'|'stop'|'play_pause'|'next'|'previous'}}) -> {ok, state}
@@ -66,6 +65,14 @@
     return null;
   }
 
+  function artworkView(state) {
+    const art = state?.artwork;
+    if (state?.running !== true || !isObject(art) || art.artUrl !== state.track?.artUrl ||
+        !['image/png', 'image/jpeg', 'image/webp'].includes(art.mime) || typeof art.data !== 'string' ||
+        !art.data || art.data.length > 2800000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(art.data)) return null;
+    return art;
+  }
+
   const payload = action => (Object.prototype.hasOwnProperty.call(CONTROLS, action) ? { action } : null);
 
   // The lifecycle: `view` on show, `stop` on hide, nothing twice. `invoke` and `onState` are injected.
@@ -86,13 +93,14 @@
       control(action, value) {
         const body = value === undefined ? payload(action) : valuedPayload(action, value);
         if (!body || !shown) return Promise.resolve();
-        return invoke('spotify_action', { payload: body }).then(apply, () => {});
+        const mine = generation;
+        return invoke('spotify_action', { payload: body }).then(r => { if (shown && mine === generation) apply(r); }, () => {});
       },
       isShown: () => shown,
     };
   }
 
-  return { PILL_ID, CONTROLS, wanted, cardView, payload, controller, formatTime, progressView, volumeOf, valuedPayload };
+  return { PILL_ID, CONTROLS, wanted, cardView, payload, controller, formatTime, progressView, volumeOf, valuedPayload, artworkView };
 });
 
 function mount(api) {
@@ -113,8 +121,7 @@ function mount(api) {
   const mk = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
   // Coucou's now-playing card (views/spotify.ts, NowPlayingViews.swift): green dot + title, subtitle, then
   // backward / play-pause / forward. Glyph paths are Coucou's ICONS (MIT, 24x24 grid, filled). There is no
-  // artwork, progress bar, volume, shuffle or repeat: Abito's `spotify_action` set is closed (previous,
-  // play_pause, next) and its state carries no position, so those parts of the card are not drawn.
+  // remote artwork fetch: local raster bytes are decoded below; all transport controls use the closed host verbs.
   const GLYPH = {
     previous: 'M21.5 6.2c0-.7-.8-1.1-1.4-.7l-7.6 5.8c-.5.4-.5 1 0 1.4l7.6 5.8c.6.4 1.4 0 1.4-.7V6.2zm-10 0c0-.7-.8-1.1-1.4-.7l-7.6 5.8c-.5.4-.5 1 0 1.4l7.6 5.8c.6.4 1.4 0 1.4-.7V6.2z',
     next: 'M2.5 6.2c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2zm10 0c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2z',
@@ -136,6 +143,25 @@ function mount(api) {
   const noteSvg = doc.createElementNS(NS, 'svg'); noteSvg.setAttribute('viewBox', '0 0 24 24'); noteSvg.setAttribute('width', '15'); noteSvg.setAttribute('height', '15');
   const notePath = doc.createElementNS(NS, 'path'); notePath.setAttribute('d', 'M12.2 3.6h1.7c.3 2.3 1.8 3.5 4.2 4.6l-.6 1.6c-1.4-.5-2.7-1.2-3.6-2.1v9.5a3.3 3.3 0 1 1-1.7-2.88V3.6z'); notePath.setAttribute('fill', 'currentColor');
   noteSvg.append(notePath); art.append(noteSvg);
+  // Decode bytes directly into a canvas: no remote/file src, data URL, blob URL or CSP change.
+  let artGeneration = 0, artKey = '';
+  async function paintArtwork(state) {
+    const a = api.artworkView(state), key = a ? a.artUrl + a.data : '';
+    if (key === artKey) return;
+    artKey = key; const mine = ++artGeneration;
+    art.replaceChildren(noteSvg); delete host.dataset.artwork;
+    if (!a) return;
+    let bitmap;
+    try {
+      const bytes = Uint8Array.from(atob(a.data), c => c.charCodeAt(0));
+      bitmap = await createImageBitmap(new Blob([bytes], {type:a.mime}), {resizeWidth:64, resizeHeight:64});
+      if (mine !== artGeneration) return;
+      const canvas = mk('canvas', 'np-cover'); canvas.width = 64; canvas.height = 64;
+      canvas.style.width = '100%'; canvas.style.height = '100%'; canvas.style.objectFit = 'cover';
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, 64, 64); art.replaceChildren(canvas); host.dataset.artwork = 'local';
+    } catch (_) { /* invalid raster: keep the musical-note fallback */ }
+    finally { bitmap?.close(); }
+  }
   const head = mk('div', 'np-head'); head.append(art, text);
   const buttons = {};
   const bar = mk('div', 'np-buttons');
@@ -206,6 +232,7 @@ function mount(api) {
   let lastAria = '';
   function paint(state) {
     const v = api.cardView(state);
+    paintArtwork(state);
     title.textContent = v.title; artist.textContent = v.artist;
     host.dataset.kind = v.kind; host.dataset.playing = v.playing ? 'true' : 'false';
     host.setAttribute('aria-label', v.aria);

@@ -42,6 +42,13 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   assert.equal(G.safeUrl('https://github.com/o/r'), 'https://github.com/o/r');
   for (const bad of ['http://evil.com', 'https://github.com.evil.com/x', 'https://u:p@github.com/x', 'javascript:alert(1)', 'https://github.com/a b', '', null, 'https://api.github.com/x', 'https://github.com/' + 'a'.repeat(2000)]) assert.equal(G.safeUrl(bad), null, String(bad).slice(0, 40));
 
+  assert.deepEqual(G.answerView({available:true, pulse, stats:{totalStars:18,totalRepos:23}}, 'pulse').stats, {totalStars:18,totalRepos:23});
+  assert.deepEqual(G.navigateDetail('ArrowDown', null, 2), {selection:0});
+  assert.deepEqual(G.navigateDetail('ArrowUp', 0, 2), {selection:1});
+  assert.deepEqual(G.navigateDetail('Enter', 1, 2), {open:1});
+  assert.deepEqual(G.navigateDetail('Escape', null, 0), {back:true});
+  assert.equal(G.navigateDetail('Enter', null, 0), null);
+
   // ---- Coucou's logic (vendored) ---------------------------------------------------------------------------
   const core = await imp('core/github.js');
   assert.equal(core.myPRsValue(pulse.myPRs), '2 · 1 fallando');

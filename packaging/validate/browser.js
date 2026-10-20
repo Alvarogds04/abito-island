@@ -354,10 +354,24 @@
     await click(pill);
     const card=await wait(()=>{const c=document.querySelector('.gh-card');return visible(c) && c.textContent.includes('GitHub') && !c.textContent.includes('Cargando') && c;},'tarjeta GitHub desde gh falso');
     const text=card.textContent;
-    // Leave the shared left card free for later scenes using real trusted input.
-    await click(byId('pill-choice-abito'));
-    await wait(()=>!visible(card),'tarjeta GitHub desenfocada');
-    return {ok:data.available===true && data.activity.total===17,text,data};
+    const stats=await invoke('github_action',{action:'refresh',section:'pulse'});
+    await wait(()=>card.textContent.includes('18') && card.querySelectorAll('.gh-stat').length===3,'stats y PRs de GitHub');
+    await click(card.querySelectorAll('.gh-stat')[0]);
+    await wait(()=>card.textContent.includes('Fixture PR') && card.querySelector('.gh-row'),'detalle PR');
+    await click(card.querySelector('.gh-back'));
+    await wait(()=>card.querySelectorAll('.gh-stat').length===3,'volver al pulso');
+    await click(card.querySelectorAll('.gh-stat')[2]);
+    await wait(()=>card.textContent.includes('main') && card.querySelector('.gh-row'),'detalle CI');
+    await click(card.querySelector('.gh-back'));
+    await wait(()=>card.querySelector('.gh-spark'),'volver al pulso CI');
+    await click(card.querySelector('.gh-spark'));
+    await wait(()=>card.textContent.includes('23 repos'),'actividad y repositorios');
+    await click(card.querySelector('.gh-back'));
+    await wait(()=>card.querySelectorAll('.gh-stat').length===3,'pulso tras actividad');
+    await click(card.querySelectorAll('.gh-stat')[0]);
+    await wait(()=>card.textContent.includes('Fixture PR') && card.querySelector('.gh-row'),'PR visible para captura');
+    // Keep the actual PR detail visible for its native PNG; Spotify releases focus.
+    return {ok:data.available===true && data.activity.total===17 && stats.stats.totalStars===18 && stats.stats.totalRepos===23,text,data,stats,details:['PR','CI','activity']};
   }
   async function mail() {
     const answer=await invoke('mail_action',{action:'inbox'});
@@ -370,10 +384,9 @@
     try {
       const reload=await invoke('sound_action',{action:'reload'});
       await wait(()=>changed,'sounds:changed tras reload');
-      // Reload also makes the real frontend read/decode the catalog. Let that
-      // burst settle and the shared 30/s budget renew before the independent
-      // validator reads; receiving the event alone is not completion evidence.
-      await new Promise(resolve=>setTimeout(resolve,1100));
+      // Reload also warms the renderer's 29-cue cache. Do not pile the
+      // validator's explicit readbacks onto that same 30 IPC/s window.
+      await new Promise(resolve=>setTimeout(resolve,1200));
       const after=await invoke('sound_action',{action:'list'});
       const expected=['peek','open','close','hover','blip','slap','annoyed','dizzy','greet','work','finish','error','approval','question','approve','gulp','tick','send','love','pop','proud','wink','yawn','attach','think','search','rate','sleep','greeting'];
       const catalog=window.AbitoSound.CUE_IDS;
@@ -391,6 +404,8 @@
     } finally {off();}
   }
   async function spotify() {
+    const gh=document.querySelector('.gh-card');
+    if(visible(gh)) { await click(byId('pill-choice-abito')); await wait(()=>!visible(gh),'GitHub desenfocado antes de Spotify'); }
     const prefs=await invoke('prefs_action',{action:'view'});
     if(!prefs.declaredPills.includes('integration_spotify')) {
       if(prefs.declaredPills.length>=4) await invoke('prefs_action',{action:'toggle_declared_pill',id:prefs.declaredPills[0]});
@@ -402,8 +417,19 @@
     await wait(()=>card.dataset.playing==='false','pausa reflejada');
     await click(card.querySelector('[data-action="play_pause"]'));
     await wait(()=>card.dataset.playing==='true','reproducción reflejada');
+    await wait(()=>card.dataset.artwork==='local' && card.querySelector('canvas'),'carátula local decodificada');
+    const slider=card.querySelector('[aria-label="Posición"]');
+    await click(slider);
+    await wait(async()=>{const r=await invoke('spotify_action',{action:'view'});return r.state.position>70 && r.state.position<110 && Number(slider.getAttribute('aria-valuenow'))>35;},'seek nativo y DOM asentados');
     const answer=await invoke('spotify_action',{action:'view'});
     return {ok:answer.ok && answer.state.playing && answer.state.track.title==='Fake Song',text:card.textContent,state:answer.state};
+  }
+  async function spotifyFallback() {
+    const card=byId('spotify-card');
+    await click(card.querySelector('[data-action="next"]'));
+    const r=await invoke('spotify_action',{action:'view'});
+    await wait(()=>!card.dataset.artwork && !card.querySelector('canvas'),'URL remota: nota musical sin fetch');
+    return {ok:r.state.track.artUrl==='https://unsupported.invalid/cover.png' && r.state.artwork===null};
   }
   async function character(on) {
     const value=on ? await window.__TAURI__.core.invoke('character_fly_out',{anywhere:true}) : await window.__TAURI__.core.invoke('character_fly_home',{forget:true});
@@ -508,5 +534,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback};
 })();

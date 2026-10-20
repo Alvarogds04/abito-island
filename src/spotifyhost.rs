@@ -23,7 +23,7 @@ fn client(app: &AppHandle) -> &'static spotify::Client {
     CLIENT.get_or_init(|| {
         let app = app.clone();
         spotify::Client::new(None, move |state| {
-            let _ = app.emit(spotify::STATE_EVENT, state);
+            let _ = app.emit(spotify::STATE_EVENT, spotify::with_artwork(state));
         })
     })
 }
@@ -65,7 +65,7 @@ async fn run(app: AppHandle, action: Action) -> Result<Value, BridgeError> {
         } else {
             client.state()
         };
-        json!({ "ok": ok, "state": state })
+        json!({ "ok": ok, "state": spotify::with_artwork(&state) })
     })
     .await
     .map_err(|_| err("unavailable"))

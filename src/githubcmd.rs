@@ -1,6 +1,6 @@
 //! #467 T11 — closed `github_action` `{action:"refresh", section:"pulse"|"activity"}`:
-//! read-only GitHub data through the user's own `gh` CLI session (no token is read,
-//! stored or sent by Abito). Pure half: `github.rs` (Coucou, unchanged).
+//! read-only GitHub data: native keychain token first, user's existing gh session otherwise.
+//! Tokens never cross IPC; the two sources share the parser/cache. Pure half: `github.rs`.
 //!
 //! Adapted from Coucou src-tauri/src/lib.rs (`github_refresh`) and integrations.rs
 //! (`github_refresh_if_stale`) @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT. Coucou
@@ -63,6 +63,7 @@ pub fn gh_args(section: Section) -> Vec<String> {
 pub struct Cache {
     pulse: Option<GitHubPulse>,
     activity: Option<GitHubActivity>,
+    stats: Option<Value>,
 }
 
 impl Cache {
@@ -79,13 +80,24 @@ impl Cache {
         if stale {
             let root = fetch(section)?;
             match section {
-                Section::Pulse => self.pulse = Some(GitHubPulse::parse(&root, now_ms).ok_or(Unavailable::BadAnswer)?),
+                Section::Pulse => {
+                    self.pulse = Some(GitHubPulse::parse(&root, now_ms).ok_or(Unavailable::BadAnswer)?);
+                    self.stats = root.pointer("/data/viewer/ownedRepos").and_then(|repos| {
+                        let total = repos.get("totalCount")?.as_u64()?;
+                        let stars: u64 = repos.get("nodes")?.as_array()?.iter()
+                            .filter_map(|r| r.get("stargazerCount").and_then(Value::as_u64)).sum();
+                        Some(json!({"totalRepos":total,"totalStars":stars}))
+                    });
+                },
                 Section::Activity => self.activity = Some(GitHubActivity::parse(&root, now_ms).ok_or(Unavailable::BadAnswer)?),
             }
         }
         let mut out = json!({ "available": true, "fetched": stale });
         match section {
-            Section::Pulse => out["pulse"] = serde_json::to_value(&self.pulse).unwrap_or(Value::Null),
+            Section::Pulse => {
+                out["pulse"] = serde_json::to_value(&self.pulse).unwrap_or(Value::Null);
+                if let Some(stats) = &self.stats { out["stats"] = stats.clone(); }
+            },
             Section::Activity => out["activity"] = serde_json::to_value(&self.activity).unwrap_or(Value::Null),
         }
         Ok(out)
@@ -116,12 +128,23 @@ where
 
 /// Runs `gh` (looked up on PATH like `files::find_on_path_in`), 20 s at most, stdin closed.
 pub fn run_gh(section: Section) -> Result<Value, Unavailable> {
+    run_gh_with_token(section, None)
+}
+
+/// A saved key takes precedence over gh's own session; never put credentials in argv.
+pub fn authenticated_gh(gh: impl AsRef<std::ffi::OsStr>, section: Section, token: Option<&str>) -> std::process::Command {
+    let mut cmd = std::process::Command::new(gh);
+    cmd.args(gh_args(section));
+    if let Some(token) = token.filter(|t| !t.is_empty()) { cmd.env("GH_TOKEN", token); }
+    cmd
+}
+
+pub fn run_gh_with_token(section: Section, token: Option<&str>) -> Result<Value, Unavailable> {
     use std::io::Read;
     let gh = std::env::var_os("PATH")
         .and_then(|p| crate::files::find_on_path_in("gh", &p))
         .ok_or(Unavailable::NotInstalled)?;
-    let mut child = std::process::Command::new(gh)
-        .args(gh_args(section))
+    let mut child = authenticated_gh(gh, section, token)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -151,4 +174,75 @@ pub fn run_gh(section: Section) -> Result<Value, Unavailable> {
         return Err(Unavailable::NotSignedIn);
     }
     serde_json::from_slice(&bytes).map_err(|_| Unavailable::BadAnswer)
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+    #[test]
+    fn public_refresh_includes_owned_repository_stats() {
+        let root = json!({"data":{"viewer":{"login":"fixture","pullRequests":{"nodes":[]},
+            "repositories":{"nodes":[]},"ownedRepos":{"totalCount":23,"nodes":[{"stargazerCount":7},{"stargazerCount":11}]},
+            "pageTwo":{"nodes":[{"stargazerCount":5}]}}}});
+        let answer = Cache::default().refresh(Section::Pulse, 1000, |_| Ok(root)).unwrap();
+        assert_eq!(answer["stats"], json!({"totalStars":18,"totalRepos":23}));
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn saved_key_reads_same_pulse_from_local_http_without_gh() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/graphql", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+            let mut input = [0; 8192]; let n = socket.read(&mut input).unwrap();
+            let text = String::from_utf8_lossy(&input[..n]).to_lowercase();
+            assert!(text.contains("authorization: bearer fixture-key"));
+            let body = r#"{"data":{"viewer":{"login":"fixture","pullRequests":{"nodes":[]},"repositories":{"nodes":[]},"ownedRepos":{"totalCount":23,"nodes":[{"stargazerCount":18}]}}}}"#;
+            write!(socket,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+        });
+        let raw = token_fetch_at(Section::Pulse, "fixture-key", &endpoint).unwrap();
+        let answer = Cache::default().refresh(Section::Pulse, 1000, |_| Ok(raw)).unwrap();
+        assert_eq!(answer["pulse"]["login"], "fixture");
+        assert_eq!(answer["stats"], json!({"totalStars":18,"totalRepos":23}));
+        server.join().unwrap();
+    }
+    #[test]
+    fn saved_key_overrides_cli_auth_without_entering_argv() {
+        let cmd = authenticated_gh("gh", Section::Pulse, Some("fixture-not-a-secret"));
+        assert!(!format!("{:?}", cmd.get_args().collect::<Vec<_>>()).contains("fixture-not-a-secret"));
+        assert!(cmd.get_envs().any(|(k,v)| k == "GH_TOKEN" && v == Some(std::ffi::OsStr::new("fixture-not-a-secret"))));
+        assert_eq!(authenticated_gh("gh", Section::Pulse, None).get_envs().count(), 0);
+    }
+}
+
+/// Saved key uses native HTTPS independently of gh. No redirects or proxy credential forwarding.
+#[cfg(target_os = "linux")]
+pub fn run_token(section: Section, token: &str) -> Result<Value, Unavailable> {
+    token_fetch_at(section, token, "https://api.github.com/graphql")
+}
+#[cfg(not(target_os = "linux"))]
+pub fn run_token(section: Section, token: &str) -> Result<Value, Unavailable> {
+    run_gh_with_token(section, Some(token))
+}
+#[cfg(target_os = "linux")]
+fn token_fetch_at(section: Section, token: &str, endpoint: &str) -> Result<Value, Unavailable> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|_| Unavailable::BadAnswer)?;
+    runtime.block_on(async {
+        let client = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(20)).build().map_err(|_| Unavailable::BadAnswer)?;
+        let query = match section { Section::Pulse => github::PULSE_QUERY, Section::Activity => github::ACTIVITY_QUERY };
+        let mut response = client.post(endpoint).bearer_auth(token).header("User-Agent", "Abito")
+            .header("Content-Type", "application/json").body(json!({"query":query}).to_string())
+            .send().await.map_err(|_| Unavailable::BadAnswer)?;
+        if matches!(response.status().as_u16(), 401 | 403) { return Err(Unavailable::NotSignedIn); }
+        if !response.status().is_success() { return Err(Unavailable::BadAnswer); }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| Unavailable::BadAnswer)? {
+            if bytes.len() + chunk.len() > 2 * 1024 * 1024 { return Err(Unavailable::BadAnswer); }
+            bytes.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&bytes).map_err(|_| Unavailable::BadAnswer)
+    })
 }
