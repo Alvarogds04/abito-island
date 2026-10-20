@@ -90,7 +90,7 @@ function engagementFixture(openOnHover) {
   const vm = require('node:vm');
   const moduleApi = require(path.join(frontend, 'island-interaction.js'));
   const invocations = [];
-  const desktopCalls = [];
+  const desktopCalls = [], dismissed = [];
   const byId = new Map();
   const windowListeners = Object.create(null);
   const documentListeners = Object.create(null);
@@ -100,7 +100,7 @@ function engagementFixture(openOnHover) {
     catch() { return this; },
     finally(fn) { fn(); return this; },
   });
-  const timers = new Map(); let nextTimer = 0;
+  const timers = new Map(); let nextTimer = 0, clock = 0;
   const makeEl = () => {
     const listeners = Object.create(null), attrs = new Map();
     return {
@@ -115,7 +115,7 @@ function engagementFixture(openOnHover) {
       addEventListener(name, fn) { (listeners[name] ||= []).push(fn); },
       removeEventListener() {},
       fire(type, ev) { for (const fn of listeners[type] || []) fn(ev); },
-      focus() {},
+      focus() {}, click() { this.fire('click',{isTrusted:false,preventDefault(){}}); },
       querySelectorAll() { return []; }, querySelector() { return null; },
       getBoundingClientRect() { return { left: 0, top: 0, width: 10, height: 10 }; },
       closest() { return null; },
@@ -141,7 +141,7 @@ function engagementFixture(openOnHover) {
     expand() { desktopCalls.push('expand'); return resolved(snapshotState); },
     close() { desktopCalls.push('close'); return resolved(snapshotState); },
     autoClose() { desktopCalls.push('autoClose'); return resolved(snapshotState); },
-    dismiss() { desktopCalls.push('dismiss'); return resolved(snapshotState); },
+    dismiss(id) { desktopCalls.push('dismiss'); dismissed.push(id); return resolved(snapshotState); },
     click() { return resolved(snapshotState); },
     allow() { return resolved(snapshotState); },
     deny() { return resolved(snapshotState); },
@@ -149,21 +149,22 @@ function engagementFixture(openOnHover) {
   const sandbox = {
     console,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
-    performance: { now: () => 0 },
-    setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, {fn, ms}); return id; },
+    performance: { now: () => clock },
+    setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, {fn, ms, due:clock+ms}); return id; },
     clearTimeout(id) { timers.delete(id); }, setInterval() { return 1; }, clearInterval() {},
     requestAnimationFrame() { return 1; },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     DOMParser: class { parseFromString() { return { documentElement: { nodeName: 'svg' } }; } },
     MutationObserver: class { constructor(cb) { this.cb = cb; observers.push(this); } observe() {} disconnect() {} },
+    AbitoNotify: require('../frontend/notify-view.js'),
     AbitoOverview: {
       viewPhase: OV.viewPhase,
       motionState: () => 'full', honorSystemMotion: () => false, choosePose: () => 'idle',
       hostPoseView: () => ({ tracker: { failing: false, since: 0 }, pose: null }),
       connectionView: () => ({ word: '', detail: '', tone: '', aria: '', icon: '' }),
       bridgeView: () => null, noticeView: () => null, hotkeyView: () => null,
-      noticeBandView: () => null, connectionBandView: () => null, // T7.3: the transport-error band is exercised in overview-view-check
-      noticeListView: () => null, // #437: the stub keeps the strip empty, like noticeView
+      noticeBandView: OV.noticeBandView, finishedCardView: OV.finishedCardView,
+      noticeListView: OV.noticeListView,
       cardConnection: () => null, expiryLabel: () => '', expiryAria: () => '',
       cardView: () => ({ kind: 'inert', tone: '', icon: null, word: '', aria: '' }),
       infoLabel: a => a, hoverScale: () => 1,
@@ -193,7 +194,12 @@ function engagementFixture(openOnHover) {
   const pointer = extra => Object.assign({ isTrusted: true, pointerType: 'mouse', buttons: 0,
     clientX: 5, clientY: 5, isPrimary: true, button: 0 }, extra);
   return {
-    invocations, desktopCalls,
+    invocations, desktopCalls, dismissed,
+    ok() { byId.get('notice-card-ok').fire('click',{isTrusted:true}); },
+    view() { return byId.get('capsule').dataset.view; },
+    noticeName() { return byId.get('notice-card-name').textContent; },
+    update(extra) { snapshotState={...snapshotState,...extra}; for(const fn of desktopHandlers) fn(snapshotState); },
+    advance(ms) { const end=clock+ms; for(;;) { const next=[...timers].sort((a,b)=>a[1].due-b[1].due)[0]; if(!next||next[1].due>end) break; clock=next[1].due; timers.delete(next[0]); next[1].fn(); } clock=end; },
     pin() { const el = byId.get('island-pin'); assert.ok(el, 'accessible manual pin control exists'); el.fire('click', {isTrusted:true,type:'click',button:0}); return el.getAttribute('aria-pressed'); },
     // the boot render mutates the observed attributes: fire them once
     mutate() { for (const o of observers) o.cb([]); },
@@ -213,7 +219,7 @@ function engagementFixture(openOnHover) {
     click() { fire(documentListeners, 'click', pointer({ type: 'click' })); },
     // Execute the shipped global pointer handlers around an independently owned
     // control callback. This models DOM bubbling, not native/trusted input.
-    activateControl(name, button) {
+    activateControl(_name, button) {
       const el = makeEl(); let actions = 0;
       el.closest = selector => button && selector.split(',').map(s => s.trim()).includes('button') ? el : null;
       el.onclick = () => { actions++; };
@@ -341,5 +347,24 @@ test('#419 style.css rules: theme tokens, transform token, reduced motion, no sy
     'no system media query: island.js paints data-motion');
 });
 
+const finishedNotice=id=>({id,kind:'settled',title:'Pi terminó',agent:'pi',projectName:id,detail:'No confirma éxito',at:Date.now(),expiresAt:Date.now()+60000});
+test('A04c shipped finished opens its lane, holds 5200ms, then folds without dismissing',()=>{
+  const f=engagementFixture(false); f.mutate(); f.seed('compact'); f.update({notices:[finishedNotice('fresh')]});
+  assert.equal(f.view(),'notices'); f.seed('expanded'); f.advance(5199); assert.equal(f.desktopCalls.includes('autoClose'),false);
+  f.advance(1); assert.equal(f.view(),'overview'); assert.equal(f.desktopCalls.filter(x=>x==='autoClose').length,1); assert.equal(f.desktopCalls.includes('dismiss'),false);
+});
+for(const [name,protect] of [['human engagement',f=>f.click()],['pending request',f=>f.update({request:{}})],['transport failure',f=>f.update({unavailable:true})]]) test('A04c '+name+' prevents the finished timer collapsing the island',()=>{
+  const f=engagementFixture(false); f.mutate(); f.seed('compact'); f.update({notices:[finishedNotice('fresh')]}); f.seed('expanded'); protect(f); f.advance(5200);
+  assert.equal(f.view(),'overview'); assert.equal(f.desktopCalls.includes('autoClose'),false);
+});
+test('A04c the finished pane selects the new tail, not the oldest retained notice',()=>{
+  const f=engagementFixture(false); f.mutate(); f.seed('compact'); const old=finishedNotice('old'); f.update({notices:[old]}); f.seed('expanded');
+  f.update({notices:[old,finishedNotice('fresh')]}); assert.equal(f.noticeName(),'fresh');
+  f.ok(); assert.deepEqual(f.dismissed,['fresh'],'OK dismisses the displayed exact notice, never the oldest row');
+});
+test('A04c a user-opened overview returns from finished without auto-fold',()=>{
+  const f=engagementFixture(false); f.mutate(); f.seed('expanded'); f.update({notices:[finishedNotice('fresh')]}); f.advance(5200);
+  assert.equal(f.view(),'overview'); assert.equal(f.desktopCalls.includes('autoClose'),false);
+});
 console.log(`island-interaction-wiring-check: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

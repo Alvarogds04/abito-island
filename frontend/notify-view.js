@@ -160,6 +160,16 @@
   function createRevealGate() {
     let questionSeen; // undefined = no baseline; then the last live pending id (or null)
     let noticeSeen;   // undefined = no baseline; then a Set of ids already observed
+    function arrivals(notices) {
+      const list = (Array.isArray(notices) ? notices : []).filter(x => x && typeof x.id === 'string');
+      if (noticeSeen === undefined) { noticeSeen = new Set(list.map(x => x.id)); return []; }
+      const fresh = list.filter(x => !noticeSeen.has(x.id));
+      if (noticeSeen.size > NOTICE_SEEN_MAX) {
+        for (const old of noticeSeen) { noticeSeen.delete(old); if (noticeSeen.size <= NOTICE_SEEN_MAX / 2) break; }
+      }
+      for (const x of list) noticeSeen.add(x.id);
+      return fresh;
+    }
     return {
       // A live, well-formed pending question whose id differs from the last seen
       // one fires EXACTLY once. Expired or malformed pendings are no events; a
@@ -173,25 +183,57 @@
         questionSeen = id;
         return fire;
       },
-      // A top notice NEVER SEEN before fires. Notices already on the strip at
-      // boot are seeded silently; a dismiss that exposes an older (seen) notice
-      // is not an arrival. Seen memory is bounded (FIFO): with host-issued
-      // unique ids a pruned replay is a new event, which is the honest reading
-      // of a notice resurfacing after hundreds of arrivals.
-      notice(notices) {
-        const list = Array.isArray(notices) ? notices : [];
-        const ids = [];
-        for (const x of list) if (x && typeof x.id === 'string') ids.push(x.id);
-        const top = ids.length ? ids[0] : null;
-        if (noticeSeen === undefined) { noticeSeen = new Set(ids); return false; }
-        if (noticeSeen.size > NOTICE_SEEN_MAX) {
-          for (const old of noticeSeen) { noticeSeen.delete(old); if (noticeSeen.size <= NOTICE_SEEN_MAX / 2) break; }
-        }
-        const fire = top !== null && !noticeSeen.has(top);
-        if (top !== null) noticeSeen.add(top);
-        return fire;
-      },
+      // Host order is oldest-first. Admit new arrivals anywhere in a batch,
+      // seed every retained row, and never mistake dismissal for arrival.
+      // FIFO memory stays bounded; a pruned replay is honestly a new event.
+      arrivals,
+      notice(notices) { return arrivals(notices).length > 0; },
     };
+  }
+  // A04c: presentation lifetime only. Retained host notices are never deleted.
+  // Coucou hooks.ts Stop retires the finished state after 5200ms; the caller
+  // owns navigation/admission and must recheck protected state before folding.
+  const FINISHED_MS = 5200;
+  function createFinishedCycle(options) {
+    const gate = createRevealGate();
+    let id = null, timer = null, generation = 0, stopped = false;
+    function end(expired) {
+      generation++;
+      if (timer !== null) options.cancel(timer);
+      timer = null;
+      const previous = id; id = null;
+      if (previous !== null) options.end(previous, expired);
+    }
+    function start(next) {
+      generation++;
+      if (timer !== null) options.cancel(timer);
+      timer = null; id = next;
+      const serial = generation, due = options.now() + FINISHED_MS;
+      options.start(id);
+      function deliver() {
+        if (stopped || serial !== generation) return;
+        const remaining = due - options.now();
+        if (remaining > 0) timer = options.schedule(deliver, Math.max(1, remaining));
+        else end(true);
+      }
+      timer = options.schedule(deliver, FINISHED_MS);
+    }
+    return Object.freeze({
+      observe(notices, allowed) {
+        if (stopped) return false;
+        const list = Array.isArray(notices) ? notices : [];
+        const arrivals = gate.arrivals(list);
+        if (id !== null && (!allowed || !list.some(n => n && n.id === id))) end(false);
+        const latest = arrivals.at(-1);
+        if (latest) {
+          if (allowed && (!latest.kind || latest.kind === 'settled')) start(latest.id);
+          else end(false); // a problem/pending context never remains under finished
+        }
+        return arrivals.length > 0;
+      },
+      cancel() { if (!stopped) end(false); },
+      stop() { end(false); stopped = true; },
+    });
   }
   // Only a resting compact island or a HIDDEN one expands: the reveal goes
   // through the host's own `expand` verb (Rust owns the native geometry; the
@@ -225,5 +267,5 @@
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
   return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
-    outcomeView, phase, soundFor, createCueLimiter, createRevealGate, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
+    outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });
