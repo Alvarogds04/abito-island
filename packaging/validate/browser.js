@@ -183,6 +183,16 @@
       let last;
       try { await wait(async()=>{await invoke('agent_action',{action:'view'});last=await invoke('agent_action',{action:'sessions_list'}); return last.connection==='connected' && Array.isArray(last.sessions?.rows);},'daemon conectado y lista de sesiones',15000); }
       catch { const unavailable=seen.some(t=>t.includes('Sesiones no disponibles')); return {ok:false,reason:unavailable ? 'ticker mostró Sesiones no disponibles con daemon conectado' : 'daemon conectado pero sessions_list no devolvió una lista (no es una lista vacía)',unavailable_seen:unavailable,last}; }
+      // Isolation: earlier scenes may leave a main pill (e.g. Claude) that owns the card. Focus the
+      // validator's own Pi session through the public mini control before asserting its steps.
+      const ownRow=(last.sessions.rows||[]).find(r=>r.tools?.total===2);
+      if(ownRow) {
+        if(byId('capsule').dataset.phase!=='compact') { await invoke('desktop_action',{action:'close'}); await wait(()=>byId('capsule').dataset.phase==='compact','barra compacta'); }
+        const mini=await wait(()=>byId('mini-grid')?.querySelector(`[data-session-id="${ownRow.id}"]`),'mini de la sesión propia');
+        await click(mini);
+        await invoke('desktop_action',{action:'expand'});
+        await wait(()=>byId('capsule').dataset.phase==='expanded','isla expandida');
+      }
       const until=performance.now()+4500;
       while(performance.now()<until){ seen.push(byId('overview-view').textContent); await frame(); }
       const s=await invoke('agent_action',{action:'view'});
