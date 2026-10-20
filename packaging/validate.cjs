@@ -86,6 +86,9 @@ async function main(args = process.argv.slice(2)) {
     for (const [key, sub] of Object.entries({ HOME: 'home', XDG_CONFIG_HOME: 'config', XDG_CACHE_HOME: 'cache', XDG_DATA_HOME: 'data', XDG_RUNTIME_DIR: 'runtime', ABITO_SOCKET_DIR: 'sockets' })) {
       env[key] = path.join(out, sub); fs.mkdirSync(env[key], { mode: 0o700 });
     }
+    // Exercise a real read-only Claude installer preview, not just the missing-tool path.
+    // No user configuration or installed hooks are copied into this private HOME.
+    fs.mkdirSync(path.join(env.HOME, '.claude'), {mode:0o700});
     const piParent = '/run/user/1000/abito-validator-pi';
     fs.mkdirSync(piParent, { mode: 0o700, recursive: true });
     const parentStat = fs.lstatSync(piParent);
@@ -136,8 +139,8 @@ async function main(args = process.argv.slice(2)) {
     fs.copyFileSync(binary, candidate); fs.chmodSync(candidate, 0o700);
     for (const [dir, files] of [['desktop-daemon', L.DAEMON_FILES], ['desktop-harness', L.HARNESS_FILES]]) {
       for (const file of files) {
-        const dest = path.join(out, dir, file); fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-        fs.copyFileSync(path.join(crate, '..', dir, file), dest);
+        const dest = path.join(out, dir, file);
+        require('./validate/layout.cjs').copyRuntimeFile(path.join(crate, '..', dir, file), dest);
       }
     }
     // Original 1px PNG fixture, private output only, no external artwork request.

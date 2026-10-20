@@ -372,6 +372,7 @@
     await wait(()=>root.textContent.trim().length>20 && root.querySelector('button,input,select,textarea'), 'contenido y controles '+page);
     const text=root.textContent;
     if (/No se pudieron (leer|abrir) los ajustes/.test(text)) return {ok:false,reason:'renderer de ajustes mostró su fallback de error',text};
+    if (page==='agents' && /install_failed|No se pudo completar/i.test(text)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text};
     const controls=[...root.querySelectorAll('button,input,select,textarea')];
     const before=await snapshot();
     let effect, limitation;
@@ -452,6 +453,11 @@
         effect={...effect,instructions:'guardadas para próximos mensajes'};
       }
     }
+    // Preferences can repaint the page while installer previews arrive asynchronously.
+    // Check the CURRENT full DOM as well, not just the pre-interaction/truncated text.
+    const finalText=document.querySelector('.hub-page')?.textContent || '';
+    if (page==='agents' && /install_failed|No se pudo completar/i.test(finalText)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text:finalText};
+    if (page==='agents') document.querySelector('.hub-page')?.scrollIntoView({block:'start'});
     return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
   }
   async function integrationStates(state) {
