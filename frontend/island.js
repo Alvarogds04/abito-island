@@ -539,8 +539,27 @@
       models: !!(models && models.dataset.open === 'true'),
     };
   }
+  // A manual pin is local to this expansion; protected cards have independent
+  // guards and cannot be unpinned by this control. Keep the existing header slot
+  // styling and keyboard activation rather than installing another global hook.
+  const pinButton = document.createElement('button');
+  pinButton.id = 'island-pin'; pinButton.type = 'button'; pinButton.className = 'hdr-action';
+  pinButton.textContent = '⌖';
+  const foldButton = $('header-fold');
+  if (foldButton) foldButton.before(pinButton);
+  function paintPin() {
+    const pinned = !!(interaction && interaction.snapshot().pinned);
+    pinButton.setAttribute('aria-pressed', String(pinned));
+    pinButton.setAttribute('aria-label', pinned ? 'Desfijar isla' : 'Fijar isla');
+    pinButton.title = pinned ? 'Desfijar isla' : 'Fijar isla';
+    pinButton.disabled = !interaction || !window.AbitoIslandInteraction.eligible(interactionFacts());
+  }
+  pinButton.addEventListener('click', event => {
+    if (interaction) { interaction.update(interactionFacts()); interaction.togglePin(event); paintPin(); }
+  });
   function syncInteraction() {
     if (interaction) interaction.update(interactionFacts());
+    paintPin();
   }
   function applyInteractionPrefs(p) {
     if (!interaction || !p) return;

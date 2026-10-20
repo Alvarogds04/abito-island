@@ -100,15 +100,17 @@ function engagementFixture(openOnHover) {
     catch() { return this; },
     finally(fn) { fn(); return this; },
   });
+  const timers = new Map(); let nextTimer = 0;
   const makeEl = () => {
-    const listeners = Object.create(null);
+    const listeners = Object.create(null), attrs = new Map();
     return {
       hidden: true, inert: false, disabled: false, value: '', textContent: '', tabIndex: 0,
       dataset: {},
       style: { width: '', height: '', top: '', bottom: '', left: '', borderRadius: '',
         setProperty() {}, getPropertyValue() { return '1'; } },
       classList: { add() {}, remove() {}, toggle() {} },
-      setAttribute() {}, getAttribute() { return null; }, removeAttribute() {}, appendChild() {},
+      setAttribute(k, v) { attrs.set(k, v); }, getAttribute(k) { return attrs.get(k) ?? null; }, removeAttribute() {}, appendChild() {},
+      before(el) { byId.set(el.id, el); },
       replaceChildren() {},
       addEventListener(name, fn) { (listeners[name] ||= []).push(fn); },
       removeEventListener() {},
@@ -148,7 +150,8 @@ function engagementFixture(openOnHover) {
     console,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     performance: { now: () => 0 },
-    setTimeout() { return 1; }, clearTimeout() {}, setInterval() { return 1; }, clearInterval() {},
+    setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, {fn, ms}); return id; },
+    clearTimeout(id) { timers.delete(id); }, setInterval() { return 1; }, clearInterval() {},
     requestAnimationFrame() { return 1; },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     DOMParser: class { parseFromString() { return { documentElement: { nodeName: 'svg' } }; } },
@@ -191,6 +194,7 @@ function engagementFixture(openOnHover) {
     clientX: 5, clientY: 5, isPrimary: true, button: 0 }, extra);
   return {
     invocations, desktopCalls,
+    pin() { const el = byId.get('island-pin'); assert.ok(el, 'accessible manual pin control exists'); el.fire('click', {isTrusted:true,type:'click',button:0}); return el.getAttribute('aria-pressed'); },
     // the boot render mutates the observed attributes: fire them once
     mutate() { for (const o of observers) o.cb([]); },
     seed(state) {
@@ -282,6 +286,12 @@ test('#336 with hover-open off a compact press requests expansion, not a native 
   f.press(); f.release(); f.click();
   assert.deepEqual(f.desktopCalls, ['expand']);
   assert.equal(f.dragReleases().length, 0);
+});
+
+test('A04a shipped pin button toggles and resets when native collapse settles', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  assert.equal(f.pin(), 'true'); assert.equal(f.pin(), 'false'); assert.equal(f.pin(), 'true');
+  f.seed('compact'); f.seed('expanded'); assert.equal(f.pin(), 'true', 'collapse cleared the old pin');
 });
 
 // ---- #419: the approved countdown decoration surface -----------------------

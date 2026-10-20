@@ -54,6 +54,51 @@ function fixture(effects = {}) {
   return { controller, calls, counts, jobs, advance, raw: n => { raw = n; } };
 }
 (async () => {
+  await test('A04a Coucou: hover opens immediately with no enter timer, then grants 600ms on leave', async () => {
+    const f = fixture(); f.controller.setPreferences(prefs(15, true));
+    f.controller.update(overview({ state: 'compact' }));
+    assert.equal(f.controller.enter(mouse()), true);
+    assert.deepEqual(f.calls, ['open'], 'mouseEntered immediately requests home');
+    assert.equal(f.jobs.size, 0, 'no enter dwell timer');
+    assert.equal(f.controller.snapshot().hoverOnly, true);
+    await flush(); f.controller.update(overview()); f.controller.leave(mouse());
+    f.advance(599); assert.deepEqual(f.calls, ['open']);
+    f.advance(1); assert.deepEqual(f.calls, ['open', 'autoClose']);
+  });
+  await test('A04a pin: trusted toggle suppresses deadlines, unpin starts a full countdown', () => {
+    const f = fixture(); f.controller.update(overview()); f.advance(1000);
+    assert.equal(f.controller.togglePin(click()), true);
+    assert.equal(f.controller.snapshot().pinned, true);
+    assert.equal(f.controller.snapshot().countdown, null);
+    f.advance(120000); assert.deepEqual(f.calls, []);
+    assert.equal(f.controller.togglePin(click({ isTrusted: false })), false);
+    assert.equal(f.controller.snapshot().pinned, true);
+    assert.equal(f.controller.togglePin(click()), true);
+    f.advance(14999); assert.deepEqual(f.calls, []); f.advance(1);
+    assert.deepEqual(f.calls, ['autoClose']);
+  });
+  await test('A04a pin cannot release a protected card; collapse clears only the manual pin', () => {
+    const f = fixture(); f.controller.update(overview()); f.controller.togglePin(click());
+    for (const field of ['question', 'approval', 'request', 'decision', 'card']) {
+      f.controller.update(overview({ [field]: true }));
+      assert.equal(f.controller.togglePin(click()), false);
+      assert.equal(f.controller.snapshot().pinned, true);
+      f.advance(120000); assert.deepEqual(f.calls, []);
+    }
+    f.controller.update(overview({ state: 'compact', question: true }));
+    assert.equal(f.controller.snapshot().pinned, false);
+    f.advance(120000); assert.deepEqual(f.calls, []);
+  });
+  await test('A04a pending approval/question pins a hover-open island through the leave grace', async () => {
+    for (const field of ['approval', 'question', 'card', 'request']) {
+      const f = fixture(); f.controller.setPreferences(prefs(15, true));
+      f.controller.update(overview({state:'compact'})); f.controller.enter(mouse()); await flush();
+      f.controller.update(overview()); f.controller.leave(mouse()); f.advance(599);
+      f.controller.update(overview({[field]:true})); f.advance(120000);
+      assert.deepEqual(f.calls, ['open'], field + ' cannot be auto-closed');
+      assert.equal(f.controller.snapshot().countdown, null);
+    }
+  });
   await test('S4 defaults, inclusive integer bounds and exact preference shape', () => {
     assert.deepEqual(I.DEFAULTS, prefs()); assert.ok(Object.isFrozen(I.DEFAULTS));
     for (const n of [0, 5, 15, 120]) assert.equal(I.validPreferences(prefs(n)), true);

@@ -30,6 +30,7 @@ function boot() {
   const nodes = new Map();
   class Element {
     constructor(id) { this.id = id; this.dataset = {}; this.style = { setProperty() {} }; this.attrs = {}; this.handlers = {}; this.hidden = false; this.inert = false; this.disabled = false; this.textContent = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
+    before(el) { nodes.set(el.id, el); }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] || null; }
     removeAttribute(k) { delete this.attrs[k]; }

@@ -145,9 +145,9 @@ async function main(args = process.argv.slice(2)) {
         const row = JSON.parse(line);
         if (row.step === 'validation_input') {
           const key = row.kind === 'key' && ['Down', 'Up', 'Right', 'Home', 'Return', 'Escape', 'BackSpace', 'Ctrl+F8', 'Ctrl+Alt+A', 'Ctrl+Alt+space', 'Ctrl+Alt+s', 'Ctrl+Alt+t', 'Ctrl+Alt+Shift+a'].includes(row.key);
-          const click = row.kind === 'click' && Number.isInteger(row.x) && Number.isInteger(row.y) && row.x >= 0 && row.y >= 0 && row.x < 1280 && row.y < 900;
+          const click = ['click', 'move'].includes(row.kind) && Number.isInteger(row.x) && Number.isInteger(row.y) && row.x >= 0 && row.y >= 0 && row.x < 1280 && row.y < 900;
           if (!key && !click) { failure = 'entrada inválida'; return; }
-          const argv = key ? ['key', row.key] : [String(row.x), String(row.y)];
+          const argv = key ? ['key', row.key] : [String(row.x), String(row.y), ...(row.kind === 'move' ? ['move'] : [])];
           const r = cp.spawnSync('python3', [path.join(__dirname, 'validate', 'input.py'), ...argv], { env, encoding: 'utf8', timeout: 3000 });
           if (r.status !== 0) failure = `XTest: ${r.stderr || r.error?.message}`;
         }

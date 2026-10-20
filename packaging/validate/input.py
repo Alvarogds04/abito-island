@@ -40,9 +40,12 @@ try:
             raise SystemExit('coordinates out of range')
         if not t.XTestFakeMotionEvent(display, -1, px, py, 0):
             raise SystemExit('XTest motion failed')
-        for pressed in [1, 0]:
-            if not t.XTestFakeButtonEvent(display, 1, pressed, 0):
-                raise SystemExit('XTest click failed')
+        if sys.argv[3:] not in ([], ['move']):
+            raise SystemExit('unknown pointer action')
+        if sys.argv[3:] != ['move']:
+            for pressed in [1, 0]:
+                if not t.XTestFakeButtonEvent(display, 1, pressed, 0):
+                    raise SystemExit('XTest click failed')
     x.XSync(display, 0)
 finally:
     x.XCloseDisplay(display)
