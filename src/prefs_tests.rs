@@ -1224,6 +1224,7 @@ mod chosen_models {
             chosen_models: Some([("anthropic".to_string(), vec!["claude-sonnet-4-5".to_string()])].into()),
             auto_close_seconds: Some(30),
             open_on_hover: Some(true),
+            absence_minutes: Some(3),
             custom_blobs: Some(vec![CustomBlob { name: "Abito GitHub".into(), color: Some("#2DD4BF".into()) }]),
             monitor: Some("DP-1".into()),
             settings_window: None,
@@ -2242,4 +2243,17 @@ fn launch_settings_is_a_closed_persisted_opt_in() {
     }
     assert!(parse_command(&json!({"action":"autostart_view"})).is_ok());
     assert!(parse_command(&json!({"action":"set_autostart","enabled":true})).is_ok());
+}
+
+#[test]
+fn absence_minutes_round_trip_through_existing_prefs_command() {
+    let command = parse_command(&json!({"action":"set_absence_minutes","minutes":5})).expect("G16 setting accepted");
+    let next = apply(&Prefs::default(), &command).unwrap();
+    let wire: Value = serde_json::from_str(&next.to_text()).unwrap();
+    assert_eq!(wire["absence_minutes"], 5);
+    assert_eq!(Prefs::from_text(Some(&next.to_text())), next);
+    for bad in [json!(0), json!(121), json!(1.5), json!("3"), json!(null)] {
+        assert!(parse_command(&json!({"action":"set_absence_minutes","minutes":bad})).is_err());
+    }
+    assert!(parse_command(&json!({"action":"set_absence_minutes","minutes":3,"extra":true})).is_err());
 }

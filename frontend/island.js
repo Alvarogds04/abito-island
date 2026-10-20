@@ -212,13 +212,24 @@
     };
   }
   const reportShape = shapeReporter(invoke);
+  const conceal = { x:0, target:0, from:0, start:0, moving:false };
+  function setConcealed(hidden) {
+    const next = hidden ? 1 : 0;
+    if (conceal.target === next) return;
+    conceal.target = next; conceal.from = conceal.x; conceal.start = performance.now();
+    conceal.moving = !motionReduced();
+    if (!conceal.moving) conceal.x = next;
+    capsule.dataset.edgeHidden = String(hidden);
+    render();
+    if (conceal.moving && !raf) raf = requestAnimationFrame(tick);
+  }
 
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
     const overviewHeight = recapShown ? RECAP_H : questionShown ? QUESTION_H : OVERVIEW.h;
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
     reportShape([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
-      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target)], [w, h], mode === 'idle' && q.mode === 'idle');
+      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target], [w, h - 28 * conceal.x], mode === 'idle' && q.mode === 'idle' && !conceal.moving);
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
     const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
@@ -230,7 +241,7 @@
     put(island, 'width', w + 'px');
     put(island, 'height', h + 'px');
     put(island, 'borderRadius', `${rTop}px ${rTop}px ${rBottom}px ${rBottom}px`);
-    put(island, 'top', gap + 'px');
+    put(island, 'top', (gap - 28 * conceal.x) + 'px');
     put(island, 'bottom', 'auto');
     // R6 is only scaled and positioned (never redrawn): centred in the
     // overview, small at the left of the header in the chat view.
@@ -303,8 +314,13 @@
       q.x = q.target + (q.x0 - q.target) * (1 - easeShrink(t));
       if (t >= 1) { q.x = q.target; q.mode = 'idle'; }
     }
+    if (conceal.moving) {
+      const t = Math.min(1, (now - conceal.start) / SHRINK_MS);
+      conceal.x = lerp(conceal.from, conceal.target, easeShrink(t));
+      if (t >= 1) { conceal.x = conceal.target; conceal.moving = false; }
+    }
     render();
-    if (mode !== 'idle' || q.mode !== 'idle') raf = requestAnimationFrame(tick);
+    if (mode !== 'idle' || q.mode !== 'idle' || conceal.moving) raf = requestAnimationFrame(tick);
   }
 
   // U1: move the chat channel with the contract motion (grow = spring,
@@ -513,6 +529,9 @@
         onCountdown: value => { if (countdownView) countdownView.update(value); },
       })
     : null;
+  const edgeInteraction = window.AbitoIslandInteraction?.createEdgeController({
+    now: () => performance.now(), schedule: (fn, ms) => setTimeout(fn, ms), cancel: id => clearTimeout(id), onHidden: setConcealed,
+  });
   const TEXT_FIELD = 'input, textarea, [contenteditable="true"]';
   function interactionFacts() {
     const snap = current;
@@ -560,9 +579,17 @@
   function syncInteraction() {
     if (interaction) interaction.update(interactionFacts());
     paintPin();
+    if (edgeInteraction) {
+      // Native input-mask changes may swallow pointerleave. Reconcile against
+      // WebKit's live hover hit-test before arming another idle deadline.
+      const facts = { ...interactionFacts(), pointerInside: capsule.matches(':hover'), pinned: !!interaction?.snapshot().pinned,
+        notice: !!(current?.notices?.length || current?.unavailable || (O && O.bridgeView(current))) };
+      edgeInteraction.update(facts);
+    }
   }
   function applyInteractionPrefs(p) {
     if (!interaction || !p) return;
+    if (edgeInteraction) edgeInteraction.setPreferences({ sound:p.sound !== false, absenceMinutes:p.absenceMinutes ?? 3 });
     // An absent/foreign pair (a host without #336) keeps the module defaults.
     if (Number.isInteger(p.autoCloseSeconds) && typeof p.openOnHover === 'boolean') {
       try { interaction.setPreferences({ autoCloseSeconds: p.autoCloseSeconds, openOnHover: p.openOnHover }); }
@@ -580,11 +607,11 @@
     document.addEventListener('compositionend', () => { composingIME = false; syncInteraction(); });
     // Trusted-mouse filtering is the module's own public contract (enter/leave/
     // engage reject anything synthetic); these listeners only forward events.
-    capsule.addEventListener('pointerenter', e => { interaction.enter(e); });
-    capsule.addEventListener('pointerleave', e => { interaction.leave(e); });
+    capsule.addEventListener('pointerenter', e => { edgeInteraction?.enter(e); interaction.enter(e); });
+    capsule.addEventListener('pointerleave', e => { edgeInteraction?.leave(e); interaction.leave(e); });
     document.addEventListener('click', e => { interaction.engage(e); });
     document.addEventListener('keydown', e => { interaction.engage(e); });
-    window.addEventListener('pagehide', () => { interaction.stop(); });
+    window.addEventListener('pagehide', () => { interaction.stop(); edgeInteraction?.stop(); });
   }
 
   // ---- notices (M2): DISPLAY text only ---------------------------------
@@ -681,6 +708,7 @@
   let revealFlight = false;
   if (desktopCharacter) desktopCharacter.attach({ clay, reveal: () => revealIsland() }); // #486
   function revealIsland() {
+    edgeInteraction?.alert();
     if (!NV || typeof NV.revealAction !== 'function' || revealFlight) return;
     if (NV.revealAction({ state: current && current.state, phase: capsule.dataset.phase }) !== 'expand') return;
     if (!window.desktop || typeof window.desktop.expand !== 'function') return;
