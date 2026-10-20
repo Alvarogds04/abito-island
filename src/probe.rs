@@ -2745,6 +2745,7 @@ fn feature_validation(app: &AppHandle) {
     let _ = crate::dispatch_action(app, &state, abito_island::bridge::Action::Expand, None);
     sleep(Duration::from_millis(500));
     record("dictado-inactivo", run(&win,"AbitoValidate.dictationIdle()"));
+    record("isla-hover-pin-ocultar", run(&win,"AbitoValidate.islandHoverPin()"));
     record("sesiones-motor", run(&win,"AbitoValidate.sessions()"));
     record("sesiones-foco-pildoras", run(&win,"AbitoValidate.sessionsFocus()"));
     let _ = run(&win,"AbitoValidate.restoreSessionFocus()");

@@ -94,6 +94,53 @@
     const pill=document.querySelector('.dpill'), css=getComputedStyle(pill), rect=pill.getBoundingClientRect();
     return {ok:pill.hidden && css.display==='none' && rect.width===0 && rect.height===0,reason:'pill de dictado visible en idle con función habilitada',hidden:pill.hidden,display:css.display,rect:[rect.width,rect.height],phase:byId('capsule').dataset.dictation||'idle'};
   }
+  async function islandHoverPin() {
+    const original = await invoke('prefs_action',{action:'view'});
+    const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
+    const phase = () => byId('capsule').dataset.phase;
+    const move = (x,y) => emit('validate-input',{kind:'move',x:Math.round(x),y:Math.round(y)});
+    const outside = () => move(20,500);
+    const inside = async () => {
+      const r=byId('capsule').getBoundingClientRect(), o=window.__validateOrigin;
+      await move(o.x+(r.x+r.width/2)*o.scale,o.y+(r.y+8)*o.scale);
+    };
+    try {
+      await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:5,open_on_hover:false});
+      await outside(); await invoke('desktop_action',{action:'close'});
+      await wait(()=>phase()==='compact','compacto antes del hover');
+      await inside(); await delay(700);
+      const hoverOff=await invoke('desktop_action',{action:'snapshot'});
+      await outside();
+      await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:5,open_on_hover:true});
+      await inside();
+      // Read native state immediately on the next IPC round trip, not after
+      // the spring lands. An enter dwell would still report compact here.
+      const entered=await invoke('desktop_action',{action:'snapshot'});
+      await wait(()=>phase()==='expanded','hover abre sin dwell');
+      await outside(); await delay(200);
+      const grace=await invoke('desktop_action',{action:'snapshot'});
+      await wait(()=>phase()==='compact','600ms de gracia y animación de cierre');
+      await inside(); await wait(()=>phase()==='expanded','segunda entrada abre');
+      await click(byId('island-pin'));
+      await wait(()=>byId('island-pin').getAttribute('aria-pressed')==='true','pin confirmado');
+      await outside(); await delay(5400);
+      const held=await invoke('desktop_action',{action:'snapshot'});
+      const noCountdown=byId('island-countdown').hidden;
+      await click(byId('island-pin'));
+      await wait(()=>byId('island-pin').getAttribute('aria-pressed')==='false','desfijado confirmado');
+      await outside();
+      await wait(()=>!byId('island-countdown').hidden,'cuenta atrás visible');
+      await wait(()=>phase()==='compact','cierre tras desfijar',7000);
+      const closed=await invoke('desktop_action',{action:'snapshot'});
+      return {ok:hoverOff.state==='compact' && entered.state==='expanded' && grace.state==='expanded' && held.state==='expanded' && noCountdown && closed.state==='compact',hoverOff:hoverOff.state,entered:entered.state,grace:grace.state,held:held.state,noCountdown,closed:closed.state,
+        coverage:'XTest immediate hover-on, hover-off stays compact, leave grace, trusted pin, countdown and native phase readback; hidden peek/edge hide remains a separate transaction'};
+    } finally {
+      await outside();
+      await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:original.autoCloseSeconds,open_on_hover:original.openOnHover});
+      await invoke('desktop_action',{action:'expand'});
+      await wait(()=>phase()==='expanded','overview restaurado');
+    }
+  }
   async function sessions() {
     const seen=[byId('overview-view').textContent];
     // Observe actual rendered text during initial asynchronous request and at
@@ -323,6 +370,10 @@
     try {
       const reload=await invoke('sound_action',{action:'reload'});
       await wait(()=>changed,'sounds:changed tras reload');
+      // Reload also makes the real frontend read/decode the catalog. Let that
+      // burst settle and the shared 30/s budget renew before the independent
+      // validator reads; receiving the event alone is not completion evidence.
+      await new Promise(resolve=>setTimeout(resolve,1100));
       const after=await invoke('sound_action',{action:'list'});
       const expected=['peek','open','close','hover','blip','slap','annoyed','dizzy','greet','work','finish','error','approval','question','approve','gulp','tick','send','love','pop','proud','wink','yawn','attach','think','search','rate','sleep','greeting'];
       const catalog=window.AbitoSound.CUE_IDS;
@@ -457,5 +508,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin};
 })();

@@ -92,6 +92,7 @@
     let preferences = DEFAULTS, facts = {}, inside = false, hoverOnly = false;
     let timer = null, deadline = null, stopped = false, opening = false, closing = false;
     let exhausted = false, generation = 0, timerGeneration = 0, published = 'null';
+    let pinned = false;
 
     function emit(value) {
       const key = JSON.stringify(value);
@@ -125,7 +126,7 @@
     function reconcile(restart = false) {
       if (stopped) return;
       if (restart) { cancelTimer(); deadline = null; }
-      if (!eligible(facts) || inside || opening || closing || exhausted) { clearDeadline(); return; }
+      if (pinned || !eligible(facts) || inside || opening || closing || exhausted) { clearDeadline(); return; }
       const seconds = preferences.autoCloseSeconds;
       // #438: 0 («Nunca») disables ONLY the inactivity close. A pinned/clicked-open
       // island never gets a deadline and never publishes a countdown. The hover-open
@@ -166,7 +167,7 @@
       const before = eligible(facts), previousState = facts.state;
       facts = next && typeof next === 'object' ? { ...next } : {};
       if ((previousState === 'expanded' && facts.state !== 'expanded') || facts.state === 'hidden') {
-        hoverOnly = false; invalidate(); clearDeadline();
+        hoverOnly = false; pinned = false; invalidate(); clearDeadline();
       }
       if (!before && eligible(facts)) exhausted = false;
       reconcile();
@@ -182,11 +183,14 @@
       if (stopped || !mouse(event) || inside) return false;
       inside = true; exhausted = false; clearDeadline();
       if (!preferences.openOnHover || facts.state !== 'compact' || !clearGuards(facts) || opening) return false;
+      // Coucou mouseEntered: open immediately. The 600ms delay belongs only
+      // to mouseLeft on an island opened by hover, never to entry.
       hoverOnly = true; request('open'); return true;
     }
     function leave(event) {
       if (stopped || !mouse(event) || !inside) return false;
-      inside = false; exhausted = false; reconcile(); return true;
+      inside = false; exhausted = false;
+      reconcile(); return true;
     }
     function engage(event) {
       if (stopped || !deliberate(event) || facts.state !== 'expanded') return false;
@@ -196,19 +200,24 @@
       // versus drag itself. This return value is NOT permission to cancel drag.
       return consumedHover;
     }
+    function togglePin(event) {
+      if (stopped || !deliberate(event) || !eligible(facts)) return false;
+      pinned = !pinned; hoverOnly = false; exhausted = false;
+      reconcile(true); return true;
+    }
     function reset() {
       if (stopped) return;
-      invalidate(); hoverOnly = false; exhausted = true; clearDeadline();
+      invalidate(); hoverOnly = false; pinned = false; exhausted = true; clearDeadline();
     }
     function stop() {
       if (stopped) return;
-      stopped = true; invalidate(); hoverOnly = false; exhausted = true; clearDeadline();
+      stopped = true; invalidate(); hoverOnly = false; pinned = false; exhausted = true; clearDeadline();
     }
     function snapshot() {
-      return { preferences: { ...preferences }, inside, hoverOnly, deadline, stopped, opening, closing,
+      return { preferences: { ...preferences }, inside, hoverOnly, pinned, deadline, stopped, opening, closing,
         eligible: eligible(facts), countdown: deadline === null ? null : countdown(deadline, now(), preferences.autoCloseSeconds) };
     }
-    return Object.freeze({ update, setPreferences, enter, leave, engage, reset, stop, snapshot });
+    return Object.freeze({ update, setPreferences, enter, leave, engage, togglePin, reset, stop, snapshot });
   }
   return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, validPreferences, eligible, createClock, countdown, createCountdownView, createController });
 });
