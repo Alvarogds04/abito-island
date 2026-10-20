@@ -118,10 +118,11 @@ test('finished card markup + wiring: lives inside #notices, survives the boot re
   assert.doesNotMatch(notices, /id="notice-card-terminal"[^>]*disabled/);
   const src = read('island.js');
   assert.match(src, /noticesEl\.replaceChildren\(noticeChips, noticePill, noticeDetail, noticeList, \.\.\.\(\$\('notice-card'\)/, 'the boot rebuild keeps the card');
-  assert.match(src, /O\.finishedCardView\(first, NV && NV\.agentLabel\)/);
+  assert.match(src, /O\.finishedCardView\(selected, NV && NV\.agentLabel\)/);
+  assert.match(src, /find\(n => n\.id === noticeLane\.id\)/, 'the active finished lane selects its exact host notice, not the oldest retained row');
   assert.match(src, /invoke\('focus_host', \{ payload: \{ target: 'terminal' \} \}\)/, 'closed host verb, no command/path/window id');
   assert.match(src, /noticeCardTerminal\.addEventListener\('click', event => \{\s*if \(event\.isTrusted !== true \|\| !invoke\) return;/);
-  assert.match(src, /noticeCardOk\.addEventListener\('click', event => \{ if \(event\.isTrusted === true && noticeDismiss && !noticeDismiss\.hidden\) noticeDismiss\.click\(\); \}\)/);
+  assert.match(src, /noticeCardOk\.addEventListener\('click', event => \{[\s\S]*?const id = noticeLane\?\.id;[\s\S]*?event\.isTrusted !== true[\s\S]*?window\.desktop\.dismiss\(id\)/, 'trusted OK dismisses the exact displayed lane id');
   const isl = read('vendor/coucou/island/island.css').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.match(isl, /\[data-notice-view="notices"\] #notice-card:not\(\[hidden\]\) \{[^}]*display: flex/);
   assert.match(isl, /\[data-notice-view="notices"\] #notices \{ --wash: rgba\(52, 211, 153, 0\.5\); \}/, 'green wash');

@@ -705,6 +705,40 @@
   // Only genuinely new events reach this: boot/cached/duplicate snapshots never
   // call the verb, so nothing restores on start-up.
   const revealGate = NV && NV.createRevealGate ? NV.createRevealGate() : null;
+  let automaticExpansion = false;
+  function finishedAllowed() {
+    const f = interactionFacts();
+    const guards = window.AbitoIslandInteraction?.BLOCKERS;
+    return !!guards && f.nativeReady && !current?.unavailable && !(O && O.bridgeView(current)) && ['overview','notices'].includes(f.view) &&
+      guards.every(key => f[key] === false) && !interaction?.snapshot().pinned;
+  }
+  const finishedCycle = NV?.createFinishedCycle?.({
+    now: () => performance.now(), schedule: (fn, ms) => setTimeout(fn, ms), cancel: id => clearTimeout(id),
+    start(id) {
+      automaticExpansion = !!noticeLane?.automatic || current?.state === 'hidden' || capsule.dataset.phase === 'compact';
+      revealIsland();
+      noticeLane = { id, view:'notices', automatic:true };
+      capsule.dataset.noticeView = 'notices';
+      moveView(0); renderCard(); render();
+      document.dispatchEvent(new CustomEvent('island:view', {detail:'notices'}));
+    },
+    end(id, expired) {
+      const ownsView = noticeLane?.automatic && noticeLane.id === id;
+      const fold = ownsView && expired && automaticExpansion && finishedAllowed() &&
+        capsule.dataset.phase === 'expanded' && !capsule.matches(':hover');
+      automaticExpansion = false;
+      if (!ownsView) return;
+      noticeLane = null; delete capsule.dataset.noticeView;
+      moveView(0); renderCard(); render(); syncInteraction();
+      document.dispatchEvent(new CustomEvent('island:view', {detail:'overview'}));
+      // Same atomically guarded host verb as ordinary inactivity. Never dismiss.
+      if (fold && window.desktop?.autoClose) window.desktop.autoClose().catch(() => {});
+    },
+  });
+  const engageFinished = event => { if (event.isTrusted && (event.type === 'click' || !event.repeat && !event.isComposing)) automaticExpansion = false; };
+  document.addEventListener('click', engageFinished);
+  document.addEventListener('keydown', engageFinished);
+  window.addEventListener('pagehide', () => finishedCycle?.stop());
   let revealFlight = false;
   if (desktopCharacter) desktopCharacter.attach({ clay, reveal: () => revealIsland() }); // #486
   function revealIsland() {
@@ -763,7 +797,8 @@
     const notices = Array.isArray(snapshot.notices) ? snapshot.notices : [];
     announceNotice(notices);
     soundCue('observeNotices', notices); // #313: only a NEW top notice sounds, never the ones already there at start-up
-    if (revealGate && revealGate.notice(notices)) revealIsland(); // #266: a NEW notice opens the resting island once
+    const fresh = finishedCycle ? finishedCycle.observe(notices, finishedAllowed()) : revealGate?.notice(notices);
+    if (fresh) revealIsland(); // boot, retained rows and snapshot churn are not arrivals
     const conn = O.connectionView(snapshot);
     const overviewStatus = $('overview-status'), overviewDetail = $('overview-detail');
     if (overviewStatus) overviewStatus.textContent = conn.word || 'Conexión local';
@@ -850,7 +885,8 @@
   const noticeCard = $('notice-card'), noticeCardOk = $('notice-card-ok');
   function paintNoticeCard(first) {
     if (!noticeCard) return;
-    const v = first && O.finishedCardView ? O.finishedCardView(first, NV && NV.agentLabel) : null;
+    const selected = noticeLane?.view === 'notices' ? current?.notices?.find(n => n.id === noticeLane.id) : first;
+    const v = selected && O.finishedCardView ? O.finishedCardView(selected, NV && NV.agentLabel) : null;
     noticeCard.hidden = !v;
     if (!v) return;
     $('notice-card-name').textContent = v.name;
@@ -870,7 +906,14 @@
       const live = $('notice-live'); if (live) live.textContent = reason;
     }).finally(() => { noticeCardTerminal.disabled = false; });
   });
-  if (noticeCardOk) noticeCardOk.addEventListener('click', event => { if (event.isTrusted === true && noticeDismiss && !noticeDismiss.hidden) noticeDismiss.click(); });
+  if (noticeCardOk) noticeCardOk.addEventListener('click', event => {
+    const id = noticeLane?.id;
+    if (event.isTrusted !== true || !id || !window.desktop?.dismiss) return;
+    window.desktop.dismiss(id).then(snap => {
+      if (snap) current = snap;
+      renderNotices(current); renderCard();
+    }, () => {});
+  });
   // «Preguntar» is the chat tab (Coucou: Ask Claude → prompt view).
   const askButton = $('overview-ask');
   if (askButton) askButton.addEventListener('click', event => { if (event.isTrusted === true) { const t = $('open-chat'); if (t) t.click(); } });
@@ -999,6 +1042,7 @@
     const payload = event && event.payload;
     const view = O && O.noticeOpenView(payload);
     if (!view) return;
+    finishedCycle?.cancel(); // an explicit native-confirmed opener owns its view
     noticeLane = { id: payload.id, view };
     capsule.dataset.noticeView = view;
     moveView(0);
@@ -1231,6 +1275,7 @@
   });
   document.addEventListener('abito:question', event => {
     const show = !!(event.detail && event.detail.show);
+    if (show) finishedCycle?.cancel(); // never cover a pending question with finished content
     if (show !== questionShown) { questionShown = show; render(); }
     paintCompactFlag();
     if (event.detail && event.detail.reveal) revealIsland(); // #266: a genuinely new question reveals

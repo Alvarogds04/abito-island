@@ -2794,6 +2794,13 @@ fn feature_validation(app: &AppHandle) {
         notice["edge_before"]=notice_edge.clone();
         notice["ok"]=json!(notice["ok"]==true && notice_edge["ok"]==true);
         record("pi-aviso",notice);
+        let cycle_prepared=run(&win,"AbitoValidate.prepareNoticeCycle()");
+        send(&mut stream,json!({"type":"settled","id":"validator-cycle-1","projectName":"Ciclo uno","agent":"pi"}))?;
+        send(&mut stream,json!({"type":"settled","id":"validator-cycle-2","projectName":"Ciclo dos","agent":"pi"}))?;
+        let mut cycle=run(&win,"AbitoValidate.noticeCycle()");
+        cycle["prepared"]=cycle_prepared.clone();
+        cycle["ok"]=json!(cycle["ok"]==true && cycle_prepared["ok"]==true);
+        record("avisos-ciclo",cycle);
         // A private, clearly identified terminal-class fixture, not an actual
         // session. Keep the X11 connection alive through native focus readback.
         use x11rb::connection::Connection;

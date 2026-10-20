@@ -239,6 +239,44 @@
     for(let i=0;i<4;i++){words.push(word.textContent);await new Promise(resolve=>setTimeout(resolve,250));}
     return {ok:words.every(w=>connected ? w!=='Sin motor' : w==='Sin motor'),reason:'etiqueta Sin motor no coincide con conexiones reales',word:word.textContent,words,connections:snapshot.connections,aria:byId('connection')?.getAttribute('aria-label')};
   }
+  let cyclePrefs;
+  async function prepareNoticeCycle() {
+    cyclePrefs=await invoke('prefs_action',{action:'view'});
+    await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:0,open_on_hover:false});
+    await invoke('desktop_action',{action:'close'});
+    await emit('validate-input',{kind:'move',x:20,y:500});
+    await wait(()=>byId('capsule').dataset.phase==='compact','nativo y DOM compactos antes del ciclo');
+    return {ok:true};
+  }
+  async function noticeCycle() {
+    const began=performance.now();
+    try {
+    await wait(()=>byId('capsule').dataset.phase==='expanded' && byId('capsule').dataset.view==='notices' && byId('notice-card-name').textContent==='Ciclo dos','terminado nuevo abre su vista automáticamente');
+    await new Promise(resolve=>setTimeout(resolve,Math.max(0,4800-(performance.now()-began))));
+    const held=byId('capsule').dataset.view==='notices';
+    await wait(()=>byId('capsule').dataset.phase==='compact' && byId('capsule').dataset.view==='overview','terminado vuelve a compacto tras 5.2s',3500);
+    const elapsed=performance.now()-began;
+    const folded=await invoke('desktop_action',{action:'snapshot'});
+    await invoke('prefs_action',{action:'sound_off'});
+    await new Promise(resolve=>setTimeout(resolve,1600));
+    const retainedBlocksEdge=byId('capsule').dataset.edgeHidden==='false';
+    await invoke('prefs_action',{action:cyclePrefs.sound ? 'sound_on':'sound_off'});
+    await invoke('desktop_action',{action:'expand'});
+    await wait(()=>byId('capsule').dataset.phase==='expanded','reabre historial sin reiniciar terminado');
+    const historical=byId('capsule').dataset.view==='overview';
+    await click(byId('notice-action'));
+    await wait(()=>visible(byId('notice-list')),'historial agrupado');
+    const before=(await invoke('desktop_action',{action:'snapshot'})).notices.length;
+    await click(byId('notice-rows').querySelector('.notice-list-dismiss'));
+    await wait(async()=> (await invoke('desktop_action',{action:'snapshot'})).notices.length===before-1,'descarta exactamente una fila');
+    await click(byId('notice-clear'));
+    await wait(async()=> !(await invoke('desktop_action',{action:'snapshot'})).notices.length,'descarta todos conserva el contrato');
+    return {ok:held && elapsed>=5000 && folded.state==='compact' && folded.notices.length>=2 && historical && retainedBlocksEdge,held,elapsed,native:folded.state,retained:folded.notices.length,historical,retainedBlocksEdge,groupedDismissal:true};
+    } finally {
+      await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:cyclePrefs.autoCloseSeconds,open_on_hover:cyclePrefs.openOnHover});
+      await invoke('prefs_action',{action:cyclePrefs.sound ? 'sound_on':'sound_off'});
+    }
+  }
   let noticeEdgeSound=true;
   async function prepareNoticeEdge() {
     noticeEdgeSound=(await invoke('prefs_action',{action:'view'})).sound;
@@ -646,5 +684,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake,prepareNoticeCycle,noticeCycle};
 })();
