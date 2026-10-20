@@ -37,7 +37,7 @@ async function main(args = process.argv.slice(2)) {
   const started = Date.now();
   const out = fs.mkdtempSync('/tmp/abito-validate-');
   const children = [];
-  let piRuntime, github;
+  let piRuntime, github, integrationFake;
   let interrupted = false;
   // Each direct child owns a fresh process group, so a timed-out app cannot
   // leave its ffmpeg (or any activated helper) attached to the private display.
@@ -150,6 +150,7 @@ async function main(args = process.argv.slice(2)) {
     };
     const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(1,0);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=2;
     fs.writeFileSync(path.join(out,'spotify-cover.png'),Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',zlib.deflateSync(Buffer.from([0,29,185,84]))),chunk('IEND',Buffer.alloc(0))]));
+    integrationFake = await require('./validate/integrations.cjs').start(out, env);
     github = await require('./validate/github.cjs').start(out, env);
     const app = launch(candidate, ['--probe'], env, 'app.stderr.log');
     const jsonl = fs.openSync(path.join(out, 'probe.jsonl'), 'a', 0o600);
@@ -216,6 +217,7 @@ async function main(args = process.argv.slice(2)) {
       if (!exited(child)) await until(() => exited(child), 3000, 'terminar proceso propio').catch(() => {});
     }
     if (github) await github.close();
+    if (integrationFake) await integrationFake.close();
     if (piRuntime) fs.rmSync(piRuntime, { recursive: true, force: true });
     process.off('SIGINT', signal); process.off('SIGTERM', signal);
   }

@@ -343,6 +343,52 @@
     }
     return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
   }
+  async function integrationStates(state) {
+    if(byId('capsule')?.dataset.phase!=='expanded') await invoke('desktop_action',{action:'expand'});
+    const results=[];
+    for(const id of AbitoIntegrationCard.IDS) {
+      document.dispatchEvent(new CustomEvent('abito:integration-focus',{detail:{id}}));
+      await wait(async()=>{
+        const native=(await invoke('integration_action',{action:'view'})).updates[id];
+        return native?.state===state && document.querySelector('.int-host')?.dataset.state===state;
+      },id+' '+state);
+      const host=document.querySelector('.int-host');
+      if(!visible(host)) throw Error('integración oculta '+id);
+      const refresh=[...host.querySelectorAll('button')].find(b=>b.textContent==='Actualizar');
+      let sawRefresh=false;
+      const observer=new MutationObserver(()=>{if(host.dataset.state==='refreshing') sawRefresh=true;});
+      observer.observe(host,{attributes:true,attributeFilter:['data-state']});
+      await click(refresh);
+      try { await wait(()=>sawRefresh,'refresh visible '+id); }
+      catch(error) {const r=refresh.getBoundingClientRect();throw Error(error.message+'; hit='+document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML.slice(0,250)+'; state='+host.dataset.state);}
+      finally {observer.disconnect();}
+      await wait(()=>document.querySelector('.int-host')?.dataset.state===state,'refresh settled '+id);
+      if(state==='ready') {
+        const open=[...host.querySelectorAll('button')].find(b=>b.textContent==='Abrir '+AbitoIntegrationCard.NAMES[id]);
+        let opened=false;
+        const received=e=>{if(e.detail?.url===AbitoIntegrationCard.openTarget(id)) opened=true;};
+        document.addEventListener('abito:integration-opened',received);
+        try {await click(open);await wait(()=>opened,'apertura asentada '+id);}
+        finally {document.removeEventListener('abito:integration-opened',received);}
+      }
+      if(id==='integration_calcom' && state==='ready') {
+        const button=text=>[...document.querySelectorAll('.int-host button')].find(b=>b.textContent===text);
+        await click(button('Día'));
+        await wait(()=>document.querySelector('.int-host [data-calendar="day"]'),'agenda diaria');
+        const booking=[...document.querySelectorAll('.int-host button')].find(b=>b.textContent.startsWith('fixture ·'));
+        await click(booking);
+        await wait(()=>document.querySelector('.int-host [data-calendar="detail"]')?.textContent.includes('Validador'),'detalle de reserva');
+        if(!document.querySelector('.int-host').textContent.includes('Consulta fixture')) throw Error('faltan notas de reserva');
+        await click(button('Volver a la agenda'));
+        await wait(()=>document.querySelector('.int-host [data-calendar="day"]'),'volver al día');
+        await click(button('Semana'));
+        await wait(()=>document.querySelector('.int-host [data-calendar="week"]'),'agenda semanal');
+      }
+      results.push({id,state,refresh:true,open:state==='ready',calendar:id==='integration_calcom'&&state==='ready'?'week/day/detail':null});
+    }
+    const host=document.querySelector('.int-host'); if(host) host.scrollTop=0;
+    return {ok:true,results};
+  }
   async function github() {
     await invoke('desktop_action',{action:'expand'});
     const prefs=await invoke('prefs_action',{action:'view'});
@@ -534,5 +580,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates};
 })();

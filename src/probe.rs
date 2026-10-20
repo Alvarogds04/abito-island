@@ -2956,6 +2956,18 @@ fn feature_validation(app: &AppHandle) {
         record("voz-reconocimiento",json!({"ok":true,"unverifiable":"sin micrófono ni modelos: dictado real, wake word y reconocimiento no comprobables"}));
         record("ajustes-cuentas-keyring",json!({"ok":true,"unverifiable":"sin servicio de secretos privado; no se leen claves del usuario"}));
     }
+    if let Ok(origin) = std::env::var("ABITO_VALIDATE_INTEGRATIONS") {
+        let mut results=Vec::new();
+        for mode in ["missing_key","error","ready","stale"] {
+            crate::integrationshost::set_validation_fixture(Some(&origin),mode);
+            results.push(run(&win,&format!("AbitoValidate.integrationStates({mode:?})")));
+        }
+        crate::integrationshost::set_validation_fixture(None,"off");
+        let opened=std::env::var("HOME").ok().and_then(|h|std::fs::read_to_string(std::path::Path::new(&h).join("opened-urls")).ok()).unwrap_or_default();
+        let links=["https://n8n.io","https://vercel.com","https://stripe.com","https://resend.com","https://www.notion.so","https://cal.com"];
+        record("integraciones-estados",json!({"ok":results.iter().all(|r|r["ok"]==true) && links.iter().all(|url|opened.lines().any(|line|line.trim_end_matches('/')==*url)),"states":results,"opened":opened,"opener":"private PATH fixture; no browser or external request"}));
+        let _ = run(&win,"(()=>{document.dispatchEvent(new CustomEvent('abito:integration-focus',{detail:{id:null}}));return {ok:true};})()");
+    }
     app.unlisten(result_listener); app.unlisten(input_listener);
 }
 
