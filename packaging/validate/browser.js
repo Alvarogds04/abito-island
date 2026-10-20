@@ -697,5 +697,26 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake,prepareNoticeCycle,noticeCycle,action:'new'};
+  async function contextMessage(enabled) {
+    await invoke('chat_action',{action:'new'});
+    await invoke('prefs_action',{action:'set_window_context',window_context:enabled});
+    await invoke('chat_action',{action:'back'});
+    await invoke('chat_action',{action:'open'});
+    // The host's capture is asynchronous. Native evidence also checks the actual model request.
+    await new Promise(r=>setTimeout(r,1000));
+    await invoke('chat_action',{action:'submit',text:'Mensaje privado de contexto',client_request_id:'context-'+String(enabled)});
+    return wait(async()=>{const v=await invoke('chat_action',{action:'view'});return !v.active_turn && v.turns.some(t=>t.state==='completed') && {ok:true,enabled,turns:v.turns};},'mensaje con contexto completado',15000);
+  }
+  async function contextMissing(index) {
+    const result=await hub(index,'chat');
+    const prefs=await invoke('prefs_action',{action:'view'});
+    const text=document.querySelector('.hub-page').textContent;
+    return {...result,ok:result.ok && prefs.windowContextAvailable===false
+      && text.includes('extensión de GNOME no está disponible')
+      && text.includes('sh apps/desktop-tauri/gnome-extension/install.sh')
+      && text.includes('gnome-extensions enable abito-context@abito')
+      && text.includes('cerrar sesión'),availability:prefs.windowContextAvailable,
+      instructions:'install.sh, log out/in on Wayland, explicit enable; no install executed'};
+  }
+  window.AbitoValidate={contextMissing,contextMessage,dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake,prepareNoticeCycle,noticeCycle,action:'new'};
 })();
