@@ -144,7 +144,7 @@ impl Backend for System {
         paste::copy(text)
     }
     fn foreground_app(&self) -> Option<(String, String)> {
-        x11_apps(true).into_iter().next()
+        context_apps(true).into_iter().next()
     }
 }
 
@@ -159,7 +159,28 @@ impl Backend for ClaudeSystem {
     fn cleanup_provider(&self) -> Option<&dyn cleanup::CleanupProvider> { Some(&claude::AnthropicCleanup) }
 }
 
-pub fn running_apps() -> Vec<(String, String)> { x11_apps(false) }
+pub fn running_apps() -> Vec<(String, String)> { context_apps(false) }
+
+// Both the picker and capture-start use the same stable app id. No title is retained
+// or passed to cleanup. A successful empty extension reply is authoritative.
+fn context_apps(foreground: bool) -> Vec<(String, String)> {
+    #[cfg(unix)]
+    if let Some(rows) = crate::contextwin::dbus::recent_windows(None) {
+        let mut apps = Vec::new();
+        for row in rows {
+            if crate::contextwin::is_abito(&row) { continue; }
+            let id = row.app_id.trim().to_lowercase();
+            let id = id.strip_suffix(".desktop").unwrap_or(&id).to_string();
+            let name = row.app_name.trim().to_string();
+            if id.is_empty() || name.is_empty() || id.chars().count() > 80 || name.chars().count() > 80
+                || id.chars().any(char::is_control) || name.chars().any(char::is_control) { continue; }
+            if !apps.iter().any(|(existing, _)| existing == &id) { apps.push((id, name)); }
+            if foreground || apps.len() == 64 { break; }
+        }
+        return apps;
+    }
+    x11_apps(foreground)
+}
 
 #[cfg(not(target_os = "linux"))]
 fn x11_apps(_foreground: bool) -> Vec<(String, String)> { Vec::new() }

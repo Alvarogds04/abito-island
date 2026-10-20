@@ -140,7 +140,8 @@ export async function stylesPage(page: HTMLElement, ctx: HubContext) {
   page.append(card(row(t('Clean up with Claude'),t('Removes the “um”, the repeats and the corrections you made while speaking, and fixes the punctuation.'),cleanup), keyNote, divider(), row(t('Other apps'),null,defaultSelect),
     h('div', {class:'hub-note',text:t('With the clean-up on, the text (never your voice) goes to Anthropic with your Claude key. Off, everything stays on this computer.')})));
   const add = life.live(h('select', {class:'hub-select'}, h('option', {value:'',text:`+ ${t('Add an app')}`}))) as HTMLSelectElement;
-  // Open apps (X11) not already styled; each is added with the default style. Empty on Wayland, like Coucou's.
+  // Recent GNOME apps (extension), or open X11 apps, not already styled.
+  // The same normalized app id is sampled when dictation starts.
   const fillAdd = async () => {
     const running = (await life.load(FlowBridge.runningApps) ?? []).filter(a => !styles.some(s => s.id === a.id)).slice(0, 64);
     clear(add); add.append(h('option', {value:'',text:`+ ${t('Add an app')}`}));

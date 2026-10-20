@@ -376,7 +376,20 @@
       await click(startup());
       await wait(async()=> (await invoke('prefs_action',{action:'autostart_view'})).enabled===false,'autoinicio retirado desde General');
       effect={liveGain:live.gain,motion:'sin interruptor inerte',autostart:'on/off mediante UI',input:'XTest sobre controles reales'};
-    } else if(page==='styles'||page==='flowsettings') {
+    } else if(page==='styles') {
+      const add=[...root.querySelectorAll('select')].find(s=>s.options[0]?.textContent.includes('Añadir') || s.options[0]?.textContent.includes('Agregar') || s.options[0]?.textContent.includes('Add an app'));
+      if(!add) throw Error('selector para añadir app ausente');
+      add.focus();
+      await wait(()=>[...add.options].some(o=>o.textContent==='Writer del validador'),'app GNOME en selector');
+      const index=[...add.options].findIndex(o=>o.textContent==='Writer del validador');
+      await click(add); await key('Home');
+      for(let i=0;i<index;i++) await key('Down');
+      await key('Return');
+      await wait(async()=> (await invoke('dictation_action',{action:'styles'})).some(s=>s.id==='org.example.writer'),'app GNOME guardada');
+      const select=await wait(()=>[...root.querySelectorAll('.hub-row')].find(r=>r.textContent.includes('Writer del validador'))?.querySelector('select'),'estilo por app');
+      await click(select); await key('Home'); await key('Down'); await key('Down'); await key('Return');
+      effect=await wait(async()=>{const styles=await invoke('dictation_action',{action:'styles'});return styles.some(s=>s.id==='org.example.writer' && s.style==='polished') && styles;},'estilo pulido guardado');
+    } else if(page==='flowsettings') {
       // Keyboard navigation on a real select produces trusted change events.
       const selects=[...root.querySelectorAll('select')].filter(s=>!s.disabled && s.options.length>1);
       const select=page==='flowsettings'?selects.at(-1):selects[0];
@@ -646,5 +659,26 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake};
+  async function contextMessage(enabled) {
+    await invoke('chat_action',{action:'new'});
+    await invoke('prefs_action',{action:'set_window_context',window_context:enabled});
+    await invoke('chat_action',{action:'back'});
+    await invoke('chat_action',{action:'open'});
+    // The host's capture is asynchronous. Native evidence also checks the actual model request.
+    await new Promise(r=>setTimeout(r,1000));
+    await invoke('chat_action',{action:'submit',text:'Mensaje privado de contexto',client_request_id:'context-'+String(enabled)});
+    return wait(async()=>{const v=await invoke('chat_action',{action:'view'});return !v.active_turn && v.turns.some(t=>t.state==='completed') && {ok:true,enabled,turns:v.turns};},'mensaje con contexto completado',15000);
+  }
+  async function contextMissing(index) {
+    const result=await hub(index,'chat');
+    const prefs=await invoke('prefs_action',{action:'view'});
+    const text=document.querySelector('.hub-page').textContent;
+    return {...result,ok:result.ok && prefs.windowContextAvailable===false
+      && text.includes('extensión de GNOME no está disponible')
+      && text.includes('sh apps/desktop-tauri/gnome-extension/install.sh')
+      && text.includes('gnome-extensions enable abito-context@abito')
+      && text.includes('cerrar sesión'),availability:prefs.windowContextAvailable,
+      instructions:'install.sh, log out/in on Wayland, explicit enable; no install executed'};
+  }
+  window.AbitoValidate={contextMissing,contextMessage,dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus,islandHoverPin,spotifyFallback,integrationStates,prepareNoticeEdge,edgeIdle,edgeWake};
 })();

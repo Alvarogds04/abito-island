@@ -128,6 +128,19 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     const sw = trusted(toggle(prefs.windowContext === true, value => { work(() => call('prefs_action', { action: 'set_window_context', window_context: value }), next => { prefs = next; paintContext(); }, () => paintContext()); }));
     (sw as HTMLButtonElement).disabled = typeof prefs.windowContext !== 'boolean';
     ctxBody.append(row(t('Active window context'), sw));
+    const available = prefs.windowContextAvailable;
+    ctxBody.append(h('div', { class: 'hub-note', text: available === true
+      ? 'La extensión de GNOME está disponible. Solo se leen la app y el título; no se captura la URL.'
+      : available === false
+        ? 'La extensión de GNOME no está disponible. En GNOME Wayland no se pueden leer ventanas nativas sin ella; el respaldo X11 solo ve ventanas XWayland.'
+        : 'No se pudo comprobar la extensión de GNOME.' }));
+    if (available !== true) {
+      ctxBody.append(h('div', { class: 'hub-note', text: 'Para instalarla, desde la raíz del repositorio ejecuta:' }),
+        h('code', { text: 'sh apps/desktop-tauri/gnome-extension/install.sh' }),
+        h('div', { class: 'hub-note', text: 'En Wayland, después de instalar una extensión nueva debes cerrar sesión y volver a entrar. Después ejecuta:' }),
+        h('code', { text: 'gnome-extensions enable abito-context@abito' }),
+        h('div', { class: 'hub-note', text: 'Vuelve a abrir esta página para comprobarla. Abito no instala ni habilita la extensión automáticamente. No se captura la URL.' }));
+    }
   };
   paintContext();
   root.append(apiSection,

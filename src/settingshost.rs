@@ -139,6 +139,13 @@ pub(crate) fn voice_prefs_snapshot(app: &AppHandle) -> Prefs {
     app.state::<AppState>().settings.prefs.lock().expect("prefs lock").clone()
 }
 
+fn context_extension_available() -> bool {
+    #[cfg(unix)]
+    { abito_island::contextwin::dbus::available(None) }
+    #[cfg(not(unix))]
+    { false }
+}
+
 fn view_prefs(p: &Prefs) -> Value {
     json!({"sound": p.sound, "gain": p.gain(), "displayName": p.display_name, "avatarColors": p.avatar_colors,
         "mainPill": p.main_pill(), "declaredPills": p.declared_pills(),
@@ -154,6 +161,7 @@ fn view_prefs(p: &Prefs) -> Value {
         "showPlanInNotch": p.show_plan_in_notch(),
         "showCodexPlanInNotch": p.show_codex_plan_in_notch(),
         "windowContext": p.window_context(),
+        "windowContextAvailable": context_extension_available(),
         "openSettingsAtLaunch": p.open_settings_at_launch(),
         "settingsWindow": true})
 }
