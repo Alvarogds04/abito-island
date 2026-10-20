@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 #[derive(Debug, PartialEq)]
 pub enum Command {
     History,
+    CopyEntry(String),
+    CopyLast,
     DeleteEntry(String),
     ClearHistory(bool),
     Stats,
@@ -26,16 +28,17 @@ pub enum Command {
 pub fn parse_command(payload: &Value, devices: &[String], claude_key_present: bool) -> Option<Command> {
     let o = payload.as_object()?;
     match o.get("action")?.as_str()? {
+        "copy_last" if o.len() == 1 => Some(Command::CopyLast),
         "history" if o.len() == 1 => Some(Command::History),
         "stats" if o.len() == 1 => Some(Command::Stats),
         "words" if o.len() == 1 => Some(Command::Words),
         "snippets" if o.len() == 1 => Some(Command::Snippets),
         "styles" if o.len() == 1 => Some(Command::Styles),
-        "delete_entry" if o.len() == 2 => {
+        action @ ("delete_entry" | "copy_entry") if o.len() == 2 => {
             let id = o.get("id")?.as_str()?;
             (!id.is_empty() && id.len() <= 64
                 && id.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')))
-                .then(|| Command::DeleteEntry(id.into()))
+                .then(|| if action == "copy_entry" { Command::CopyEntry(id.into()) } else { Command::DeleteEntry(id.into()) })
         }
         "clear_history" if o.len() == 2 => Some(Command::ClearHistory(o.get("everything")?.as_bool()?)),
         "set_words" if o.len() == 2 => {
@@ -94,6 +97,16 @@ fn rows(value: &Value, max: usize, fields: &[(&str, usize)]) -> bool {
     value.as_array().is_some_and(|items| items.len() <= max && items.iter().all(|v|
         v.as_object().is_some_and(|o| o.len() == fields.len() && fields.iter().all(|(key, limit)|
             o.get(*key).and_then(Value::as_str).is_some_and(|s| s.chars().count() <= *limit)))))
+}
+
+/// Select stored text only; renderer-supplied text never reaches the clipboard.
+pub fn clipboard_text(command: &Command, store: &Store) -> Option<String> {
+    match command {
+        Command::CopyEntry(id) if store.prefs.keep_days != 0 =>
+            store.history.iter().find(|entry| &entry.id == id).map(|entry| entry.text.clone()),
+        Command::CopyLast => store.last_text(),
+        _ => None,
+    }
 }
 
 pub fn history_json(store: &Store) -> Value {

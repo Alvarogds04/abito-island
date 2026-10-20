@@ -99,6 +99,11 @@ async function main(args = process.argv.slice(2)) {
     fs.copyFileSync(path.join(__dirname, 'validate/internal-pi.cjs'), fixturePi);
     fs.chmodSync(fixturePi, 0o700);
     env.PATH = `${out}:${env.PATH}`;
+    // The app still calls its production clipboard helper; this owner serves
+    // the selection on this private Xvfb, never the user's Wayland session.
+    const clipboard = path.join(out, 'wl-copy');
+    fs.copyFileSync(path.join(__dirname, 'validate/clipboard.py'), clipboard);
+    fs.chmodSync(clipboard, 0o700);
     const secondProject = path.join(out, 'proyecto-beta');
     fs.mkdirSync(secondProject, { mode: 0o700 });
     const fixtureCodex = path.join(out, 'codex');

@@ -51,8 +51,8 @@ const invoke = (command, args) => {
     const strings = (v, fields) => exact(v, fields) && fields.every(k => typeof v[k] === 'string');
     const list = (v, fields) => Array.isArray(v) && Array.from(v).every(x => strings(x, fields));
     if (!exact(args, ['payload']) || !p ||
-      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'running_apps', 'history', 'stats', 'words', 'snippets', 'styles'].includes(p.action)) ||
-        (exact(p, ['action', 'id']) && p.action === 'delete_entry' && typeof p.id === 'string' && p.id.length >= 1 && p.id.length <= 64 && !/[^A-Za-z0-9_-]/.test(p.id)) ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'running_apps', 'history', 'stats', 'words', 'snippets', 'styles', 'copy_last'].includes(p.action)) ||
+        (exact(p, ['action', 'id']) && ['delete_entry', 'copy_entry'].includes(p.action) && typeof p.id === 'string' && p.id.length >= 1 && p.id.length <= 64 && !/[^A-Za-z0-9_-]/.test(p.id)) ||
         (exact(p, ['action', 'everything']) && p.action === 'clear_history' && typeof p.everything === 'boolean') ||
         (exact(p, ['action', 'words']) && p.action === 'set_words' && exact(p.words, ['words', 'replacements']) && Array.isArray(p.words.words) && Array.from(p.words.words).every(w => typeof w === 'string') && list(p.words.replacements, ['id', 'from', 'to'])) ||
         (exact(p, ['action', 'snippets']) && p.action === 'set_snippets' && list(p.snippets, ['id', 'trigger', 'text'])) ||

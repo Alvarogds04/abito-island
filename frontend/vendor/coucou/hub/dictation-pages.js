@@ -22,6 +22,13 @@ function mount(page, ctx) {
       alive = false;
       for (const off of cleanups.splice(0)) off();
     },
+    listen: async (name, fn) => {
+      const off = await onEvent(name, (p) => {
+        if (alive) fn(p);
+      });
+      if (alive) cleanups.push(off);
+      else off();
+    },
     watch: async (fn) => {
       const off = await onEvent("dictation:models", (m) => {
         if (alive) fn(m);
@@ -98,6 +105,7 @@ async function flowSettingsPage(page, ctx, invoke) {
   if (!life.alive()) return;
   const save = (change) => life.work(() => ctx.setPrefs(change));
   const prefs = status.prefs;
+  const copied = h("div", { class: "hub-note", role: "status" });
   page.append(ctx.hero("flowsettings", t("Settings"), null));
   const edges = [["bottom", t("Bottom")], ["left", t("Left")], ["right", t("Right")]];
   page.append(label(t("Keys")));
@@ -110,8 +118,12 @@ async function flowSettingsPage(page, ctx, invoke) {
     divider(),
     row(t("Hands-free"), t("Tap twice, speak as long as you like, tap once to paste."), keyKeycap("wayland", status.platform, true)),
     divider(),
-    row(t("Paste the last dictation again"), t("When the words went to the wrong place."), unavailable(button(t("Paste again"), () => {
-    }, "", true))),
+    row(t("Paste the last dictation again"), t("When the words went to the wrong place."), trusted(button(t("Paste again"), () => void life.work(async () => {
+      await FlowBridge.copyLast();
+      if (life.alive()) {
+        copied.textContent = "Copiado · presiona Ctrl+V para pegar";
+      }
+    }), "", true))),
     divider(),
     row(t("Cancel a dictation"), null, keycap(t("Esc")))
   );
@@ -123,7 +135,7 @@ async function flowSettingsPage(page, ctx, invoke) {
   } else if (status.keys !== "ok") {
     keysCard.append(h("div", { class: "hub-warn", text: t("Abito can't watch the keyboard here: use the pill's microphone to dictate.") }));
   }
-  page.append(keysCard);
+  page.append(keysCard, copied);
   page.append(label(t("Microphone")));
   const mics = [["", t("System default")], ...status.mics.map((m) => [m.name, m.name])];
   if (prefs.mic && !mics.some(([id]) => id === prefs.mic)) mics.push([prefs.mic, prefs.mic]);
@@ -231,6 +243,7 @@ async function dictationPage(page, ctx) {
   const snapshots = await data.load(() => Promise.all([FlowBridge.history(), FlowBridge.stats()]));
   if (!life.alive() || !snapshots) return;
   let [entries, stats] = snapshots, query = "";
+  const copied = h("div", { class: "hub-note", role: "status" });
   const search = data.live(h("input", { class: "hub-input", placeholder: t("Search dictations"), type: "search" }));
   const list = h("div", { style: "display:flex;flex-direction:column;gap:10px" });
   const dayKey = (ms) => {
@@ -263,8 +276,10 @@ async function dictationPage(page, ctx) {
       group.append(h("div", { class: "hub-entry" }, when, h("div", { class: "words", text: e.text }), h(
         "div",
         { class: "tools" },
-        unavailable(iconButton("copy", t("Copy"), () => {
-        })),
+        data.live(iconButton("copy", t("Copy"), () => void life.work(async () => {
+          await FlowBridge.copyEntry(e.id);
+          if (life.alive()) copied.textContent = "Copiado · presiona Ctrl+V para pegar";
+        }))),
         data.live(iconButton("trash", t("Delete"), () => data.change(() => {
           entries = entries.filter((x) => x.id !== e.id);
         }, () => FlowBridge.deleteEntry(e.id), async () => {
@@ -273,12 +288,26 @@ async function dictationPage(page, ctx) {
       )));
     }
   };
+  let refreshGeneration = 0;
+  const refresh = () => void life.work(async () => {
+    const generation = ++refreshGeneration;
+    const fresh = await FlowBridge.history();
+    if (life.alive() && generation === refreshGeneration) {
+      entries = fresh;
+      draw();
+    }
+  });
+  await life.listen("dictation:phase", (p) => {
+    if (p.phase === "copied" || p.phase === "idle") refresh();
+  });
+  await life.listen("dictation:history", refresh);
+  if (!life.alive()) return;
   search.addEventListener("input", () => {
     query = search.value.trim().toLowerCase();
     draw();
   });
   draw();
-  const left = h("div", { style: "display:flex;flex-direction:column;gap:10px;min-width:0" }, h("div", { class: "hub-history-head" }, label(t("History")), search), list);
+  const left = h("div", { style: "display:flex;flex-direction:column;gap:10px;min-width:0" }, h("div", { class: "hub-history-head" }, label(t("History")), search), copied, list);
   const big = (value, text) => h("div", { class: "hub-big-number" }, h("b", { text: value }), h("span", { text: t(text) }));
   const check = icon("check");
   check.style.setProperty("width", "15px");

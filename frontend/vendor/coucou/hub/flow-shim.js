@@ -34,6 +34,8 @@ const FlowBridge = Object.freeze({
       defaultStyle: p.defaultStyle
     } });
   },
+  copyEntry: (id) => mutation({ action: "copy_entry", id }),
+  copyLast: () => mutation({ action: "copy_last" }),
   history: () => call({ action: "history" }),
   deleteEntry: (id) => mutation({ action: "delete_entry", id }),
   clear: (everything) => mutation({ action: "clear_history", everything }),

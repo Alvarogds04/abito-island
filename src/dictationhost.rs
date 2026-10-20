@@ -103,6 +103,17 @@ pub async fn dictation_action(
                 };
                 Ok(cmd::status_json(&prefs, speech::status(), key, devices, has_claude_key))
             }
+            command @ (Command::CopyEntry(_) | Command::CopyLast) => {
+                let shared = slot.lock().expect("dictation host").store.clone();
+                let text = {
+                    let store = shared.lock().expect("dictation store");
+                    cmd::clipboard_text(&command, &store).ok_or_else(|| err("not_found"))?
+                };
+                if flow::paste::copy(&text) != flow::paste::Outcome::Copied {
+                    return Err(err("clipboard_refused"));
+                }
+                Ok(json!({"ok":true,"copied":true}))
+            }
             Command::RunningApps => Ok(cmd::running_apps_json(flow::running_apps())),
             Command::SetPrefs(prefs) => {
                 {
@@ -120,7 +131,11 @@ pub async fn dictation_action(
                 let shared = slot.lock().expect("dictation host").store.clone();
                 let today = flow::store::today();
                 let mut store = shared.lock().expect("dictation store");
-                Ok(cmd::data_action(data, &mut store, today))
+                let changed = matches!(data, Command::DeleteEntry(_) | Command::ClearHistory(_));
+                let result = cmd::data_action(data, &mut store, today);
+                drop(store);
+                if changed { let _ = app.emit("dictation:history", json!({})); }
+                Ok(result)
             }
             Command::Download => {
                 let app = app.clone();
@@ -143,4 +158,15 @@ pub async fn dictation_action(
             }
         }
     }).await.map_err(|_| err("unavailable"))?
+}
+
+/// Validator-only seed through the real private store, never microphone input.
+#[cfg(any(debug_assertions, feature = "probe"))]
+pub fn seed_validation(app: &AppHandle) {
+    let slot = app.state::<Mutex<Host>>();
+    let shared = slot.lock().expect("dictation host").store.clone();
+    let mut store = shared.lock().expect("dictation store");
+    store.prefs.keep_days = 30;
+    store.save_prefs();
+    store.record("Dictado privado del validador", None, 2.0, flow::store::today(), flow::store::now_ms());
 }

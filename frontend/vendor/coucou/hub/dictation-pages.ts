@@ -1,5 +1,5 @@
 // Adapted from Coucou src/hub/pages/{dictation,flowsettings}.ts @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
-// Abito: portal-owned keys, seven closed preferences, local history; no copy backend or history event.
+// Abito: portal-owned keys, seven closed preferences, local history; clipboard-only delivery and live local history.
 import { h, clear } from '../views/dom.js';
 import { t } from './i18n-es.js';
 import { onEvent } from './bridge-shim.js';
@@ -17,6 +17,10 @@ export function mount(page: HTMLElement, ctx: HubContext) {
   const life = {
     alive: () => alive,
     dispose: () => { alive = false; for (const off of cleanups.splice(0)) off(); },
+    listen: async (name: string, fn: (p: any) => void) => {
+      const off = await onEvent<any>(name, p => { if (alive) fn(p); });
+      if (alive) cleanups.push(off); else off();
+    },
     watch: async (fn: (m: ModelsStatus) => void) => {
       const off = await onEvent<ModelsStatus>('dictation:models', m => { if (alive) fn(m); });
       if (alive) cleanups.push(off); else off();
@@ -64,6 +68,7 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
   if (!life.alive()) return;
   const save = (change: (p: any) => void) => life.work(() => ctx.setPrefs(change));
   const prefs = status.prefs;
+  const copied = h('div', {class:'hub-note',role:'status'});
   page.append(ctx.hero("flowsettings", t("Settings"), null));
 
   // ── Keys ──
@@ -78,7 +83,10 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
     divider(),
     row(t("Hands-free"), t("Tap twice, speak as long as you like, tap once to paste."), keyKeycap("wayland", status.platform, true)),
     divider(),
-    row(t("Paste the last dictation again"), t("When the words went to the wrong place."), unavailable(button(t("Paste again"), () => {}, "", true))),
+    row(t("Paste the last dictation again"), t("When the words went to the wrong place."), trusted(button(t("Paste again"), () => void life.work(async () => {
+      await FlowBridge.copyLast();
+      if (life.alive()) { copied.textContent = 'Copiado · presiona Ctrl+V para pegar'; }
+    }), "", true))),
     divider(),
     row(t("Cancel a dictation"), null, keycap(t("Esc"))),
   );
@@ -90,7 +98,7 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
   } else if (status.keys !== "ok") {
     keysCard.append(h("div", { class: "hub-warn", text: t("Abito can't watch the keyboard here: use the pill's microphone to dictate.") }));
   }
-  page.append(keysCard);
+  page.append(keysCard, copied);
 
   // ── Microphone ──
   page.append(label(t("Microphone")));
@@ -180,11 +188,12 @@ export async function dictationPage(page: HTMLElement, ctx: HubContext) {
       row(t('Parakeet, on your computer'), t('The most accurate, offline, 25 languages. Downloaded once (about {0} MB).', {0:number(status.models.downloadMb)}), modelsControl(ctx, life, () => ctx.navigate('dictation'))));
     page.append(glowCard('#FB923C', body));
   }
-  // No flow-history event exists in Abito: these snapshots refresh only when opening the page.
+  // Refresh only after native writes settle; event payloads never carry dictated text.
   const data = dataLife(page, {...ctx, set onLeave(fn) { ctx.onLeave = () => {life.dispose(); fn?.();}; }});
   const snapshots = await data.load(() => Promise.all([FlowBridge.history(),FlowBridge.stats()]));
   if (!life.alive() || !snapshots) return;
   let [entries, stats] = snapshots, query = '';
+  const copied = h('div', {class:'hub-note',role:'status'});
   const search = data.live(h('input', {class:'hub-input',placeholder:t('Search dictations'),type:'search'})) as HTMLInputElement;
   const list = h('div', {style:'display:flex;flex-direction:column;gap:10px'});
   const dayKey = (ms: number) => {const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;};
@@ -201,12 +210,24 @@ export async function dictationPage(page: HTMLElement, ctx: HubContext) {
       const when = h('div', {class:'when'}, h('span', {text:new Date(e.date).toLocaleTimeString(document.documentElement.lang || undefined,{hour:'2-digit',minute:'2-digit'})}));
       if (e.app) when.append(h('span', {class:'hub-tag',text:e.app,title:e.app}));
       group!.append(h('div', {class:'hub-entry'},when,h('div', {class:'words',text:e.text}),h('div', {class:'tools'},
-        unavailable(iconButton('copy',t('Copy'), () => {})),
+        data.live(iconButton('copy',t('Copy'), () => void life.work(async () => {
+          await FlowBridge.copyEntry(e.id);
+          if (life.alive()) copied.textContent = 'Copiado · presiona Ctrl+V para pegar';
+        }))),
         data.live(iconButton('trash',t('Delete'), () => data.change(() => {entries = entries.filter(x => x.id !== e.id);}, () => FlowBridge.deleteEntry(e.id), async () => {entries = await FlowBridge.history();}, draw))))));
     }
   };
+  let refreshGeneration = 0;
+  const refresh = () => void life.work(async () => {
+    const generation = ++refreshGeneration;
+    const fresh = await FlowBridge.history();
+    if (life.alive() && generation === refreshGeneration) { entries = fresh; draw(); }
+  });
+  await life.listen('dictation:phase', p => { if (p.phase === 'copied' || p.phase === 'idle') refresh(); });
+  await life.listen('dictation:history', refresh);
+  if (!life.alive()) return;
   search.addEventListener('input', () => {query = search.value.trim().toLowerCase(); draw();}); draw();
-  const left = h('div', {style:'display:flex;flex-direction:column;gap:10px;min-width:0'}, h('div', {class:'hub-history-head'}, label(t('History')), search), list);
+  const left = h('div', {style:'display:flex;flex-direction:column;gap:10px;min-width:0'}, h('div', {class:'hub-history-head'}, label(t('History')), search), copied, list);
   const big = (value: string, text: string) => h('div', {class:'hub-big-number'}, h('b', {text:value}), h('span', {text:t(text)}));
   const check = icon('check'); check.style.setProperty('width','15px'); check.style.setProperty('height','15px'); check.style.setProperty('fill','none'); check.style.setProperty('stroke','currentColor'); check.style.setProperty('stroke-width','2.2');
   const numbers = card(big(shortCount(stats.all.words), 'words dictated'), big(number(stats.all.wordsPerMinute), 'words/min'), big(number(stats.streak), 'days in a row'), divider(), h('div', {class:'hub-ok'}, check, h('span', {text:t('Unlimited and free')})));

@@ -38,6 +38,8 @@ export const FlowBridge = Object.freeze({
       enabled:p.enabled, key:p.key, edge:p.edge, mic:p.mic, keepDays:p.keepDays, cleanup:p.cleanup === true, defaultStyle:p.defaultStyle,
     } });
   },
+  copyEntry: (id: string) => mutation({action:'copy_entry', id}),
+  copyLast: () => mutation({action:'copy_last'}),
   history: (): Promise<FlowEntry[]> => call({action:'history'}),
   deleteEntry: (id: string) => mutation({action:'delete_entry', id}),
   clear: (everything: boolean) => mutation({action:'clear_history', everything}),

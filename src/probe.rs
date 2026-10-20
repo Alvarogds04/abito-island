@@ -2938,6 +2938,14 @@ fn feature_validation(app: &AppHandle) {
         }
         record("atajos-catalogo",run(&page,"AbitoValidate.hotkeys()"));
         record("atajos-grabar-borrar",run(&page,"AbitoValidate.recordHotkey()"));
+        crate::dictationhost::seed_validation(app);
+        record("dictado-repegar", run(&page,"AbitoValidate.dictationRepaste()"));
+        let mut history = run(&page,"AbitoValidate.dictationHistory()");
+        let clipboard = std::process::Command::new("wl-copy").arg("--read").output();
+        let copied = clipboard.ok().filter(|o|o.status.success()).map(|o|String::from_utf8_lossy(&o.stdout).into_owned());
+        history["clipboard_readback"] = json!(copied);
+        history["ok"] = json!(history["ok"] == true && copied.as_deref() == Some("Dictado privado del validador"));
+        record("dictado-historial", history);
         record("dictado-sin-modelo",run(&page,"AbitoValidate.noModel('dictation')"));
         record("voz-sin-modelo",run(&page,"AbitoValidate.noModel('voice')"));
         record("voz-reconocimiento",json!({"ok":true,"unverifiable":"sin micrófono ni modelos: dictado real, wake word y reconocimiento no comprobables"}));

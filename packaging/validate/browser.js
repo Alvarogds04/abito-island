@@ -408,6 +408,37 @@
     await wait(()=>!byId('shortcut-reset').disabled,'reset completo');
     return {ok:suspended.status!=='active' && rebound.combo==='Ctrl+F8' && !cleared.enabled && cleared.combo==='' && other.combo===chat.combo,before,suspended,rebound,cleared,other,coverage:'trusted recording/Backspace and native readback; old-combo dispatch not exercised from settings'};
   }
+  async function dictationNavigate(id) {
+    const button=[...document.querySelectorAll('.hub-side .hub-item')][window.__validatePages.indexOf(id)];
+    const previous=document.querySelector('.hub-page');
+    await click(button);
+    await wait(()=>document.querySelector('.hub-page')!==previous,'navegar a '+id);
+    await wait(()=>document.querySelector('.hub-page input, .hub-page button'),'controles de '+id);
+  }
+  async function dictationRepaste() {
+    await dictationNavigate('flowsettings');
+    const row=[...document.querySelectorAll('.hub-row')].find(e=>e.textContent.includes('Volver a pegar el último dictado'));
+    const button=row?.querySelector('button');
+    if (!button || button.disabled) throw Error('falta volver a copiar');
+    await click(button);
+    await wait(()=>document.body.textContent.includes('Copiado · presiona Ctrl+V'));
+    return {ok:true,manualPaste:true};
+  }
+  async function dictationHistory() {
+    await dictationNavigate('dictation');
+    await wait(()=>document.body.textContent.includes('Dictado privado del validador'),'entrada sembrada');
+    const entry=document.querySelector('.hub-entry');
+    const copy=entry?.querySelector('button[title="Copiar"]');
+    if (!copy || copy.disabled) throw Error('falta Copiar');
+    await click(copy);
+    await wait(()=>document.body.textContent.includes('Copiado · presiona Ctrl+V'));
+    const remove=entry.querySelector('button[title="Eliminar"]');
+    if (!remove) throw Error('falta Eliminar');
+    await click(remove);
+    await wait(async()=>!(await invoke('dictation_action',{action:'history'})).length,'borrado nativo');
+    await wait(()=>!document.querySelector('.hub-entry'),'borrado visible');
+    return {ok:true,copied:true,deleted:true};
+  }
   async function noModel(page) {
     const index=window.__validatePages.indexOf(page);
     if(index < 0) throw Error(`página desconocida: ${page}`);
@@ -426,5 +457,5 @@
     result.errors=[...errors];
     await emit('validate-result',result);
   }
-  window.AbitoValidate={run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus};
+  window.AbitoValidate={dictationHistory,dictationRepaste,run,wait,click,key,visible,invoke,chatFirst,chatSecond,dictationIdle,sessions,connection,notice,shortcutDispatch,shortcutTerminalAbsent,shortcutAlert,answerQuestion,gear,hub,github,mail,sounds,spotify,character,hotkeys,recordHotkey,noModel,sessionsFocus,restoreSessionFocus};
 })();

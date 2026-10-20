@@ -17,10 +17,13 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const emit = (name, payload) => { for (const fn of events.get(name) || []) fn({ payload }); };
   let state = { prefs: { enabled:false,key:'right_ctrl',edge:'bottom',mic:'',keepDays:30,cleanup:false,defaultStyle:'natural',summaryEngine:'off',openAtLaunch:false,voice:false,voiceOutput:'off',voiceGender:'female' }, models:{ parakeet:{state:'missing'},downloadMb:612 }, keys:'ok',platform:'linux',mics:[{name:'USB',default:true}] };
   let rejectWrite = false;
+  let history = [];
   setInvoke(async (cmd, {payload:p}) => {
     calls.push([cmd, structuredClone(p)]);
     if (p.action === 'status') return structuredClone(state);
-    if (p.action === 'history') return [];
+    if (p.action === 'history') return structuredClone(history);
+    if (p.action === 'copy_entry' || p.action === 'copy_last') return {ok:true,copied:true};
+    if (p.action === 'delete_entry') {history=history.filter(e=>e.id!==p.id);return {ok:true};}
     if (p.action === 'stats') return {all:{words:0,wordsPerMinute:0},streak:0};
     if (p.action === 'set_prefs') { if (rejectWrite) throw Error('test write failure'); state.prefs = {...state.prefs,...p.prefs}; return p.prefs; }
     state.models.parakeet = {state:p.action === 'remove_model' ? 'missing' : 'downloading',fraction:0}; return structuredClone(state.models);
@@ -49,6 +52,12 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   assert(text(page).includes('612')); assert(text(page).includes('Ctrl+Alt+V')); assert(!all(page).some(e=>e.tagName==='option'&&e.attrs.value==='right_ctrl'));
   const row = title => all(page).find(e=>e.className==='hub-row' && all(e).some(n=>n.textContent===title));
   const control=(title,tag)=>all(row(title)).find(e=>e.tagName===tag);
+  const repaste=control('Volver a pegar el último dictado','button');
+  assert(!repaste.disabled, 'copy last is enabled');
+  calls.length=0; repaste.fire('click',false); await new Promise(r=>setImmediate(r)); assert.deepEqual(calls,[]);
+  repaste.fire('click'); await new Promise(r=>setImmediate(r));
+  assert.deepEqual(calls.splice(0),[['dictation_action',{action:'copy_last'}]]);
+  assert(text(page).includes('Ctrl+V'));
   const launch=control('Abrir esta ventana al abrir Abito','button');
   assert(!launch.disabled,'open at launch control is usable');
   launchCalls.length=0;launch.fire('click',false);await new Promise(r=>setImmediate(r));assert.deepEqual(launchCalls,[]);
@@ -87,6 +96,17 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   setupToggle.fire('click');await new Promise(r=>setImmediate(r));assert.deepEqual(calls.splice(0),[['dictation_action',{action:'set_prefs',prefs:expectedPrefs()}]]);
   leave();setupToggle.fire('click');await new Promise(r=>setImmediate(r));assert.deepEqual(calls,[],'left pages cannot write');
   for(const keys of ['pending','denied','unsupported']) { state.keys=keys; const p=new Element('div'); await flowSettingsPage(p,ctx);assert(text(p).includes('Abito no puede vigilar el teclado aquí'));leave(); }
+  history=[{id:'saved-1',date:Date.now(),text:'Dictado guardado',words:2,seconds:1}];
+  const populated=new Element('div'); await dictationPage(populated,ctx);
+  const copy=all(populated).find(e=>e.attrs.title==='Copiar');
+  assert(copy && !copy.disabled,'stored dictation has a usable Copy');
+  calls.length=0; copy.fire('click',false); await new Promise(r=>setImmediate(r)); assert.deepEqual(calls,[]);
+  copy.fire('click'); await new Promise(r=>setImmediate(r));
+  assert.deepEqual(calls.splice(0),[['dictation_action',{action:'copy_entry',id:'saved-1'}]]);
+  history.push({id:'saved-2',date:Date.now(),text:'Nuevo dictado',words:2,seconds:1});
+  emit('dictation:phase',{phase:'copied'}); await new Promise(r=>setImmediate(r));
+  assert(text(populated).includes('Nuevo dictado'),'history refreshes after dictation');
+  leave();
   state.prefs.keepDays=0;state.prefs.enabled=true;state.models.parakeet={state:'ready'};
   const readyHome=new Element('div');await dictationPage(readyHome,ctx);assert(!text(readyHome).includes('Activar el dictado'));assert(text(readyHome).includes('El historial está desactivado'));leave();
   setInvoke(async()=>{throw Error('status unavailable');}); assert.equal(await FlowBridge.status(),null);await assert.rejects(FlowBridge.setPrefs(state.prefs));

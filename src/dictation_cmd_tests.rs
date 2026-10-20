@@ -238,3 +238,29 @@ fn dictation_cleanup_requires_key_and_running_apps_is_closed() {
     assert_eq!(parse_command(&json!({"action":"running_apps"}), &[], false), Some(Command::RunningApps));
     assert!(parse_command(&json!({"action":"running_apps","extra":true}), &[], false).is_none());
 }
+
+#[test]
+fn dictation_clipboard_actions_are_closed() {
+    for payload in [json!({"action":"copy_entry","id":"entry-1"}), json!({"action":"copy_last"})] {
+        assert!(parse_command(&payload, &[], false).is_some(), "{payload}");
+    }
+    for payload in [json!({"action":"copy_entry"}), json!({"action":"copy_entry","id":""}),
+        json!({"action":"copy_entry","id":"../secret"}), json!({"action":"copy_entry","id":"ok","text":"injected"}),
+        json!({"action":"copy_last","text":"injected"})] {
+        assert!(parse_command(&payload, &[], false).is_none());
+    }
+}
+
+#[test]
+fn dictation_clipboard_selects_stored_text_without_recording() {
+    let (mut store, _dir) = flow::store::tests::temp_store();
+    store.record("uno", None, 1.0, flow::store::today(), 100);
+    store.record("dos", None, 1.0, flow::store::today(), 200);
+    let id = store.history[1].id.clone();
+    assert_eq!(clipboard_text(&Command::CopyEntry(id), &store).as_deref(), Some("uno"));
+    assert_eq!(clipboard_text(&Command::CopyLast, &store).as_deref(), Some("dos"));
+    assert_eq!(clipboard_text(&Command::CopyEntry("missing".into()), &store), None);
+    assert_eq!(store.history.len(), 2);
+    store.clear_history();
+    assert_eq!(clipboard_text(&Command::CopyLast, &store), None);
+}
