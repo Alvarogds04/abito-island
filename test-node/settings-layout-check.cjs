@@ -40,6 +40,26 @@ test('S19 Pills: no card of the page is an empty box (the «Colores de identidad
   assert(rows.rows > 0 && rows.rowInsideCard, `the Abito colour row must live INSIDE the card: ${JSON.stringify(rows)}`);
 });
 
+test('S20 Agentes: with every agent in `error` the table at rest repeats NO failure caption; only a failed action says so, once', async r => {
+  await r.go('Agentes');
+  const caption = 'No se pudo completar; no se tocó nada.';
+  assert.equal((await r.text('.hub-page')).split(caption).length - 1, 0, 'standing captions under the rows');
+  assert.equal((await r.page.evaluate(() => [...document.querySelectorAll('.agent-row .agent-state')].filter(e => /No se pudo/.test(e.textContent)).length)) > 0, true, 'the state column still reports the state');
+});
+
+test('S20 Agentes: a refused install shows ONE sentence in the status line, and nowhere else', async r => {
+  await r.close();
+  const f = await H.open({ width: 960, height: 680, agentsOk: true, failInstall: true });
+  try {
+    await f.go('Agentes');
+    await f.page.locator('#agent-row-claude-code button', { hasText: 'Instalar hooks' }).click(); await f.page.waitForTimeout(300);
+    await f.page.locator('#agent-row-claude-code button', { hasText: 'Respaldar y escribir' }).click(); await f.page.waitForTimeout(800);
+    const status = await f.text('#agent-action-status');
+    assert.equal(status.trim(), 'No se pudo completar la acción en Claude Code; no se tocó nada.');
+    assert.equal((await f.text('.hub-page')).split('no se tocó nada').length - 1, 1, 'exactly one copy on the page');
+  } finally { await f.close(); }
+});
+
 test('S23 Integraciones: every card keeps its state in ONE column and its actions off the card border', async r => {
   await r.go('Integraciones');
   const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cs = getComputedStyle(c), cb = c.getBoundingClientRect(); const inner = cb.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);

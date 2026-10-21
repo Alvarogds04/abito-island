@@ -49,6 +49,7 @@ async function renderAgentSettings({ invoke, V, P, listen, timers }) {
   root.style.setProperty("display", "contents");
   s.message.className = "abito-settings-feedback notice err";
   let state = null, reviewing = false, busy = false;
+  const actionStatus = h("div", { id: "agent-action-status", class: "hint", role: "status", "aria-live": "polite" });
   const plans = {};
   let prefs = {}, prefsKnown = false;
   function reviewChange(body, r, install, redraw) {
@@ -65,9 +66,12 @@ async function renderAgentSettings({ invoke, V, P, listen, timers }) {
       if (busy) return;
       busy = true;
       confirm.disabled = true;
+      actionStatus.textContent = "";
       work(() => call("agent_action", command), (next) => {
         state = { ...state, ...next };
         reviewing = false;
+      }, () => {
+        actionStatus.textContent = V.agentActionFailure(r.id);
       }).finally(() => {
         busy = false;
         reviewing = false;
@@ -124,7 +128,7 @@ async function renderAgentSettings({ invoke, V, P, listen, timers }) {
         if (remove) head.append(remove);
         if (!integration) body.append(h("span", { class: "path", text: UNAVAILABLE }));
       }
-      if (r?.note) body.append(hint(r.note));
+      if (r?.note && r.state !== "error") body.append(hint(r.note));
     };
     redraw();
     return block;
@@ -198,7 +202,7 @@ async function renderAgentSettings({ invoke, V, P, listen, timers }) {
         }
       } else if (!unknown) actions.append(install);
       if (claude) detail.append(hint(t(installed ? "Abito is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there." : "Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.")));
-      if (r?.note) detail.append(hint(r.note));
+      if (r?.note && r.state !== "error") detail.append(hint(r.note));
     };
     redraw();
     return entry;
@@ -265,6 +269,7 @@ async function renderAgentSettings({ invoke, V, P, listen, timers }) {
         hint(t("Show other coding agents in the island. Abito adds its entries to each agent's own config: you see the exact change and where the backup goes before anything is written, and uninstalling removes only what Abito added.")),
         hint("Desinstalar quita solo lo que Abito agregó; antes se guarda un respaldo."),
         table,
+        actionStatus,
         unavailable
       ),
       section(t("Plan usage"), planBody),
