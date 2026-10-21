@@ -163,7 +163,8 @@ const es: Record<string, string> = {
   'Claude Code, Codex and the other agents Abito follows.': 'Claude Code, Codex y los demás agentes que sigue Abito.',
   "The AI of the island's chat, with your own keys.": 'La IA del chat de la isla, con tus propias claves.',
   'Stripe, GitHub, Vercel, n8n, Notion and the rest.': 'Stripe, GitHub, Vercel, n8n, Notion y el resto.',
-  'Your agents and their approvals on your Android phone, over your Wi-Fi.': 'Tus agentes y sus aprobaciones en tu teléfono Android, por Wi-Fi.',
+  // #503 S24: U+2011 (non-breaking hyphen) keeps «Wi‑Fi» in one piece; a plain «-» let the hero subtitle break as «Wi-» / «Fi.».
+  'Your agents and their approvals on your Android phone, over your Wi-Fi.': 'Tus agentes y sus aprobaciones en tu teléfono Android, por Wi\u2011Fi.',
   'The keys that open the island and its actions.': 'Las teclas que abren la isla y sus acciones.',
   'Dictation is off': 'Dictado desactivado',
   'Downloading the voice model…': 'Descargando el modelo de voz…',
