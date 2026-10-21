@@ -188,7 +188,7 @@
     return feed(memory, view);
   }
   function feed(memory, view) {
-    if (view && view.state === 'pending') return { active: false, task: null, who: null };
+    if (view && view.state === 'pending') return { active: false, ticker: false, task: null, who: null };
     const previous = memory.log.join('\n');
     if (!view || view.state !== 'ready') {
       memory.log = [errorText()]; memory.focus = null;
@@ -198,10 +198,10 @@
       memory.focus = (memory.selected && remembered) || view.rows.find(r => r.tools?.total > 0) || remembered || view.rows[0] || null;
       if (!view.rows.length) {
         memory.log = []; memory.seq = 0; memory.focus = null;
-        return { active: false, task: null, who: null };
+        return { active: false, ticker: false, task: null, who: null };
       }
-      memory.log = ['Sin pasos de herramientas'];
-      if (view.truncated) memory.log.push(boundedText(view));
+      // No placeholder for «no tool steps»: that is not information (human: «si no es nada quitalo»). Only a real notice is a line.
+      memory.log = view.truncated ? [boundedText(view)] : [];
     }
     // Ticker.sync uses a monotonic index, not text equality, to detect updates.
     // Advance on notice transitions too, without counting process metadata.
@@ -209,13 +209,15 @@
     const f = memory.focus;
     if (f?.tools?.total > 0) {
       const { total, steps } = f.tools;
-      return { active: true, task: { steps: steps.map(s => s.name), stepSeq: total - 1, finalLine: steps.some(s => s.state === 'running') ? null : steps.at(-1).name }, who: { name: f.cwd ?? '—', tool: f.kindLabel, count: `${steps.at(-1).index}/${total}` } };
+      return { active: true, ticker: true, task: { steps: steps.map(s => s.name), stepSeq: total - 1, finalLine: steps.some(s => s.state === 'running') ? null : steps.at(-1).name }, who: { name: f.cwd ?? '—', tool: f.kindLabel, count: `${steps.at(-1).index}/${total}` } };
     }
     const steps = memory.log.slice();
     // Neither the availability notice nor the bounded-list notice is a tool.
     const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: '' } : null;
+    // Nothing real to draw: the who-row (session name) stays, the ticker row does not exist.
+    if (!steps.length) return { active: true, ticker: false, task: null, who };
     // An unavailable/bounded notice is not live work: finalLine makes Coucou's Ticker hold it still (no shimmer).
-    return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: steps.at(-1) ?? null }, who };
+    return { active: true, ticker: true, task: { steps, stepSeq: memory.seq - 1, finalLine: steps.at(-1) ?? null }, who };
   }
 
   return { moreView, listView, pendingAsker, piStateOf, SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
@@ -351,15 +353,16 @@ function mount(V) {
     lastView = view;
     const main = !memory.selected && V.sessionRows(view, prefs).find(r => r.sourcePill === prefs.mainPill);
     if (main) V.focus(memory, view, main.id);
-    const { active, task, who: w } = V.feed(memory, view);
+    const { active, ticker: showTicker, task, who: w } = V.feed(memory, view);
     const session = memory.focus ? `${memory.focus.id}:${!!memory.focus.tools?.total}:${memory.focus.tools?.epoch ?? 0}` : null;
     if (session !== shownSession) { ticker.sync(null); shownSession = session; }
     paintMiniGrid(view);
-    ticker.el.hidden = !active;
+    ticker.el.hidden = !(active && showTicker);
     who.hidden = !active || !w;
     if (w) { whoName.textContent = w.name; whoTool.textContent = w.tool; whoCount.textContent = w.count; whoCount.hidden = !w.count; }
     if (active) overview.dataset.ticker = 'on'; else delete overview.dataset.ticker;
-    ticker.sync(task);
+    if (!showTicker) ticker.sync(null);
+    else ticker.sync(task);
     ticker.el.title = task?.steps?.at(-1) ?? ''; // full text fallback when a long step is cut
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
     const more = V.moreView(view);
