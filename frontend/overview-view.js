@@ -78,7 +78,7 @@
       aria: 'Sin motor: no hay una sesión conectada. Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.',
       detail: 'Conectá una sesión de Pi.',
       // Coucou's no-agent state is a way forward, not a dead label: the action opens Ajustes -> Conexiones (Agentes).
-      action: { target: 'accounts', label: 'Abrir Ajustes' },
+      action: { target: 'accounts:agentes', label: 'Abrir Ajustes' },
       actionAria: 'Sin motor: no hay una sesión conectada. Abrir Ajustes para conectar un agente.' };
   }
 
@@ -315,9 +315,23 @@
   // §3: while a card is on screen the notices strip steps aside, so a missing
   // Pi / downed channel stays visible next to the card (icon + word). A
   // healthy connection needs nothing there.
-  // Coucou's idle card (IslandViewContent.swift not-connected): status dot + label, then a plain link button.
-  const engineRowView = conn => (conn && conn.kind === 'down' && conn.action
-    ? { label: conn.word, link: 'Conectar Pi…', target: conn.action.target, aria: 'Conectar Pi: abrir Ajustes → Conexiones' } : null);
+  // Coucou's idle card (IslandViewContent.swift not-connected): status dot + label, then ONE plain link button. Every state in
+  // which Pi is not working gets that pair, from the states the island really knows: the notice snapshot (no session), the
+  // agent state (connection, accounts) and the session list. Anything not distinguishable from that data yields null.
+  // `pi` = { connection, accounts: [{configured, local}] | null, sessions: 'ready'|'error'|'pending' }.
+  const ENGINE_BAD = { lost: 'Motor caído', refused: 'Motor no responde', bad_session: 'Sesión no válida', no_daemon: 'Sin motor' };
+  const row = (kind, label, link, target, where) => ({ kind, label, link, target, aria: `${link.replace('…', '')}: abrir Ajustes → ${where}` });
+  function engineRowView(conn, pi) {
+    if (!conn || conn.kind === 'unavailable') return null; // the notice channel is not Pi
+    const p = pi && typeof pi === 'object' ? pi : null;
+    if (p && Object.prototype.hasOwnProperty.call(ENGINE_BAD, p.connection)) return row('engine', ENGINE_BAD[p.connection], 'Revisar Pi…', 'accounts:motor', 'Motor');
+    if (p && p.connection === 'connected' && Array.isArray(p.accounts) && !p.accounts.some(a => a && (a.configured === true || a.local === true))) {
+      return row('account', 'Pi sin cuenta', 'Configurar Pi…', 'accounts:proveedores', 'Proveedores');
+    }
+    if (p && p.connection === 'connected' && p.sessions === 'error') return row('sessions', 'Sesiones no disponibles', 'Revisar Pi…', 'accounts:motor', 'Motor');
+    if (conn.kind === 'down' && conn.action) return row('down', conn.word, 'Conectar Pi…', conn.action.target, 'Agentes');
+    return null;
+  }
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
   // S10 (L22): Coucou's finished card (views.ts buildFinished): who-row «<name> <verb>», the final message in bold,

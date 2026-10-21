@@ -264,6 +264,16 @@
     if (tabsHost) tabsHost.setAttribute('aria-orientation', wide ? 'vertical' : 'horizontal');
   }
   window.addEventListener('resize', syncRail);
+  let pendingSection = null;
+  function focusPendingSection() {
+    if (!pendingSection) return;
+    const target = document.getElementById(pendingSection);
+    if (!target) return; // the section renders later: render() calls this again
+    pendingSection = null;
+    target.setAttribute('tabindex', '-1');
+    target.scrollIntoView({ block: 'start' });
+    target.focus({ preventScroll: true });
+  }
   function showScreen(id) {
     screen = id;
     id = V.tabAlias(id) || 'general';
@@ -377,6 +387,8 @@
     if (!WINDOW_MODE) { openSettingsWindow(); return; }
     if (e.detail === 'open') open(screen);
     else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
+    // Pi deep links from the island's status row: land on Conexiones, then scroll/focus the right section
+    else if (Object.prototype.hasOwnProperty.call(V.PI_SECTIONS, e.detail)) { pendingSection = V.PI_SECTIONS[e.detail]; if (isOpen()) showScreen('accounts'); else open('accounts'); focusPendingSection(); }
     // the old accounts:<method> deep links still land on Conexiones; the method choice now lives in each row
     else if (e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key') { if (isOpen()) showScreen('accounts'); else open('accounts'); }
   });
@@ -502,6 +514,7 @@
   }
   function render() {
     if (!isOpen()) return;
+    queueMicrotask(focusPendingSection);
     // Every tab exit disposes Blobs, including Models/Connections, which bypass renderGeneral().
     if (screen !== 'pills' && blobsMounted) {
       window.AbitoPillSettings?.dispose(blobsHost);

@@ -91,12 +91,20 @@
     return 'Sesiones no disponibles';
   }
 
+  /** What the island may know of Pi's health from the agent state: connection + whether any account can run a model. */
+  function piStateOf(state) {
+    if (!state || typeof state !== 'object') return null;
+    const accounts = Array.isArray(state.accounts) ? state.accounts.map(a => ({ configured: !!a && a.configured === true, local: !!a && a.local === true })) : null;
+    return { connection: typeof state.connection === 'string' ? state.connection : null, accounts };
+  }
+
   // agent_action sends asynchronously: its return value is a cached snapshot, not
   // the response to this scan. Open the lazy connection before sending and let
   // the next poll collect the answer. Null while connected means pending.
-  async function requestSessions(invoke) {
+  async function requestSessions(invoke, onState) {
     await invoke('agent_action', { payload: { action: 'view' } });
     const state = await invoke('agent_action', { payload: { action: 'sessions_list' } });
+    if (typeof onState === 'function') onState(piStateOf(state));
     const sessions = state && state.sessions;
     if (sessions && Array.isArray(sessions.rows)) {
       return sessionsView({ type: 'sessions', schema: SCHEMA, sessions: sessions.rows, truncated: sessions.truncated === true }) || { state: 'error' };
@@ -180,7 +188,7 @@
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: steps.at(-1) ?? null }, who };
   }
 
-  return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
+  return { piStateOf, SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -295,15 +303,19 @@ function mount(V) {
   const observed = prefsVersion;
   invoke('prefs_action', { payload: { action: 'view' } }).then(raw => { if (observed === prefsVersion) applyPrefs(raw); }, () => {});
 
+  let piState = null;
   let timer = null;
   let inFlight = false;
   async function ask() {
     if (inFlight) return;
     inFlight = true;
     try {
-      show(await V.requestSessions(invoke));
+      const view = await V.requestSessions(invoke, state => { piState = state; });
+      show(view);
+      document.dispatchEvent(new CustomEvent('abito:pi-state', { detail: piState ? { ...piState, sessions: view.state } : { connection: null, accounts: null, sessions: view.state } }));
     } catch {
-      show({ state: 'error' }); // one honest muted line; rows return on the next good answer
+      show({ state: 'error' });
+      document.dispatchEvent(new CustomEvent('abito:pi-state', { detail: { connection: piState ? piState.connection : null, accounts: piState ? piState.accounts : null, sessions: 'error' } })); // one honest muted line; rows return on the next good answer
     } finally {
       inFlight = false;
     }

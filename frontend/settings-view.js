@@ -59,6 +59,8 @@
     const row = Object.prototype.hasOwnProperty.call(CONNECTION, c) ? CONNECTION[c] : CONNECTION.no_daemon;
     return { kind: c in CONNECTION ? c : 'no_daemon', word: row[0], icon: row[1], tone: row[2], aria: `${row[0]}: ${row[3]}` };
   }
+  // Island status-row deep links (abito:settings-select) -> the section id inside Ajustes -> Conexiones.
+  const PI_SECTIONS = Object.freeze({ 'accounts:agentes': 'connections-agents', 'accounts:motor': 'daemon-restart', 'accounts:proveedores': 'provider-list' });
   const connected = state => !!state && state.connection === 'connected';
 
   // ---- #390 GD027: the manual restart of the island agent daemon (Ajustes → Conexiones) --------
@@ -800,7 +802,7 @@
     return '';
   }
 
-  return { KEY_IDS, keyRows, keyPayload, keyError, ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, connectionView, accountRows, loginMethods, createValidity,
+  return { PI_SECTIONS, KEY_IDS, keyRows, keyPayload, keyError, ownedAccounts, colorRows, soundGainProblem, gainPercent, autoCloseSegments, isSettingsWindow, settingsWindowView, quickPanelView, displayNameProblem, islandInteractionView, autoCloseProblem, commandOutcome, hotkeySetOutcome, makeDrafts, providerRows, cancelPlan, TABS, tabById, tabAlias, servicesGroupVisible, tabKeyTarget, METHOD_CARDS, providerList, loginPlan, pendingLogin, pendingLoginReady, connectedAccounts, AGENT_IDS, agentsView, planSummary, AGENTS_WAIT_MS, CONNECT_WAIT_MS, LOGOUT_WORD, SOUND_DEFAULT: false, connectionView, accountRows, loginMethods, createValidity,
     modelsTabView, chosenToggle, chosenModelsPayload,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,
     maskInput, promptView, replyValid, eventView, safeWebUrl, flowOutcome, connectorsView, soundDefault, generalView, captureCombo,

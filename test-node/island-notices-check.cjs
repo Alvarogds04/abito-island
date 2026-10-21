@@ -119,17 +119,33 @@ test('«Sin motor» is a real button (keyboard + mouse), enabled only when the c
   assert.match(css, /#notice-row button\.chip:focus-visible/);
 });
 
-test('the left idle card carries Coucou\'s status row: 5px dot + «Sin motor» + a plain link button (trusted click -> abito:settings-select), keyboard-focusable; the strip chip is not duplicated while that card shows', () => {
+test('the Pi status row (dot + label + link) is mounted twice (idle card, under the ticker), fed by abito:pi-state, trusted click deep-links, keyboard focusable', () => {
   const html = read('index.html');
-  assert.match(html, /<div id="overview-engine" class="engine-row" hidden><span class="engine-dot"[^>]*><\/span><span id="overview-engine-label"[^>]*><\/span><button id="overview-engine-link" class="engine-link" type="button"><\/button><\/div>/);
+  for (const id of ['overview-engine', 'overview-engine-live']) assert.match(html, new RegExp(`id="${id}" class="engine-row[^"]*" hidden><span class="engine-dot"`));
   const src = read('island.js');
-  assert.match(src, /O\.engineRowView\(conn\)/);
-  assert.match(src, /\$\('overview-engine-link'\)\.addEventListener\('click', event => \{ if \(event\.isTrusted === true && lastConn && lastConn\.action\)/);
+  assert.match(src, /O\.engineRowView\(lastConn, piState\)/);
+  assert.match(src, /document\.addEventListener\('abito:pi-state'/);
+  assert.match(src, /openPiSection = event => \{ if \(event\.isTrusted === true && engineRow\)/);
+  const ticker = read('sessions-ticker.js');
+  assert.match(ticker, /CustomEvent\('abito:pi-state'/);
+  const settings = read('settings.js');
+  assert.match(settings, /V\.PI_SECTIONS, e\.detail/);
+  assert.match(settings, /scrollIntoView/);
   const css = read('style.css') + read('vendor/coucou/island/island.css');
   assert.match(css, /\.engine-dot \{[^}]*width: 5px/);
   assert.match(css, /\.engine-link \{[^}]*font: 500 11px/);
   assert.match(css, /\.engine-link:focus-visible/);
   assert.match(css, /#overview-view:not\(\[data-ticker="on"\]\):not\(\[data-spotify="on"\]\) ~ #notices #connection\[data-kind="down"\]/);
+});
+
+test('every deep-link target the island can emit resolves to a real section id in Conexiones', () => {
+  const V = require('../frontend/settings-view.js'), O = require('../frontend/overview-view.js');
+  const settings = read('settings.js');
+  for (const target of ['accounts:agentes', 'accounts:motor', 'accounts:proveedores']) {
+    assert.ok(V.PI_SECTIONS[target], target);
+    assert.ok(settings.includes(`.id = '${V.PI_SECTIONS[target]}'`), V.PI_SECTIONS[target]);
+  }
+  assert.equal(O.connectionView({ connections: 0 }).action.target, 'accounts:agentes');
 });
 
 if (failed) process.exit(1);

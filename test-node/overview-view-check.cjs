@@ -950,17 +950,38 @@ test('#423 the notice title keeps a readable width in the 228px band (measured 1
 
 test('Sin motor is actionable: the down view carries a real action (open Conexiones); connected/unavailable carry none', () => {
   const down = O.connectionView({ unavailable: false, connections: 0 });
-  assert.deepEqual(down.action, { target: 'accounts', label: 'Abrir Ajustes' });
+  assert.deepEqual(down.action, { target: 'accounts:agentes', label: 'Abrir Ajustes' });
   assert.match(down.actionAria, /Sin motor.*Ajustes/);
   assert.equal(O.connectionView({ connections: 1 }).action, undefined);
   assert.equal(O.connectionView({ unavailable: true, connections: 0 }).action, undefined);
 });
 
-test('Sin motor card row (Coucou idle card): dot + label + short link; engineRowView only exists for the down state', () => {
-  const row = O.engineRowView(O.connectionView({ connections: 0 }));
-  assert.deepEqual(row, { label: 'Sin motor', link: 'Conectar Pi…', target: 'accounts', aria: 'Conectar Pi: abrir Ajustes → Conexiones' });
-  assert.equal(O.engineRowView(O.connectionView({ connections: 1 })), null);
-  assert.equal(O.engineRowView(O.connectionView({ unavailable: true, connections: 0 })), null);
+test('Pi status row (Coucou idle card): one short line + one link per real failing state, deep-linking to Pi\'s section; none when Pi works', () => {
+  const down = O.connectionView({ connections: 0 }), up = O.connectionView({ connections: 1 });
+  const acct = [{ configured: true, local: false }];
+  // not connected (existing): the Agentes row
+  assert.deepEqual(O.engineRowView(down), { kind: 'down', label: 'Sin motor', link: 'Conectar Pi…', target: 'accounts:agentes', aria: 'Conectar Pi: abrir Ajustes → Agentes' });
+  assert.deepEqual(O.engineRowView(down, { connection: 'connected', accounts: acct, sessions: 'ready' }).kind, 'down');
+  // engine failures the agent state really reports -> the Motor card (Reiniciar)
+  for (const [connection, label] of [['lost', 'Motor caído'], ['refused', 'Motor no responde'], ['bad_session', 'Sesión no válida'], ['no_daemon', 'Sin motor']]) {
+    const r = O.engineRowView(up, { connection, accounts: null, sessions: 'error' });
+    assert.deepEqual([r.kind, r.label, r.link, r.target], ['engine', label, 'Revisar Pi…', 'accounts:motor'], connection);
+  }
+  // engine up but no account/key configured (and none local) -> Proveedores
+  const none = O.engineRowView(up, { connection: 'connected', accounts: [{ configured: false, local: false }], sessions: 'ready' });
+  assert.deepEqual([none.kind, none.label, none.link, none.target], ['account', 'Pi sin cuenta', 'Configurar Pi…', 'accounts:proveedores']);
+  assert.equal(O.engineRowView(up, { connection: 'connected', accounts: [{ configured: false, local: true }], sessions: 'ready' }), null, 'a local account is enough');
+  assert.equal(O.engineRowView(up, { connection: 'connected', accounts: [], sessions: 'ready' }).kind, 'account', 'no accounts at all');
+  // the session list failed while the engine is up
+  const sess = O.engineRowView(up, { connection: 'connected', accounts: acct, sessions: 'error' });
+  assert.deepEqual([sess.kind, sess.label, sess.link, sess.target], ['sessions', 'Sesiones no disponibles', 'Revisar Pi…', 'accounts:motor']);
+  // Pi works / unknown: no link, nothing invented
+  assert.equal(O.engineRowView(up, { connection: 'connected', accounts: acct, sessions: 'ready' }), null);
+  assert.equal(O.engineRowView(up, { connection: 'connected', accounts: acct, sessions: 'pending' }), null);
+  assert.equal(O.engineRowView(up, { connection: 'connecting', accounts: null, sessions: 'pending' }), null);
+  assert.equal(O.engineRowView(up, { connection: 'connected', accounts: null, sessions: 'ready' }), null, 'accounts unknown is not «sin cuenta»');
+  assert.equal(O.engineRowView(up), null);
+  assert.equal(O.engineRowView(O.connectionView({ unavailable: true, connections: 0 }), { connection: 'lost' }), null, 'notice channel down is not a Pi problem');
   assert.equal(O.engineRowView(null), null);
 });
 

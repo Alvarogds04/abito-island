@@ -622,7 +622,21 @@
   // `/execute`, and only through a trusted human click.
   const noticesEl = $('notices');
   const connectionEl = $('connection');
-  let lastConn = null;
+  let lastConn = null, piState = null, engineRow = null;
+  // Coucou's idle-card pair (status dot + label, one link) for every state in which Pi is not working; two mounts of the same
+  // row: the idle card and the strip under the ticker (the ticker covers the idle card while sessions are listed).
+  function paintEngine() {
+    engineRow = O.engineRowView(lastConn, piState);
+    for (const [box, label, link] of [['overview-engine', 'overview-engine-label', 'overview-engine-link'], ['overview-engine-live', 'overview-engine-live-label', 'overview-engine-live-link']]) {
+      const el = $(box);
+      if (!el) continue;
+      el.hidden = !engineRow;
+      if (engineRow) { $(label).textContent = engineRow.label; $(link).textContent = engineRow.link; $(link).setAttribute('aria-label', engineRow.aria); el.dataset.kind = engineRow.kind; }
+    }
+  }
+  const openPiSection = event => { if (event.isTrusted === true && engineRow) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: engineRow.target })); };
+  for (const id of ['overview-engine-link', 'overview-engine-live-link']) { const b = $(id); if (b) b.addEventListener('click', openPiSection); }
+  document.addEventListener('abito:pi-state', event => { piState = event.detail || null; paintEngine(); });
   connectionEl.addEventListener('click', event => { if (event.isTrusted === true && lastConn && lastConn.action) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: lastConn.action.target })); });
   const noticeTitle = $('notice-title');
   const noticeDetail = $('notice-detail');
@@ -810,13 +824,9 @@
     connectionEl.disabled = !conn.action;
     lastConn = conn;
     connectionEl.dataset.kind = conn.kind;
-    const engine = O.engineRowView(conn), engineEl = $('overview-engine');
-    if (engineEl) {
-      engineEl.hidden = !engine;
-      if (engine) { $('overview-engine-label').textContent = engine.label; const link = $('overview-engine-link'); link.textContent = engine.link; link.setAttribute('aria-label', engine.aria); }
-    }
     putIcon($('connection-icon'), iconNode(icon(conn.icon)));
     $('connection-word').textContent = conn.word;
+    paintEngine();
     const bridge = O.bridgeView(snapshot);
     const bridgeChip = $('bridge');
     bridgeChip.hidden = !bridge;
@@ -924,7 +934,6 @@
       renderNotices(current); renderCard();
     }, () => {});
   });
-  $('overview-engine-link').addEventListener('click', event => { if (event.isTrusted === true && lastConn && lastConn.action) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: lastConn.action.target })); });
   // «Preguntar» is the chat tab (Coucou: Ask Claude → prompt view).
   const askButton = $('overview-ask');
   if (askButton) askButton.addEventListener('click', event => { if (event.isTrusted === true) { const t = $('open-chat'); if (t) t.click(); } });

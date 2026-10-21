@@ -755,3 +755,8 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .engine-row[hidden] { display: none; }
 /* the strip chip repeats the same status while the idle card already shows it: hide the duplicate */
 #overview-view:not([data-ticker="on"]):not([data-spotify="on"]) ~ #notices #connection[data-kind="down"] { display: none; }
+
+/* the same status row under the ticker (the idle card is covered while sessions are listed) */
+.engine-row-live { position: absolute; top: 78px; left: 108px; right: 12px; margin: 0; flex-wrap: nowrap; }
+#overview-view:not([data-ticker="on"]) .engine-row-live { display: none; }
+.engine-row[data-kind="engine"] .engine-dot, .engine-row[data-kind="account"] .engine-dot, .engine-row[data-kind="sessions"] .engine-dot { background: var(--sun, #e0b23a); }
