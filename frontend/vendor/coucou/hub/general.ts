@@ -3,7 +3,7 @@
 import { h, clear } from '../views/dom.js';
 import { renderRecapRows } from './recap.js';
 import { createBridge } from '../bridge-abito.js';
-import { toggle, select, button } from './ui.js';
+import { toggle, select, button, segmented } from './ui.js';
 import { t, LANGUAGES } from './i18n-es.js';
 import { notchCard, notchRow as row, notchHint as hint } from './notch.js';
 
@@ -91,9 +91,17 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       if (!absence.value.trim() || !Number.isInteger(seconds) || seconds < 5 || seconds > 300) { issue = 'Usa un entero entre 5 y 300 segundos.'; paint(); return; }
       directPrefs({ action: 'set_absence_seconds', seconds });
     });
+    // #503 S18 (screen validation): the theme is three segmented pills Oscuro / Claro / Sistema (the MD), not a dropdown.
+    // Same closed command; each pill carries its own accessible sentence.
     const theme = V.themeView(prefs);
-    const themeSelect = trusted(select(theme.options.map((o: any) => [o.id, o.label]), theme.mode, value => directPrefs({ action: 'set_theme', theme: value })));
-    themeSelect.setAttribute('aria-label', t('Theme'));
+    const order = ['dark', 'light', 'system'], pills = order.map((id: string) => theme.options.find((o: any) => o.id === id)).filter(Boolean);
+    const themeSelect = identify(trusted(segmented(pills.map((o: any): [string, string] => [o.id, o.label]), theme.mode, (value: string) => directPrefs({ action: 'set_theme', theme: value }))), 'hub-theme');
+    themeSelect.setAttribute('role', 'group'); themeSelect.setAttribute('aria-label', t('Theme'));
+    for (const b of themeSelect.querySelectorAll('button')) {
+      const o = pills.find((x: any) => x.label === b.textContent); if (!o) continue;
+      b.setAttribute('aria-pressed', String(o.selected === true)); b.setAttribute('title', o.aria); b.setAttribute('type', 'button');
+      b.addEventListener('click', () => { for (const other of themeSelect.querySelectorAll('button')) other.setAttribute('aria-pressed', String(other === b)); });
+    }
     const change = trusted(button(capturing ? 'Cancelar' : 'Cambiar', () => { capturing = !capturing; paint(); }));
     const capture = h('input', { class: 'hub-input', type: 'text', value: capturing ? '' : hotkey.combo, 'aria-label': 'Atajo global', readonly: true }) as HTMLInputElement;
     capture.addEventListener('keydown', e => {
@@ -144,14 +152,13 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
         row('Ocultar tras', absence, h('span', { class: 'hint', text: 'segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta' })),
         row(t('Island lives on'), screen),
         row('Atajo global', capture, change, trusted(button('Original', () => shortcut({ action: 'reset' }))), enabled),
-        hint(g.hotkey?.note || g.hotkey?.backendLabel || 'Combinación que abre o cierra la isla desde cualquier app.'),
+        hint(g.hotkey?.note || (g.hotkey?.backendLabel ? `Se registra como: ${g.hotkey.backendLabel}.` : 'Combinación que abre o cierra la isla desde cualquier app.')),
         recap),
       notchCard('Sonido',
         row(t('Sound'), sound, volume),
         h('div', { class: 'row' }, soundsFolder, soundsReload, h('span', { class: 'hint', text: customCount > 0 ? t('{0} custom', { 0: customCount }) : '' })),
         hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload."))),
       h('p', { class: 'hub-note', role: 'status', text: issue }));
-    themeSelect.className = '';
     if (capturing) { capture.focus?.(); }
   }
   paint();

@@ -67,9 +67,14 @@ section.abito-card > h2 { gap: 8px; }
    opens on demand and a plain-text «¿Dónde?». Targets keep 44px; the state is icon + word, never colour alone. */
 #integration-list { gap: 10px !important; }
 .int-card { gap: 8px; }
-.int-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 44px; }
+.int-head { display: grid; grid-template-columns: minmax(120px, 1fr) 128px max-content; align-items: center; gap: 10px 14px; min-height: 44px; }
+.int-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.int-head .card-state { margin-left: 0; }
 .int-name { font-size: 13px; font-weight: 600; min-width: 96px; }
-.int-actions { display: inline-flex; gap: 8px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.int-actions { display: grid; grid-template-columns: 90px 66px 106px; gap: 6px; align-items: center; justify-content: end; }
+.int-actions .int-slot-1 { grid-column: 1; } .int-actions .int-slot-2 { grid-column: 2; } .int-actions .int-slot-3 { grid-column: 3; }
+.int-actions .hub-btn { white-space: nowrap; padding-inline: 10px; min-width: 0; }
+@media (max-width: 860px) { .int-head { grid-template-columns: minmax(130px, 1fr) max-content; } .int-head .card-state { grid-column: 2; } .int-actions { grid-column: 1 / -1; justify-content: start; } }
 .int-actions .hub-btn { min-height: 36px; }
 .int-connect { padding-top: 4px; border-top: 1px solid var(--hairline); }
 .int-connect[hidden], .int-where[hidden], .int-card [hidden] { display: none !important; }
@@ -91,7 +96,7 @@ section.abito-card > h2 { gap: 8px; }
 .shortcut-table { display: flex; flex-direction: column; }
 .shortcut-table .shortcut { display: grid; grid-template-columns: 44px minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(120px, 1fr); align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--hairline); }
 .shortcut-table .shortcut-head { min-height: 28px; grid-template-columns: 44px minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(120px, 1fr); font: 600 11px var(--font); color: var(--dim); }
-.shortcut-table .shortcut-head > :first-child { grid-column: 2; }
+.shortcut-table .shortcut-head > :first-child { grid-column: 1 / 3; } /* «Acción» heads the switch AND the name: the switch is part of the action */
 .shortcut-table .shortcut .keycap { grid-column: 3; grid-row: 1; justify-self: start; min-height: 36px; }
 .shortcut-table .shortcut .shortcut-state { grid-column: 4; grid-row: 1; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .shortcut-head > :nth-child(2) { grid-column: 3; } .shortcut-head > :nth-child(3) { grid-column: 4; }

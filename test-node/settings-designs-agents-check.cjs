@@ -102,3 +102,23 @@ test('S20 Agentes: how to undo is stated next to the table, and the plan section
   assert(all(ui).some(e => e.attrs.id === 'agent-integration-recap'), 'the weekly recap block is still there');
   const plan = ui.children[1]; assert.equal(all(plan).filter(e => e.tagName === 'button' && String(e.className).includes('switch')).length, 2, 'both plan switches kept');
 });
+
+test('S20 Agentes: a state of «error» is shown once in the Estado column, NEVER as a permanent caption under every row', async () => {
+  const bad = ['claude-code', 'codex', 'copilot-cli', 'opencode'].map(id => ({ id, state: 'error' }));
+  const { ui } = await mount({ agents: bad });
+  const caption = 'No se pudo completar; no se tocó nada.';
+  for (const id of ['claude-code', 'codex']) {
+    const row = entry(ui, id);
+    assert(!text(row).includes(caption), `${id}: the generic failure sentence is not a standing caption`);
+    assert.equal(cellText(row, 'agent-state'), '✗ No se pudo', `${id}: the state column still says it`);
+  }
+  assert.equal((text(ui).match(/No se pudo completar; no se tocó nada\./g) || []).length, 0, 'zero copies on the page at rest');
+});
+
+test('S20 Agentes: a FAILED ACTION says so once, in the one status line of the page, and the next success clears it', async () => {
+  const { ui, V } = await mount({ agents: [{ id: 'claude-code', state: 'not_connected', plan_hash: hash, summary: 'Add managed hooks', reviewable: true }, { id: 'codex', state: 'connected', backup: true }] });
+  const live = all(ui).find(e => e.attrs.id === 'agent-action-status');
+  assert(live, 'one status line for action outcomes'); assert.equal(live.attrs.role, 'status'); assert.equal(live.attrs['aria-live'], 'polite'); assert.equal(text(live).trim(), '');
+  assert(V.agentActionFailure && V.agentActionFailure('claude-code') === 'No se pudo completar la acción en Claude Code; no se tocó nada.');
+  assert.equal(V.agentActionFailure('nope'), 'No se pudo completar la acción; no se tocó nada.');
+});

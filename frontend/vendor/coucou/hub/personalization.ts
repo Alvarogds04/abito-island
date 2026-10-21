@@ -16,7 +16,8 @@ function preview() {
 }
 
 function colors(V: any, A: any, prefs: any, identities: any[], save: any) {
-  const sec = section('Colores de identidad');
+  // #503 S19 (screen validation): the rows belong INSIDE the card; appending them to the section left an empty card above them.
+  const rows: HTMLElement[] = [];
   for (const r of V.colorRows(prefs, identities, A)) {
     const options = h('div', { class: 'palette', role: 'group', 'aria-label': `Color de ${r.name}` });
     // The upstream palette class is an anchored popover; for an always-visible row use
@@ -30,9 +31,9 @@ function colors(V: any, A: any, prefs: any, identities: any[], save: any) {
       b.style.setProperty('background', hex);
       options.append(b);
     }
-    sec.append(row(r.name, r.label, options));
+    rows.push(row(r.name, r.label, options));
   }
-  return sec;
+  return section('Colores de identidad', ...rows);
 }
 
 export async function renderAppearance({ invoke, listen, V, S, A }: any) {

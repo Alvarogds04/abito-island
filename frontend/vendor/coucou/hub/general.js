@@ -2,7 +2,7 @@
 import { h, clear } from "../views/dom.js";
 import { renderRecapRows } from "./recap.js";
 import { createBridge } from "../bridge-abito.js";
-import { toggle, select, button } from "./ui.js";
+import { toggle, select, button, segmented } from "./ui.js";
 import { t, LANGUAGES } from "./i18n-es.js";
 import { notchCard, notchRow as row, notchHint as hint } from "./notch.js";
 function trusted(el) {
@@ -130,8 +130,20 @@ async function renderGeneral({ invoke, V }) {
       directPrefs({ action: "set_absence_seconds", seconds: seconds2 });
     });
     const theme = V.themeView(prefs);
-    const themeSelect = trusted(select(theme.options.map((o) => [o.id, o.label]), theme.mode, (value) => directPrefs({ action: "set_theme", theme: value })));
+    const order = ["dark", "light", "system"], pills = order.map((id) => theme.options.find((o) => o.id === id)).filter(Boolean);
+    const themeSelect = identify(trusted(segmented(pills.map((o) => [o.id, o.label]), theme.mode, (value) => directPrefs({ action: "set_theme", theme: value }))), "hub-theme");
+    themeSelect.setAttribute("role", "group");
     themeSelect.setAttribute("aria-label", t("Theme"));
+    for (const b of themeSelect.querySelectorAll("button")) {
+      const o = pills.find((x) => x.label === b.textContent);
+      if (!o) continue;
+      b.setAttribute("aria-pressed", String(o.selected === true));
+      b.setAttribute("title", o.aria);
+      b.setAttribute("type", "button");
+      b.addEventListener("click", () => {
+        for (const other of themeSelect.querySelectorAll("button")) other.setAttribute("aria-pressed", String(other === b));
+      });
+    }
     const change = trusted(button(capturing ? "Cancelar" : "Cambiar", () => {
       capturing = !capturing;
       paint();
@@ -211,7 +223,7 @@ async function renderGeneral({ invoke, V }) {
         row("Ocultar tras", absence, h("span", { class: "hint", text: "segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta" })),
         row(t("Island lives on"), screen),
         row("Atajo global", capture, change, trusted(button("Original", () => shortcut({ action: "reset" }))), enabled),
-        hint(g.hotkey?.note || g.hotkey?.backendLabel || "Combinación que abre o cierra la isla desde cualquier app."),
+        hint(g.hotkey?.note || (g.hotkey?.backendLabel ? `Se registra como: ${g.hotkey.backendLabel}.` : "Combinación que abre o cierra la isla desde cualquier app.")),
         recap
       ),
       notchCard(
@@ -222,7 +234,6 @@ async function renderGeneral({ invoke, V }) {
       ),
       h("p", { class: "hub-note", role: "status", text: issue })
     );
-    themeSelect.className = "";
     if (capturing) {
       capture.focus?.();
     }

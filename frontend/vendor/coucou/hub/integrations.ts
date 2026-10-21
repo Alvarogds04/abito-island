@@ -70,9 +70,9 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
     const rows=h('div',{style:'display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0'});
     const keyIds=def.fields.map(f=>f[0]);
     const badge=h('span',{class:'card-state'});
-    const connectBtn=trusted(h('button',{type:'button',class:'hub-btn primary',text:'Conectar','aria-expanded':'false'})) as HTMLButtonElement;
-    const testBtn=trusted(h('button',{type:'button',class:'hub-btn',text:'Probar'})) as HTMLButtonElement;
-    const removeBtn=trusted(h('button',{type:'button',class:'hub-btn danger',text:'Quitar'})) as HTMLButtonElement;
+    const connectBtn=trusted(h('button',{type:'button',class:'hub-btn primary int-slot-1',text:'Conectar','aria-expanded':'false'})) as HTMLButtonElement;
+    const testBtn=trusted(h('button',{type:'button',class:'hub-btn int-slot-1',text:'Probar'})) as HTMLButtonElement;
+    const removeBtn=trusted(h('button',{type:'button',class:'hub-btn danger int-slot-2',text:'Quitar'})) as HTMLButtonElement;
     const connectPanel=h('div',{class:'int-connect'});connectPanel.hidden=true;
     const verdict=h('div',{class:'hint int-verdict',role:'status','aria-live':'polite'});
     let open=false,serviceBusy=false;
@@ -140,14 +140,14 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
     const site=KEY_SITE[def.id];let helpBtn:HTMLButtonElement|null=null;
     const where=h('div',{class:'hint int-where',text:site?`Créala en ${site}.`:''});where.hidden=true;
     if(site){
-      helpBtn=trusted(h('button',{type:'button',class:'hub-btn int-help',text:'¿Dónde? ↗','aria-expanded':'false'})) as HTMLButtonElement;
+      helpBtn=trusted(h('button',{type:'button',class:'hub-btn int-help int-slot-3',text:'¿Dónde? ↗','aria-expanded':'false'})) as HTMLButtonElement;
       helpBtn.addEventListener('click',e=>{if(!e.isTrusted)return;where.hidden=!where.hidden;helpBtn!.setAttribute('aria-expanded',String(!where.hidden));});
     }
     const actions=h('div',{class:'int-actions'},connectBtn,testBtn,removeBtn);if(helpBtn)actions.append(helpBtn);
     const body=(head:HTMLElement)=>h('section',{id:def.id,class:'int-card abito-card'},head,connectPanel,where,verdict);
     updateCard();
     if(noPill){
-      list.append(body(h('div',{class:'int-head'},h('span',{class:'int-name',text:def.name}),badge,actions)));
+      list.append(body(h('div',{class:'int-head'},h('div',{class:'int-id'},h('span',{class:'int-name',text:def.name})),badge,actions)));
       continue;
     }
     const dot=colorDot(def,'',()=>prefs.pillColors,next=>{
@@ -155,7 +155,7 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
       const color=next[def.id];save(color?{action:'set_pill_color',id:def.id,color}:{action:'clear_pill_color',id:def.id});
     },true);dots.push(dot);
     refreshColors.push(()=>dot.style.setProperty('background',pillColor(def.id,def.color,prefs.pillColors)));
-    list.append(body(h('div',{class:'int-head'},sw,dot,h('span',{class:'int-name',text:def.name}),badge,actions)));
+    list.append(body(h('div',{class:'int-head'},h('div',{class:'int-id'},sw,dot,h('span',{class:'int-name',text:def.name})),badge,actions)));
   }
   root.append(section(t('Integrations'),note,list),s.message);
   refresh();

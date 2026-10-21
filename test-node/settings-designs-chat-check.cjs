@@ -26,7 +26,8 @@ async function mount({ present = {}, accounts = [], failPresent = false } = {}) 
 const card = (ui, title) => all(ui).find(e => e.tagName === 'section' && all(e).some(h => h.tagName === 'h2' && text(h).trim().startsWith(title)));
 const stateOf = c => text(all(c).find(e => e.className.split(' ').includes('card-state'))).replace(/\s+/g, ' ').trim();
 const field = (c, id) => all(c).find(e => e.attrs.id === id);
-const btn = (scope, word) => all(scope).find(e => e.tagName === 'button' && (e.textContent === word || e.attrs['aria-label'] === word));
+// a control that is `hidden` is not there for the user: only visible buttons count (a DISABLED one still is)
+const btn = (scope, word) => all(scope).find(e => e.tagName === 'button' && !e.hidden && (e.textContent === word || e.attrs['aria-label'] === word));
 const rowOf = (c, input) => all(c).find(e => e.className === 'row' && e.children.includes(input));
 
 test('S21 Chat: the page is cards in the wireframe order, each provider with its own state badge (icon + word)', async () => {
@@ -44,8 +45,15 @@ test('S21 Chat: the page is cards in the wireframe order, each provider with its
 test('S21 Chat: «Probar» only where a key exists; it checks locally through closed commands and says it did not call the provider', async () => {
   const { ui, calls } = await mount({ present: { 'google-api-key': true }, accounts: [{ accountId: 'key-google' }] });
   const google = card(ui, 'Google AI'), openai = card(ui, 'OpenAI');
-  assert(btn(google, 'Probar') && !btn(google, 'Probar').hidden && !btn(google, 'Quitar').hidden);
-  assert(btn(openai, 'Probar').hidden && btn(openai, 'Quitar').hidden, 'nothing to test or remove without a key');
+  assert(btn(google, 'Probar') && !btn(google, 'Probar').disabled && !btn(google, 'Quitar').hidden);
+  // #503 S21 (screen validation): «Probar» is always VISIBLE (the MD shows it on the «sin clave» card too); without a key it is
+  // DISABLED and says why, instead of vanishing. «Quitar» has nothing to remove without a key, so it stays hidden.
+  const noKey = btn(openai, 'Probar'); assert(noKey && !noKey.hidden, 'visible without a key'); assert.equal(noKey.disabled, true, 'disabled without a key');
+  assert.equal(noKey.attrs.title, 'Guarda una clave para poder probarla.'); assert.equal(btn(google, 'Probar').attrs.title, '', 'no tooltip once it can be used'); assert.equal(noKey.attrs['aria-disabled'], 'true');
+  assert(!btn(openai, 'Quitar'), 'nothing to remove without a key');
+  const reason = all(openai).find(e => e.attrs.id === 'chat-key-test-reason-openai-api-key'); assert(reason, 'the reason is also text, not only a tooltip'); assert.equal(text(reason).trim(), 'Guarda una clave para poder probarla.');
+  assert.equal(noKey.attrs['aria-describedby'], reason.attrs.id);
+  assert.equal(text(all(google).find(e => e.attrs.id === 'chat-key-test-reason-google-api-key')).trim(), '', 'no reason once a key exists');
   calls.length = 0; btn(google, 'Probar').fire('click', false); await ui.settled(); assert.deepEqual(calls, [], 'synthetic click does nothing');
   btn(google, 'Probar').fire('click'); await ui.settled();
   assert.deepEqual(calls.map(([c, p]) => `${c}:${p.action}`), ['secret_action:present', 'agent_action:view'], 'only closed read commands');

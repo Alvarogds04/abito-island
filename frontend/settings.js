@@ -363,8 +363,9 @@
   const isOpen = () => panel.dataset.open === 'true';
 
   // #455 S8: one route, regardless of legacy placement. Failure never mounts island settings.
-  function openSettingsWindow() {
-    return call('settings_window_action', { action: 'open' }).then(result => {
+  // `page` is one of the window's own page ids (Rust re-checks it against its closed list and ignores anything else).
+  function openSettingsWindow(page) {
+    return call('settings_window_action', typeof page === 'string' ? { action: 'open', page } : { action: 'open' }).then(result => {
       if (!result || result.open !== true) throw new Error('window unavailable');
     }).catch(() => {
       const feedback = $('chat-live') || live;
@@ -384,7 +385,8 @@
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
-    if (!WINDOW_MODE) { openSettingsWindow(); return; }
+    // #503 S26: the island's «Configurar Pi…» / engine row deep links land on the window's Conexiones page, not on its default page
+    if (!WINDOW_MODE) { openSettingsWindow(Object.prototype.hasOwnProperty.call(V.PI_SECTIONS, e.detail) || e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key' ? 'accounts' : undefined); return; }
     if (e.detail === 'open') open(screen);
     else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
     // Pi deep links from the island's status row: land on Conexiones, then scroll/focus the right section

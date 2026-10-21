@@ -140,24 +140,55 @@ fn err(code: &str) -> BridgeError {
     }
 }
 
-/// The closed payload: exactly `{"action":"open"}` or `{"action":"close"}` —
-/// no URL, no label, no size: the window's identity is Rust's decision.
-pub(crate) fn parse_settings_window_action(payload: &Value) -> Option<&'static str> {
+/// The Ajustes pages Rust may open a window on, in sidebar order. A CLOSED list of ASCII ids (the same ids the page's own shell
+/// uses): the page that reaches the webview is always one of these exact strings, never text from the payload.
+pub(crate) const PAGES: &[&str] = &[
+    "dictation", "notes", "insights", "dictionary", "snippets", "styles", "flowsettings",
+    "general", "pills", "agents", "chat", "accounts", "voice", "integrations", "phone", "shortcuts",
+];
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Request {
+    /// Open (or raise) the window, optionally on one of [`PAGES`].
+    Open(Option<&'static str>),
+    Close,
+}
+
+/// The closed payload: `{"action":"open"}`, `{"action":"open","page":<one of PAGES>}` or `{"action":"close"}` — no URL, no label,
+/// no size: the window's identity is Rust's decision, and the page is chosen from Rust's own list (exact, case-sensitive).
+pub(crate) fn parse_settings_window_request(payload: &Value) -> Option<Request> {
     let obj = payload.as_object()?;
-    if obj.len() != 1 {
-        return None;
-    }
     match obj.get("action")?.as_str()? {
-        "open" => Some("open"),
-        "close" => Some("close"),
+        "close" if obj.len() == 1 => Some(Request::Close),
+        "open" if obj.len() == 1 => Some(Request::Open(None)),
+        "open" if obj.len() == 2 => {
+            let wanted = obj.get("page")?.as_str()?;
+            PAGES.iter().copied().find(|p| *p == wanted).map(|p| Request::Open(Some(p)))
+        }
         _ => None,
     }
+}
+
+/// Kept for the original contract (and its tests): the action alone.
+pub(crate) fn parse_settings_window_action(payload: &Value) -> Option<&'static str> {
+    match parse_settings_window_request(payload)? {
+        Request::Open(None) => Some("open"),
+        Request::Close => Some("close"),
+        Request::Open(Some(_)) => None,
+    }
+}
+
+/// Handed to a NEW window before its scripts run: the page to open first. Built only from [`PAGES`].
+pub(crate) fn page_script(page: &str) -> String { format!("window.__abitoHubPage=\"{page}\";") }
+/// Sent to a window that already exists. The shell listens for it and shows that page (anything off its own list is ignored).
+pub(crate) fn select_script(page: &str) -> String {
+    format!("document.dispatchEvent(new CustomEvent('abito:hub-select',{{detail:\"{page}\"}}));")
 }
 
 /// Called once during main-thread setup. Login startup never steals focus.
 pub(crate) fn open_on_launch(app: &AppHandle, autostarted: bool) {
     if !autostarted && crate::settingshost::voice_prefs_snapshot(app).open_settings_at_launch() {
-        if let Err(error) = open_window(app) { eprintln!("settings launch failed: {error}"); }
+        if let Err(error) = open_window(app, None) { eprintln!("settings launch failed: {error}"); }
     }
 }
 
@@ -165,8 +196,9 @@ pub(crate) fn open_on_launch(app: &AppHandle, autostarted: bool) {
 /// focuses the existing window instead of building a second one. The URL is
 /// the dedicated `settings.html` page (the closed settings-label entry); the window is
 /// decorated, resizable and NOT always-on-top — it is a normal window.
-fn open_window(app: &AppHandle) -> tauri::Result<()> {
+fn open_window(app: &AppHandle, page: Option<&'static str>) -> tauri::Result<()> {
     if let Some(win) = app.get_webview_window(SETTINGS_LABEL) {
+        if let Some(page) = page { let _ = win.eval(select_script(page)); }
         win.show()?;
         let _ = win.unminimize();
         win.set_focus()?;
@@ -184,11 +216,13 @@ fn open_window(app: &AppHandle) -> tauri::Result<()> {
         })
         .unwrap_or((u32::MAX, u32::MAX));
     let (w, h) = opening_size(crate::settingshost::settings_window_size(app), work);
-    WebviewWindowBuilder::new(
+    let mut builder = WebviewWindowBuilder::new(
         app,
         SETTINGS_LABEL,
         WebviewUrl::App(std::path::PathBuf::from("settings.html")),
-    )
+    );
+    if let Some(page) = page { builder = builder.initialization_script(page_script(page)); }
+    builder
     .title("Ajustes")
     .inner_size(w, h)
     .min_inner_size(MIN_INNER_SIZE.0, MIN_INNER_SIZE.1)
@@ -213,10 +247,10 @@ pub async fn settings_window_action(
         .lock()
         .expect("chat rate lock")
         .check(crate::now_ms())?;
-    let action = parse_settings_window_action(&payload).ok_or_else(|| err("invalid_schema"))?;
-    match action {
-        "open" => {
-            open_window(&app).map_err(|e| {
+    let request = parse_settings_window_request(&payload).ok_or_else(|| err("invalid_schema"))?;
+    match request {
+        Request::Open(page) => {
+            open_window(&app, page).map_err(|e| {
                 eprintln!("settings window open failed: {e}");
                 err("window_failed")
             })?;
@@ -224,7 +258,7 @@ pub async fn settings_window_action(
         }
         // Closing asks the window to close; the ordinary CloseRequested path
         // (allowed for this label only) does the rest. A missing window is fine.
-        _ => {
+        Request::Close => {
             if let Some(win) = app.get_webview_window(SETTINGS_LABEL) {
                 let _ = win.close();
             }
@@ -266,6 +300,35 @@ mod tests {
                 "{bad} must be refused"
             );
         }
+    }
+
+    /// #503 S26: «Configurar Pi…» opens Ajustes ON a page. The page is a CLOSED name chosen from Rust's own list: the payload
+    /// can carry it, but only when it is exactly one of the listed ids (never a path, a URL, a label or a size).
+    #[test]
+    fn s26_open_may_name_one_closed_page_and_nothing_else() {
+        use super::{parse_settings_window_request, Request};
+        assert_eq!(parse_settings_window_request(&json!({"action": "open"})), Some(Request::Open(None)));
+        assert_eq!(parse_settings_window_request(&json!({"action": "close"})), Some(Request::Close));
+        for page in ["accounts", "general", "pills", "agents", "chat", "voice", "integrations", "phone", "shortcuts", "dictation", "flowsettings"] {
+            assert_eq!(parse_settings_window_request(&json!({"action": "open", "page": page})), Some(Request::Open(Some(page_id(page)))), "{page}");
+        }
+        for bad in [json!({"action": "open", "page": "Accounts"}), json!({"action": "open", "page": "accounts "}), json!({"action": "open", "page": "../x"}),
+            json!({"action": "open", "page": ""}), json!({"action": "open", "page": 1}), json!({"action": "open", "page": null}), json!({"action": "open", "page": ["accounts"]}),
+            json!({"action": "open", "page": "accounts", "url": "https://evil.example/"}), json!({"action": "close", "page": "accounts"}),
+            json!({"action": "open", "page": "constructor"}), json!({"action": "open", "page": "a".repeat(5000)}), json!({"action": "open", "label": "settings"})] {
+            assert_eq!(parse_settings_window_request(&bad), None, "{bad} must be refused");
+        }
+    }
+
+    fn page_id(name: &str) -> &'static str { super::PAGES.iter().copied().find(|p| *p == name).expect("closed page") }
+
+    /// #503 S26: the page reaches the window as ONE inert script assignment built only from the closed list (no page text is ever
+    /// interpolated), and a window that already exists is told the same way instead of being rebuilt.
+    #[test]
+    fn s26_the_page_hint_script_is_built_from_the_closed_list_only() {
+        assert_eq!(super::page_script("accounts"), "window.__abitoHubPage=\"accounts\";");
+        assert_eq!(super::select_script("accounts"), "document.dispatchEvent(new CustomEvent('abito:hub-select',{detail:\"accounts\"}));");
+        for page in super::PAGES { assert!(page.bytes().all(|b| b.is_ascii_lowercase()), "{page}"); }
     }
 
     /// #366 F093: island-window commands refuse every label but the exact `main`.

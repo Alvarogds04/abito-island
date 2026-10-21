@@ -1,12 +1,41 @@
 // Adapted from Coucou src/settings/main.ts shortcutsSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
 // Desktop toggle wiring: Adapted from Coucou windows/src/settings/main.ts @71b773f, Copyright (c) 2026 Louis Raillé, MIT.
 import { h, clear } from '../views/dom.js';
-import { SHORTCUTS, SHORTCUT_TEXT, ISLAND_SHORTCUTS, displayKeys, duplicates } from '../core/shortcuts.js';
+import { SHORTCUTS, SHORTCUT_TEXT, ISLAND_SHORTCUTS, displayKeys, duplicates, normalizeKeys } from '../core/shortcuts.js';
 import { toggle } from './ui.js';
 import { notchSection as section, notchHint as hint } from './notch.js';
 import { session, trusted } from './runtime.js';
 import { renderRecapRows } from './recap.js';
 import { t } from './i18n-es.js';
+// #503 S25: the desktop portal describes an assigned shortcut as a SENTENCE in the user's language («Pulse <Shift><Control>n»), in GTK
+// accelerator notation. That is a description, not an accelerator: shown raw it read like an instruction. This reads the trailing
+// `<Modifier>…key` and returns the app's own canonical accelerator, or null when it is not one (bounded input, no throwing).
+const PORTAL_MODIFIERS: Record<string, string> = { shift: 'Shift', control: 'Ctrl', ctrl: 'Ctrl', primary: 'Ctrl', alt: 'Alt', mod1: 'Alt', super: 'Super', meta: 'Super', mod4: 'Super', hyper: 'Super' };
+export function portalTriggerKeys(text: unknown): string | null {
+  if (typeof text !== 'string' || text.length > 200) return null;
+  const m = /((?:<[A-Za-z0-9_]{1,12}>)+)\s*([^\s<>]{1,16})\s*$/.exec(text.trim());
+  if (!m) return null;
+  const rest = text.trim().slice(0, m.index).trim();
+  if (rest.split(/\s+/).length > 3 && rest.length > 40) return null;
+  const mods: string[] = [];
+  for (const raw of m[1].slice(1, -1).split('><')) {
+    const mapped = PORTAL_MODIFIERS[raw.toLowerCase()];
+    if (!mapped) return null;
+    if (!mods.includes(mapped)) mods.push(mapped);
+  }
+  const order = ['Ctrl', 'Alt', 'Shift', 'Super'];
+  mods.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return normalizeKeys([...mods, m[2]].join('+'));
+}
+/** What the key cell DRAWS: the portal's effective binding translated, else the configured combo, else the default; never raw text. */
+export function keyText(effective: string | undefined, combo: string | undefined, fallback: string | undefined): string {
+  const translated = effective ? portalTriggerKeys(effective) ?? normalizeKeys(effective) : null;
+  if (translated) return displayKeys(translated);
+  const configured = combo ? normalizeKeys(combo) : null;
+  if (configured) return displayKeys(configured);
+  const base = fallback ? normalizeKeys(fallback) : null;
+  return base ? displayKeys(base) : '—';
+}
 export async function renderShortcuts({invoke,V,listen,timers}:any) {
   const s=session(invoke,listen,timers),{root,call,work}=s;
   root.style.setProperty('display','contents');
@@ -39,11 +68,13 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
       const supported=Object.hasOwn(views,d.id),hotkey=views[d.id],known=supported&&!!hotkey;
       const enabled=supported?hotkey?.enabled===true:d.enabledByDefault;
       const keys=hotkey?(hotkey.effective||hotkey.combo):d.defaultKeys;
+      // what is DRAWN comes from keyText: the portal's description is translated, never printed (#503 S25)
+      const shownKeys=keyText(hotkey?.effective,hotkey?.combo,d.defaultKeys);
       const sw=trusted(toggle(enabled,on=>{if(known&&!busy)save(d.id,{action:on?'enable':'disable'});}));
       (sw as HTMLButtonElement).disabled=!known||busy||!keys;sw.setAttribute('aria-label',t(SHORTCUT_TEXT[d.id]));
       if(known&&!keys)sw.title='Graba una combinación antes de activar este atajo.';
       const isRecording=recording===d.id;
-      const keycap=trusted(h('button',{class:isRecording?'keycap recording':'keycap',text:isRecording?t('Press keys…'):displayKeys(keys)})) as HTMLButtonElement;
+      const keycap=trusted(h('button',{class:isRecording?'keycap recording':'keycap',text:isRecording?t('Press keys…'):shownKeys})) as HTMLButtonElement;
       keycap.disabled=!known||busy;
       if(supported)keycap.title='Esc: cancelar · Backspace: borrar';
       keycap.addEventListener('click',e=>{if(!e.isTrusted||keycap.disabled)return;startRecording(d.id);});

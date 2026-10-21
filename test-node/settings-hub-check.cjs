@@ -40,21 +40,24 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     .replace('"./flow-shim.js"', '"../core/flow"').replace('the keys the app suggests.', 'the keys Coucou suggests.');
   assert.equal(hash(upstreamUi), '67c5f63da4a672ddc74649f28fe17f032d49af5bbb1efcddbbc6eaea46ea6269');
   assert.deepEqual(FLOW_PAGES.map(p => [p.id, p.icon]), [['dictation','mic'],['notes','record'],['insights','chart'],['dictionary','book'],['snippets','bolt'],['styles','text'],['flowsettings','sliders']]);
-  assert.deepEqual(NOTCH_PAGES.map(p => [p.id,p.icon]), [['general','gear'],['pills','grid'],['agents','terminal'],['chat','chat'],['voice','wave'],['integrations','puzzle'],['phone','phone'],['shortcuts','keyboard']]);
+  assert.deepEqual(NOTCH_PAGES.map(p => [p.id,p.icon]), [['general','gear'],['pills','grid'],['agents','terminal'],['chat','chat'],['accounts','lock'],['voice','wave'],['integrations','puzzle'],['phone','phone'],['shortcuts','keyboard']]);
   const events = {};
   global.window = { __TAURI__: { event: { listen: async (name, handler) => { events[name] = handler; return () => {}; } } } };
   const pages = [], host = new Element('div');
   await startHub(host, { version: 'test', flowPages: {}, renderNotch: async p => { pages.push(p); } });
-  assert.equal(all(host).filter(e => e.className === 'hub-item' || e.className === 'hub-item on').length, 15);
+  assert.equal(all(host).filter(e => e.className === 'hub-item' || e.className === 'hub-item on').length, 16);
   assert.deepEqual(pages, ['dictation']);
   const items = all(host).filter(e => e.className.split(' ').includes('hub-item'));
-  assert.deepEqual(items.map(e => e.children[1].textContent), ['Dictado','Notetaker','Estadísticas','Diccionario','Fragmentos','Estilos','Ajustes','General','Pestañas activas','Agentes','Chat','OK Abito','Integraciones','Teléfono Android','Atajos']);
+  assert.deepEqual(items.map(e => e.children[1].textContent), ['Dictado','Notetaker','Estadísticas','Diccionario','Fragmentos','Estilos','Ajustes','General','Pestañas activas','Agentes','Chat','Conexiones','OK Abito','Integraciones','Teléfono Android','Atajos']);
   for (const item of items) { item.fire('click'); await Promise.resolve(); }
   assert.deepEqual(pages.slice(1), [...FLOW_PAGES, ...NOTCH_PAGES].map(p => p.id));
   events['hub-page']({ payload: 'future-page' }); await Promise.resolve();
   assert.equal(pages.at(-1), 'shortcuts');
   assert.deepEqual(all(host).filter(e => e.className === 'hub-group').map(e => e.textContent), ['Flow', 'Notch']);
   const status = all(host).find(e => e.className === 'hub-status');
+  assert(['Comprobando el dictado…', 'Dictado desactivado'].includes(status.children[1].textContent), 'until the real status lands the line says it is checking, never a made-up «off»');
+  // the window no longer waits for the dictation status (#503): the real answer repaints the same line
+  for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r));
   assert.equal(status.children[0].className, 'dot');
   assert.equal(status.children[1].textContent, 'Dictado desactivado');
   assert.equal(all(host).find(e => e.className === 'hub-version').textContent, 'Abito test');
@@ -135,7 +138,8 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert.equal(ui.firstChild.tagName, 'section', 'General is made of settings sections (#503 S18: three task cards)');
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' Apariencia', ' Isla', ' Sonido']);
   assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Idioma','Tema','Nombre visible','Abrir al iniciar sesión','Abrir al pasar el cursor','Cierre automático','Ocultar tras','La isla vive en','Atajo global','Resumen semanal','','','Sonido']);
-  assert(!all(ui).some(e => e.className === 'hub-segmented'));
+  // #503 S18: the theme IS a segmented control now (the MD's «Oscuro / Claro / Sistema»); it must be the only one
+  assert.equal(all(ui).filter(e => e.className === 'hub-segmented').length, 1);
   for (const id of ['hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);
     el.fire(el.tagName === 'select' ? 'change' : 'click'); await ui.settled(); assert.deepEqual(calls, []);
@@ -206,9 +210,10 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const value of ['4', '121', '2.5', '']) { const n = number(); n.value = value; n.fire('change'); await ui.settled(); assert.deepEqual(calls, []); }
   number().value = '0'; number().fire('change'); await ui.settled();
   assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_island_interaction', auto_close_seconds: 0, open_on_hover: true }]);
-  const select = () => all(ui).find(e => e.attrs['aria-label'] === 'Tema');
-  select().value = 'dark'; select().fire('change', false); await ui.settled(); assert.deepEqual(calls, []);
-  select().fire('change'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_theme', theme: 'dark' }]);
+  // #503 S18 (screen validation): the theme is three segmented pills, not a dropdown
+  const dark = () => all(all(ui).find(e => e.attrs.id === 'hub-theme')).find(e => e.tagName === 'button' && e.textContent === 'Oscuro');
+  dark().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+  dark().fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_theme', theme: 'dark' }]);
   const name = () => all(ui).find(e => e.attrs['aria-label'] === 'Nombre visible');
   const saveName = () => all(ui).find(e => e.textContent === 'Guardar nombre');
   name().value = 'Ana'; name().fire('input'); saveName().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);

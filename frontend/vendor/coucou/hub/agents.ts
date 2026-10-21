@@ -30,6 +30,7 @@ export async function renderAgentSettings({ invoke, V, P, listen, timers }: any)
   root.style.setProperty('display', 'contents');
   s.message.className = 'abito-settings-feedback notice err';
   let state: any = null, reviewing = false, busy = false;
+  const actionStatus = h('div', { id: 'agent-action-status', class: 'hint', role: 'status', 'aria-live': 'polite' });
   const plans: Record<string, any> = {};
   let prefs: any = {}, prefsKnown = false;
   // Never replace a reviewed hash with an unseen backend update. A changed plan is rejected by the host.
@@ -42,10 +43,11 @@ export async function renderAgentSettings({ invoke, V, P, listen, timers }: any)
       h('pre', { class: 'diff', text: install ? r.summary : 'Se quitarán los hooks administrados por Abito.' }));
     const confirm = button(install ? 'Back up and write' : 'Back up and remove', () => {
       if (busy) return; busy = true; confirm.disabled = true;
+      actionStatus.textContent = '';
       work(() => call('agent_action', command), next => {
         state = { ...state, ...next }; reviewing = false;
         // A transport acknowledgement is not an installation result: render only the host's actual status.
-      }).finally(() => { busy = false; reviewing = false; if (s.alive()) paint(); });
+      }, () => { actionStatus.textContent = V.agentActionFailure(r.id); }).finally(() => { busy = false; reviewing = false; if (s.alive()) paint(); });
     }, install ? 'primary' : 'danger');
     body.append(h('div', { class: 'row' }, confirm, button('Cancel', () => { reviewing = false; redraw(); })));
   }
@@ -83,7 +85,7 @@ export async function renderAgentSettings({ invoke, V, P, listen, timers }: any)
         if (!integration) body.append(h('span', { class: 'path', text: UNAVAILABLE }));
       }
       // Do not claim paths, relay readiness or a raw diff that sender_ok deliberately strips.
-      if (r?.note) body.append(hint(r.note));
+      if (r?.note && r.state !== 'error') body.append(hint(r.note)); // a standing `error` state is the dot's job (#503 S20)
     };
     redraw(); return block;
   }
@@ -128,7 +130,8 @@ export async function renderAgentSettings({ invoke, V, P, listen, timers }: any)
       if (claude) detail.append(hint(t(installed
         ? 'Abito is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there.'
         : 'Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.')));
-      if (r?.note) detail.append(hint(r.note));
+      // The `error` state's generic sentence is the state column's job, not a caption (#503 S20); other notes stay.
+      if (r?.note && r.state !== 'error') detail.append(hint(r.note));
     };
     redraw(); return entry;
   }
@@ -172,7 +175,7 @@ export async function renderAgentSettings({ invoke, V, P, listen, timers }: any)
       row(t('Show Codex plan in the notch'), sw(prefs.showCodexPlanInNotch === true, 'set_show_codex_plan_in_notch', 'show_codex_plan_in_notch')));
     root.append(
       section(t('Agents'), hint(t("Show other coding agents in the island. Abito adds its entries to each agent's own config: you see the exact change and where the backup goes before anything is written, and uninstalling removes only what Abito added.")),
-        hint('Desinstalar quita solo lo que Abito agregó; antes se guarda un respaldo.'), table, unavailable),
+        hint('Desinstalar quita solo lo que Abito agregó; antes se guarda un respaldo.'), table, actionStatus, unavailable),
       section(t('Plan usage'), planBody), section(t('Weekly recap'), agentBlock('recap', t('Weekly recap'), false, false, true)), s.message);
   }
   const apply = (next: any) => { state = { ...state, ...next }; paint(); };

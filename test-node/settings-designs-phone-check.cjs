@@ -63,3 +63,13 @@ test('S24 Teléfono: the security notes are no longer last and faint, and the pa
   const src = fs.readFileSync(path.join(base, 'pages.ts'), 'utf8').split('export function renderUnavailable')[1].split('// Notetaker')[0];
   assert(!/invoke|call\(|phone_link|qr_svg|pairing|fetch\(|innerHTML/.test(src), 'inert by construction: no IPC, no pairing code, no markup sink');
 });
+
+test('S24 Teléfono: the hero subtitle keeps «Wi‑Fi» in one piece (non-breaking hyphen), with the same words', async () => {
+  const fs = require('node:fs'), pathMod = require('node:path');
+  const src = fs.readFileSync(pathMod.join(base, 'i18n-es.ts'), 'utf8');
+  const line = src.split('\n').find(l => l.includes('over your Wi-Fi.') && l.includes("': '"));
+  assert(line && line.includes('por Wi\\u2011Fi.'), 'the Spanish subtitle uses U+2011');
+  const { t } = await import(require('node:url').pathToFileURL(pathMod.join(base, 'i18n-es.js')));
+  const es = t('Your agents and their approvals on your Android phone, over your Wi-Fi.');
+  assert.equal(es.replace(/[\u2010\u2011]/g, '-'), 'Tus agentes y sus aprobaciones en tu teléfono Android, por Wi-Fi.'); assert(es.includes('\u2011') && !es.includes('Wi-Fi'));
+});

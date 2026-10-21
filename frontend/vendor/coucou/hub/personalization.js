@@ -15,7 +15,7 @@ function preview() {
   return row("Vista previa", "Sólo presentación; no inicia tareas.", svg, trusted(segmented([["idle", "Reposo"], ["working", "Trabaja"]], "idle", (state) => clay?.setState(state))));
 }
 function colors(V, A, prefs, identities, save) {
-  const sec = section("Colores de identidad");
+  const rows = [];
   for (const r of V.colorRows(prefs, identities, A)) {
     const options = h("div", { class: "palette", role: "group", "aria-label": `Color de ${r.name}` });
     options.className = "hub-segmented";
@@ -31,9 +31,9 @@ function colors(V, A, prefs, identities, save) {
       b.style.setProperty("background", hex);
       options.append(b);
     }
-    sec.append(row(r.name, r.label, options));
+    rows.push(row(r.name, r.label, options));
   }
-  return sec;
+  return section("Colores de identidad", ...rows);
 }
 async function renderAppearance({ invoke, listen, V, S, A }) {
   const s = session(invoke, listen), { root, call, work, watch, message } = s;

@@ -1,11 +1,36 @@
 // Adapted from Coucou src/settings/main.ts shortcutsSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
 import { h, clear } from "../views/dom.js";
-import { SHORTCUTS, SHORTCUT_TEXT, ISLAND_SHORTCUTS, displayKeys, duplicates } from "../core/shortcuts.js";
+import { SHORTCUTS, SHORTCUT_TEXT, ISLAND_SHORTCUTS, displayKeys, duplicates, normalizeKeys } from "../core/shortcuts.js";
 import { toggle } from "./ui.js";
 import { notchSection as section, notchHint as hint } from "./notch.js";
 import { session, trusted } from "./runtime.js";
 import { renderRecapRows } from "./recap.js";
 import { t } from "./i18n-es.js";
+const PORTAL_MODIFIERS = { shift: "Shift", control: "Ctrl", ctrl: "Ctrl", primary: "Ctrl", alt: "Alt", mod1: "Alt", super: "Super", meta: "Super", mod4: "Super", hyper: "Super" };
+function portalTriggerKeys(text) {
+  if (typeof text !== "string" || text.length > 200) return null;
+  const m = /((?:<[A-Za-z0-9_]{1,12}>)+)\s*([^\s<>]{1,16})\s*$/.exec(text.trim());
+  if (!m) return null;
+  const rest = text.trim().slice(0, m.index).trim();
+  if (rest.split(/\s+/).length > 3 && rest.length > 40) return null;
+  const mods = [];
+  for (const raw of m[1].slice(1, -1).split("><")) {
+    const mapped = PORTAL_MODIFIERS[raw.toLowerCase()];
+    if (!mapped) return null;
+    if (!mods.includes(mapped)) mods.push(mapped);
+  }
+  const order = ["Ctrl", "Alt", "Shift", "Super"];
+  mods.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return normalizeKeys([...mods, m[2]].join("+"));
+}
+function keyText(effective, combo, fallback) {
+  const translated = effective ? portalTriggerKeys(effective) ?? normalizeKeys(effective) : null;
+  if (translated) return displayKeys(translated);
+  const configured = combo ? normalizeKeys(combo) : null;
+  if (configured) return displayKeys(configured);
+  const base = fallback ? normalizeKeys(fallback) : null;
+  return base ? displayKeys(base) : "—";
+}
 async function renderShortcuts({ invoke, V, listen, timers }) {
   const s = session(invoke, listen, timers), { root, call, work } = s;
   root.style.setProperty("display", "contents");
@@ -68,6 +93,7 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
       const supported = Object.hasOwn(views, d.id), hotkey = views[d.id], known = supported && !!hotkey;
       const enabled = supported ? hotkey?.enabled === true : d.enabledByDefault;
       const keys = hotkey ? hotkey.effective || hotkey.combo : d.defaultKeys;
+      const shownKeys = keyText(hotkey?.effective, hotkey?.combo, d.defaultKeys);
       const sw = trusted(toggle(enabled, (on) => {
         if (known && !busy) save(d.id, { action: on ? "enable" : "disable" });
       }));
@@ -75,7 +101,7 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
       sw.setAttribute("aria-label", t(SHORTCUT_TEXT[d.id]));
       if (known && !keys) sw.title = "Graba una combinación antes de activar este atajo.";
       const isRecording = recording === d.id;
-      const keycap = trusted(h("button", { class: isRecording ? "keycap recording" : "keycap", text: isRecording ? t("Press keys…") : displayKeys(keys) }));
+      const keycap = trusted(h("button", { class: isRecording ? "keycap recording" : "keycap", text: isRecording ? t("Press keys…") : shownKeys }));
       keycap.disabled = !known || busy;
       if (supported) keycap.title = "Esc: cancelar · Backspace: borrar";
       keycap.addEventListener("click", (e) => {
@@ -183,5 +209,7 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
   return mounted;
 }
 export {
+  keyText,
+  portalTriggerKeys,
   renderShortcuts
 };

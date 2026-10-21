@@ -36,6 +36,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     const dot = statusDot(false), feedback = h("div", {}), stateLabel = hint("");
     const stateBadge = h("span", { class: "card-state" });
     const errorId = `chat-key-error-${id}`;
+    const testReason = h("div", { class: "hint test-reason", id: `chat-key-test-reason-${id}` });
     const fieldError = h("div", { class: "field-error hint", id: errorId, role: "alert", "aria-live": "polite", text: "" });
     field.setAttribute("aria-invalid", "false");
     field.setAttribute("aria-describedby", errorId);
@@ -74,7 +75,12 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
       dot.style.setProperty("background", !known ? "#6b7079" : present[id] ? "#22c55e" : "#f4505e");
       stateLabel.textContent = !known ? UNAVAILABLE : t(present[id] ? "Key saved in the {store}." : "No key yet — the chat needs one.", { store: STORE });
       field.placeholder = present[id] ? `••••••••  ${t("(stored)")}` : placeholder;
-      remove.hidden = test.hidden = !present[id];
+      remove.hidden = !present[id];
+      const can = present[id] === true;
+      test.disabled = !can || busy;
+      test.setAttribute("aria-disabled", String(!can));
+      testReason.textContent = can ? "" : "Guarda una clave para poder probarla.";
+      test.setAttribute("title", can ? "" : "Guarda una clave para poder probarla.");
       paintBadge();
     };
     const change = (action) => {
@@ -120,7 +126,8 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
         feedback.append(h("div", { class: "notice err", text: V.keyError(error) }));
       }).finally(() => {
         busy = false;
-        save.disabled = remove.disabled = test.disabled = false;
+        save.disabled = remove.disabled = false;
+        refresh();
       });
     };
     const probe = () => {
@@ -140,13 +147,15 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
         feedback.append(h("div", { class: present[id] && has ? "notice ok" : "notice err", text: !present[id] ? "No hay clave guardada." : has ? "Clave guardada y cuenta del chat lista. No se contactó al proveedor." : "El chat aún no tiene cuenta para este proveedor. Vuelve a guardar la clave." }));
       }, () => feedback.append(h("div", { class: "notice err", text: "No se pudo comprobar la clave." }))).finally(() => {
         busy = false;
-        save.disabled = remove.disabled = test.disabled = false;
+        save.disabled = remove.disabled = false;
+        refresh();
       });
     };
     const save = button(primary ? "Save key" : "Save", () => change("set"), primary ? "primary" : "");
     const test = button("Probar", probe);
     test.setAttribute("aria-label", "Probar");
     test.type = "button";
+    test.setAttribute("aria-describedby", `chat-key-test-reason-${id}`);
     const remove = button("Remove", () => change("clear"), "danger");
     const r = row(title, field, eye, save, test, remove);
     if (!primary) {
@@ -156,7 +165,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     }
     keyRefresh[id] = refresh;
     refresh();
-    return { r, dot, stateLabel, feedback, stateBadge, fieldError };
+    return { r, dot, stateLabel, feedback, stateBadge, fieldError, testReason };
   }
   const api = keyRow("anthropic-api-key", t("API key"), "sk-ant-...", true);
   const model = trusted(h("select", { id: "chat-anthropic-model", "aria-label": t("Model") }));
@@ -188,12 +197,12 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
       if (s.alive()) drawModels();
     });
   });
-  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, row(t("Model"), model), api.feedback);
+  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), model), api.feedback);
   apiSection.children[0].prepend(api.dot);
   const providerCards = [];
   for (const [id, name, placeholder, site] of CLOUD) {
     const k = keyRow(providerDef(id).key, name, placeholder);
-    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, h("div", { class: "hint", text: t("Key from {site}", { site }) }), k.feedback);
+    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, h("div", { class: "hint", text: t("Key from {site}", { site }) }), k.feedback);
     c.children[0].prepend(k.dot);
     providerCards.push(c);
   }

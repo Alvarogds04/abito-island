@@ -10,7 +10,7 @@ import { icon, keyLabel } from "./ui.js";
 
 export type PageId =
   | "dictation" | "notes" | "insights" | "dictionary" | "snippets" | "styles" | "flowsettings"
-  | "general" | "pills" | "agents" | "chat" | "voice" | "integrations" | "phone" | "shortcuts";
+  | "general" | "pills" | "agents" | "chat" | "accounts" | "voice" | "integrations" | "phone" | "shortcuts";
 
 interface PageDef {
   id: PageId;
@@ -35,6 +35,8 @@ export const NOTCH_PAGES: PageDef[] = [
   { id: "pills", icon: "grid", title: () => t("Active pills"), subtitle: () => t("The pills shown in the island, their order and their colours.") },
   { id: "agents", icon: "terminal", title: () => t("Agents"), subtitle: () => t("Claude Code, Codex and the other agents Abito follows.") },
   { id: "chat", icon: "chat", title: () => t("Chat"), subtitle: () => t("The AI of the island's chat, with your own keys.") },
+  // #503 S26: the engine and the accounts (Pi, Claude…) had no page of their own: reachable only inside Chat/Integrations.
+  { id: "accounts", icon: "lock", title: () => "Conexiones", subtitle: () => "El motor de Abito y las cuentas con las que inicia sesión." },
   { id: "voice", icon: "wave", title: () => "OK Abito" },
   { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
@@ -58,6 +60,8 @@ export interface HubOptions {
   version: string;
   flowPages: Partial<Record<PageId, FlowPageRenderer>>;
   renderNotch(page: PageId, container: HTMLElement, navigate?: (page: PageId) => void): Promise<void | (() => void)>;
+  /** The page to open first (a deep link). Anything that is not one of ALL's ids is ignored: the closed list decides. */
+  initialPage?: unknown;
 }
 const DEFAULT_STATUS: FlowStatus = {
   prefs: {
@@ -74,8 +78,14 @@ const DEFAULT_STATUS: FlowStatus = {
 
 export async function startHub(root: HTMLElement, opts: HubOptions) {
   document.body.classList.add("hub-window");
-  let current: PageId = "dictation";
-  let status: FlowStatus = (await FlowBridge.status()) ?? DEFAULT_STATUS;
+  const wanted = typeof opts.initialPage === "string" ? ALL.find((p) => p.id === opts.initialPage) : undefined;
+  let current: PageId = wanted ? wanted.id : "dictation";
+  // The window must not wait for the dictation status: that host answer enumerates audio devices and reads the keychain, and
+  // took ~3 s with the sidebar still on «Cargando…». Draw now with the defaults; the real status lands when it arrives. `hasStatus`
+  // (FlowBridge) still refuses writes until a real status was read, so nothing can overwrite unread preferences.
+  let status: FlowStatus = DEFAULT_STATUS, statusKnown = false;
+  // «checking» lasts only while the read is in flight; a read that fails keeps the defaults exactly as before (never stuck).
+  const firstStatus = FlowBridge.status().then((real) => { if (real) status = real; statusKnown = true; drawStatus(); });
   const items = new Map<PageId, HTMLElement>();
   const statusLine = h("div", { class: "hub-status" });
   const scroll = h("div", { class: "hub-scroll" });
@@ -85,7 +95,8 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
     get status() { return status; },
     navigate: (page) => void show(page),
     refresh: async () => {
-      status = (await FlowBridge.status()) ?? status;
+      const real = await FlowBridge.status();
+      if (real) { status = real; statusKnown = true; }
       drawStatus();
       return status;
     },
@@ -96,7 +107,8 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
         const saved = await FlowBridge.setPrefs(next);
         status = { ...status, prefs: { ...status.prefs, ...saved } };
         // The seven-field write reply does not include the live portal key state.
-        status = (await FlowBridge.status()) ?? status;
+        const real = await FlowBridge.status();
+        if (real) { status = real; statusKnown = true; }
         drawStatus();
       });
       saving = task.catch(() => {});
@@ -110,7 +122,10 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
     const models = status.models.parakeet.state;
     let color = "#6b7079";
     let text: string;
-    if (!status.prefs.enabled) {
+    if (!statusKnown) {
+      // not read yet: never claim «off» from the defaults
+      text = "Comprobando el dictado…";
+    } else if (!status.prefs.enabled) {
       text = t("Dictation is off");
     } else if (models !== "ready") {
       color = "#f7b32b";
@@ -175,9 +190,16 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
   group(t("Notch"), NOTCH_PAGES);
   side.append(h("div", { class: "spacer" }), statusLine, h("div", { class: "hub-version", text: `Abito ${opts.version}` }));
   clear(root);
+  scroll.append(h("p", { class: "hub-loading", text: "Cargando…" }));
   root.append(side, h("main", { class: "hub-panel" }, scroll));
   drawStatus();
+  void firstStatus;
   await show(current);
+  // Rust tells an ALREADY OPEN window which page to show (a deep link from the island); only ids of this shell are honoured.
+  if (typeof document.addEventListener === "function") document.addEventListener("abito:hub-select", (e) => {
+    const id = (e as CustomEvent).detail;
+    if (typeof id === "string" && ALL.some((p) => p.id === id)) void show(id as PageId);
+  });
   void onEvent<string>("hub-page", (page) => {
     const id = (page === "settings" ? "flowsettings" : page) as PageId;
     if (ALL.some((p) => p.id === id)) void show(id);

@@ -27,7 +27,7 @@ test('S18 General: three titled cards (Apariencia, Isla, Sonido), every control 
     if (cmd === 'recap_action') return p.action === 'prefs' ? { enabled: true } : { ok: true };
     if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1' }] };
     if (cmd === 'sound_action') return p.action === 'list' ? { names: [] } : { ok: true };
-    if (cmd === 'hotkey_action') return { combo: 'Ctrl+Space', enabled: true, status: 'active' };
+    if (cmd === 'hotkey_action') return { combo: 'Ctrl+Space', enabled: true, status: 'active', backend: 'portal' };
     return structuredClone(prefs);
   };
   const ui = await renderGeneral({ invoke, V }); await ui.settled();
@@ -49,6 +49,9 @@ test('S18 General: three titled cards (Apariencia, Isla, Sonido), every control 
   for (const label of ['Nombre visible', 'Atajo global', 'Atajo activo', 'Cierre automático en segundos', 'Segundos antes de ocultar la isla plegada']) assert(all(ui).some(e => e.attrs['aria-label'] === label || e.textContent === label), label);
   // visible helper text under the fields (input-helper-text), and the one status line is outside the cards
   assert(text(ui).includes('Sistema sigue el tema de tu escritorio.'));
+  // the mechanism that registers the global shortcut is a sentence, never a bare label with nothing to show
+  assert(!all(ui).some(e => e.className === 'hint' && /^Atajo (del sistema|de GNOME|de X11|de Windows|limitado)/.test(e.textContent || '')), 'no bare backend label');
+  assert(text(ui).includes('Se registra como: Atajo del sistema'), 'the mechanism reads as a sentence');
   assert(c.every(card => all(card).some(e => e.className === 'hint')), 'every card carries helper text');
   assert(ui.children.at(-1).className === 'hub-note' && ui.children.at(-1).attrs.role === 'status', 'the one global status line is the last child, outside every card');
   ui.dispose();
