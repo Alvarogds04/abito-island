@@ -77,7 +77,14 @@ test('#336 the feed: facts update on native state/phase/view/DOM changes, prefs 
 test('#336 no innerHTML is reintroduced in island.js (#411) and the adapter owns no geometry', () => {
   const src = read('island.js');
   assert.doesNotMatch(src, /innerHTML/, 'icons stay DOM nodes, text stays textContent');
-  assert.doesNotMatch(src, /setInterval\(.*interaction|requestAnimationFrame\(.*syncInteraction/, 'the scheduler never polls');
+  assert.doesNotMatch(src, /requestAnimationFrame\(.*syncInteraction/, 'no frame loop feeds the scheduler');
+  // The scheduler (island-interaction.js) never polls. The adapter has exactly ONE bounded re-read of the live :hover hit-test, only
+  // while the controller believes the pointer is inside: a swallowed pointerleave sends no event, so nothing else would notice it.
+  const polls = src.match(/setInterval\([^\n]*interaction[^\n]*/g) || [];
+  assert.equal(polls.length, 1, 'one hover re-read, no other interaction polling');
+  assert.match(polls[0], /interaction\.snapshot\(\)\.inside && !document\.hidden\) syncInteraction\(\)/, 'guarded by «inside» and a visible page');
+  assert.match(polls[0], /, 1000\)/, 'once a second');
+  assert.doesNotMatch(fs.readFileSync(path.join(frontend, 'island-interaction.js'), 'utf8'), /setInterval/, 'the module itself owns only the one hosted timer');
 });
 
 // ---- #336 L18: the engagement press through the facade spy ------------------
@@ -88,6 +95,7 @@ test('#336 no innerHTML is reintroduced in island.js (#411) and the adapter owns
 // island-interaction-check.cjs).
 function engagementFixture(openOnHover) {
   const vm = require('node:vm');
+  let hovering = false;
   const moduleApi = require(path.join(frontend, 'island-interaction.js'));
   const invocations = [];
   const desktopCalls = [], dismissed = [];
@@ -121,6 +129,7 @@ function engagementFixture(openOnHover) {
       closest() { return null; },
     };
   };
+  byId.set('capsule', Object.assign(makeEl(), { matches: sel => (sel === ':hover' ? hovering : false) }));
   const documentStub = {
     documentElement: makeEl(),
     body: makeEl(),
@@ -209,8 +218,8 @@ function engagementFixture(openOnHover) {
       byId.get('capsule').dataset.phase = state === 'expanded' ? 'expanded' : 'compact';
       for (const o of observers) o.cb([]);
     },
-    enter() { byId.get('capsule').fire('pointerenter', pointer({ type: 'pointerenter' })); },
-    leave() { byId.get('capsule').fire('pointerleave', pointer({ type: 'pointerleave' })); },
+    enter() { hovering = true; byId.get('capsule').fire('pointerenter', pointer({ type: 'pointerenter' })); },
+    leave() { hovering = false; byId.get('capsule').fire('pointerleave', pointer({ type: 'pointerleave' })); },
     press() { fire(windowListeners, 'pointerdown', pointer({ type: 'pointerdown', target: { closest: () => null } })); },
     // a press on an element that matches the real selector list (e.g. a link): closest honours the selector
     pressOn(tag) { fire(windowListeners, 'pointerdown', pointer({ type: 'pointerdown', ctrlKey: true,
@@ -231,6 +240,17 @@ function engagementFixture(openOnHover) {
       return actions;
     },
     dragReleases() { return invocations.filter(i => i.cmd === 'drag_release'); },
+    // WebKit's live hit-test (capsule.matches(':hover')): the truth when a pointerleave was swallowed
+    hover(on) { hovering = on; },
+    // the focused element: { tag, type, hidden } as the live DOM would report it
+    focus(spec) {
+      const el = makeEl();
+      el.type = spec.type; el.tagName = String(spec.tag).toUpperCase();
+      el.matches = sel => String(sel).split(',').map(x => x.trim()).includes(spec.tag); // faithful: ANY <input> matches «input»
+      el.hidden = !!spec.hidden; el.closest = () => (spec.hidden ? { hidden: true, inert: true } : null);
+      el.getClientRects = () => (spec.hidden ? [] : [{}]); el.offsetParent = spec.hidden ? null : {};
+      documentStub.activeElement = el;
+    },
   };
 }
 
@@ -366,5 +386,45 @@ test('A04c a user-opened overview returns from finished without auto-fold',()=>{
   const f=engagementFixture(false); f.mutate(); f.seed('expanded'); f.update({notices:[finishedNotice('fresh')]}); f.advance(5200);
   assert.equal(f.view(),'overview'); assert.equal(f.desktopCalls.includes('autoClose'),false);
 });
+// ---- auto-minimize (human: «abito se minimice después de un tiempo y no lo hace») ----------------------------------------------
+test('B0 control: a quiet expanded island folds after Ajustes -> auto_close_seconds (15 s)', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  f.advance(14999); assert.equal(f.desktopCalls.includes('autoClose'), false);
+  f.advance(1); assert.equal(f.desktopCalls.filter(x => x === 'autoClose').length, 1);
+});
+test('B1 the pointer that left WITHOUT a pointerleave (input-shape change swallowed it) does not hold the island open', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  f.enter();                      // the pointer was over the island...
+  f.hover(false);                 // ...and WebKit now reports it is NOT hovering (no pointerleave was delivered)
+  f.mutate();                     // any DOM/phase change re-feeds the facts
+  f.advance(15000);
+  assert.equal(f.desktopCalls.filter(x => x === 'autoClose').length, 1, 'the live :hover hit-test wins over a missed leave');
+});
+test('B2 a pointer that really is still over the island keeps it open (no regression)', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  f.enter(); f.hover(true); f.mutate();
+  f.advance(60000);
+  assert.equal(f.desktopCalls.includes('autoClose'), false);
+  f.leave(); f.hover(false); f.advance(15000);
+  assert.equal(f.desktopCalls.filter(x => x === 'autoClose').length, 1, 'leaving restarts the full delay');
+});
+test('B3 a focused radio/checkbox of a structured question is not «editing text»; a text field still is', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  f.focus({ type: 'checkbox', tag: 'input' }); f.mutate(); f.advance(15000);
+  assert.equal(f.desktopCalls.filter(x => x === 'autoClose').length, 1, 'a checkbox holds no text');
+});
+test('B4 a text field that is hidden or inert (a closed question card) no longer holds the island open', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  f.focus({ type: 'text', tag: 'textarea', hidden: true }); f.mutate(); f.advance(15000);
+  assert.equal(f.desktopCalls.filter(x => x === 'autoClose').length, 1);
+  const g = engagementFixture(false); g.mutate(); g.seed('expanded');
+  g.focus({ type: 'text', tag: 'textarea' }); g.mutate(); g.advance(60000);
+  assert.equal(g.desktopCalls.includes('autoClose'), false, 'a visible text field still protects what is being typed');
+});
+test('B5 the edge-hide setting is MINUTES (Ajustes -> General -> «Ocultar tras», absence_minutes 1..120, default 3), not 10 seconds', () => {
+  const prefs = fs.readFileSync(path.join(__dirname, '../src/prefs.rs'), 'utf8');
+  assert.match(prefs, /absence_minutes\(&self\) -> u16 \{ self\.absence_minutes\.filter\(\|v\| \(1\.\.=120\)\.contains\(v\)\)\.unwrap_or\(3\) \}/);
+});
+
 console.log(`island-interaction-wiring-check: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

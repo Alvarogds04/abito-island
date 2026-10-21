@@ -536,10 +536,14 @@
     now: () => performance.now(), schedule: (fn, ms) => setTimeout(fn, ms), cancel: id => clearTimeout(id), onHidden: setConcealed,
   });
   const TEXT_FIELD = 'input, textarea, [contenteditable="true"]';
+  const NON_TEXT_INPUT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image']);
   function interactionFacts() {
     const snap = current;
     const active = document.activeElement;
-    const editing = !!(active && active.matches && active.matches(TEXT_FIELD));
+    // «Editing» = a VISIBLE text field holds the focus. A checkbox/radio/button <input> holds no text, and a field inside a hidden
+    // or inert card (a closed question) is not being typed in: neither may keep the island open forever.
+    const editing = !!(active && active.matches && active.matches(TEXT_FIELD) &&
+      !(active.tagName === 'INPUT' && NON_TEXT_INPUT.has(active.type)) && !(active.closest && active.closest('[inert], [hidden]')));
     const field = $('chat-input');
     const permission = $('permission');
     const models = $('models');
@@ -548,6 +552,7 @@
       view: capsule.dataset.view || 'unknown',
       settled: capsule.dataset.phase === 'expanded' || capsule.dataset.phase === 'compact',
       nativeReady: snap !== null && snap !== undefined,
+      pointerInside: typeof capsule.matches === 'function' ? capsule.matches(':hover') : undefined,
       question: capsule.dataset.question === 'pending',
       approval: !!(permission && !permission.hidden),
       request: !!(snap && snap.request),
@@ -615,6 +620,8 @@
     document.addEventListener('click', e => { interaction.engage(e); });
     document.addEventListener('keydown', e => { interaction.engage(e); });
     window.addEventListener('pagehide', () => { interaction.stop(); edgeInteraction?.stop(); });
+    // No event follows a swallowed pointerleave: while the island believes the pointer is inside, re-read the live hover once a second.
+    setInterval(() => { if (interaction.snapshot().inside && !document.hidden) syncInteraction(); }, 1000);
   }
 
   // ---- notices (M2): DISPLAY text only ---------------------------------

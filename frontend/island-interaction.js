@@ -166,6 +166,10 @@
       if (stopped) return;
       const before = eligible(facts), previousState = facts.state;
       facts = next && typeof next === 'object' ? { ...next } : {};
+      // A pointerleave can be swallowed (the native input shape changes under the pointer; remote desktops drop it). The live
+      // :hover hit-test is the truth: when it says the pointer is NOT over the island, an `inside` that never got its leave is
+      // stale and must not hold the island open forever. It never turns `inside` ON (only a real enter does, for hover-open).
+      if (inside && facts.pointerInside === false) inside = false;
       if ((previousState === 'expanded' && facts.state !== 'expanded') || facts.state === 'hidden') {
         hoverOnly = false; pinned = false; invalidate(); clearDeadline();
       }
