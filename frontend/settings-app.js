@@ -79,6 +79,8 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
+  // The page Rust chose when it opened this window (a closed list: the shell ignores anything else), e.g. «Configurar Pi…» -> accounts.
+  initialPage: window.__abitoHubPage,
   version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
   async renderNotch(page, container, navigate) {
     if (page === 'general') {
@@ -102,6 +104,8 @@ startHub(root, {
           chat.dispose = () => { models.dispose(); disposeChat(); };
         }
         if (page === 'integrations') mounted.push(await renderIntegrations(personal));
+        // #503 S26: the engine and the accounts have their own page; their keys already live in Chat and Integraciones (no second list).
+        if (page === 'accounts') mounted.push(await renderAccounts({ ...options, page: 'all', keys: false }));
         if (page === 'shortcuts') mounted.push(await renderShortcuts(options));
         if (page === 'chat' || page === 'integrations') mounted.push(await renderAccounts({ ...options, page, keys: page !== 'chat' }));
         if (mounted.length) container.append(...mounted);

@@ -19,6 +19,8 @@ const NOTCH_PAGES = [
   { id: "pills", icon: "grid", title: () => t("Active pills"), subtitle: () => t("The pills shown in the island, their order and their colours.") },
   { id: "agents", icon: "terminal", title: () => t("Agents"), subtitle: () => t("Claude Code, Codex and the other agents Abito follows.") },
   { id: "chat", icon: "chat", title: () => t("Chat"), subtitle: () => t("The AI of the island's chat, with your own keys.") },
+  // #503 S26: the engine and the accounts (Pi, Claude…) had no page of their own: reachable only inside Chat/Integrations.
+  { id: "accounts", icon: "lock", title: () => "Conexiones", subtitle: () => "El motor de Abito y las cuentas con las que inicia sesión." },
   { id: "voice", icon: "wave", title: () => "OK Abito" },
   { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
@@ -49,8 +51,14 @@ const DEFAULT_STATUS = {
 };
 async function startHub(root, opts) {
   document.body.classList.add("hub-window");
-  let current = "dictation";
-  let status = await FlowBridge.status() ?? DEFAULT_STATUS;
+  const wanted = typeof opts.initialPage === "string" ? ALL.find((p) => p.id === opts.initialPage) : void 0;
+  let current = wanted ? wanted.id : "dictation";
+  let status = DEFAULT_STATUS, statusKnown = false;
+  const firstStatus = FlowBridge.status().then((real) => {
+    if (real) status = real;
+    statusKnown = true;
+    drawStatus();
+  });
   const items = /* @__PURE__ */ new Map();
   const statusLine = h("div", { class: "hub-status" });
   const scroll = h("div", { class: "hub-scroll" });
@@ -62,7 +70,11 @@ async function startHub(root, opts) {
     },
     navigate: (page) => void show(page),
     refresh: async () => {
-      status = await FlowBridge.status() ?? status;
+      const real = await FlowBridge.status();
+      if (real) {
+        status = real;
+        statusKnown = true;
+      }
       drawStatus();
       return status;
     },
@@ -72,7 +84,11 @@ async function startHub(root, opts) {
         change(next);
         const saved = await FlowBridge.setPrefs(next);
         status = { ...status, prefs: { ...status.prefs, ...saved } };
-        status = await FlowBridge.status() ?? status;
+        const real = await FlowBridge.status();
+        if (real) {
+          status = real;
+          statusKnown = true;
+        }
         drawStatus();
       });
       saving = task.catch(() => {
@@ -90,7 +106,9 @@ async function startHub(root, opts) {
     const models = status.models.parakeet.state;
     let color = "#6b7079";
     let text;
-    if (!status.prefs.enabled) {
+    if (!statusKnown) {
+      text = "Comprobando el dictado…";
+    } else if (!status.prefs.enabled) {
       text = t("Dictation is off");
     } else if (models !== "ready") {
       color = "#f7b32b";
@@ -167,9 +185,15 @@ async function startHub(root, opts) {
   group(t("Notch"), NOTCH_PAGES);
   side.append(h("div", { class: "spacer" }), statusLine, h("div", { class: "hub-version", text: `Abito ${opts.version}` }));
   clear(root);
+  scroll.append(h("p", { class: "hub-loading", text: "Cargando…" }));
   root.append(side, h("main", { class: "hub-panel" }, scroll));
   drawStatus();
+  void firstStatus;
   await show(current);
+  if (typeof document.addEventListener === "function") document.addEventListener("abito:hub-select", (e) => {
+    const id = e.detail;
+    if (typeof id === "string" && ALL.some((p) => p.id === id)) void show(id);
+  });
   void onEvent("hub-page", (page) => {
     const id = page === "settings" ? "flowsettings" : page;
     if (ALL.some((p) => p.id === id)) void show(id);

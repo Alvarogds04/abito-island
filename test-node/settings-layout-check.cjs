@@ -116,9 +116,57 @@ test('S25 Atajos: an assigned key reads «Ctrl+Shift+N» (the page\'s canonical 
   assert.match(await r.page.locator('#global-shortcuts .keycap').first().textContent(), /Pulsa/, 'while capturing, the cell asks for the keys');
 });
 
-test('S26 Conexiones: the sidebar has an entry, and the island\'s «Configurar Pi…» deep link lands on it', async r => {
+test('Ajustes opens without waiting for the dictation status: the sidebar is there at once even when that host answer takes 3 s', async r => {
+  await r.close();
+  const slow = await H.open({ width: 960, height: 680, statusDelayMs: 3000 });
+  try {
+    const ms = await slow.shellAfter();
+    assert(ms < 1500, `the sidebar waited ${ms} ms for dictation_action{status} (device enumeration + keychain happen before it answers)`);
+    // the page that needs the status still gets it when it arrives
+    await slow.page.waitForTimeout(3300);
+    assert.match(await slow.text('.hub-status'), /Listo|Dictado|modelo|micr/i, 'the status line is filled in once the real answer lands');
+  } finally { await slow.close(); }
+});
+
+test('S26 Conexiones: the sidebar has a «Conexiones» entry that opens a page with the engine state first and one card per account', async r => {
   const titles = await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item')].map(e => e.textContent.trim()));
-  assert(titles.some(t => /^(Cuentas|Conexiones)$/.test(t)), `no sidebar entry for accounts/connections in ${JSON.stringify(titles)}`);
+  assert(titles.includes('Conexiones'), `no «Conexiones» entry in ${JSON.stringify(titles)}`);
+  await r.go('Conexiones');
+  assert.equal((await r.text('.hub-hero h1')).trim(), 'Conexiones');
+  // the first thing a person sees: the topmost visible element with an id inside the page
+  const first = await r.page.evaluate(() => { const ids = [...document.querySelectorAll('#settings-root [id]')].filter(e => e.getBoundingClientRect().height > 0).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); return ids[0] ? ids[0].id : null; });
+  assert.equal(first, 'engine-status', 'the engine state comes first');
+  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('[id^="provider-"]')].map(e => e.id)), ['provider-pi', 'provider-claude']);
+});
+
+test('S26 deep link: opened FOR «Configurar Pi…» (Rust names the page), Ajustes lands on Conexiones, not on Dictado', async r => {
+  await r.close();
+  const f = await H.open({ width: 960, height: 680, page: 'accounts' });
+  try {
+    await f.shellAfter(); await f.page.waitForTimeout(700);
+    const on = await f.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim()));
+    assert.deepEqual(on, ['Conexiones'], `landed on ${JSON.stringify(on)}`);
+    assert.equal((await f.text('.hub-hero h1')).trim(), 'Conexiones');
+  } finally { await f.close(); }
+});
+
+test('S26 deep link on an ALREADY OPEN window: Rust sends abito:hub-select and the page changes; a foreign id is ignored', async r => {
+  await r.go('General');
+  await r.page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:hub-select', { detail: 'accounts' }))); await r.page.waitForTimeout(500);
+  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim())), ['Conexiones']);
+  for (const bad of ['../x', 'Accounts', '', 7, null, { detail: 'general' }, ['general']]) { await r.page.evaluate(b => document.dispatchEvent(new CustomEvent('abito:hub-select', { detail: b })), bad); await r.page.waitForTimeout(150); }
+  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim())), ['Conexiones'], 'a foreign id never moves the window');
+});
+
+test('S26 deep link: an unknown or hostile page name falls back to the default page (the closed list decides)', async r => {
+  await r.close();
+  for (const bad of ['../x', 'accounts ', '<img>', 'constructor', '__proto__', '']) {
+    const f = await H.open({ width: 960, height: 680, page: bad });
+    try { await f.shellAfter(); await f.page.waitForTimeout(500);
+      const on = await f.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim()));
+      assert.deepEqual(on, ['Dictado'], `${JSON.stringify(bad)} -> ${JSON.stringify(on)}`); }
+    finally { await f.close(); }
+  }
 });
 
 (async () => {
