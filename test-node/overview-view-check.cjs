@@ -458,23 +458,20 @@ test('R4 (A+E): the strip band sits over the blobs card\'s x range only and the 
   assert.equal(p['pointer-events'] || blobs['pointer-events'], 'auto', 'the blob choices stay clickable');
   // the blobs card is its own element in the overview frame: top 42, height 108
   assert.equal(px(blobs.top), OV_TOP); assert.equal(px(blobs.height), OVH);
-  assert.equal(n.left, 'calc(50% + 22px)'); assert.equal(n.right, 'auto'); assert.equal(n.width, '288px');
+  assert.equal(n.left, 'calc(50% + 136px)'); assert.equal(n.right, 'auto'); assert.equal(n.width, '174px');
   assert.ok(px(mb.right) >= 36 && mb.left === 'auto', `#minibots right ${mb.right} reaches into the blobs card`);
 });
 
-test('R5: two stacked notices stay inside the fixed 44px band and never reach the grid', () => {
+test('R5 (A+E): the notices band is ONE 28px row over the top of the blobs card — the capsule or the chips row, never both stacked — and scrolls inside, never growing', () => {
   const n = decls('#notices'), p = decls('#pill-choices');
-  assert.equal(px(n.height), 44, 'band = the approved one-row 44px (overview y0..44)');
-  assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/,
-    'overflow scrolls INSIDE the band instead of growing the box');
-  // model of two stacked notices, from the real boxes: row + gap + band (#437: the
-  // design's 40 px band replaces the old 44 px pill — D11, the design wins; L37: Coucou's 28px .pill capsule replaces the 40px band)
-  const stacked = px(decls('#notice-row')['min-height']) + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
-  assert.equal(stacked, 80, 'model: chips row + gap + Coucou 28px pill capsule stack to 80px');
-  assert.ok(stacked > px(n.height), 'the stacked content exceeds the band, so it must scroll');
-  assert.equal(px(decls('#notice-info').top), 0, 'the «i» fits the band: no phantom 4px scroll');
-  assert.equal(String(decls('#notice-pill').order), '-1', 'the actionable notice sits in the first visible row of the band');
-  assert.equal(p.overflow, 'hidden', 'the grid clips its own box, it never grows upward');
+  assert.equal(px(n.height), 28, 'band = one 28px row (Coucou\'s .pill capsule); the card pads 32px under it');
+  assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/, 'overflow scrolls INSIDE the band instead of growing the box');
+  assert.match(css, /#capsule\[data-view="overview"\] #notices:has\(#notice-pill:not\(\[hidden\]\)\) #notice-row \{ display: none; \}/,
+    'with a notice capsule the chips row is not drawn: nothing stacks inside 28px (the screen gate showed the «4 avisos» chip over the blobs)');
+  assert.equal(px(decls('#notice-row')['min-height']), 28);
+  assert.equal(String(decls('#notice-pill').order), '-1', 'the actionable notice is the first thing in the band');
+  assert.equal(px(decls('#blobs')['padding-top']), 0, 'padding is conditional: calm gives the room back');
+  assert.equal(p.overflow, 'hidden', 'the list clips its own box, it never grows upward');
   assert.equal(p['flex-direction'], 'column', 'A+E: one blob per row');
   assert.doesNotMatch(css, /#pill-choices \.pill-choice:nth-child\(n\+5\)/, 'A+E: no CSS belt hides the fifth blob any more; the column scrolls');
 });

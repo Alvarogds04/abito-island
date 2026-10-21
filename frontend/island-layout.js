@@ -151,7 +151,7 @@
     return (working || rows[0]).id || null;
   }
   const STATE_WORD = Object.freeze({ working: 'Trabajando', idle: 'En reposo', waiting: 'Te espera', error: 'Con error' });
-  const STEP_LINES = 3, CENTRE_NAME_MAX = 32;
+  const STEP_LINES = 2, CENTRE_NAME_MAX = 32;
   /** What the centre draws for one session: its real state (never invented) and its real tool steps (none -> no step lines at all). */
   function centreView(row, ctx) {
     if (!row || typeof row !== 'object' || typeof row.id !== 'string') return null;
@@ -176,7 +176,7 @@
     const v = o.view;
     if (v && v.state === 'error') return null;
     if (v && v.state === 'ready' && Array.isArray(v.rows) && v.rows.length) return null;
-    return { title: 'Todo tranquilo', sub: 'Nada en marcha por ahora. Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } };
+    return { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } };
   }
 
   // ---- D: «Pi terminó» in the centre, the result untruncated ----------------------------------------------------------------------

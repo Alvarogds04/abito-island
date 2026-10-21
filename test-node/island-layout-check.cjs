@@ -237,7 +237,7 @@ test('CSS: the columns add up to the 620px overview — status 108 | centre | 8 
   assert.equal(list.display, 'flex');
   assert.equal(list['flex-direction'], 'column');
   const row = decls('.pill-choice');
-  assert.equal(px(row.height), 32);
+  assert.equal(px(row.height), 22, 'rows are 22px: 3 fully visible even with the 28px notices band over the top of the card (screen gate: only ~1.5 were)');
   assert.equal(row.width, '100%', 'one blob per row, full width of the column');
 });
 test('CSS: focus mode — the card takes left + centre and the blobs shrink to a 64px mascot column (names hidden, dots kept)', () => {
@@ -274,13 +274,13 @@ test('wiring: notify.js renders approvalView (badge, mono box, Rechazar/Aprobar)
   assert.match(css, /#question-approval \.q-cmd \{[^}]*font: 400 12px var\(--mono\)/, 'the command in a mono well');
   assert.match(css, /#question\[data-look="approval"\]/);
   assert.equal(decls('.q-approval-btn.q-approve::after').background, 'var(--ink)', 'Aprobar is the primary (white) pill');
-  assert.equal(decls('.q-approval-btn.q-approve').color, '#0b0c0e', 'dark text on it');
+  assert.equal(decls('.q-approval-btn.q-approve').color, 'var(--island, #0b0c0e)', 'the island colour on the ink pill: readable in BOTH themes (the first build hardcoded dark ink)');
 });
 
 // ---- the notices band must not cover the blobs list; calm gives the room back ---------------------------------------------------
-test('CSS: the blobs card leaves the 44px notices band free; a calm strip (nothing to say) gives that room back', () => {
-  assert.equal(px(decls('#blobs')['padding-top']), 44, 'the band (y42..86 of the island) owns the top of the right card');
-  assert.equal(px(decls('#capsule[data-notices-calm="true"] #blobs')['padding-top']), 0);
+test('CSS: the blobs card leaves the 28px notices band free (32px with air); a calm strip and focus mode give that room back', () => {
+  assert.equal(px(decls('#capsule[data-notices-calm="false"]:not([data-layout="focus"]) #blobs')['padding-top']), 32, 'the 28px band + 4px of air owns the top of the card');
+  assert.equal(px(decls('#capsule[data-notices-calm="true"] #blobs')['padding-top']), 0, 'calm: nothing to say, the rows start at the top');
   assert.equal(px(decls('#capsule[data-layout="focus"] #blobs')['padding-top']), 0, 'focus mode hides the band behind the question card');
 });
 
@@ -325,9 +325,9 @@ test('centreView: name, agent, REAL state word and real tool steps; no steps -> 
   const tools = { total: 4, steps: [{ index: 2, name: 'read', state: 'done' }, { index: 3, name: 'grep', state: 'done' }, { index: 4, name: 'bash', state: 'running' }] };
   const t = L.centreView(row({ state: 'sleeping', tools }));
   assert.equal(t.state, 'working', 'a running tool overrides the process state');
-  assert.deepEqual(t.steps.map(x => [x.name, x.state]), [['read', 'done'], ['grep', 'done'], ['bash', 'running']]);
+  assert.deepEqual(t.steps.map(x => [x.name, x.state]), [['grep', 'done'], ['bash', 'running']], 'the last 2 steps: that is what fits the 94px centre next to the state line and the footer row');
   assert.equal(t.count, '4/4');
-  assert.deepEqual(t.steps.map(x => x.current), [false, false, true], 'the running step is the current one');
+  assert.deepEqual(t.steps.map(x => x.current), [false, true], 'the running step is the current one');
   const done = L.centreView(row({ tools: { total: 2, steps: [{ index: 1, name: 'read', state: 'done' }, { index: 2, name: 'bash', state: 'done' }] } }));
   assert.equal(done.steps.at(-1).current, true, 'when nothing runs the last step is the current one');
   const err = L.centreView(row({ tools: { total: 1, steps: [{ index: 1, name: 'bash', state: 'error' }] } }));
@@ -341,10 +341,10 @@ test('centreView: a session waiting for the human says so ONLY when the pending 
   assert.equal(L.centreView(row(), { attributedId: 's-0000000b' }).state, 'idle', 'someone else\'s question is not this session\'s state');
   assert.equal(L.centreView(row({ state: 'running' }), { attributedId: 's-0000000a' }).state, 'waiting', 'waiting beats working');
 });
-test('centreView: steps are bounded to what fits (last 3) and a long name is cut for the column', () => {
+test('centreView: steps are bounded to what fits (last 2) and a long name is cut for the column', () => {
   const steps = Array.from({ length: 6 }, (_, i) => ({ index: i + 1, name: `tool${i}`, state: 'done' }));
-  assert.equal(L.centreView(row({ tools: { total: 6, steps } })).steps.length, 3);
-  assert.equal(L.centreView(row({ tools: { total: 6, steps } })).steps[2].name, 'tool5');
+  assert.equal(L.centreView(row({ tools: { total: 6, steps } })).steps.length, 2);
+  assert.equal(L.centreView(row({ tools: { total: 6, steps } })).steps[1].name, 'tool5');
   const long = L.centreView(row({ cwd: 'un-proyecto-con-un-nombre-larguisimo-de-verdad' }));
   assert.ok(Array.from(long.name).length <= 32 && long.name.endsWith('…'), long.name);
 });
@@ -352,7 +352,7 @@ test('centreView: steps are bounded to what fits (last 3) and a long name is cut
 // ---- I: the empty state in the centre, with a CTA ------------------------------------------------------------------------------
 test('emptyView: nothing running -> «Todo tranquilo» + «Nueva conversación»; failures and unknown states are NOT empty', () => {
   const e = L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [] }), pending: null, finished: false });
-  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Nada en marcha por ahora. Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } });
+  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } });
   assert.deepEqual(L.emptyView({ view: null, pending: null, finished: false }).cta.action, 'new-chat', 'no list yet and nothing pending: still a calm empty centre');
   assert.equal(L.emptyView({ view: { state: 'error' }, pending: null, finished: false }), null, 'a failed list is not "everything is calm": the engine row owns that');
   assert.equal(L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [{ id: 's-0000000a', kind: 'pi', cwd: 'x', state: 'sleeping', origin: null }] }), pending: null, finished: false }), null, 'a session exists: the centre shows it');

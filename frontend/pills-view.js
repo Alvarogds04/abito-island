@@ -16,10 +16,9 @@
   }
   const A = root.AbitoAvatarColors;
   let prefs = {}, version = 0, busy = false, sessions = null, sessionFocus = null;
-  const sessionRows = () => {
-    const kept = new Set([prefs.mainPill, ...(prefs.declaredPills || [])]);
-    return (root.AbitoSessionsTicker?.sessionRows(sessions, prefs) || []).filter(r => r.tools || r.id === sessionFocus || kept.has(r.sourcePill));
-  };
+  // A+E: EVERY live session is a blob (the column scrolls); the old filter only let through sessions with tool steps, the focused
+  // one or those of a declared source, so a plain Claude/Codex session never reached the right column.
+  const sessionRows = () => root.AbitoSessionsTicker?.sessionRows(sessions, prefs) || [];
   const selectSession = id => {
     focused = null;
     doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: null } }));
@@ -57,8 +56,10 @@
   // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
   // A+E: the right column is ONE scrolling list. The human's declared pills (Abito, specialists, integrations) come FIRST and are
   // never pushed out; the live agent sessions follow. No cap of four: the column scrolls.
+  // The focused INTEGRATION leaves the column (it becomes the left card); the focused SESSION stays a row, marked pressed: the centre
+  // shows it, and the human needs the row to know which one it is and to pick another.
   const gridRows = all => {
-    const rest = all.filter(r => r.id !== focused && r.id !== sessionFocus);
+    const rest = all.filter(r => r.id !== focused);
     return [...rest.filter(r => !r.session), ...rest.filter(r => r.session)];
   };
   const CARD_PILLS = Object.freeze({ integration_github: 'GitHub', integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
@@ -79,7 +80,11 @@
     return out[0] ? out[0].status : 'idle';
   };
   let attributedId = null;
-  doc.addEventListener('abito:layout', e => { const next = e.detail ? e.detail.attributedId : null; if (next !== attributedId) { attributedId = next; paint(); } });
+  let layoutMode = 'normal';
+  doc.addEventListener('abito:layout', e => {
+    const next = e.detail ? e.detail.attributedId : null, mode = e.detail && e.detail.mode === 'focus' ? 'focus' : 'normal';
+    if (next !== attributedId || mode !== layoutMode) { attributedId = next; layoutMode = mode; paint(); }
+  });
   function focusIntegration(id) {
     focused = id; badges.delete(id);
     doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: focused } }));
@@ -155,7 +160,9 @@
     // E (focus mode): the 64px column keeps up to four mascots and says «+N» for the rest; the others are hidden by CSS only here.
     const L = root.AbitoIslandLayout, more = get('blobs-more');
     if (L) {
-      const o = L.focusOverflow(buttons.map(b => ({ id: b.dataset.pillId })));
+      // «+N» only exists in focus mode (the 64px mascot column); in the normal column every row is reachable by scrolling
+      const focusMode = capsule.dataset.layout === 'focus';
+      const o = focusMode ? L.focusOverflow(buttons.map(b => ({ id: b.dataset.pillId }))) : { shown: buttons.map(b => ({ id: b.dataset.pillId })), more: 0 };
       const shown = new Set(o.shown.map(r => r.id));
       for (const b of buttons) b.dataset.overflow = shown.has(b.dataset.pillId) ? 'false' : 'true';
       if (more) { more.hidden = !o.more; more.textContent = o.more ? `+${o.more}` : ''; more.setAttribute('aria-label', o.more ? `${o.more} más` : ''); }

@@ -158,7 +158,10 @@ test('A02b session pills focus projects without changing the conversation target
   const publish = id => b.doc.dispatchEvent({ type: 'abito:sessions-view', detail: { view, focusId: id } });
   publish('s-11111111');
   assert.ok(b.get('pill-choice-s-22222222'), 'the other project appears in the grid');
-  assert.equal(b.get('pill-choice-s-11111111'), null, 'the focused session is not duplicated in the grid');
+  // A+E: the focused session STAYS a row of the blobs column (marked pressed): the centre shows it and the human needs the row to know
+  // which one it is. (Never pass a DOM node to assert.equal: a failing diff of a node graph exhausts the heap.)
+  assert.ok(b.get('pill-choice-s-11111111') !== null, 'the focused session keeps its row');
+  assert.equal(b.get('pill-choice-s-11111111').getAttribute('aria-pressed'), 'true', 'and it is the pressed one');
   b.click('pill-choice-s-22222222', { isTrusted: false }); assert.equal(requests.length, 0);
   b.click('pill-choice-s-22222222'); assert.equal(requests.at(-1), 's-22222222');
   publish('s-22222222');
@@ -405,7 +408,7 @@ test('#460 E2 General groups: Perfil / Isla / Sonido / Atajo global, name in Per
   const name = b.get('settings-display-name');
   assert.ok(name, 'the display name moved into PERFIL on the General tab');
   assert.equal(name.getAttribute('placeholder'), 'Tu nombre (opcional)');
-  assert.equal(b.get('sw-settings-window'), null, '#455: the window replaces placement choices');
+  assert.ok(b.get('sw-settings-window') === null, '#455: the window replaces placement choices');
   assert.equal(b.doc.body.dataset.window, 'settings');
   assert.equal(b.get('settings-tabs').getAttribute('aria-orientation'), 'vertical');
   assert.equal(b.get('settings-tab-general').tabIndex, 0);
@@ -768,8 +771,8 @@ test('#442 Ajustes → Blobs paints the principal (Abito), the agent tiles from 
   assert.equal(b.get('blob-principal-card').getAttribute('aria-label'), 'Abito: siempre en la isla');
   assert.deepEqual(allByClass(b.get('blob-agent-grid'), 'blob-tile').map(x => x.dataset.agentId), ['esp-a', 'esp-b']);
   assert.equal(b.get('blob-count').textContent, '2/3');
-  assert.equal(b.get('pill-principal-card'), null, 'the old principal card is gone');
-  assert.equal(b.get('pill-editor-main'), null, 'the per-tile «Principal» button is removed (design §4)');
+  assert.ok(b.get('pill-principal-card') === null, 'the old principal card is gone');
+  assert.ok(b.get('pill-editor-main') === null, 'the per-tile «Principal» button is removed (design §4)');
   assert.deepEqual(writes(b), []); assert.deepEqual(b.backend.specCalls, []); assert.equal(b.backend.writes, 0);
   const scripts = [...read('index.html').matchAll(/src="([^"]+\.js)"/g)].map(x => x[1]);
   assert.ok(scripts.indexOf('pills.js') < scripts.indexOf('pill-settings.js'));
@@ -808,7 +811,7 @@ test('#442 colour is the avatar colour of the SAME id; the principal colour is a
 
 test('#442 «Activo» and the arrows write ONE closed set_island_agents (≤3); the third slot refuses a fourth', async () => {
   const b = await settingsBoot({ specs: [...SPECS, { id: 'esp-c', name: 'Correo', instructions: 'Correo' }, { id: 'esp-d', name: 'Cuarto', instructions: 'Cuarto' }] });
-  assert.equal(b.get('blob-count').textContent, '3/3'); assert.equal(b.get('blob-tile-new'), null, 'lleno 3/3');
+  assert.equal(b.get('blob-count').textContent, '3/3'); assert.ok(b.get('blob-tile-new') === null, 'lleno 3/3');
   assert.ok(b.get('blob-stored'), 'the fourth is kept and reachable');
   b.click('blob-editor-right'); await flush();
   assert.deepEqual(writes(b).map(x => x.payload), [{ action: 'set_island_agents', order: ['esp-b', 'esp-a', 'esp-c'] }]);
@@ -886,7 +889,7 @@ test('#442 «Guardados de antes»: a stored custom blob becomes an agent only on
   assert.equal(made.name, 'Música');
   assert.deepEqual(writes(b).map(x => x.payload).slice(0, 1), [{ action: 'set_avatar_color', identity: made.id, color: 'purple' }]);
   assert.deepEqual(b.backend.prefs.customBlobs.map(x => x.name), ['Música'], 'the original stored entry is NOT removed');
-  assert.equal(b.get('blob-saved-before'), null, 'it is no longer offered once it has an agent');
+  assert.ok(b.get('blob-saved-before') === null, 'it is no longer offered once it has an agent');
 });
 
 test('#442 deleting an agent needs the inline confirmation; synthetic gestures and a failed delete change nothing', async () => {
@@ -1235,6 +1238,20 @@ test('A+E: five declared integrations all stay in the right column (it scrolls; 
   b.get('pill-choices').children[3].fire('click');
   assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_vercel', 'integration_stripe', 'integration_resend'], 'the focused one is the card, not a row');
   assert.doesNotMatch(read('style.css'), /#pill-choices \.pill-choice:nth-child\(n\+5\)\s*\{\s*display:\s*none/, 'the CSS belt that hid the fifth is gone');
+});
+
+test('A+E: EVERY live session is a blob in the right column (not only those with tool steps or a declared source); the column scrolls', async () => {
+  const b = boot({ specs: SPECS, prefs: {} }); b.load('specialists.js'); await flush();
+  b.backend.sessionRows = [
+    { id: 's-11111111', kind: 'pi', cwd: 'alpha', origin: null, state: 'sleeping' },
+    { id: 's-22222222', kind: 'claude-code', cwd: 'beta', origin: null, state: 'running' },
+    { id: 's-33333333', kind: 'codex', cwd: 'gamma', origin: null, state: 'sleeping' },
+    { id: 's-44444444', kind: 'gemini', cwd: 'delta', origin: null, state: 'sleeping' },
+  ];
+  b.load('sessions-ticker.js'); await flush(); await flush();
+  const ids = b.get('pill-choices').children.map(n => n.dataset.pillId);
+  for (const id of ['s-11111111', 's-22222222', 's-33333333', 's-44444444']) assert.ok(ids.includes(id), `${id} is a blob row: ${ids}`);
+  assert.deepEqual(ids.slice(0, 3), ['abito', 'esp-a', 'esp-b'], 'declared first, sessions after');
 });
 
 test('the session key sent for the terminal is always the well-formed row id, else none (never page text)', async () => {

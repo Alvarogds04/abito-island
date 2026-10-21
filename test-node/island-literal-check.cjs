@@ -67,15 +67,15 @@ test('who row and ticker: 600 12px name, 400 11px tool, 500 13px/22px rows, 108p
   assert.equal(d.left, '108px'); assert.equal(d.height, '44px'); assert.equal(d.font, '500 13px/22px var(--font)');
 });
 
-test('blobs (A+E): one pill per row, 32px, full width, (r999, card-flat, .14 border), label left of the status dot', () => {
+test('blobs (A+E): one pill per row, 22px, full width, (r999, card-flat, .14 border), label left of the status dot', () => {
   const g = decls('#pill-choices');
-  assert.equal(g.display, 'flex'); assert.equal(g['flex-direction'], 'column'); assert.equal(g.padding, '6px 8px'); assert.equal(g.gap, '4px');
+  assert.equal(g.display, 'flex'); assert.equal(g['flex-direction'], 'column'); assert.equal(g.padding, '1px 6px'); assert.equal(g.gap, '2px');
   assert.equal(g['overflow-y'], 'auto');
   const p = decls('.pill-choice');
-  assert.equal(p.height, '32px'); assert.equal(p.width, '100%'); assert.equal(p['border-radius'], '999px'); assert.equal(p.background, 'var(--card-flat)');
+  assert.equal(p.height, '22px'); assert.equal(p.width, '100%'); assert.equal(p['border-radius'], '999px'); assert.equal(p.background, 'var(--card-flat)');
   assert.match(p.border, /rgba\(255, 255, 255, 0\.14\)/); assert.equal(p.font, '600 10px var(--font)'); assert.equal(p.color, 'var(--dim-3)');
-  assert.equal(decls('.pill-choice span:not(.ico)').padding, '0 24px 0 34px');
-  assert.equal(decls('.pill-choice .island-agent-clay')['margin-left'], '5px');
+  assert.equal(decls('.pill-choice span:not(.ico)').padding, '0 22px 0 30px');
+  assert.equal(decls('.pill-choice .island-agent-clay')['margin-left'], '4px');
 });
 
 test('pill hit area extends 2px into every 4px gap (no overlap between neighbours)', () => {
@@ -109,9 +109,9 @@ test('fold and info: 16px round visual (inset 14 of 44), glyph 8px, 44px hit kep
   assert.equal(decls('#permission .icon-btn .ico svg').width, '8px');
 });
 
-test('notices: 44px band on the right card; a confirmed notice takes the whole 620px card, 108 by default and as tall as its wrapped result needs (--finished-h)', () => {
+test('notices (A+E): a 28px band over the TOP of the blobs card (x446..620, the card pads 32px for it); a confirmed notice takes the whole 620px card, 108 by default and as tall as its wrapped result needs (--finished-h)', () => {
   const n = decls('#notices');
-  assert.equal(n.left, 'calc(50% + 22px)'); assert.equal(n.width, '288px'); assert.equal(n.height, '44px'); assert.equal(n.top, '42px');
+  assert.equal(n.left, 'calc(50% + 136px)'); assert.equal(n.width, '174px'); assert.equal(n.height, '28px'); assert.equal(n.top, '42px');
   const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
   assert.equal(lane.width, '620px'); assert.equal(lane.padding, '4px 16px 4px 116px');
   assert.equal(lane.height, 'var(--finished-h, 108px)', 'D: 108 unless a long result asked for more');

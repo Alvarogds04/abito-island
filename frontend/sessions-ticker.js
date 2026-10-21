@@ -251,7 +251,8 @@ function mount(V) {
   const who = mkEl('div', 'who'); who.hidden = true;
   const whoName = mkEl('span', 'name'), whoTool = mkEl('span', 'tool'), whoCount = mkEl('span', 'count');
   who.append(mkEl('span', 'who-dot'), whoName, whoTool, whoCount);
-  leftCard.append(who);
+  // the «Ver todas» link lives in the centre column's footer row, next to the Pi status row: ONE row, never two stacked on one line
+  (leftCard.querySelector('#centre-foot') || leftCard).append(who);
   let ticker = null, raf = 0, shownSession = null, lastView = null, prefs = {}, integrationFocused = false;
   const jump = mkEl('button', 'icon-btn jump', '↗'); jump.id = 'session-jump'; jump.type = 'button'; jump.hidden = true;
   leftCard.append(jump);

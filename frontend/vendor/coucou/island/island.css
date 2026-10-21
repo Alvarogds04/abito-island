@@ -901,3 +901,66 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .who .name, .who .tool, .who .count, .who .who-dot { display: none; }
 .card-left > .ticker { display: none; }
 .card-left > .who { top: auto; bottom: 6px; left: 108px; right: 12px; justify-content: flex-start; }
+
+
+/* ══ A+E geometry fix (screen gate 48/5/6): everything in the left card flows inside ONE column, nothing is stacked on the same y ═══
+   Island 640x160, cards y42..150 (108). Left card x26..464 (438): mascot column 108 | centre | jump 44 (top right). Right card x472..646 (174).
+   Centre column (flex, top 8 bottom 6 => 94px): state line 17 + 6 + 2 step lines 40 + 6 + footer row 19 = 88.
+   Footer row = the Pi status row + «Ver todas» on ONE line. Status counts live under the mascot (10px/10px, 2 lines = 20px). */
+.col-centre { top: 8px; bottom: 6px; right: 56px; overflow: hidden; }
+.col-centre > * { flex: 0 0 auto; }
+.centre-steps { flex: 0 1 auto; min-height: 0; }
+.centre-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 19px; pointer-events: auto; }
+.centre-foot > .engine-row-live, .centre-foot > .who { position: static; margin: 0; top: auto; right: auto; bottom: auto; left: auto; flex: 0 0 auto; min-width: 0; }
+.centre-foot > .engine-row-live { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; }
+.centre-foot > .who { display: flex; }
+.centre-foot > .who[hidden] { display: none; }
+.centre-foot .engine-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* the Pi status row shows whenever Pi is not working (also with no session at all: the old idle card that carried it is gone) */
+#overview-view:not([data-ticker="on"]) .engine-row-live { display: flex; }
+.engine-row-live[hidden] { display: none !important; }
+.col-status { top: auto; bottom: 1px; left: 12px; width: 96px; font: 400 10px/10px var(--font); gap: 0; }
+/* the centre's empty state fits the column: one-line sub, the CTA's 44px hit box counted */
+.centre-empty { margin-top: 0; gap: 4px; }
+.centre-empty-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+#centre-cta { margin: 0; }
+.col-centre[data-engine="on"] .centre-empty-sub { display: none; }
+/* the blobs card: full 108px; rows are 24px (3 fully visible even with the 28px notices band over them), the list scrolls */
+#blobs { padding-top: 0; }
+.pill-choice { height: 22px; min-height: 22px; flex: 0 0 22px; }
+.pill-choice .island-agent-clay { width: 18px; height: 18px; margin-left: 4px; }
+.pill-choice span:not(.ico) { padding: 0 22px 0 30px; }
+#pill-choices { gap: 2px; padding: 1px 6px; }
+/* the notices band sits over the TOP of the blobs card, 28px: the capsule (Coucou's 28px pill) or the chips row, never both stacked */
+#notices, #capsule[data-view="overview"] #notices[data-grouped="true"] { left: calc(50% + 136px); width: 174px; top: 42px; height: 28px; padding: 0 4px; }
+#notices { gap: 0; }
+#notice-row { min-height: 28px; padding-right: 28px; gap: 0 4px; flex-wrap: nowrap; overflow: hidden; }
+#notice-row .chip { min-height: 22px; }
+/* the 44px hit area of × and «i» is an accessibility rule of this repo: kept, with a NEGATIVE margin so the 28px band is not stretched */
+#notice-info { top: -8px; right: -8px; min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
+#notice-pill { margin: 0 28px 0 0; height: 28px; min-height: 28px; }
+#capsule #notice-dismiss, #capsule #notice-info { min-width: 44px; min-height: 44px; flex: 0 0 44px; margin: -8px -10px -8px -12px; }
+#capsule[data-view="overview"] #notices:has(#notice-pill:not([hidden])) #notice-row { display: none; }
+#capsule[data-notices-calm="false"]:not([data-layout="focus"]) #blobs { padding-top: 28px; }
+#capsule[data-notices-calm="true"] #blobs { padding-top: 0; }
+
+/* the notices band floats OVER the top of the blobs card (the card has padding for it): it must also receive the clicks there */
+#notices { z-index: 3; }
+#blobs { z-index: 1; }
+
+
+/* ══ Themes: the A+E additions must read in BOTH themes (the first build drew dark ink on dark in the light theme) ═══════════════════
+   Primary pills use the theme's ink as background and its island colour as text; wells and fills are alpha over ink, not over white. */
+html[data-theme="light"] #centre-cta::after, html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--ink); }
+#centre-cta, .q-approval-btn.q-approve { color: var(--island, #0b0c0e); }
+html[data-theme="light"] #centre-cta, html[data-theme="light"] .q-approval-btn.q-approve { color: var(--surface, #fbf8f1); }
+#question-approval .q-cmd { color: var(--ink); background: var(--fill, rgba(255, 255, 255, 0.07)); border-color: var(--card-line, rgba(255, 255, 255, 0.06)); }
+.q-sum-row { background: var(--fill, rgba(255, 255, 255, 0.06)); }
+.q-kbd { color: inherit; }
+html[data-theme="light"] .q-approval-btn::after { background: var(--btn-bg); }
+html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--ink); }
+#question-approval-badge { color: #000; }
+
+/* air between the notices capsule and the first blob row (its ring/shadow used to touch the row below) */
+#capsule[data-notices-calm="false"]:not([data-layout="focus"]) #blobs { padding-top: 32px; }
+#capsule[data-notices-calm="false"]:not([data-layout="focus"]) #notices { box-shadow: none; }

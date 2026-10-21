@@ -648,6 +648,7 @@
   // row: the idle card and the strip under the ticker (the ticker covers the idle card while sessions are listed).
   function paintEngine() {
     engineRow = O.engineRowView(lastConn, piState);
+    const centreEl = $('col-centre'); if (centreEl) centreEl.dataset.engine = engineRow ? 'on' : 'off';
     for (const [box, label, link] of [['overview-engine', 'overview-engine-label', 'overview-engine-link'], ['overview-engine-live', 'overview-engine-live-label', 'overview-engine-live-link']]) {
       const el = $(box);
       if (!el) continue;
