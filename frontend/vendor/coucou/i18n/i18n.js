@@ -70,6 +70,7 @@ const messages = {
   "{count} review": "{count} revisión",
   "{count} reviews": "{count} revisiones",
   "no CI": "sin CI",
+  "See all ({count}) →": "Ver todas ({count}) →",
   "CI: {state}": "CI de la rama: {state}",
   // S10 (L30): weekly recap (views/recap.ts, recap/summary.ts)
   "Weekly recap": "Resumen semanal",

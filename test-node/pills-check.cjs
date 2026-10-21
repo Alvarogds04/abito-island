@@ -1146,7 +1146,8 @@ test('#489 declared integration pills with a live poller show with their colour;
   const focus = []; b.events['abito:integration-focus'] = [e => focus.push(e.detail.id)];
   n8n.fire('click', { isTrusted: false }); assert.deepEqual(focus, []);
   n8n.fire('click'); assert.deepEqual(focus, ['integration_n8n']);
-  assert.deepEqual(ids(), base, 'Coucou: the focused pill is the card, not a grid cell');
+  assert.deepEqual(ids(), [...base, 'integration_n8n'], 'design 16: the focused pill is the card AND stays a marked row of the column');
+  assert.equal(b.get('pill-choice-integration_n8n').getAttribute('aria-pressed'), 'true'); assert.equal(b.get('pill-choice-integration_n8n').dataset.centre, 'true');
   assert.equal(b.backend.specCalls.length, 0, 'never a chat target');
   assert.equal(b.get('pill-name').textContent, 'Abito');
   b.click('pill-choice-esp-a'); await flush();
@@ -1171,7 +1172,8 @@ test('GitHub declared + connected shows a pill; trusted focus opens its card wit
   b.click('pill-choice-integration_github'); await flush();
   assert.equal(card.hidden, false); assert.match(card.textContent, /GitHub 17/);
   assert.equal(b.get('overview-view').dataset.github, 'on');
-  assert.deepEqual(ids(), ['abito', 'integration_n8n'], 'focused pill is the left card');
+  assert.deepEqual(ids(), ['abito', 'integration_github', 'integration_n8n'], 'the focused pill is the left card and its row stays IN PLACE, marked active');
+  assert.equal(b.get('pill-choice-integration_github').getAttribute('aria-pressed'), 'true'); assert.equal(b.get('pill-choice-integration_github').dataset.centre, 'true');
   assert.equal(b.backend.specCalls.length, 0); assert.equal(b.backend.writes, 0);
   b.click('pill-choice-integration_n8n'); assert.equal(card.hidden, true, 'focusing another integration hides GitHub');
   b.click('pill-choice-integration_github');
@@ -1211,7 +1213,7 @@ test('A+E: the right column has NO four-cell cap (every declared pill stays); th
   // human (A+E): «las sesiones empujan las pastillas declaradas» — the column scrolls instead of dropping anything
   assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_github', 'integration_n8n', 'integration_vercel']);
   b.click('pill-choice-integration_github');
-  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_n8n', 'integration_vercel'], 'the focused pill is the card, not a row');
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_github', 'integration_n8n', 'integration_vercel'], 'design 16: the focused pill is the card AND keeps its (marked) row');
   assert.equal(b.leftCard.children[0].hidden, false, 'the focused card still shows');
 });
 
@@ -1225,7 +1227,7 @@ test('#489 an unseen event puts a badge on an unfocused integration pill; focusi
   assert.match(pill().getAttribute('aria-label'), /con novedades/);
   pill().fire('click');
   b.doc.dispatchEvent({ type: 'abito:integration-focus', detail: { id: null } });
-  assert.equal(b.get('pill-choices').children.length, 1, 'focused: out of the grid');
+  assert.equal(b.get('pill-choices').children.length, 2, 'focused: still a marked row of the column');
   b.click('pill-choice-abito'); await flush();
   assert.equal(pill().dataset.badge, 'false', 'focusing cleared it');
 });
@@ -1236,7 +1238,7 @@ test('A+E: five declared integrations all stay in the right column (it scrolls; 
   const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
   assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'], 'nothing is dropped');
   b.get('pill-choices').children[3].fire('click');
-  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_vercel', 'integration_stripe', 'integration_resend'], 'the focused one is the card, not a row');
+  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'], 'the focused one is the card and keeps its marked row');
   assert.doesNotMatch(read('style.css'), /#pill-choices \.pill-choice:nth-child\(n\+5\)\s*\{\s*display:\s*none/, 'the CSS belt that hid the fifth is gone');
 });
 

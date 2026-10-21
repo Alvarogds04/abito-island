@@ -70,6 +70,7 @@ const GH_STRINGS = {
   get noCI() {
     return t("no CI");
   },
+  seeAll: (n) => t("See all ({count}) →", { count: n }),
   mainCIAria: (state) => t("CI: {state}", { state }),
   get noContributions() {
     return t("No contributions");

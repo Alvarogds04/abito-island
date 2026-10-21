@@ -413,6 +413,16 @@ test('S14 composer: a 44px microphone sits before the send disc, hidden until di
   assert.match(chat, /e\.isTrusted === true/, 'a synthetic click never opens the microphone');
   assert.ok(require(path.join(__dirname, '..', 'frontend', 'icons.js')).NAMES.includes('mic'));
 });
+test('S14 validation: the mic is a full 44px disc and the send disc is a solid primary (white) that only dims, never greys out, for an empty draft', () => {
+  const isl = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'vendor', 'coucou', 'island', 'island.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const last = sel => { const m = [...isl.matchAll(new RegExp('(?:^|\\n)' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}', 'g'))]; return m.length ? m[m.length - 1][1] : ''; };
+  assert.match(last('#chat-composer #chat-mic::after'), /inset:\s*0\b/, 'the visible mic disc is the whole 44px box (it was a 28px disc inside it)');
+  assert.match(last('#chat-composer #chat-send::after'), /inset:\s*0\b/, 'and so is the send disc');
+  assert.match(last('#chat-composer #chat-send::after'), /background:\s*var\(--ink\)/, 'white primary');
+  const dim = /opacity:\s*(0?\.\d+)/.exec(last('#chat-send:disabled::after'));
+  assert.ok(dim && Number(dim[1]) >= 0.6, 'an empty draft only dims the white disc (>= .6), it does not turn it grey: ' + (dim && dim[1]));
+  assert.doesNotMatch(last('#chat-send:not(:disabled)::after') + last('#chat-send::after'), /opacity:\s*0?\.[0-8]/, 'enabled is fully opaque');
+});
 test('S14 focus: the chat field\'s focus is a 1px accent edge (never the lime halo)', () => {
   assert.match(rule('#chat-input:focus-visible'), /outline:\s*1px solid var\(--island-live\)/);
 });

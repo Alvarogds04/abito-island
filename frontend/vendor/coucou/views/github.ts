@@ -85,7 +85,10 @@ export function githubPulseCard(
   mainBtn.style.color = main.color;
   head.append(mainBtn);
 
-  return h("div", { class: "int-card" }, head, listBody(pulse.myPRs.map((pr) => prRow(pr, true))));
+  // At most four rows; the rest is one tap away on github.com (the list also scrolls inside the card).
+  const shown = pulse.myPRs.slice(0, MAX_ROWS).map((pr) => prRow(pr, true));
+  if (pulse.myPRs.length > MAX_ROWS) shown.push(allRow(pulse));
+  return h("div", { class: "int-card" }, head, listBody(shown));
 }
 
 // ── Detail: lists ─────────────────────────────────────────────────────────────
@@ -97,6 +100,16 @@ function backButton(title: string, onBack: () => void): HTMLElement {
     svg(ICONS.chevronLeft, 9, { stroke: 2.6 }),
     h("span", { text: title }),
   );
+}
+
+const MAX_ROWS = 4;
+
+/** «Ver todas (N) →»: the full open-PR list of the user on github.com (login URL-encoded; github.com only). */
+function allRow(pulse: GitHubPulse): HTMLElement {
+  const go = () => open(`https://github.com/pulls?q=${encodeURIComponent("is:pr is:open author:" + pulse.login).replace(/%20/g, "+")}`);
+  const el = h("button", { class: "gh-all", onclick: go, text: GH_STRINGS.seeAll(pulse.myPRs.length) });
+  rowOpens.set(el, go);
+  return el;
 }
 
 const CI_ICON: Record<GitHubPR["ci"], string> = {
@@ -119,11 +132,11 @@ function ciText(ci: GitHubPR["ci"]): string {
 const rowOpens = new WeakMap<Element, () => void>();
 
 /** A 36px row: state icon, two lines of text, and an explicit [Abrir] — the row itself is not a button. */
-function row(onOpen: () => void, ref: string, openLabel: string, ci: GitHubPR["ci"], line1: HTMLElement[], tail: (HTMLElement | null)[]): HTMLElement {
+function row(onOpen: () => void, ref: string, fullTitle: string, ci: GitHubPR["ci"], line1: HTMLElement[], tail: (HTMLElement | null)[]): HTMLElement {
   const open = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
   const el = h(
     "div",
-    { class: "gh-row" },
+    { class: "gh-row", title: `${ref} ${fullTitle}` },
     ciIcon(ci),
     h("span", { class: "gh-text" },
       h("span", { class: "gh-line1" }, ...line1),
@@ -131,22 +144,21 @@ function row(onOpen: () => void, ref: string, openLabel: string, ci: GitHubPR["c
     open,
   );
   rowOpens.set(el, onOpen);
-  void openLabel;
   return el;
 }
 
 function prRow(pr: GitHubPR, _showCI: boolean): HTMLElement {
   const ref = `${shortRepo(pr.repo)}#${pr.number}`;
   return row(
-    () => open(pr.url), ref, ref, pr.ci,
-    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", text: pr.title })],
+    () => open(pr.url), ref, pr.title, pr.ci,
+    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", title: `${ref} ${pr.title}`, text: pr.title })],
     [pr.isDraft ? h("span", { class: "gh-draft", text: `· ${GH_STRINGS.draft}` }) : null],
   );
 }
 
 function repoRow(repo: GitHubRepoCI): HTMLElement {
   return row(
-    () => open(actionsUrl(repo.url)), shortRepo(repo.repo), shortRepo(repo.repo), repo.ci,
+    () => open(actionsUrl(repo.url)), shortRepo(repo.repo), repo.branch, repo.ci,
     [h("span", { class: "gh-ref", text: shortRepo(repo.repo) }), h("span", { class: "gh-title", text: repo.branch })],
     [],
   );
