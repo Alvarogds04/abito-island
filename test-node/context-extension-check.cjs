@@ -21,10 +21,23 @@ assert.ok(js.includes(`<interface name="${rsConst('INTERFACE')}">`));
 assert.ok(js.includes(`<method name="${rsConst('METHOD')}">`));
 assert.ok(js.includes('type="a(sss)"'));
 assert.ok(js.includes(`${rsConst('METHOD')}()`));
-// read-only and local: nothing that acts on windows, spawns, or reaches the network
-for (const bad of ['activate(', 'kill', 'GLib.spawn', 'Soup', 'Gio.Subprocess', 'get_pid', 'win.get_id', 'get_stable_sequence', 'move_']) {
+// local, and read-only EXCEPT ONE method (v2, ActivateByPid): it may only RAISE the window of one pid. Nothing
+// else may act on windows, spawn, or reach the network, and no window id or pid ever leaves the extension.
+for (const bad of ['kill', 'GLib.spawn', 'Soup', 'Gio.Subprocess', 'win.get_id', 'get_stable_sequence', 'move_', 'eval(']) {
   assert.ok(!js.includes(bad), `extension must not use ${bad}`);
 }
+// the two acting/pid-reading calls exist ONLY inside ActivateByPid
+const outside = js.replace(/ActivateByPid\(pid\) \{[\s\S]*?\n    \}\n/, '');
+for (const acting of ['activate(', 'get_pid']) {
+  assert.ok(js.includes(acting), `${acting} is used by ActivateByPid`);
+  assert.ok(!outside.includes(acting), `${acting} must not appear outside ActivateByPid`);
+}
+assert.strictEqual(meta.version, 2, 'a changed contract is a new extension version');
+assert.ok(js.includes('<method name="ActivateByPid">') && js.includes('type="u" direction="in" name="pid"') && js.includes('type="b" direction="out" name="activated"'));
+// it never answers with anything but a boolean: no pid, id, title or geometry
+const body = /ActivateByPid\(pid\) \{([\s\S]*?)\n    \}\n/.exec(js)[1];
+const returns = [...body.matchAll(/return ([^;]*);/g)].map(m => m[1].trim());
+assert.ok(returns.length >= 2 && returns.every(r => r === '[true]' || r === '[false]'), `only [true] / [false]: ${returns}`);
 assert.ok(/Copyright \(c\) 2026 Louis Raillé, MIT/.test(js), 'citation present');
 assert.ok(js.includes('<method name="GetWindowAt">'), 'additive point query');
 assert.ok(js.includes('type="a(sssiiii)"'), 'one geometry tuple, no ids');

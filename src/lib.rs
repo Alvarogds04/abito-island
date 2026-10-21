@@ -31,6 +31,7 @@ pub mod desktop;
 pub mod files;
 pub mod contextwin;
 pub mod focushost;
+pub mod sessionterm;
 pub mod github;
 pub mod githubcmd;
 pub mod daemonhost;

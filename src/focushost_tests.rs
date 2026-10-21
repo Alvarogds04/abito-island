@@ -317,3 +317,62 @@ fn validation_launcher_replaces_the_real_spawn_and_counts_requests() {
     assert_eq!(hits.load(Ordering::SeqCst), 2);
     validation_launcher::uninstall();
 }
+
+// ---- the session key: `{target:'terminal', session:'s-xxxxxxxx'}` ---------------------------------------------
+
+#[test]
+fn a_session_key_is_the_only_extra_field_and_only_for_the_terminal_target() {
+    let key = "s-0123abcd";
+    let mut rate = RateLimiter::new();
+    let mut got = vec![];
+    focus_command_for("main", ORIGIN_OK, &json!({"target":"terminal","session":key}), &mut rate, 0, |t, s| { got.push((t, s.map(str::to_owned))); Ok(()) }).unwrap();
+    focus_command_for("main", ORIGIN_OK, &json!({"target":"terminal"}), &mut rate, 0, |t, s| { got.push((t, s.map(str::to_owned))); Ok(()) }).unwrap();
+    assert_eq!(got, vec![(Target::Terminal, Some(key.to_string())), (Target::Terminal, None)]);
+    // everything else is refused as an invalid target, before the rate budget or any effect
+    for bad in [json!({"target":"terminal","session":"s-0123ABCD"}), json!({"target":"terminal","session":"../x"}), json!({"target":"terminal","session":7}),
+                json!({"target":"terminal","session":null}), json!({"target":"terminal","session":key,"path":"/etc"}), json!({"target":"editor","session":key}),
+                json!({"target":"session","session":key}), json!({"session":key}), json!({"target":"terminal","session":""})] {
+        let mut rate = RateLimiter::new();
+        let e = focus_command_for("main", ORIGIN_OK, &bad, &mut rate, 0, |_, _| panic!("{bad} must not reach the effect")).unwrap_err();
+        assert_eq!(e, BridgeError::denied(ERR_INVALID_TARGET), "{bad}");
+    }
+    // the old entry point keeps its exact behaviour
+    assert!(focus_command("main", ORIGIN_OK, &json!({"target":"terminal","session":key}), &mut RateLimiter::new(), 0, |_| Ok(())).is_err());
+}
+
+#[test]
+fn sender_and_rate_gates_still_precede_the_session_effect() {
+    let key = "s-0123abcd";
+    assert!(focus_command_for("evil", ORIGIN_OK, &json!({"target":"terminal","session":key}), &mut RateLimiter::new(), 0, |_, _| panic!()).is_err());
+    let mut rate = RateLimiter::new();
+    for _ in 0..30 { focus_command_for("main", ORIGIN_OK, &json!({"target":"terminal","session":key}), &mut rate, 0, |_, _| Ok(())).unwrap(); }
+    assert_eq!(focus_command_for("main", ORIGIN_OK, &json!({"target":"terminal","session":key}), &mut rate, 0, |_, _| panic!()).unwrap_err(), BridgeError::rate_exceeded());
+}
+
+#[test]
+fn a_known_session_goes_through_its_own_terminal_and_an_unknown_one_falls_back_to_the_old_path() {
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    // resolved: the session path decides, nothing else runs
+    let r = focus_session_or_fallback(Some("s-0123abcd"), |k| { calls.borrow_mut().push(format!("session {k}")); Some(Ok(())) }, || { calls.borrow_mut().push("fallback".into()); Ok(()) });
+    assert_eq!(r, Ok(())); assert_eq!(*calls.borrow(), vec!["session s-0123abcd"]);
+    // resolved but failed: its public reason, and NO fallback (never open a second terminal behind the human's back)
+    calls.borrow_mut().clear();
+    let r = focus_session_or_fallback(Some("s-0123abcd"), |_| Some(Err("no se puede".to_string())), || { calls.borrow_mut().push("fallback".into()); Ok(()) });
+    assert_eq!(r, Err("no se puede".to_string())); assert!(calls.borrow().is_empty());
+    // unknown session (finished, recycled pid, no key): exactly the previous behaviour
+    for key in [Some("s-0123abcd"), None] {
+        calls.borrow_mut().clear();
+        let r = focus_session_or_fallback(key, |_| None, || { calls.borrow_mut().push("fallback".into()); Ok(()) });
+        assert_eq!(r, Ok(())); assert_eq!(*calls.borrow(), vec!["fallback"]);
+    }
+}
+
+#[test]
+fn the_default_terminal_is_launched_through_xdg_terminal_exec_with_the_session_directory_as_a_fixed_argument() {
+    assert_eq!(launch_args("xdg-terminal-exec", Some(Path::new("/work/proyecto"))), vec!["--dir=/work/proyecto".to_string()]);
+    assert!(launch_args("xdg-terminal-exec", None).is_empty());
+    // every other candidate keeps an empty argv (cwd comes from current_dir)
+    for other in ["gnome-terminal", "ptyxis", "kgx", "x-terminal-emulator"] { assert!(launch_args(other, Some(Path::new("/work"))).is_empty(), "{other}"); }
+    // a path that could be read as an option, or carries control characters, is never passed
+    for bad in ["relative/dir", "/work/a\nb", "/work/\u{0}x"] { assert!(launch_args("xdg-terminal-exec", Some(Path::new(bad))).is_empty(), "{bad:?}"); }
+}

@@ -287,7 +287,9 @@ pub fn launch_terminal(session_dir: Option<std::path::PathBuf>) -> Result<(), St
     let path_var = std::env::var("PATH").unwrap_or_default();
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     launch_terminal_with(&path_var, session_dir, home, |exe, dir| {
+        let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or("");
         match std::process::Command::new(exe)
+            .args(launch_args(name, Some(dir)))
             .current_dir(dir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -303,6 +305,15 @@ pub fn launch_terminal(session_dir: Option<std::path::PathBuf>) -> Result<(), St
     })
 }
 
+/// The command's platform entry: a session key shows THAT session's terminal (its window, and its herdr pane);
+/// anything else, or a session Rust cannot find, is the previous behaviour.
+pub fn focus_running(target: Target, session: Option<&str>) -> Result<(), String> {
+    if target == Target::Terminal {
+        return focus_session_or_fallback(session, crate::sessionterm::focus_session, || focus_or_launch_running(target));
+    }
+    focus_or_launch_running(target)
+}
+
 /// The platform entry the command calls: focus, else launch (terminal only).
 pub fn focus_or_launch_running(target: Target) -> Result<(), String> {
     // The daemon's session rows carry only a directory BASENAME (never a full
@@ -311,17 +322,27 @@ pub fn focus_or_launch_running(target: Target) -> Result<(), String> {
 }
 
 fn validated_target(payload: &Value) -> Result<Target, BridgeError> {
-    let map = payload
-        .as_object()
-        .ok_or_else(|| BridgeError::denied(ERR_INVALID_TARGET))?;
-    if map.len() != 1 {
-        return Err(BridgeError::denied(ERR_INVALID_TARGET));
+    let (target, session) = validated_request(payload)?;
+    // The original entry point never knew a session: it keeps refusing one.
+    if session.is_some() { return Err(BridgeError::denied(ERR_INVALID_TARGET)); }
+    Ok(target)
+}
+/// `{target}` or `{target:'terminal', session:'s-xxxxxxxx'}`: the key is the id the daemon's session list already
+/// carries, validated here; it only ever selects among processes Rust finds itself in /proc.
+fn validated_request(payload: &Value) -> Result<(Target, Option<String>), BridgeError> {
+    let invalid = || BridgeError::denied(ERR_INVALID_TARGET);
+    let map = payload.as_object().ok_or_else(invalid)?;
+    let raw = map.get("target").and_then(Value::as_str).ok_or_else(invalid)?;
+    let target = Target::parse(raw).ok_or_else(invalid)?;
+    match map.len() {
+        1 => Ok((target, None)),
+        2 => {
+            let key = map.get("session").and_then(Value::as_str).filter(|k| crate::sessionterm::valid_session_key(k)).ok_or_else(invalid)?;
+            if target != Target::Terminal { return Err(invalid()); }
+            Ok((target, Some(key.to_owned())))
+        }
+        _ => Err(invalid()),
     }
-    let raw = map
-        .get("target")
-        .and_then(Value::as_str)
-        .ok_or_else(|| BridgeError::denied(ERR_INVALID_TARGET))?;
-    Target::parse(raw).ok_or_else(|| BridgeError::denied(ERR_INVALID_TARGET))
 }
 
 /// The F099 command body: sender gate, closed-target validation, rate gate,
@@ -342,6 +363,47 @@ where
     let target = validated_target(payload)?;
     rate.check(now)?;
     focus(target).map_err(|reason| BridgeError::denied(&reason))
+}
+
+/// [`focus_command`] for a request that may carry a session key. Same gates, same order.
+pub fn focus_command_for<F>(
+    label: &str,
+    origin: &str,
+    payload: &Value,
+    rate: &mut RateLimiter,
+    now: u128,
+    focus: F,
+) -> Result<(), BridgeError>
+where
+    F: FnOnce(Target, Option<&str>) -> Result<(), String>,
+{
+    crate::bridge::sender_ok(label, origin)?;
+    let (target, session) = validated_request(payload)?;
+    rate.check(now)?;
+    focus(target, session.as_deref()).map_err(|reason| BridgeError::denied(&reason))
+}
+
+/// A known session is shown through ITS terminal and nothing else; its failure is its own public reason and never
+/// triggers a second terminal. A session Rust cannot resolve (finished, recycled pid, no key) takes the old path.
+pub fn focus_session_or_fallback<S, F>(session: Option<&str>, by_session: S, fallback: F) -> Result<(), String>
+where
+    S: FnOnce(&str) -> Option<Result<(), String>>,
+    F: FnOnce() -> Result<(), String>,
+{
+    match session.and_then(by_session) {
+        Some(outcome) => outcome,
+        None => fallback(),
+    }
+}
+
+/// argv of a launch candidate: only `xdg-terminal-exec` takes the directory (as ONE `--dir=<absolute path>`
+/// argument Rust built); a path that is not absolute or carries control characters is dropped, never passed.
+pub fn launch_args(exe_name: &str, dir: Option<&std::path::Path>) -> Vec<String> {
+    match (exe_name, dir) {
+        ("xdg-terminal-exec", Some(d)) if d.is_absolute() && !d.to_string_lossy().chars().any(char::is_control) =>
+            vec![format!("--dir={}", d.display())],
+        _ => Vec::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +523,23 @@ mod x11 {
             .collect()
     }
 
+    /// `_NET_WM_PID` of a window.
+    fn wm_pid(conn: &RustConnection, window: u32) -> Option<u32> {
+        let atom = intern(conn, b"_NET_WM_PID")?;
+        conn.get_property(false, window, atom, AtomEnum::CARDINAL, 0, 1).ok()?.reply().ok()?.value32()?.next()
+    }
+
+    /// Raise the topmost window owned by process `pid` (XWayland / X11 windows only).
+    pub(super) fn raise_window_of_pid(pid: u32) -> bool {
+        let Some((conn, screen)) = connect(None) else { return false };
+        let root = conn.setup().roots[screen].root;
+        let windows = client_windows(&conn, root);
+        match windows.into_iter().rev().find(|w| wm_pid(&conn, *w) == Some(pid)) {
+            Some(window) => activate(&conn, root, window),
+            None => false,
+        }
+    }
+
     /// Resolve `target` among the running windows and activate the topmost
     /// match through the SAME honest decision the unit tests cover
     /// (`focus_from_windows`). Connect failure and activation failure are
@@ -476,6 +555,10 @@ mod x11 {
         focus_from_windows(target, &infos, |idx| activate(&conn, root, list[idx].0))
     }
 }
+
+/// X11 / XWayland only: a native Wayland window has no X11 id to find.
+#[cfg(target_os = "linux")]
+pub fn raise_x11_window_of_pid(pid: u32) -> bool { x11::raise_window_of_pid(pid) }
 
 #[cfg(target_os = "linux")]
 fn focus_on_display(display: Option<&str>, target: Target) -> Result<(), String> {

@@ -5,8 +5,12 @@
 //
 // Exposes on the SESSION bus (name org.abito.Context):
 //   GetRecentWindows() -> a(sss)   (app id, app name, title), most recently focused first.
-// Read-only: it never focuses, moves or closes anything and exposes no window ids, pids or
-// content. Automatic capture is opt-in; explicit character drags query geometry on demand.
+//   GetWindowAt(x, y) -> a(sssiiii)  (the window under a point, geometry for explicit character drags)
+//   ActivateByPid(pid) -> b          (v2: bring the window of ONE process to the front)
+// Everything but ActivateByPid is read-only. ActivateByPid only raises: it takes a pid, activates the most
+// recently focused window whose own pid matches it and answers whether one existed. It never moves, resizes or
+// closes anything, runs no code or process, and exposes no window ids, pids or content. Automatic capture is
+// opt-in; explicit character drags query geometry on demand.
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -19,6 +23,10 @@ const IFACE = `<node>
   <interface name="org.abito.Context">
     <method name="GetRecentWindows">
       <arg type="a(sss)" direction="out" name="windows"/>
+    </method>
+    <method name="ActivateByPid">
+      <arg type="u" direction="in" name="pid"/>
+      <arg type="b" direction="out" name="activated"/>
     </method>
     <method name="GetWindowAt">
       <arg type="i" direction="in" name="x"/>
@@ -84,6 +92,23 @@ export default class AbitoContextExtension extends Extension {
             }
         }
         return [[]];
+    }
+
+    // v2. Abito asks this for the terminal that runs the agent session you clicked. The Shell refuses
+    // org.gnome.Shell.FocusApp to other clients, and a native Wayland window has no X11 id, so this is the one way
+    // to raise it by process. Most recently focused first among windows of that pid; none -> false.
+    ActivateByPid(pid) {
+        if (!Number.isInteger(pid) || pid <= 0) return [false];
+        const windows = global.display.sort_windows_by_stacking(
+            global.get_window_actors().map(actor => actor.meta_window)).reverse();
+        const candidates = [...this._history, ...windows];
+        for (const win of candidates) {
+            if (win.get_pid() === pid && !win.is_skip_taskbar()) {
+                win.activate(global.get_current_time());
+                return [true];
+            }
+        }
+        return [false]; // wrapJSObject wants the out args as a tuple
     }
 
     GetRecentWindows() {
