@@ -105,14 +105,16 @@
   let edgeIdlePrefs;
   async function edgeIdle() {
     edgeIdlePrefs=await invoke('prefs_action',{action:'view'});
-    await invoke('prefs_action',{action:'set_absence_minutes',minutes:1});
+    // human decision: «Ocultar tras» is SECONDS (5..300); 5 s keeps the scene short. Restored by edgeWake.
+    await invoke('prefs_action',{action:'set_absence_seconds',seconds:5});
     await invoke('prefs_action',{action:'sound_on'});
     await emit('validate-input',{kind:'move',x:20,y:500});
     await invoke('desktop_action',{action:'close'});
     const began=performance.now();
-    await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=4.1,'ausencia de un minuto deja franja',66000);
+    await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=4.1,'ausencia de 5 s deja franja',15000);
     const native=await invoke('desktop_action',{action:'snapshot'});
-    return {ok:native.state==='compact' && performance.now()-began>=59000,elapsed:performance.now()-began,native:native.state,bottom:byId('island').getBoundingClientRect().bottom};
+    const elapsed=performance.now()-began;
+    return {ok:native.state==='compact' && elapsed>=4000 && elapsed<=15000,elapsed,native:native.state,bottom:byId('island').getBoundingClientRect().bottom};
   }
   async function edgeWake() {
     const o=window.__validateOrigin, r=byId('island').getBoundingClientRect();
@@ -122,7 +124,7 @@
     const through=byId('capsule').dataset.edgeHidden==='true';
     await emit('validate-input',{kind:'move',x,y:Math.round(o.y+2*o.scale)});
     await wait(()=>byId('capsule').dataset.edgeHidden==='false' && byId('island').getBoundingClientRect().bottom>=31.9,'mouse en franja restaura barra');
-    await invoke('prefs_action',{action:'set_absence_minutes',minutes:edgeIdlePrefs.absenceMinutes});
+    await invoke('prefs_action',{action:'set_absence_seconds',seconds:edgeIdlePrefs.absenceSeconds});
     await invoke('prefs_action',{action:edgeIdlePrefs.sound ? 'sound_on':'sound_off'});
     await emit('validate-input',{kind:'move',x:20,y:500});
     await invoke('desktop_action',{action:'expand'});
@@ -278,8 +280,8 @@
     const elapsed=performance.now()-began;
     const folded=await invoke('desktop_action',{action:'snapshot'});
     await invoke('prefs_action',{action:'sound_off'});
-    await new Promise(resolve=>setTimeout(resolve,1600));
-    const retainedBlocksEdge=byId('capsule').dataset.edgeHidden==='false';
+    // human decision: only a pending question blocks the edge hide, so the retained notices do NOT keep the island out of the edge
+    const retainedDoesNotBlockEdge=await wait(()=>byId('capsule').dataset.edgeHidden==='true','avisos retenidos no frenan ocultar',5000).then(()=>true,()=>false);
     await invoke('prefs_action',{action:cyclePrefs.sound ? 'sound_on':'sound_off'});
     await invoke('desktop_action',{action:'expand'});
     await wait(()=>byId('capsule').dataset.phase==='expanded','reabre historial sin reiniciar terminado');
@@ -291,7 +293,7 @@
     await wait(async()=> (await invoke('desktop_action',{action:'snapshot'})).notices.length===before-1,'descarta exactamente una fila');
     await click(byId('notice-clear'));
     await wait(async()=> !(await invoke('desktop_action',{action:'snapshot'})).notices.length,'descarta todos conserva el contrato');
-    return {ok:held && elapsed>=5000 && folded.state==='compact' && folded.notices.length>=2 && historical && retainedBlocksEdge,held,elapsed,native:folded.state,retained:folded.notices.length,historical,retainedBlocksEdge,groupedDismissal:true};
+    return {ok:held && elapsed>=5000 && folded.state==='compact' && folded.notices.length>=2 && historical && retainedDoesNotBlockEdge,held,elapsed,native:folded.state,retained:folded.notices.length,historical,retainedDoesNotBlockEdge,groupedDismissal:true};
     } finally {
       await invoke('prefs_action',{action:'set_island_interaction',auto_close_seconds:cyclePrefs.autoCloseSeconds,open_on_hover:cyclePrefs.openOnHover});
       await invoke('prefs_action',{action:cyclePrefs.sound ? 'sound_on':'sound_off'});
