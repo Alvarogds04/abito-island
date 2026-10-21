@@ -82,7 +82,7 @@
     return [stop(light * 100 + 12), hex, stop(light * 100 - 12)];
   }
   // Connectors/providers the repo already names — never sub-Abito identities.
-  const PROVIDERS = Object.freeze(['claude-code', 'codex', 'opencode', 'pi']);
+  const PROVIDERS = Object.freeze(['claude-code', 'codex', 'copilot-cli', 'opencode', 'pi']);
   // The same closed slug shape the notice view enforces for a wire identity (notify-view.js).
   const IDENTITY = /^[a-z0-9][a-z0-9._-]{0,31}$/;
   // Keys that must never travel from a preferences file into a plain object's prototype.

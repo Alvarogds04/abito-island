@@ -376,7 +376,7 @@ fn a_daemon_that_does_not_know_agents_list_ends_the_wait_with_a_readable_error()
     if after["agents"].is_array() {
         // an engine that implements it: the closed view, every entry from the allowlist
         for a in after["agents"].as_array().unwrap() {
-            assert!(["claude-code", "codex", "opencode", "recap", "statusline"].contains(&a["id"].as_str().unwrap()), "{a}");
+            assert!(["claude-code", "codex", "copilot-cli", "opencode", "recap", "statusline"].contains(&a["id"].as_str().unwrap()), "{a}");
         }
     } else {
         let code = after["last_error"]["code"].as_str().unwrap();

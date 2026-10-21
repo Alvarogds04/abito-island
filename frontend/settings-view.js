@@ -505,7 +505,7 @@
   // ---- agents: connect Claude Code / Codex / OpenCode with ONE click (no terminal) -------------------------------------
   // The state comes from the engine's `agents` frame. Names and sentences are OURS: nothing the engine sends is
   // shown as text, only chosen from these closed tables.
-  const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', recap: 'Resumen semanal', statusline: 'Uso del plan (relay)' });
+  const AGENT_NAMES = Object.freeze({ 'claude-code': 'Claude Code', codex: 'Codex', 'copilot-cli': 'Copilot CLI', opencode: 'OpenCode', recap: 'Resumen semanal', statusline: 'Uso del plan (relay)' });
   const AGENT_IDS = Object.freeze(Object.keys(AGENT_NAMES));
   // #436 T6.5 (D7): all SEVEN hook clients the daemon's `hooks` frame may name. The three extra
   // ones are DISPLAY-ONLY (no install/remove exists for them; a dead button would be a lie),
@@ -567,7 +567,7 @@
   const PLAN_HASH = /^[0-9a-f]{64}$/;
   // The engine prints a CLOSED English template for the plan. The page never shows engine text: it recognises
   // the template and says the same thing in Spanish; anything else becomes one generic, true sentence.
-  const PLAN_RE = /^(Adds|Updates) the Abito hooks (?:\(PermissionRequest, Stop\) )?(?:to|in) (~\/[\w.\/-]{1,120}|\/[\w.\/-]{1,200})\. A backup is made first\.( Codex will ask you to trust them in \/hooks\.)?( This change is large: review it in the file\.)?$/;
+  const PLAN_RE = /^(Adds|Updates) the Abito (hooks|plugin) (?:(\([A-Za-z.]+(?:, [A-Za-z.]+){0,5}\)) )?(?:to|in) (~\/[\w.\/-]{1,120}|\/[\w.\/-]{1,200})\. A backup is made first\.( Codex will ask you to trust them in \/hooks\.)?( This change is large: review it in the file\.)?$/;
   // L32e: the two notify-only integrations have their own closed summaries (daemon agents.cjs); only these exact
   // sentences (optionally followed by the one large-change line) are shown, in Spanish. Anything else falls back.
   const NOTIFY_PLANS = Object.freeze({
@@ -584,10 +584,11 @@
     }
     const m = typeof text === 'string' && text.length <= 400 ? PLAN_RE.exec(text) : null;
     if (!m) return PLAN_FALLBACK;
-    const verb = m[1] === 'Adds' ? 'Agrega los hooks de Abito' : 'Actualiza los hooks de Abito';
+    const noun = m[2] === 'plugin' ? 'el plugin de Abito' : 'los hooks de Abito';
+    const verb = (m[1] === 'Adds' ? 'Agrega ' : 'Actualiza ') + noun;
     const joiner = m[1] === 'Adds' ? 'a' : 'en';
-    const withNames = /\(PermissionRequest, Stop\)/.test(text) && m[1] === 'Adds' ? ' (PermissionRequest, Stop)' : '';
-    return `${verb}${withNames} ${joiner} ${m[2]}. Antes se hace un respaldo.${m[3] ? ' Codex te va a pedir que confíes en ellos en /hooks.' : ''}${m[4] ? ' Es un cambio grande: revisalo en el archivo.' : ''}`;
+    const withNames = m[3] && m[1] === 'Adds' ? ` ${m[3]}` : '';
+    return `${verb}${withNames} ${joiner} ${m[4]}. Antes se hace un respaldo.${m[5] ? ' Codex te va a pedir que confíes en ellos en /hooks.' : ''}${m[6] ? ' Es un cambio grande: revisalo en el archivo.' : ''}`;
   }
   const AGENTS_WAIT_MS = 4000; // how long the page waits for the engine's `agents` frame before saying so
   const LOGOUT_WORD = 'Cerrar sesión'; // gentle-dot's «Sign out»
