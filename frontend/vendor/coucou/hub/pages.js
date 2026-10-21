@@ -10,16 +10,59 @@ const definitions = {
 };
 function renderUnavailable(page) {
   if (page === "phone") {
-    const sw = toggle(false, () => {
-    });
-    sw.disabled = true;
+    const inert = (el) => {
+      el.disabled = true;
+      el.setAttribute("title", "No disponible todavía");
+      return el;
+    };
+    const sw = inert(toggle(false, () => {
+    }));
+    sw.setAttribute("aria-pressed", "false");
+    sw.setAttribute("aria-label", "Enlace con el teléfono");
+    const status = h(
+      "div",
+      { id: "phone-status", class: "phone-status", role: "status" },
+      h("span", { class: "state-ico", "aria-hidden": "true", text: "○" }),
+      h("span", { class: "state-word", text: "No disponible en la versión 0.2" })
+    );
+    const security = h(
+      "div",
+      { id: "phone-security", class: "phone-security" },
+      notchHint(t("Allow on the phone asks for the fingerprint or the screen lock. Deny does not.")),
+      notchHint("Solo escucha en tu red local.")
+    );
+    const steps = h(
+      "ol",
+      { id: "phone-steps", class: "phone-steps" },
+      h("li", { text: "Abrí Abito en el teléfono." }),
+      h("li", { text: "Cuando esté disponible, escaneá el código con el teléfono." }),
+      h("li", { text: "Confirmá en el teléfono el código que te mostrará Abito." })
+    );
+    const code = h("div", { id: "phone-code", class: "hint", text: "El código de verificación aparecerá aquí cuando el enlace esté disponible." });
+    const noQr = h("div", { id: "phone-no-qr", class: "hint", text: "El emparejamiento con código QR no está disponible en la versión 0.2." });
+    const unlink = inert(button("Desvincular", () => {
+    }, "danger", true));
+    const confirm = h(
+      "div",
+      { id: "phone-unlink-confirm", class: "phone-confirm", role: "group" },
+      h("span", { text: "¿Desvincular este teléfono?" }),
+      inert(button("Desvincular", () => {
+      }, "danger", true)),
+      inert(button("Cancelar", () => {
+      }, "", true))
+    );
+    confirm.hidden = true;
+    const devices = h("div", { id: "phone-devices", class: "phone-devices" }, h("strong", { text: "Dispositivos" }), h("span", { class: "hint", text: "Ninguno vinculado." }), unlink, confirm);
     return notchSection(
       t("Android phone"),
+      status,
+      security,
       notchHint(t("Send your agents' sessions to Abito for Android and answer permission requests from the phone. Off by default; it only listens on your local network.")),
-      notchHint(t("Allow on the phone asks for the fingerprint or the screen lock. Deny does not.")),
       notchRow(t("Phone link"), sw),
-      notchHint("No disponible"),
-      h("div", {})
+      steps,
+      code,
+      noQr,
+      devices
     );
   }
   const control = button(t(page === "phone" ? "Connect" : "Enable"), () => {

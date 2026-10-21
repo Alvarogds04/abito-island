@@ -76,3 +76,12 @@ section.abito-card > h2 { gap: 8px; }
 .int-verdict:empty { display: none; }
 .int-head .switch { position: relative; }
 .int-head .switch::before { content: ""; position: absolute; inset: -12px -6px; }
+
+/* #503 S24 (Teléfono, Opción A, sin QR en 0.2): status line, numbered steps, an honest code area and an empty devices list.
+   Everything is inert; the state is icon + word and the security notes sit at the top, readable. */
+.phone-status { display: flex; align-items: center; gap: 8px; font: 600 13px var(--font); color: var(--dim); }
+.phone-security { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.04); }
+.phone-steps { margin: 4px 0 0 20px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.phone-devices { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 44px; }
+.phone-confirm { display: flex; align-items: center; gap: 8px; }
+.phone-confirm[hidden] { display: none !important; }

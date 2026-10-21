@@ -80,8 +80,9 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
         if(id==='phone') {
           assert.deepEqual(all(container).filter(e=>e.tagName==='h2').map(e=>text(e).trim()),['Teléfono Android']);
           assert(text(container).includes('Enlace con el teléfono'));
-          assert.equal(all(container).filter(e=>e.tagName==='button').length,1);
-          assert.equal((text(container).match(/No disponible/g)||[]).length,1);
+          // #503 S24: the designed layout (steps, devices, unlink with confirmation) without QR; every control stays inert (checked below for all pages)
+          assert(all(container).filter(e=>e.tagName==='button').length>=1);
+          assert(!all(container).some(e=>['canvas','img','svg'].includes(e.tagName)),'no QR in 0.2');
         }
       }
     }
