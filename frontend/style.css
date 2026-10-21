@@ -600,15 +600,15 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #question-asker, #question-expiry, #question-state { flex: none; }
 #question-asker:empty { display: none; } /* only a pending notification shows an asker */
 #question-options { display: flex; }
-.q-option { display: inline-flex; align-items: center; min-width: 44px; max-width: 100%; border: 1px solid var(--line-mid); background: transparent; color: var(--island-ink); cursor: pointer; text-align: left; }
+.q-option { display: inline-flex; flex-wrap: wrap; align-items: center; height: auto; min-width: 44px; max-width: 100%; border: 1px solid var(--line-mid); background: transparent; color: var(--island-ink); cursor: pointer; text-align: left; }
 .q-option:hover:not(:disabled) { background: var(--fill-hover); }
 .q-option:disabled { opacity: .45; cursor: default; }
 .q-key { display: inline-grid; place-items: center; }
-.q-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.q-desc { display: none; }
+.q-label { overflow-wrap: anywhere; white-space: normal; text-align: left; }
+.q-desc { display: block; flex: 0 0 100%; font: 400 11px/1.3 var(--font); color: var(--dim-2); overflow-wrap: anywhere; white-space: normal; text-align: left; }
 #question-freeform { display: flex; align-items: flex-end; gap: 8px; margin: 0; }
 #question-text {
-  flex: 1; min-height: 44px; max-height: 44px; resize: none; padding: 12px 14px; border-radius: var(--radius-2xl);
+  flex: 1; min-height: 44px; max-height: 120px; resize: none; overflow-y: hidden; padding: 12px 14px; box-sizing: border-box; border-radius: var(--radius-2xl);
   border: 1px solid var(--line-soft); background: var(--fill); color: var(--island-ink); font: 400 13.5px/1.35 var(--font-ui);
   -webkit-user-select: text; user-select: text; cursor: text;
 }

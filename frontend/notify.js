@@ -146,6 +146,8 @@
     skipEl.hidden = !n; // no pending notification: nothing to skip (outcome states show only icon + word)
     paintState(view);
     paintText(view);
+    growText();
+    fitCard();
   }
 
   function paintState(view) {
@@ -159,6 +161,26 @@
     $('question-state-word').textContent = o.word;
   }
 
+  // Auto-size: the card is as tall as its content (min 148), the island follows through `abito:question-size`; past the cap the card
+  // scrolls inside itself. Measured with height:auto, so nothing is ever clipped and the buttons stay inside the card.
+  let sizedKey = '';
+  function fitCard() {
+    if (capsule.dataset.question !== 'pending' && capsule.dataset.question !== 'expired') {
+      if (sizedKey) { sizedKey = ''; root.style.height = ''; root.style.overflowY = ''; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: 0 } })); }
+      return;
+    }
+    root.style.height = 'auto'; root.style.overflowY = 'hidden';
+    const layout = N.questionLayout(root.offsetHeight);
+    root.style.height = `${layout.cardH}px`; root.style.overflowY = layout.scroll ? 'auto' : 'hidden';
+    const key = `${layout.cardH}:${layout.scroll}`;
+    if (key !== sizedKey) { sizedKey = key; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: layout.islandH } })); }
+  }
+  function growText() {
+    textEl.style.height = 'auto';
+    const fit = N.textareaHeight(textEl.scrollHeight);
+    textEl.style.height = `${fit.height}px`; textEl.style.overflowY = fit.scroll ? 'auto' : 'hidden';
+  }
+
   function paintText(view) {
     const text = textEl.value;
     const word = N.textWord(budget, text);
@@ -168,25 +190,29 @@
   }
 
   // ---- answering: trusted gestures only -------------------------------------
-  function finish(next) {
+  function finish(next, sent) {
     inFlight = false;
-    if (next && typeof next === 'object') apply(next); else render();
+    // a state pushed while the send was in flight is newer than this reply: keep it (the ack can beat the invoke)
+    if (next && typeof next === 'object' && N.replyIsCurrent(sent, pushSeq)) apply(next); else render();
   }
+  let pushSeq = 0;
   function choose(event, index) {
     if (!N.trusted(event)) return;
     if (!onScreen()) return;
     const view = current();
     if (!view.notification || !view.controlsEnabled) return;
+    const sent = pushSeq;
     inFlight = true; render();
-    action({ action: 'answer', id: view.notification.id, index }).then(finish, error => { finish(null); say((error && error.message) || 'No se pudo enviar.'); });
+    action({ action: 'answer', id: view.notification.id, index }).then(next => finish(next, sent), error => { finish(null, sent); say((error && error.message) || 'No se pudo enviar.'); });
   }
   function decline(event) {
     if (!N.trusted(event)) return;
     if (!onScreen()) return;
     const view = current();
     if (!view.notification || !view.controlsEnabled) return;
+    const sent = pushSeq;
     inFlight = true; render();
-    action({ action: 'decline', id: view.notification.id }).then(finish, error => { finish(null); say((error && error.message) || 'No se pudo omitir.'); });
+    action({ action: 'decline', id: view.notification.id }).then(next => finish(next, sent), error => { finish(null, sent); say((error && error.message) || 'No se pudo omitir.'); });
   }
   function submitText(event) {
     event.preventDefault();
@@ -194,13 +220,15 @@
     const view = current();
     if (!view.notification || !view.controlsEnabled || !N.canSendText(budget, textEl.value)) return;
     const text = textEl.value;
+    const sent = pushSeq;
     inFlight = true; render();
-    action({ action: 'text', id: view.notification.id, text }).then(next => { textEl.value = ''; budget = null; finish(next); },
-      error => { finish(null); say((error && error.message) || 'No se pudo enviar.'); });
+    action({ action: 'text', id: view.notification.id, text }).then(next => { textEl.value = ''; budget = null; finish(next, sent); },
+      error => { finish(null, sent); say((error && error.message) || 'No se pudo enviar.'); });
   }
   skipEl.addEventListener('click', decline);
   freeform.addEventListener('submit', submitText);
   textEl.addEventListener('input', () => {
+    growText(); fitCard();
     const view = current();
     if (!view.notification) return;
     const seq = ++budgetSeq;
@@ -226,6 +254,7 @@
   // ---- state stream ------------------------------------------------------------------
   function apply(next) {
     if (!next || typeof next !== 'object') return;
+    if (N.regressesToSent(snapshot, next)) return; // never roll a delivered answer back to «Enviada»
     previous = snapshot; snapshot = next;
     trackOutcome(previous, next);
     // Cue ids go to the sound engine through the page event (see sound-wiring.js).
@@ -241,6 +270,6 @@
   }
   document.addEventListener('island:view', render);
   new MutationObserver(render).observe(capsule, { attributes: true, attributeFilter: ['data-card', 'data-view', 'data-phase'] });
-  if (listen) listen('question:state', event => apply(event && event.payload)).catch(() => {});
+  if (listen) listen('question:state', event => { pushSeq += 1; apply(event && event.payload); }).catch(() => {});
   action({ action: 'view' }).then(apply, () => {});
 })();

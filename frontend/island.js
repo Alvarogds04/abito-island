@@ -56,7 +56,9 @@
   // Coucou's corners 0 0 14 14; Rust pins every view with geometry::island_window_rect.
   const OVERVIEW = { w: 640, h: 160, r: 14, gap: 0, clay: 66, clayX: 68, cy: 101 };
   const RECAP_H = 184; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
-  const QUESTION_H = 200; // Coucou QUESTION_PICKER_H: the fixed window already has room
+  const QUESTION_H = 200; // default; a long question grows it (abito:question-size), capped by the fixed window
+  let questionH = QUESTION_H;
+  // const QUESTION_H doc: // Coucou QUESTION_PICKER_H: the fixed window already has room
   const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 101 };
   const BLOB_DROP = 10 / 140; // the drawn blob sits this fraction of the box below the box centre (measured, was drop 10 at box 140)
   // The engine draws its body ~112 viewBox units wide inside its 200x160
@@ -226,15 +228,16 @@
 
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
-    const overviewHeight = recapShown ? RECAP_H : questionShown ? QUESTION_H : OVERVIEW.h;
+    const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : OVERVIEW.h;
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
-    reportShape([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
-      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target], [w, h - 28 * conceal.x], mode === 'idle' && q.mode === 'idle' && !conceal.moving);
+    const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown && capsule.dataset.phase !== 'expanded' ? QT.shapeWithToast(shape, true) : shape);
+    reportShape(withToast([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
+      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target]), withToast([w, h - 28 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
     const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
     // the question card is 148 high (200 island): the character centres on it, 15px lower than on the 108 cards
-    const ovBase = recapShown ? { ...OVERVIEW_CARD, cy: 42 + (RECAP_H - 52) / 2 } : questionShown ? { ...OVERVIEW_CARD, cy: OVERVIEW_CARD.cy + (QUESTION_H - OVERVIEW.h) / 2 } : cardShown ? OVERVIEW_CARD : OVERVIEW;
+    const ovBase = recapShown ? { ...OVERVIEW_CARD, cy: 42 + (RECAP_H - 52) / 2 } : questionShown ? { ...OVERVIEW_CARD, cy: OVERVIEW_CARD.cy + (questionH - OVERVIEW.h) / 2 } : cardShown ? OVERVIEW_CARD : OVERVIEW;
     // the confirmed finished-notice lane (pane starts at x=108) uses the small R6 too, or the 128px blob covers the pane
     const ov = (noticeLane && noticeLane.view === 'notices') ? OVERVIEW_CARD : ovBase;
     const cs = lerp(COMPACT.clay, ov.clay, p);
@@ -1293,12 +1296,31 @@
     const show = !!(event.detail && event.detail.show);
     if (show !== recapShown) { recapShown = show; render(); }
   });
+  // Sileo-style toast (question-toast.js) below the island: a trusted click opens the island on the question; the card answers.
+  let toastShown = false;
+  document.addEventListener('abito:question-toast', event => {
+    const shown = !!(event.detail && event.detail.shown);
+    if (shown !== toastShown) { toastShown = shown; render(); }
+  });
+  document.addEventListener('abito:question-open', () => {
+    if (!window.desktop || typeof window.desktop.expand !== 'function') return;
+    window.desktop.expand().then(snap => { if (snap) { current = snap; syncToggle(snap.state); } }, () => {});
+  });
+  document.addEventListener('abito:question-size', event => {
+    const h = Number(event.detail && event.detail.islandH);
+    const next = Number.isFinite(h) && h >= QUESTION_H ? Math.min(h, 332) : QUESTION_H;
+    if (next !== questionH) { questionH = next; render(); }
+  });
   document.addEventListener('abito:question', event => {
     const show = !!(event.detail && event.detail.show);
     if (show) finishedCycle?.cancel(); // never cover a pending question with finished content
     if (show !== questionShown) { questionShown = show; render(); }
     paintCompactFlag();
-    if (event.detail && event.detail.reveal) revealIsland(); // #266: a genuinely new question reveals
+    if (event.detail && event.detail.reveal) {
+      // #266: a genuinely new question reveals. With the toast the island stays as it is (the human opens it from the toast).
+      const T = window.AbitoQuestionToast;
+      if (T && T.revealByToast({ phase: capsule.dataset.phase })) edgeInteraction?.alert(); else revealIsland();
+    }
   });
 
   // ---- Q1: keyboard control of the island itself -------------------------

@@ -218,7 +218,7 @@ function harness(dataset) {
   const calls = [];
   const listeners = {};
   const node = (id) => {
-    const n = { id, dataset: {}, hidden: false, inert: true, disabled: false, value: '', textContent: '', title: '', children: [],
+    const n = { id, dataset: {}, style: {}, offsetHeight: 148, scrollHeight: 20, hidden: false, inert: true, disabled: false, value: '', textContent: '', title: '', children: [],
       listeners: {}, classList: { add() {}, remove() {}, toggle() {} },
       setAttribute() {}, getAttribute() { return null; }, append(...k) { this.children.push(...k); }, appendChild(k) { this.children.push(k); },
       addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
@@ -331,4 +331,72 @@ test('S3 wiring: the island paints the asker line and the queue label with textC
   assert.match(src, /askerName\.textContent = N\.askerLine\(n\)/);
   assert.match(src, /queueEl\.textContent = N\.queueLabel\(snapshot\)/);
   assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /id="question-queue"/);
+});
+
+// ---- «Enviada» race: a delivered answer must end as «Recibida» ----------------------------------------------------
+// Pi acks in <1 ms, so the pushed `question:state` (notice «answered») can land BEFORE the invoke of the send resolves with the
+// view computed right after the write (notice «sent»). Applying that older reply used to roll the island back to «Enviada».
+test('race: a reply to a send is applied only when no pushed state arrived while it was in flight', () => {
+  assert.equal(N.replyIsCurrent(3, 3), true, 'nothing pushed meanwhile: the reply is the newest state');
+  assert.equal(N.replyIsCurrent(3, 4), false, 'a push arrived while the invoke was in flight: the reply is older');
+  assert.equal(N.replyIsCurrent(0, 0), true);
+  for (const bad of [undefined, null, NaN, '3']) assert.equal(N.replyIsCurrent(bad, 3), false, String(bad));
+});
+test('race: a terminal outcome never regresses to «sent» (answered/human_cancelled/rejected/ack_lost/outcome_unknown stay)', () => {
+  for (const terminal of ['answered', 'human_cancelled', 'rejected', 'ack_lost', 'outcome_unknown', 'cancelled', 'expired', 'disconnected']) {
+    assert.equal(N.regressesToSent({ pending: null, notice: terminal }, { pending: null, notice: 'sent' }), true, terminal);
+  }
+  assert.equal(N.regressesToSent({ pending: null, notice: 'sent' }, { pending: null, notice: 'sent' }), false);
+  assert.equal(N.regressesToSent({ pending: null, notice: null }, { pending: null, notice: 'sent' }), false);
+  assert.equal(N.regressesToSent({ pending: null, notice: 'answered' }, { pending: null, notice: 'answered' }), false);
+  assert.equal(N.regressesToSent(null, { pending: null, notice: 'sent' }), false);
+  // a NEW question in between is a different send: never blocked
+  assert.equal(N.regressesToSent({ pending: { id: 'x' }, notice: null }, { pending: null, notice: 'sent' }), false);
+  assert.equal(N.regressesToSent({ pending: null, notice: 'answered' }, { pending: { id: 'y' }, notice: null }), false);
+});
+test('race wiring: notify.js counts pushed states, ignores stale replies and never lets apply() regress a terminal outcome', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /let pushSeq = 0;/);
+  assert.match(src, /listen\('question:state', event => \{ pushSeq \+= 1; apply\(event && event\.payload\); \}\)/);
+  assert.match(src, /N\.replyIsCurrent\(sent, pushSeq\)/);
+  assert.match(src, /N\.regressesToSent\(snapshot, next\)/);
+  for (const fn of ['choose', 'decline', 'submitText']) {
+    const body = src.slice(src.indexOf(`function ${fn}(`));
+    assert.match(body.slice(0, 900), /const sent = pushSeq;/, fn);
+  }
+});
+
+// ---- auto-size: the question card grows with its content, the island with it (human: «abito se ajusta al tamaño») -----------
+test('questionLayout: min 148, grows with the content, capped so the island fits the fixed window, then scrolls inside the card', () => {
+  const L = N.questionLayout;
+  assert.deepEqual(L(60), { cardH: 148, islandH: 200, scroll: false }, 'short: the Coucou question card, unchanged');
+  assert.deepEqual(L(148), { cardH: 148, islandH: 200, scroll: false });
+  assert.deepEqual(L(200.2), { cardH: 201, islandH: 253, scroll: false }, 'rounds up, never clips by a fraction');
+  assert.deepEqual(L(280), { cardH: 280, islandH: 332, scroll: false }, 'exactly the cap');
+  assert.deepEqual(L(900), { cardH: 280, islandH: 332, scroll: true }, 'beyond the cap: capped and scrolling');
+  assert.equal(N.QUESTION_MAX_ISLAND_H, 332);
+  assert.ok(N.QUESTION_MAX_ISLAND_H <= 340, 'never taller than the native window (geometry::ISLAND_WINDOW)');
+  for (const bad of [NaN, -5, undefined, null, Infinity, '200']) assert.deepEqual(L(bad), { cardH: 148, islandH: 200, scroll: false }, String(bad));
+});
+test('textareaHeight: the free-text field grows with its text up to a cap, then scrolls', () => {
+  const H = N.textareaHeight;
+  assert.deepEqual(H(20), { height: 44, scroll: false }, 'one line: the 44px field');
+  assert.deepEqual(H(90), { height: 90, scroll: false });
+  assert.deepEqual(H(120), { height: 120, scroll: false });
+  assert.deepEqual(H(400), { height: 120, scroll: true });
+  for (const bad of [NaN, -1, undefined, null]) assert.deepEqual(H(bad), { height: 44, scroll: false }, String(bad));
+});
+test('auto-size wiring: notify.js measures, sets the card height and tells the island; the island follows; the CSS never clips', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /N\.questionLayout\(/);
+  assert.match(src, /N\.textareaHeight\(/);
+  assert.match(src, /CustomEvent\('abito:question-size'/);
+  const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  assert.match(isl, /addEventListener\('abito:question-size'/);
+  assert.match(isl, /questionH/);
+  assert.doesNotMatch(isl, /\? QUESTION_H : OVERVIEW\.h/, 'the fixed 200 is only the default now');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8') + fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
+  assert.match(css, /#question-body \{[^}]*max-height: none/);
+  assert.match(css, /\.q-label \{[^}]*white-space: normal/);
+  assert.match(css, /#question-text \{[^}]*overflow-y: hidden/);
 });
