@@ -272,5 +272,22 @@ function noOverlaps(list, why) {
       finally { await r.close(); }
     }
   }
+  // Ctrl+Alt+T on the REAL island.js: with a session focused the shortcut sends THAT session's key; after the validator scene publishes
+  // «no focused session» it sends the plain class verb, so its class fixture stays the window the native readback expects.
+  {
+    const r = await H.open({});
+    try {
+      const press = async () => { await r.page.evaluate(() => window.__emit('global-shortcut', 'jumpToTerminal')); await r.page.waitForTimeout(300); return r.page.evaluate(() => (window.__focusCalls || []).at(-1)); };
+      const focused = await press();
+      assert.equal(focused.target, 'terminal');
+      assert.match(String(focused.session), /^s-[0-9a-f]{8}$/, `with a session focused the key travels: ${JSON.stringify(focused)}`);
+      await r.page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:sessions-view', { detail: { view: null, focusId: null } })));
+      const cleared = await press();
+      assert.deepEqual(cleared, { target: 'terminal' }, `with no focused session it is the plain class verb: ${JSON.stringify(cleared)}`);
+      const mode = await r.page.evaluate(() => document.getElementById('capsule').dataset.shortcutTerminal);
+      assert.equal(mode, 'focused-class', 'and the product reports «focused-class», which is what the class-fixture readback is judged against');
+      passed += 1;
+    } finally { await r.close(); }
+  }
   console.log(`island-geometry-check: ${passed} real-layout checks ok`);
 })().catch(e => { console.error(e); process.exit(1); });

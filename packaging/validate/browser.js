@@ -346,6 +346,10 @@
     await wait(async()=> (await invoke('prefs_action',{action:'view'})).sound===before.sound,'sonido restaurado');
     await key('Ctrl+Alt+Shift+a');
     await wait(()=>byId('notice-live').textContent==='No hay permisos ni preguntas pendientes.','alerta vacía explica que no hay solicitud');
+    // The previous scene (sesiones-foco-pildoras) leaves a session focused, and since fc7f679 the shortcut then opens THAT session's own terminal
+    // (found from /proc), not the class fixture this scene's native readback expects. Publish «no focused session» through the event island.js
+    // already listens to, right before the press (the key is read at press time; the 2 s ticker poll cannot restore it in between).
+    document.dispatchEvent(new CustomEvent('abito:sessions-view',{detail:{view:null,focusId:null}}));
     await key('Ctrl+Alt+t');
     // fc7f679: with a session focused the shortcut opens THAT session's terminal («focused-session»); «focused-class» is the plain verb with none
     await wait(()=>['focused-session','focused-class'].includes(byId('capsule').dataset.shortcutTerminal),'terminal confirmó foco (de la sesión enfocada o, sin ella, por clase)');
