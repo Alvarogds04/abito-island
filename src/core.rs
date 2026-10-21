@@ -222,10 +222,10 @@ mod tests {
     #[test]
     fn overview_to_chat_becomes_the_column_and_back() {
         let (mut core, io) = expanded_top(); let open = core.plan_view(&io, area(), true).unwrap();
-        assert!(open.chat && core.expanded); assert_eq!(open.visible, (640, 240));
+        assert!(open.chat && core.expanded); assert_eq!(open.visible, (720, 240));
         assert_eq!(core.plan_view(&io, area(), true), None);
         let back = core.plan_view(&io, area(), false).unwrap(); assert!(!back.chat);
-        assert_eq!(back.visible, (640, 160)); assert_eq!(back.rect, open.rect);
+        assert_eq!(back.visible, (720, 184)); assert_eq!(back.rect, open.rect);
     }
     #[test]
     fn the_chat_fits_the_work_area_height() {

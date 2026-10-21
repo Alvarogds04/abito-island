@@ -68,17 +68,17 @@ test('V1 D1: a question outcome is a 2-4s confirmation that returns to the previ
   assert.match(src, /trackOutcome\(previous, next\)/);
 });
 
-test('S10 header on top (replaces the V1 gutter): 640x34 header above the cards; the chat keeps it at 640; 44px hit tabs', () => {
+test('S10 header on top (replaces the V1 gutter): 720x34 header above the cards; the chat keeps it at 720; 44px hit tabs', () => {
   const css = read('style.css');
   const v1 = css.slice(css.indexOf('Visual correction V1'));
   const isl = read('vendor/coucou/island/island.css');
-  assert.match(isl, /#island-header \{[^}]*top: 8px;[^}]*width: 640px; height: 34px;[^}]*flex-direction: row/);
-  assert.match(isl, /#overview-view \{[^}]*width: 620px;[^}]*top: 42px;[^}]*height: 108px/);
+  assert.match(isl, /#island-header \{[^}]*top: 8px;[^}]*width: 720px; height: 34px;[^}]*flex-direction: row/);
+  assert.match(isl, /#overview-view \{[^}]*width: 700px;[^}]*top: 42px;[^}]*height: 132px/);
   assert.match(isl, /#notices \{[^}]*width: 288px;[^}]*top: 42px;[^}]*height: 44px/);
-  assert.match(isl, /#permission, #question \{[^}]*width: 620px;[^}]*top: 42px;[^}]*height: 108px/);
+  assert.match(isl, /#permission, #question \{[^}]*width: 700px;[^}]*top: 42px;[^}]*height: 132px/);
   assert.doesNotMatch(v1 + isl, /(#island-header|#overview-view|#notices|#question, #permission|#permission, #question)[^{}]*\{[^}]*(right: 72px|width: 56px)/, 'no rail gutter any more');
   // L32 #480: the chat now keeps the island's header (home / chat / «+», gear / mute) instead of hiding it
-  assert.match(isl, /\[data-view="chat"\] #island-header \{\s*opacity: 1; visibility: visible; pointer-events: auto; left: calc\(50% - 320px\); width: 640px;/, 'the chat shows the shared header at the island width (640)');
+  assert.match(isl, /\[data-view="chat"\] #island-header \{\s*opacity: 1; visibility: visible; pointer-events: auto; left: calc\(50% - 360px\); width: 720px;/, 'the chat shows the shared header at the island width (640)');
   assert.match(isl, /#island-header \.tab, #island-header \.hdr-action \{[^}]*height: 44px/);
 });
 

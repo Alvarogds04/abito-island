@@ -39,8 +39,8 @@ html[data-theme="light"] {
 /* ── Content shell: #content padding 8px 10px 10px, #header 34px, views from y=42 ── */
 
 #island-header {
-  top: 8px; right: auto; bottom: auto; left: calc(50% - 320px);
-  width: 640px; height: 34px;
+  top: 8px; right: auto; bottom: auto; left: calc(50% - 360px);
+  width: 720px; height: 34px;
   flex-direction: row; align-items: center; justify-content: space-between;
   gap: 0; padding: 0;
 }
@@ -74,7 +74,7 @@ html[data-theme="light"] {
 
 /* ── Overview: .overview (gap 10) > .left 322 + .right flex, in the 108px row under the header ── */
 
-#overview-view { left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px; }
+#overview-view { left: calc(50% - 350px); right: auto; width: 700px; top: 42px; bottom: auto; height: 132px; }
 .card-left { width: 322px; inset: 0 auto 0 0; }
 
 /* .who (name 600 12px ink, tool 400 11px dim-2) padded 0 36px 0 108px, 10px under the card top */
@@ -130,12 +130,12 @@ html[data-theme="light"] {
 
 /* ── Notices: the 44px band on top of the right card (x342..630 of the island), full-card lane ── */
 
-#notices { left: calc(50% + 22px); right: auto; width: 288px; top: 42px; bottom: auto; height: 44px; padding: 0 8px; }
-#capsule[data-view="overview"] #notices[data-grouped="true"] { left: calc(50% + 22px); width: 288px; top: 42px; height: 44px; padding: 0 8px; }
-#capsule[data-view="overview"] #notices[data-list="open"] { left: calc(50% - 310px); width: 620px; top: 42px; height: 108px; padding: 8px; }
+#notices { left: calc(50% + 62px); right: auto; width: 288px; top: 42px; bottom: auto; height: 44px; padding: 0 8px; }
+#capsule[data-view="overview"] #notices[data-grouped="true"] { left: calc(50% + 62px); width: 288px; top: 42px; height: 44px; padding: 0 8px; }
+#capsule[data-view="overview"] #notices[data-list="open"] { left: calc(50% - 350px); width: 700px; top: 42px; height: 132px; padding: 8px; }
 /* a confirmed finished/error notice takes the whole 620x108 card, like Coucou's finished and error views */
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notices {
-  left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px;
+  left: calc(50% - 350px); right: auto; width: 700px; top: 42px; bottom: auto; height: 132px;
   padding: 4px 16px 4px 116px; background: var(--card); border: 1px solid var(--hairline); border-radius: 20px; overflow: hidden;
 }
 #notice-row .chip { font: 400 11px var(--font); color: var(--dim-2); }
@@ -144,7 +144,7 @@ html[data-theme="light"] {
 /* ── Approval (.card.wash amber) and question (.card.wash cyan): .stack padding 4px 16px 4px 116px, gap 5 ── */
 
 #permission, #question {
-  left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px;
+  left: calc(50% - 350px); right: auto; width: 700px; top: 42px; bottom: auto; height: 132px;
   padding: 4px 16px 4px 116px; gap: 5px; justify-content: center; overflow: hidden;
   background: var(--card); border: 1px solid var(--hairline); border-radius: 20px;
 }
@@ -275,7 +275,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #card-head { flex-wrap: nowrap; }
 #card-status { gap: 7px; }
 #card-agent, #question-asker-name { font: 600 12px var(--font); color: var(--ink); }
-#question-asker-verb { font: 400 12px var(--font); color: var(--dim-2); }
+#question-asker-verb { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } /* S28: «pregunta» stays for assistive tech, not drawn */
 #question-asker { gap: 7px; }
 /* expiry and the helper caption are not in Coucou's card: they stay readable by assistive tech */
 #card-expiry:not([data-tone="red"]), #card-wait, #question-expiry {
@@ -408,7 +408,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #chat-history-label { font: 400 11px var(--font); color: var(--dim-2); }
 
 /* the question card is taller in Coucou (window 640x200): 148 high under the header */
-#question { height: 148px; box-sizing: border-box; }
+#question { height: 172px; box-sizing: border-box; }
 
 /* ── Plan usage: the pills in the header and the card behind them (style.css "Plan usage" @434d6a2b) ──
    Nothing applies until a pill is turned on in Ajustes. */
@@ -516,7 +516,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 /* ── Weekly recap (style.css "Weekly recap" @434d6a2b): a wash'd card in the same box as the approval card ── */
 
 #recap-card {
-  position: absolute; left: calc(50% - 310px); width: 620px; top: 42px; height: 132px; z-index: 3; display: flex; flex-direction: column;
+  position: absolute; left: calc(50% - 350px); width: 700px; top: 42px; height: 156px; z-index: 3; display: flex; flex-direction: column;
   justify-content: center; overflow: hidden; border-radius: 20px; background: var(--card); border: 1px solid var(--hairline);
 }
 #recap-card[hidden] { display: none; }
@@ -601,7 +601,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 
 /* the shared header stays in the chat view, at the chat column's width, with the chat tab lit */
 #capsule[data-phase="expanded"][data-view="chat"] #island-header {
-  opacity: 1; visibility: visible; pointer-events: auto; left: calc(50% - 320px); width: 640px; right: auto;
+  opacity: 1; visibility: visible; pointer-events: auto; left: calc(50% - 360px); width: 720px; right: auto;
 }
 #capsule[data-phase="expanded"][data-view="chat"] .plan-pills, #capsule[data-phase="expanded"][data-view="chat"] .dpill { display: none; }
 #chat { padding: 42px 10px 10px; }
@@ -837,10 +837,10 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
    status and the centre; the blobs are their own card to the right and scroll, so sessions never push the declared pills out.
    E: while something waits for the human the question/approval card takes left + centre (548) and the blobs shrink to a 64px
    mascot column. Widths come from island-layout.js columnWidths(); the numbers here are its output for 620. */
-.card-left { width: 438px; }
+.card-left { width: 518px; }
 .col-status { position: absolute; left: 12px; top: 74px; width: 96px; display: flex; flex-direction: column; gap: 1px; font: 400 11px/14px var(--font); color: var(--dim-2); pointer-events: none; }
 .col-status span:first-child { color: var(--ink); font-weight: 500; }
-#blobs { position: absolute; left: calc(50% + 136px); top: 42px; width: 174px; height: 108px; padding-top: 44px; box-sizing: border-box; right: auto; bottom: auto; display: flex; flex-direction: column; overflow: hidden; z-index: 1; opacity: 0; visibility: hidden; pointer-events: none; }
+#blobs { position: absolute; left: calc(50% + 176px); top: 42px; width: 174px; height: 132px; padding-top: 44px; box-sizing: border-box; right: auto; bottom: auto; display: flex; flex-direction: column; overflow: hidden; z-index: 1; opacity: 0; visibility: hidden; pointer-events: none; }
 #capsule[data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-notice-view="notices"]) #blobs { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay); }
 #pill-choices { position: relative; left: auto; right: auto; top: auto; bottom: auto; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; grid-template-columns: none; grid-template-rows: none; grid-auto-rows: auto; align-content: flex-start; }
 #blobs-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 6px; font: 400 11px var(--font); color: var(--dim-2); }
@@ -854,9 +854,9 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .blob-dot[data-status="needs"] { background: var(--sun); box-shadow: 0 0 6px var(--sun); }
 .blob-dot[data-status="news"] { background: var(--island-live); }
 /* E: focus mode */
-#capsule[data-layout="focus"] #question, #capsule[data-layout="focus"] #permission { width: 548px; }
-#capsule[data-layout="focus"] #blobs { left: calc(50% + 246px); width: 64px; opacity: 1; visibility: visible; pointer-events: auto; }
-#capsule[data-layout="focus"][data-phase="expanded"][data-view="overview"] #blobs { left: calc(50% + 246px); width: 64px; }
+#capsule[data-layout="focus"] #question, #capsule[data-layout="focus"] #permission { width: 628px; }
+#capsule[data-layout="focus"] #blobs { left: calc(50% + 286px); width: 64px; opacity: 1; visibility: visible; pointer-events: auto; }
+#capsule[data-layout="focus"][data-phase="expanded"][data-view="overview"] #blobs { left: calc(50% + 286px); width: 64px; }
 #capsule[data-layout="focus"] .pill-choice { padding: 0; justify-content: center; }
 #capsule[data-layout="focus"] .pill-choice span:not(.ico) { display: none; }
 #capsule[data-layout="focus"] .pill-choice .island-agent-clay { margin-left: 0; }
@@ -887,7 +887,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 #blobs-more { font: 600 11px var(--font); color: var(--dim-2); }
 
 /* D: «Pi terminó» wraps its result (never a truncated line); a long one grows the card, then scrolls INSIDE it */
-#capsule[data-phase="expanded"][data-notice-view="notices"] #notices { height: var(--finished-h, 108px); }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices { height: var(--finished-h, 132px); }
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notices[data-scroll="true"] { overflow-y: auto; }
 #capsule[data-phase="expanded"][data-notice-view="notices"] #notice-card:not([hidden]) { height: auto; min-height: 100%; }
 /* E: the centre column = the focused session's real state + real tool steps; I: the calm state with a CTA */
@@ -949,7 +949,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .pill-choice span:not(.ico) { padding: 0 22px 0 30px; }
 #pill-choices { gap: 2px; padding: 1px 6px; }
 /* the notices band sits over the TOP of the blobs card, 28px: the capsule (Coucou's 28px pill) or the chips row, never both stacked */
-#notices, #capsule[data-view="overview"] #notices[data-grouped="true"] { left: calc(50% + 136px); width: 174px; top: 42px; height: 28px; padding: 0 4px; }
+#notices, #capsule[data-view="overview"] #notices[data-grouped="true"] { left: calc(50% + 176px); width: 174px; top: 42px; height: 28px; padding: 0 4px; }
 #notices { gap: 0; }
 #notice-row { min-height: 28px; padding-right: 28px; gap: 0 4px; flex-wrap: nowrap; overflow: hidden; }
 #notice-row .chip { min-height: 22px; }
@@ -1008,7 +1008,7 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
 /* The OPEN grouped list takes the whole 620x108 card again: the 174x28 band rule above is more specific than the plain list rule and
    squashed it (screen gate: «descarta exactamente una fila» timed out — the rows were clipped inside a 28px strip). */
 #capsule[data-view="overview"] #notices[data-list="open"], #capsule[data-view="overview"] #notices[data-grouped="true"][data-list="open"] {
-  left: calc(50% - 310px); width: 620px; top: 42px; height: 108px; padding: 8px; gap: 8px; box-shadow: none; z-index: 4;
+  left: calc(50% - 350px); width: 700px; top: 42px; height: 132px; padding: 8px; gap: 8px; box-shadow: none; z-index: 4;
 }
 #capsule[data-view="overview"] #notices[data-list="open"] ~ #blobs, #capsule[data-notice-list="open"] #blobs { opacity: 0; visibility: hidden; pointer-events: none; }
 

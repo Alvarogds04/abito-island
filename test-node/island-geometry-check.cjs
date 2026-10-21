@@ -1,12 +1,12 @@
 'use strict';
 /* The expanded overview with the REAL css/scripts in a real layout engine: nothing overlaps, nothing is clipped out of reach, every
-   control receives its own click. Island = 640x160 (viewport x16..656, y0..160); cards y42..150. Run: node test-node/island-geometry-check.cjs */
+   control receives its own click. Island = 720x184 (viewport x16..656, y0..160); cards y42..150. Run: node test-node/island-geometry-check.cjs */
 const assert = require('node:assert/strict');
 const H = require('./island-geometry-harness.cjs');
 if (!H.findPlaywright()) { console.log('SKIPPED island-geometry-check: playwright is not installed here (no real layout engine) — NOT a pass'); process.exit(0); }
 
-const ISLAND = { left: 16, top: 0, right: 656, bottom: 160 };
-const CARD = { top: 42, bottom: 150 };
+const ISLAND = { left: 16, top: 0, right: 736, bottom: 184 };
+const CARD = { top: 42, bottom: 174 };
 const overlap = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
 const inside = (a, c) => a.left >= c.left - 0.5 && a.top >= c.top - 0.5 && a.right <= c.right + 0.5 && a.bottom <= c.bottom + 0.5;
 const label = e => `${e.id}[${Math.round(e.left)},${Math.round(e.top)},${Math.round(e.right)},${Math.round(e.bottom)}]`;
@@ -51,7 +51,7 @@ function noOverlaps(list, why) {
       noOverlaps(list, `${name}: overlapping boxes`);
       for (const b of list) if (b.sel !== '#clay') assert.ok(inside(b, ISLAND), `${name}: ${label(b)} leaves the island`);
       // the left card's content stays inside the cards' row (nothing drawn into the header or below the island)
-      for (const b of list) if (!['#notices'].includes(b.sel)) assert.ok(b.top >= CARD.top - 1 && b.bottom <= CARD.bottom + 1, `${name}: ${label(b)} leaves the 108px card row`);
+      for (const b of list) if (!['#notices'].includes(b.sel)) assert.ok(b.top >= CARD.top - 1 && b.bottom <= CARD.bottom + 1, `${name}: ${label(b)} leaves the 132px card row`);
       // every control receives its own click (the validator clicks by coordinates)
       const hits = [];
       for (const sel of ['#session-jump', '#notice-action', '#notice-dismiss', '#notice-open', '.pill-choice', '.see-all', '.engine-link', '#centre-cta', '#connection:not([disabled])']) hits.push(...await r.hit(sel));
@@ -206,8 +206,8 @@ function noOverlaps(list, why) {
       await r.page.waitForTimeout(6500); // «Recibida» (3 s) + the spring back
       const mode = await r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question || '', badge: !document.getElementById('clay-badge').hidden, layout: document.getElementById('capsule').dataset.layout }));
       assert.deepEqual(mode, { q: '', badge: false, layout: 'normal' }, `nothing of the question is left over: ${JSON.stringify(mode)}`);
-      assert.ok(Math.abs(await islandH() - 160) < 2, `the island is back to the 160px overview, got ${await islandH()}`);
-      assert.ok(Math.abs(await clayTop() - 63) < 2, `the mascot is back at the overview position (63), got ${await clayTop()}`);
+      assert.ok(Math.abs(await islandH() - 184) < 2, `the island is back to the 184px overview, got ${await islandH()}`);
+      assert.ok(Math.abs(await clayTop() - 75) < 2, `the mascot is back at the overview position (75), got ${await clayTop()}`);
       const list = await boxes(r);
       noOverlaps(list, 'after answering: overlapping boxes');
       passed += 1;

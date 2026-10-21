@@ -171,7 +171,7 @@
   }
   function moreView(view) {
     if (!view || view.state !== 'ready' || !(view.truncated || view.rows.length > 1) || !view.rows.length) return null;
-    return { label: 'Ver todas', aria: 'Ver todas las sesiones' };
+    return { label: 'Todas', aria: 'Ver todas las sesiones' };
   }
   function listView(view, pending, focusId) {
     if (!view || view.state !== 'ready' || !view.rows.length) return null;

@@ -391,7 +391,7 @@ pub fn run(app: AppHandle) {
         a11y_evidence(&app);
     }
 
-    // 11. chat (U1): overview -> chat in the SAME window (672x340 read back
+    // 11. chat (U1): overview -> chat in the SAME window (752x340 read back
     //     from the X server), one turn through the REAL `chat_action` IPC
     //     against an in-process FAKE local router (the real router and any
     //     provider are never contacted by the probe), then an unreachable
@@ -1934,9 +1934,9 @@ fn chat_evidence(app: &AppHandle) {
     // change of the session can still snap; run one page-driven round trip first.
     {
         let Some(page) = main_window(app) else { return };
-        let _ = page.eval("window.__islandSetView('overview', 640, 240)");
+        let _ = page.eval("window.__islandSetView('overview', 720, 240)");
         sleep(Duration::from_millis(500));
-        let _ = page.eval("window.__islandSetView('chat', 640, 240)");
+        let _ = page.eval("window.__islandSetView('chat', 720, 240)");
         sleep(Duration::from_millis(700));
     }
     let lines = sample_motion(app, "vista-salida", 1400, || {
@@ -1952,10 +1952,10 @@ fn chat_evidence(app: &AppHandle) {
     // DIAGNOSTIC: the same view change driven only by the page (no native resize).
     let Some(page) = main_window(app) else { return };
     let lines = sample_motion(app, "vista-salida-solo-pagina", 1200, || {
-        let _ = page.eval("window.__islandSetView('overview', 640, 240)");
+        let _ = page.eval("window.__islandSetView('overview', 720, 240)");
     });
     emit(&json!({"step": "motion_sample", "scene": "vista-salida-solo-pagina", "webview": lines}));
-    let _ = page.eval("window.__islandSetView('chat', 640, 240)");
+    let _ = page.eval("window.__islandSetView('chat', 720, 240)");
     sleep(Duration::from_millis(700));
     // DIAGNOSTIC 2: native exit AGAIN, now that page-driven ones already ran
     // (is the snap a first-use artefact or the native route itself?).
@@ -2054,7 +2054,7 @@ fn chat_evidence(app: &AppHandle) {
     }));
 
     chat_state_scenes(app);
-    // back to the overview (same window shrinks to 672x176), then collapse
+    // back to the overview (same window shrinks to 752x200), then collapse
     crate::chathost::switch_view(app, &state, false);
     let back = wait_for_size(app, overview, Duration::from_secs(3));
     sleep(Duration::from_millis(200));

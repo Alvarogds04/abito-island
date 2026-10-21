@@ -74,7 +74,7 @@ test('input region: the island shape grows to include the toast (the host region
   const [w, h] = T.shapeWithToast([288, 32], true);
   assert.equal(w, 350);
   assert.equal(h, 32 + T.TOAST.gap + T.TOAST.hMax);
-  assert.deepEqual(T.shapeWithToast([640, 160], true), [640, 160 + T.TOAST.gap + T.TOAST.hMax]);
+  assert.deepEqual(T.shapeWithToast([720, 184], true), [720, 184 + T.TOAST.gap + T.TOAST.hMax]);
 });
 
 test('reveal policy: a new question shows the toast; it no longer expands the island by itself', () => {

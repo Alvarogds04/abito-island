@@ -101,7 +101,7 @@ mod tests {
 #[test]
 fn edge_input_tracks_four_pixel_strip_and_protected_cards_refuse_it() {
     let strip = Report { w:288, h:4, settled:true };
-    assert_eq!(input_rect(strip, (672,340), false), (192,0,288,4));
-    assert_eq!(input_rect(strip, (672,340), true), (192,0,288,32));
-    assert_eq!(input_rect(Report {h:-1,..strip}, (672,340), false), (192,0,288,32));
+    assert_eq!(input_rect(strip, (752,340), false), (232,0,288,4));
+    assert_eq!(input_rect(strip, (752,340), true), (232,0,288,32));
+    assert_eq!(input_rect(Report {h:-1,..strip}, (752,340), false), (232,0,288,32));
 }

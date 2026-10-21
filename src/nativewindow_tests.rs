@@ -3,7 +3,7 @@ use super::{defer, logical_size};
 #[test]
 fn physical_requests_use_actual_scale_and_round_like_tao() {
     for scale in [1.0, 1.25, 2.0] {
-        for (w, h) in [(288, 32), (672, 176), (672, 256)] {
+        for (w, h) in [(288, 32), (752, 200), (752, 280)] {
             let physical = (
                 (w as f64 * scale).round() as i32,
                 (h as f64 * scale).round() as i32,
