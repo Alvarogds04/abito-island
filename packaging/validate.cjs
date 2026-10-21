@@ -115,6 +115,10 @@ async function main(args = process.argv.slice(2)) {
     fs.copyFileSync(fixturePi, fixtureCodex); fs.chmodSync(fixtureCodex, 0o700);
     launch('node', [fixtureCodex, '--discovery-project', secondProject], env, 'discovery-project.log');
     env.ABITO_PROJECT_ROOT = path.resolve(crate, '../..');
+    // The island lists live agent sessions from /proc. A validation run must see only ITS OWN fixtures (children of
+    // this process), never the human's real Pi/Claude/Codex sessions: they fill the four pill slots and hide the
+    // integration pill the GitHub scenes wait for.
+    env.ABITO_SESSIONS_SCOPE_PID = String(process.pid);
     // Xvfb atomically chooses a free display; never guess, and never touch :0.
     const xvfb = launch('Xvfb', ['-displayfd', '1', '-screen', '0', '1280x900x24', '-nolisten', 'tcp', '-noreset'], env, 'xvfb.log');
     let display = '';
