@@ -61,6 +61,12 @@ impl Transport {
         match self.never {}
     }
 
+    pub fn answer_many(&self, _id: &str, _indexes: Vec<usize>, _text: Option<String>) -> Result<(), HumanReplyError> {
+        match self.never {}
+    }
+    pub fn answer_form(&self, _id: &str, _answers: Vec<crate::question::ItemAnswer>) -> Result<(), HumanReplyError> {
+        match self.never {}
+    }
     pub fn decline(&self, _id: &str) -> Result<(), HumanReplyError> {
         match self.never {}
     }

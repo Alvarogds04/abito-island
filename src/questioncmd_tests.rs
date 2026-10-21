@@ -129,3 +129,39 @@ fn questioncmd_budget_literal_escaping_validation_and_privacy() {
     for secret in ["secret","session-1","private-a","project","source"] { assert!(!v.contains(secret)); }
     assert!(slot.active().is_some());
 }
+
+// ---- structured IPC: `answer_many` (multiSelect) and `answer_form` (questionnaire) -------------------
+
+#[test]
+fn answer_many_and_answer_form_accept_only_closed_bounded_shapes() {
+    match parse_command(&json!({"action":"answer_many","id":ID,"indexes":[2,0]})).unwrap() {
+        Command::AnswerMany { indexes, text, .. } => { assert_eq!(indexes, vec![2, 0]); assert!(text.is_none()); }
+        _ => panic!(),
+    }
+    assert!(matches!(parse_command(&json!({"action":"answer_many","id":ID,"indexes":[],"text":"otra"})), Ok(Command::AnswerMany { .. })));
+    let form = json!({"action":"answer_form","id":ID,"answers":[
+        {"index":1}, {"indexes":[0,2]}, {"indexes":[1],"text":"x"}, {"text":"libre"}]});
+    match parse_command(&form).unwrap() {
+        Command::AnswerForm { answers, .. } => assert_eq!(answers.len(), 4),
+        _ => panic!(),
+    }
+    for bad in [
+        json!({"action":"answer_many","id":ID,"indexes":[0,1,2,3,0]}),          // more than 4 entries
+        json!({"action":"answer_many","id":ID,"indexes":[-1]}), json!({"action":"answer_many","id":ID,"indexes":[4]}),
+        json!({"action":"answer_many","id":ID,"indexes":["0"]}), json!({"action":"answer_many","id":ID,"indexes":0}),
+        json!({"action":"answer_many","id":ID,"indexes":[0],"text":"bad\u{0000}"}),
+        json!({"action":"answer_many","id":ID,"indexes":[0],"value":"v1"}),     // stowaway
+        json!({"action":"answer_many","id":ID}),
+        json!({"action":"answer_form","id":ID,"answers":[]}),
+        json!({"action":"answer_form","id":ID,"answers":[{"index":0},{"index":0},{"index":0},{"index":0},{"index":0}]}),
+        json!({"action":"answer_form","id":ID,"answers":[{"index":0,"indexes":[0]}]}),   // ambiguous entry
+        json!({"action":"answer_form","id":ID,"answers":[{}]}),
+        json!({"action":"answer_form","id":ID,"answers":[{"index":9}]}),
+        json!({"action":"answer_form","id":ID,"answers":[{"value":"v1"}]}),
+        json!({"action":"answer_form","id":ID,"answers":[{"text":"bad\u{007f}"}]}),
+        json!({"action":"answer_form","id":ID,"answers":"x"}),
+        json!({"action":"answer_form","id":ID,"answers":[{"index":0}],"source":"human"}),
+    ] { assert!(parse_command(&bad).is_err(), "{bad}"); }
+    // the old verbs are untouched
+    assert!(matches!(parse_command(&json!({"action":"answer","id":ID,"index":3})), Ok(Command::Answer { index: 3, .. })));
+}

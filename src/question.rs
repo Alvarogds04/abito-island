@@ -25,6 +25,26 @@ pub const QUESTIONS_READY_LINE: &[u8] =
     b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1}\n";
 pub const QUESTIONS_BUSY_REASON_READY_LINE: &[u8] =
     b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"busyReason\":1}\n";
+/// Frame cap on a connection that negotiated `structured:1` (multiSelect, questionnaire, larger limits).
+/// A connection that did not keeps [`FRAME_BYTES`] and the original limits, byte for byte.
+pub const STRUCTURED_FRAME_BYTES: usize = 16384;
+/// Most questions in one questionnaire frame; it occupies ONE queue slot.
+pub const MAX_FORM_ITEMS: usize = 4;
+/// The `questions_ready` line for the capabilities the receiver grants. Legacy combinations are the
+/// exact constants above; key order is `busyReason` then `structured`.
+pub fn questions_ready_line(busy_reason: bool, structured: bool) -> Vec<u8> {
+    match (busy_reason, structured) {
+        (false, false) => QUESTIONS_READY_LINE.to_vec(),
+        (true, false) => QUESTIONS_BUSY_REASON_READY_LINE.to_vec(),
+        (false, true) => b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"structured\":1}\n".to_vec(),
+        (true, true) => b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"busyReason\":1,\"structured\":1}\n".to_vec(),
+    }
+}
+/// Text limits by negotiated mode (characters; the frame cap bounds bytes on top of these).
+struct Limits { text: usize, label: usize, desc: usize, header: usize, free: usize, frame: usize }
+const LEGACY_LIMITS: Limits = Limits { text: 500, label: 60, desc: 160, header: 0, free: 2000, frame: FRAME_BYTES };
+const STRUCTURED_LIMITS: Limits = Limits { text: 2000, label: 120, desc: 400, header: 32, free: 4000, frame: STRUCTURED_FRAME_BYTES };
+fn limits(structured: bool) -> &'static Limits { if structured { &STRUCTURED_LIMITS } else { &LEGACY_LIMITS } }
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Static codes only: never expose parser diagnostics or private payloads.
@@ -104,8 +124,36 @@ pub struct Question {
     agent: String,
     /// OPTIONAL display name of the asking session's project (S3); never an identity.
     project_name: Option<String>,
+    /// The connection negotiated `structured:1`: larger limits and frame cap apply to this question.
+    structured: bool,
+    /// The human may pick several options (answer: a list of offered values).
+    multi_select: bool,
+    /// A questionnaire: 1-4 questions in ONE frame and ONE queue slot; the answer has one entry each.
+    form: Option<Vec<Item>>,
+}
+/// One question of a questionnaire.
+#[derive(Clone)]
+pub struct Item { header: String, text: String, options: Vec<QuestionOption>, multi_select: bool, allow_free_text: bool }
+impl Item {
+    pub fn header(&self) -> &str { &self.header }
+    pub fn text(&self) -> &str { &self.text }
+    pub fn options(&self) -> &[QuestionOption] { &self.options }
+    pub fn multi_select(&self) -> bool { self.multi_select }
+    pub fn allow_free_text(&self) -> bool { self.allow_free_text }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireItem {
+    header: String, text: String, options: Vec<QuestionOption>,
+    #[serde(default, rename = "multiSelect")] multi_select: bool,
+    #[serde(default, rename = "allowFreeText")] allow_free_text: bool,
 }
 impl Question {
+    pub fn multi_select(&self) -> bool { self.multi_select }
+    pub fn form(&self) -> Option<&[Item]> { self.form.as_deref() }
+    pub fn structured(&self) -> bool { self.structured }
+    /// Longest free-text entry this question accepts, in characters.
+    pub fn free_text_max(&self) -> usize { limits(self.structured).free }
     /// The asking session's project name, when the producer sent a valid one.
     pub fn project_name(&self) -> Option<&str> { self.project_name.as_deref() }
     /// The wire identity of the asking agent (`pi` by default).
@@ -139,7 +187,7 @@ impl Resolved {
     pub fn status(&self) -> ResolutionStatus { self.status }
 }
 pub enum Inbound {
-    Hello, HelloBusyReason, Question(Question), Cancel(Cancel), AnswerRejected(AnswerRejected), Resolved(Resolved),
+    Hello, HelloBusyReason, HelloStructured { busy_reason: bool }, Question(Question), Cancel(Cancel), AnswerRejected(AnswerRejected), Resolved(Resolved),
 }
 
 // No flatten/Value intermediate: serde's struct visitor rejects duplicates,
@@ -153,6 +201,9 @@ enum Wire {
         project: String, #[serde(rename = "sessionId")] session_id: String, at: u64,
         #[serde(default, rename = "busyReason", deserialize_with = "busy_reason_capability")]
         busy_reason: bool,
+        /// Capability level 1, exact like `busyReason`: absent or the integer 1.
+        #[serde(default, deserialize_with = "busy_reason_capability")]
+        structured: bool,
     },
     #[serde(rename = "question")]
     Question {
@@ -165,6 +216,10 @@ enum Wire {
         #[serde(default, deserialize_with = "present_string")] agent: Option<String>,
         /// OPTIONAL (S3): display name of the project, same grammar as `settled` (`project_name_ok`).
         #[serde(default, rename = "projectName", deserialize_with = "present_string")] project_name: Option<String>,
+        /// STRUCTURED only: several options may be chosen.
+        #[serde(default, rename = "multiSelect", deserialize_with = "present::<_, bool>")] multi_select: Option<bool>,
+        /// STRUCTURED only: a questionnaire of 1-4 questions in one frame.
+        #[serde(default, deserialize_with = "present::<_, Vec<WireItem>>")] questions: Option<Vec<WireItem>>,
     },
     #[serde(rename = "question_cancel")]
     Cancel {
@@ -188,6 +243,9 @@ enum Wire {
 
 // A present value must be a real string: an explicit `null` is NOT "absent" (Option<String> alone
 // would accept it as None and silently mean `pi`), so it is refused with the rest of the junk.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
 fn present_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
     String::deserialize(deserializer).map(Some)
 }
@@ -201,15 +259,22 @@ fn busy_reason_capability<'de, D: serde::Deserializer<'de>>(deserializer: D) -> 
 /// A proved v1 identity is required, including for the question opt-in hello.
 /// The caller owns the separate per-connection subscription state.
 pub fn decode(body: &[u8], identity: &Identity, now: u64) -> Result<Inbound, Error> {
-    if body.len() > FRAME_BYTES { return Err(Error::FrameTooLarge); }
+    decode_with(body, identity, now, false)
+}
+/// [`decode`] for a connection that did (`structured`) or did not negotiate `structured:1`: the frame cap,
+/// the text limits and the structured fields all depend on it. `false` is exactly the original decoder.
+pub fn decode_with(body: &[u8], identity: &Identity, now: u64, structured: bool) -> Result<Inbound, Error> {
+    if body.len() > limits(structured).frame { return Err(Error::FrameTooLarge); }
     let wire: Wire = serde_json::from_slice(body).map_err(|_| Error::InvalidFrame)?;
     let (v, version, base, inbound) = match wire {
-        Wire::Hello { v, question_version, project, session_id, at, busy_reason } => {
+        Wire::Hello { v, question_version, project, session_id, at, busy_reason, structured: wants } => {
             (v, question_version, Base { project, session_id, at },
-             if busy_reason { Inbound::HelloBusyReason } else { Inbound::Hello })
+             if wants { Inbound::HelloStructured { busy_reason } }
+             else if busy_reason { Inbound::HelloBusyReason } else { Inbound::Hello })
         }
         Wire::Question { v, question_version, project, session_id, at, id, kind, text,
-                         options, allow_free_text, expires_at, agent, project_name } => {
+                         options, allow_free_text, expires_at, agent, project_name, multi_select, questions } => {
+            if !structured && (multi_select.is_some() || questions.is_some()) { return Err(Error::InvalidSchema); }
             let base = Base { project, session_id, at };
             let agent = match agent {
                 None => DEFAULT_AGENT.to_owned(),
@@ -219,7 +284,11 @@ pub fn decode(body: &[u8], identity: &Identity, now: u64) -> Result<Inbound, Err
             if project_name.as_deref().is_some_and(|n| !crate::protocol::project_name_ok(n)) {
                 return Err(Error::InvalidQuestion);
             }
-            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent, project_name };
+            let form = questions.map(|items| items.into_iter().map(|i| Item {
+                header: i.header, text: i.text, options: i.options, multi_select: i.multi_select, allow_free_text: i.allow_free_text,
+            }).collect());
+            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent, project_name,
+                structured, multi_select: multi_select.unwrap_or(false), form };
             validate_question(&question, now)?;
             (v, question_version, base, Inbound::Question(question))
         }
@@ -331,22 +400,46 @@ pub fn agent_label(slug: &str) -> String {
     }
 }
 
-fn validate_question(q: &Question, now: u64) -> Result<(), Error> {
-    validate_id(&q.id)?;
-    let duration = q.expires_at.checked_sub(q.base.at).ok_or(Error::InvalidQuestion)?;
-    if !safe_epoch(q.expires_at) || !(30_000..=900_000).contains(&duration)
-        || !plain(&q.text, 500, false)
-        || (q.kind == Kind::Approval && (q.allow_free_text || q.options.len() != 2))
-        || (!(2..=4).contains(&q.options.len())
-            && !(q.options.is_empty() && q.kind == Kind::Question && q.allow_free_text)) {
-        return Err(Error::InvalidQuestion);
-    }
-    for (index, option) in q.options.iter().enumerate() {
-        if !token(&option.value) || !plain(&option.label, 60, false)
-            || !plain(&option.description, 160, true)
-            || q.options[..index].iter().any(|prior| prior.value == option.value) {
+fn validate_options(options: &[QuestionOption], l: &Limits) -> Result<(), Error> {
+    for (index, option) in options.iter().enumerate() {
+        if !token(&option.value) || !plain(&option.label, l.label, false)
+            || !plain(&option.description, l.desc, true)
+            || options[..index].iter().any(|prior| prior.value == option.value) {
             return Err(Error::InvalidQuestion);
         }
+    }
+    Ok(())
+}
+fn validate_question(q: &Question, now: u64) -> Result<(), Error> {
+    validate_id(&q.id)?;
+    let l = limits(q.structured);
+    let duration = q.expires_at.checked_sub(q.base.at).ok_or(Error::InvalidQuestion)?;
+    if !safe_epoch(q.expires_at) || !(30_000..=900_000).contains(&duration)
+        || !plain(&q.text, l.text, false) {
+        return Err(Error::InvalidQuestion);
+    }
+    if (q.multi_select || q.form.is_some()) && (!q.structured || q.kind != Kind::Question) {
+        return Err(Error::InvalidQuestion);
+    }
+    if let Some(items) = &q.form {
+        // The frame's own options/free text/multiSelect are empty: every question lives in its item.
+        if !(1..=MAX_FORM_ITEMS).contains(&items.len()) || !q.options.is_empty() || q.allow_free_text || q.multi_select {
+            return Err(Error::InvalidQuestion);
+        }
+        for item in items {
+            if !plain(&item.header, l.header, false) || !plain(&item.text, l.text, false)
+                || !(2..=4).contains(&item.options.len()) {
+                return Err(Error::InvalidQuestion);
+            }
+            validate_options(&item.options, l)?;
+        }
+    } else {
+        if (q.kind == Kind::Approval && (q.allow_free_text || q.options.len() != 2))
+            || (!(2..=4).contains(&q.options.len())
+                && !(q.options.is_empty() && q.kind == Kind::Question && q.allow_free_text && !q.multi_select)) {
+            return Err(Error::InvalidQuestion);
+        }
+        validate_options(&q.options, l)?;
     }
     if q.expires_at <= now { return Err(Error::Expired); }
     Ok(())
@@ -354,10 +447,47 @@ fn validate_question(q: &Question, now: u64) -> Result<(), Error> {
 
 /// UI supplies an index, never a wire token. Rust resolves the original value.
 /// Text is retained verbatim; trim is used only to test non-emptiness.
-pub enum HumanAnswer { Option { index: usize }, Text { text: String } }
+pub enum HumanAnswer {
+    Option { index: usize }, Text { text: String },
+    /// A multiSelect question: the chosen option indexes (distinct, offered) and, only when free text is allowed, a text.
+    Options { indexes: Vec<usize>, text: Option<String> },
+    /// A questionnaire: exactly one entry per question, in order. All or nothing.
+    Form { answers: Vec<ItemAnswer> },
+}
+/// The answer to ONE question of a questionnaire.
+pub enum ItemAnswer { Option { index: usize }, Options { indexes: Vec<usize>, text: Option<String> }, Text { text: String } }
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum Answer<'a> { Option { value: &'a str }, Text { text: &'a str } }
+enum ItemOut<'a> {
+    Option { value: &'a str },
+    Options { values: Vec<&'a str>, #[serde(skip_serializing_if = "Option::is_none")] text: Option<&'a str> },
+    Text { text: &'a str },
+}
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Answer<'a> {
+    Option { value: &'a str }, Text { text: &'a str },
+    Options { values: Vec<&'a str>, #[serde(skip_serializing_if = "Option::is_none")] text: Option<&'a str> },
+    Form { answers: Vec<ItemOut<'a>> },
+}
+/// Validate one answer against one question's shape and render it. `None` = refused. The free-text
+/// bound is in characters; the caller's frame cap bounds bytes.
+fn item_answer<'a>(options: &'a [QuestionOption], multi: bool, free: bool, free_max: usize, a: &'a ItemAnswer) -> Option<ItemOut<'a>> {
+    match a {
+        ItemAnswer::Option { index } if !multi => Some(ItemOut::Option { value: &options.get(*index)?.value }),
+        ItemAnswer::Text { text } if !multi && free && plain(text, free_max, false) => Some(ItemOut::Text { text }),
+        ItemAnswer::Options { indexes, text } if multi => options_out(options, free, free_max, indexes, text.as_deref()),
+        _ => None,
+    }
+}
+fn options_out<'a>(options: &'a [QuestionOption], free: bool, free_max: usize, indexes: &[usize], text: Option<&'a str>) -> Option<ItemOut<'a>> {
+    let mut sorted = indexes.to_vec();
+    sorted.sort_unstable();
+    if sorted.windows(2).any(|w| w[0] == w[1]) || sorted.iter().any(|i| *i >= options.len()) { return None; }
+    if let Some(t) = text { if !free || !plain(t, free_max, false) { return None; } }
+    if sorted.is_empty() && text.is_none() { return None; }
+    Some(ItemOut::Options { values: sorted.iter().map(|i| options[*i].value.as_str()).collect(), text })
+}
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Outbound<'a> {
@@ -377,9 +507,10 @@ enum Outbound<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 enum CloseReason { Expired, Cancelled, Busy }
-fn encode(frame: &Outbound<'_>) -> Result<Vec<u8>, Error> {
+fn encode(frame: &Outbound<'_>) -> Result<Vec<u8>, Error> { encode_cap(frame, FRAME_BYTES) }
+fn encode_cap(frame: &Outbound<'_>, cap: usize) -> Result<Vec<u8>, Error> {
     let mut body = serde_json::to_vec(frame).map_err(|_| Error::InvalidFrame)?;
-    if body.len() > FRAME_BYTES { return Err(Error::FrameTooLarge); }
+    if body.len() > cap { return Err(Error::FrameTooLarge); }
     body.push(b'\n');
     Ok(body)
 }
@@ -483,20 +614,34 @@ impl QuestionSlot {
     pub fn prepare_answer(&self, connection_id: u64, identity: &Identity, id: &str, input: HumanAnswer, now: u64) -> Result<PreparedDelivery, Error> {
         let active = self.for_human(connection_id, identity, id, now)?;
         let q = &active.question;
+        let l = limits(q.structured);
+        let plain_question = !q.multi_select && q.form.is_none();
         let answer = match &input {
-            HumanAnswer::Option { index } => Answer::Option {
+            HumanAnswer::Option { index } if plain_question => Answer::Option {
                 value: &q.options.get(*index).ok_or(Error::InvalidAnswer)?.value,
             },
-            HumanAnswer::Text { text } => {
-                if q.kind != Kind::Question || !q.allow_free_text
-                    || !plain(text, 2000, false) {
-                    return Err(Error::InvalidAnswer);
-                }
+            HumanAnswer::Text { text } if plain_question && q.kind == Kind::Question && q.allow_free_text && plain(text, l.free, false) => {
                 Answer::Text { text }
             }
+            HumanAnswer::Options { indexes, text } if q.multi_select => {
+                match options_out(&q.options, q.allow_free_text, l.free, indexes, text.as_deref()).ok_or(Error::InvalidAnswer)? {
+                    ItemOut::Options { values, text } => Answer::Options { values, text },
+                    _ => return Err(Error::InvalidAnswer),
+                }
+            }
+            HumanAnswer::Form { answers } => {
+                let items = q.form.as_deref().ok_or(Error::InvalidAnswer)?;
+                if answers.len() != items.len() { return Err(Error::InvalidAnswer); }
+                let mut out = Vec::with_capacity(items.len());
+                for (item, a) in items.iter().zip(answers) {
+                    out.push(item_answer(&item.options, item.multi_select, item.allow_free_text, l.free, a).ok_or(Error::InvalidAnswer)?);
+                }
+                Answer::Form { answers: out }
+            }
+            _ => return Err(Error::InvalidAnswer),
         };
-        let line = encode(&Outbound::Answer { v: 1, question_version: 1, project: &identity.project,
-            session_id: &identity.session_id, at: now, id: &q.id, source: "human", answer })?;
+        let line = encode_cap(&Outbound::Answer { v: 1, question_version: 1, project: &identity.project,
+            session_id: &identity.session_id, at: now, id: &q.id, source: "human", answer }, l.frame)?;
         Ok(Self::preparation(active, line))
     }
     pub fn prepare_decline(&self, connection_id: u64, identity: &Identity, id: &str, now: u64) -> Result<PreparedDelivery, Error> {
@@ -552,7 +697,7 @@ macro_rules! redacted_debug {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(concat!(stringify!($ty), "(<redacted>)")) }
     })+ };
 }
-redacted_debug!(QuestionOption, Base, Question, Cancel, AnswerRejected, Resolved, Inbound,
+redacted_debug!(QuestionOption, Base, Question, Item, ItemAnswer, Cancel, AnswerRejected, Resolved, Inbound,
     HumanAnswer, Active, Admission, PreparedDelivery, QuestionSlot);
 
 #[cfg(test)]

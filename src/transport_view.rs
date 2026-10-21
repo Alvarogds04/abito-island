@@ -26,6 +26,19 @@ pub struct PendingQuestionView {
     /// Project name of the asking session when the producer sent one (S3); absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_name: Option<String>,
+    /// Structured questions: several options may be chosen (absent/false for a plain question).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub multi_select: bool,
+    /// A questionnaire: one entry per question; the frame's own options/text-entry are empty then.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form: Option<Vec<FormItemView>>,
+    /// Longest free-text answer accepted, in characters (2000 plain, 4000 structured).
+    pub free_text_max: usize,
+}
+#[derive(Clone, Serialize)]
+pub struct FormItemView {
+    pub header: String, pub text: String, pub options: Vec<QuestionOptionView>,
+    pub multi_select: bool, pub allow_free_text: bool,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]

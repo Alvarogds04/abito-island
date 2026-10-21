@@ -42,7 +42,7 @@ use crate::protocol::{self, Message};
 use crate::question::{self, Admission, HumanAnswer, Inbound, QuestionSlot, ResolutionStatus};
 use crate::questioncmd::NativeTransition;
 pub use crate::transport_view::{
-    DeliveryState, HumanReplyError, PendingQuestionView, PreviewScan, QuestionDeliveryView,
+    DeliveryState, FormItemView, HumanReplyError, PendingQuestionView, PreviewScan, QuestionDeliveryView,
     QuestionOptionView, QuestionOutcome, QuestionSnapshot, TransportError, TransportOptions,
     INSTALLED_RUNTIME_LEAF, RESERVED_RUNTIME_NAMES, SOCKET_DIR_ENV,
 };
@@ -68,7 +68,13 @@ impl Questions {
                     index, label: o.label().into(), description: o.description().into(),
                 }).collect(), allow_free_text: q.allow_free_text(), expires_at: q.expires_at(),
                 agent: q.agent().into(), agent_label: q.agent_label(),
-                project_name: q.project_name().map(str::to_owned) }
+                project_name: q.project_name().map(str::to_owned),
+                multi_select: q.multi_select(), free_text_max: q.free_text_max(),
+                form: q.form().map(|items| items.iter().map(|i| FormItemView {
+                    header: i.header().into(), text: i.text().into(), multi_select: i.multi_select(), allow_free_text: i.allow_free_text(),
+                    options: i.options().iter().enumerate().map(|(index, o)| QuestionOptionView {
+                        index, label: o.label().into(), description: o.description().into() }).collect(),
+                }).collect()) }
         };
         let pending = self.slot.active().map(view);
         // Everyone waiting BEHIND the one shown, oldest first (the head is `pending`).
@@ -507,6 +513,12 @@ impl Transport {
     pub fn answer_text(&self, id: &str, text: String) -> Result<(), HumanReplyError> {
         self.human_reply(id, Some(HumanAnswer::Text { text }))
     }
+    pub fn answer_many(&self, id: &str, indexes: Vec<usize>, text: Option<String>) -> Result<(), HumanReplyError> {
+        self.human_reply(id, Some(HumanAnswer::Options { indexes, text }))
+    }
+    pub fn answer_form(&self, id: &str, answers: Vec<question::ItemAnswer>) -> Result<(), HumanReplyError> {
+        self.human_reply(id, Some(HumanAnswer::Form { answers }))
+    }
     pub fn decline(&self, id: &str) -> Result<(), HumanReplyError> {
         self.human_reply(id, None)
     }
@@ -888,13 +900,17 @@ fn accept_loop(inner: Arc<Inner>, listener: UnixListener) {
 /// unchanged. Identification allows question negotiation in this buffer;
 /// subscription still gates admission and never widens legacy decode.
 #[derive(Default)]
-struct QuestionFramer { pending: Vec<u8> }
+struct QuestionFramer { pending: Vec<u8>, structured: bool }
 impl QuestionFramer {
     fn push(&mut self, chunk: &[u8], identified: bool) -> Result<protocol::Framed, ()> {
         // After v1 identification, allow a full-size questions_hello as well.
         // This is framing permission, NOT subscription or admission authority.
-        let cap = if identified { question::FRAME_BYTES } else { protocol::FRAME_BYTES };
-        if self.pending.len() + chunk.len() > cap * protocol::BATCH_FACTOR { return Err(()); }
+        // A connection that negotiated `structured:1` may send frames up to STRUCTURED_FRAME_BYTES; the batch
+        // bound stays proportionate (two frames). Everyone else keeps the original caps exactly.
+        let structured = identified && self.structured;
+        let cap = if structured { question::STRUCTURED_FRAME_BYTES } else if identified { question::FRAME_BYTES } else { protocol::FRAME_BYTES };
+        let batch = if structured { cap * 2 } else { cap * protocol::BATCH_FACTOR };
+        if self.pending.len() + chunk.len() > batch { return Err(()); }
         self.pending.extend_from_slice(chunk);
         let mut frames = Vec::new();
         let mut start = 0;
@@ -920,14 +936,20 @@ impl QuestionFramer {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // per-connection negotiation flags travel by reference, as before
 fn receive_question(inner: &Inner, connection: u64, identity: &protocol::Identity,
-    origin: &QuestionOrigin, subscribed: &mut bool, busy_reason_supported: &mut bool, inbound: Inbound) -> bool {
-    if matches!(inbound, Inbound::Hello | Inbound::HelloBusyReason) {
-        let requested = matches!(inbound, Inbound::HelloBusyReason);
-        let ready = if requested { question::QUESTIONS_BUSY_REASON_READY_LINE } else { question::QUESTIONS_READY_LINE };
-        if *subscribed || write_line(&origin.writer, ready).is_err() { return false; }
+    origin: &QuestionOrigin, subscribed: &mut bool, busy_reason_supported: &mut bool, structured_supported: &mut bool, inbound: Inbound) -> bool {
+    if matches!(inbound, Inbound::Hello | Inbound::HelloBusyReason | Inbound::HelloStructured { .. }) {
+        let (requested, structured) = match inbound {
+            Inbound::HelloBusyReason => (true, false),
+            Inbound::HelloStructured { busy_reason } => (busy_reason, true),
+            _ => (false, false),
+        };
+        let ready = question::questions_ready_line(requested, structured);
+        if *subscribed || write_line(&origin.writer, &ready).is_err() { return false; }
         *subscribed = true;
         *busy_reason_supported = requested;
+        *structured_supported = structured;
         inner.questions.lock().expect("questions lock").ready.insert(connection);
         inner.question_changed();
         return true;
@@ -1000,7 +1022,7 @@ fn receive_question(inner: &Inner, connection: u64, identity: &protocol::Identit
                 }
                 true
             }
-            Inbound::Hello | Inbound::HelloBusyReason => unreachable!(),
+            Inbound::Hello | Inbound::HelloBusyReason | Inbound::HelloStructured { .. } => unreachable!(),
         };
         (valid, changed)
     };
@@ -1019,6 +1041,7 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
     let origin = QuestionOrigin { stream: stream.clone(), writer };
     let mut subscribed = false;
     let mut busy_reason_supported = false;
+    let mut structured_supported = false;
     let mut framer = QuestionFramer::default();
     let mut identity: Option<protocol::Identity> = None;
     let mut quota = protocol::FrameQuota::new(now_millis());
@@ -1096,13 +1119,14 @@ fn handle_connection(inner: Arc<Inner>, id: u64, stream: Arc<UnixStream>) {
                             }
                         }
                         Err(_) => {
-                            let inbound = identity.as_ref().and_then(|bound| question::decode(frame, bound, now_ms()).ok());
+                            let inbound = identity.as_ref().and_then(|bound| question::decode_with(frame, bound, now_ms(), structured_supported).ok());
                             if let Some(inbound) = inbound {
                                 let Some(bound) = identity.as_ref() else {
                                     rejected = true;
                                     break;
                                 };
-                                if receive_question(&inner, id, bound, &origin, &mut subscribed, &mut busy_reason_supported, inbound) {
+                                if receive_question(&inner, id, bound, &origin, &mut subscribed, &mut busy_reason_supported, &mut structured_supported, inbound) {
+                                    framer.structured = structured_supported;
                                     last_valid = Some(Instant::now());
                                     continue;
                                 }

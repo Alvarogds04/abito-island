@@ -7,6 +7,34 @@ pub const MAX_REQUEST_BYTES: usize = 16384;
 pub enum Command {
     View, Answer { id: String, index: usize }, Text { id: String, text: String },
     Decline { id: String }, Budget { id: String, text: String },
+    /// multiSelect: the chosen option indexes (and optional text when the question allows it).
+    AnswerMany { id: String, indexes: Vec<usize>, text: Option<String> },
+    /// questionnaire: one entry per question, all together.
+    AnswerForm { id: String, answers: Vec<crate::question::ItemAnswer> },
+}
+fn control_free(text: &str) -> bool {
+    !text.chars().any(|c| matches!(c, '\u{0000}'..='\u{0008}' | '\u{000b}' | '\u{000c}' | '\u{000e}'..='\u{001f}' | '\u{007f}'))
+}
+fn index_list(v: &Value) -> Result<Vec<usize>, Error> {
+    let list = v.as_array().filter(|a| a.len() <= 4).ok_or(Error::InvalidAnswer)?;
+    list.iter().map(|i| i.as_u64().filter(|i| *i <= 3).map(|i| i as usize).ok_or(Error::InvalidAnswer)).collect()
+}
+fn opt_text(map: &serde_json::Map<String, Value>) -> Result<Option<String>, Error> {
+    match map.get("text") {
+        None => Ok(None),
+        Some(t) => { let t = t.as_str().filter(|t| control_free(t)).ok_or(Error::InvalidAnswer)?; Ok(Some(t.into())) }
+    }
+}
+fn item_answer(v: &Value) -> Result<crate::question::ItemAnswer, Error> {
+    use crate::question::ItemAnswer;
+    let m = v.as_object().ok_or(Error::InvalidAnswer)?;
+    if m.keys().any(|k| !matches!(k.as_str(), "index" | "indexes" | "text")) { return Err(Error::InvalidSchema); }
+    match (m.get("index"), m.get("indexes"), m.get("text")) {
+        (Some(i), None, None) => Ok(ItemAnswer::Option { index: i.as_u64().filter(|i| *i <= 3).ok_or(Error::InvalidAnswer)? as usize }),
+        (None, Some(l), _) => Ok(ItemAnswer::Options { indexes: index_list(l)?, text: opt_text(m)? }),
+        (None, None, Some(_)) => Ok(ItemAnswer::Text { text: opt_text(m)?.ok_or(Error::InvalidAnswer)? }),
+        _ => Err(Error::InvalidAnswer),
+    }
 }
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct TextBudget { pub bytes: usize, pub allowed: bool, pub reason: Option<&'static str> }
@@ -21,19 +49,25 @@ pub fn parse_command(payload: &Value) -> Result<Command, Error> {
         "answer" => &["action", "id", "index"],
         "text" | "budget" => &["action", "id", "text"],
         "decline" => &["action", "id"],
+        "answer_many" => {
+            if map.len() > 4 || map.keys().any(|k| !matches!(k.as_str(), "action" | "id" | "indexes" | "text")) || !map.contains_key("indexes") {
+                return Err(Error::InvalidSchema);
+            }
+            let id = valid_id(map.get("id"))?;
+            return Ok(Command::AnswerMany { id, indexes: index_list(&map["indexes"])?, text: opt_text(map)? });
+        }
+        "answer_form" => {
+            if map.len() != 3 || !map.contains_key("answers") { return Err(Error::InvalidSchema); }
+            let id = valid_id(map.get("id"))?;
+            let list = map["answers"].as_array().filter(|a| (1..=crate::question::MAX_FORM_ITEMS).contains(&a.len())).ok_or(Error::InvalidAnswer)?;
+            return Ok(Command::AnswerForm { id, answers: list.iter().map(item_answer).collect::<Result<_, _>>()? });
+        }
         _ => return Err(Error::InvalidSchema),
     };
     if map.len() != keys.len() || !keys.iter().all(|k| map.contains_key(*k)) {
         return Err(Error::InvalidSchema);
     }
-    let id = map["id"].as_str().ok_or(Error::InvalidSchema)?;
-    let b = id.as_bytes();
-    if b.len() != 36 || b[14] != b'4' || !matches!(b[19], b'8'|b'9'|b'a'|b'b')
-        || !b.iter().enumerate().all(|(i, &c)| if matches!(i, 8|13|18|23) { c == b'-' }
-            else { c.is_ascii_digit() || (b'a'..=b'f').contains(&c) }) {
-        return Err(Error::InvalidQuestion);
-    }
-    let id = id.to_owned();
+    let id = valid_id(map.get("id"))?;
     Ok(match action {
         "answer" => Command::Answer { id, index: map["index"].as_u64().filter(|i| *i <= 3)
             .ok_or(Error::InvalidAnswer)? as usize },
@@ -46,6 +80,16 @@ pub fn parse_command(payload: &Value) -> Result<Command, Error> {
             else { Command::Budget { id, text: text.into() } }
         }
     })
+}
+fn valid_id(v: Option<&Value>) -> Result<String, Error> {
+    let id = v.and_then(Value::as_str).ok_or(Error::InvalidSchema)?;
+    let b = id.as_bytes();
+    if b.len() != 36 || b[14] != b'4' || !matches!(b[19], b'8'|b'9'|b'a'|b'b')
+        || !b.iter().enumerate().all(|(i, &c)| if matches!(i, 8|13|18|23) { c == b'-' }
+            else { c.is_ascii_digit() || (b'a'..=b'f').contains(&c) }) {
+        return Err(Error::InvalidQuestion);
+    }
+    Ok(id.to_owned())
 }
 pub fn collapse_allowed(expanded: bool, pending: bool) -> bool { !(expanded && pending) }
 /// A blocked short click must still clear the native press and snap, but must
