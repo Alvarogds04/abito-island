@@ -85,8 +85,15 @@ fn ensure_island_window(app: &AppHandle) -> Rect {
     let Some(win) = main_window(app) else { return area };
     let io = TauriIo(&win);
     let monitor = *state.monitor.lock().expect("monitor lock");
-    let monitor = if monitor.w > 0 && monitor.h > 0 { monitor } else { area };
-    let wanted = geometry::island_window_rect_on(monitor, area, io.scale(), state.window_h.load(Ordering::SeqCst));
+    let monitor = Some(monitor).filter(|m| m.w > 0 && m.h > 0);
+    // No monitor (no RandR output: the virtual screen-share monitor was removed) means GDK's scale 1 is a fallback, not a reading,
+    // and the work area is a stale X value: keep where the window is and place again when a monitor or another scale shows up
+    // (the work-area watcher and ScaleFactorChanged both call this funnel).
+    let Some(wanted) = geometry::island_window_rect_for(monitor, area, io.scale(), state.window_h.load(Ordering::SeqCst)) else {
+        let (w, h) = io.size();
+        let (x, y) = io.outer_position();
+        return Rect { x, y, w, h };
+    };
     if io.size() != (wanted.w, wanted.h) {
         io.set_size(wanted.w, wanted.h);
     }
@@ -505,7 +512,13 @@ fn refresh_work_area(app: &AppHandle, state: &AppState) -> Rect {
     let rect = placement_area(&win, wa.rect, chosen.as_deref());
     // The screen the island centres on: the chosen monitor's bounds when one is chosen (its bounds ARE its work area there), else
     // the monitor the window lives on. Unknown -> the work area (today's behaviour).
-    let monitor = if chosen.is_some() { rect } else { wa.monitor.unwrap_or(rect) };
+    // No usable monitor at all -> an empty Rect (unknown): `ensure_island_window` then keeps the last placement instead of centring
+    // on a stale X work area with a fallback scale.
+    let monitor = match (chosen.is_some(), wa.monitor) {
+        (_, None) => Rect { x: 0, y: 0, w: 0, h: 0 },
+        (true, Some(_)) => rect,
+        (false, Some(m)) => m,
+    };
     *state.monitor.lock().expect("monitor lock") = monitor;
     *state.work_area.lock().expect("work area lock") = rect;
     rect
@@ -847,6 +860,9 @@ fn open_chat_and_type(app: &AppHandle) {
 /// Poll the work area once a second and re-place the fixed window when it changes.
 /// Island pointer gestures never own native placement.
 fn spawn_workarea_watcher(app: AppHandle) {
+    // What the last placement was made from besides the area: whether a monitor backed it, and the scale. The area alone does not
+    // change when the virtual monitor comes back or GDK settles on another scale, and the island must be placed again then.
+    let mut last_basis: Option<(bool, u64)> = None;
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(1000));
         if QUITTING.load(Ordering::SeqCst) {
@@ -858,13 +874,15 @@ fn spawn_workarea_watcher(app: AppHandle) {
         // #389: with a chosen monitor the island re-clamps into THAT monitor's
         // area, not the one it currently sits on; the fallback is unchanged.
         let area = placement_area(&win, wa.rect, settingshost::chosen_monitor(&app).as_deref());
+        let basis = (wa.monitor.is_some(), cached_scale().to_bits());
         {
             let mut stored = state.work_area.lock().expect("work area lock");
-            if area == *stored {
+            if area == *stored && last_basis == Some(basis) {
                 continue;
             }
             *stored = area;
         }
+        last_basis = Some(basis);
         let safe = ensure_island_window(&app);
         store_requested(&state, "workarea-clamp", Some((safe.x, safe.y)), Some((safe.w, safe.h)));
         publish(&app, &state);

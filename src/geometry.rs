@@ -93,6 +93,20 @@ pub fn island_window_rect_on(monitor: Rect, area: Rect, scale: f64, height: i32)
     let centred = Rect { x: monitor.x + (monitor.w - w) / 2, y: area.y, w, h };
     clamp_rect(centred, area)
 }
+/// The scale to lay the island out with, or None while no monitor backs it. Under XWayland native scaling the X screen is drawn
+/// at an integer multiple of the logical one (GNOME 125 %: root 3072x1728 for a 1920x1080 monitor, GDK scale 2) and GDK reports it
+/// only through a monitor; with no RandR output at all (the virtual screen-share monitor removed) GDK answers 1 while the root keeps
+/// its native geometry, and that 1 is a fallback, not a reading: placing from it made the island half size and off-centre.
+pub fn effective_scale(reported: f64, monitor: Option<Rect>) -> Option<f64> {
+    monitor.filter(|m| m.w > 0 && m.h > 0)?;
+    Some(valid_scale(reported))
+}
+/// `island_window_rect_on` for a monitor that may not exist: None means «keep the last placement and wait» (the caller places again
+/// when the monitor appears or the scale changes). The size, the centre and the input region all use the one `effective_scale`.
+pub fn island_window_rect_for(monitor: Option<Rect>, area: Rect, reported_scale: f64, height: i32) -> Option<Rect> {
+    let scale = effective_scale(reported_scale, monitor)?;
+    Some(island_window_rect_on(monitor?, area, scale, height))
+}
 /// A long question may grow the native window up to this share of the work-area height (human: «abito se ajusta al tamaño»).
 pub const WINDOW_GROWTH_PERCENT: i32 = 70;
 /// The page asks for a logical height; Rust decides: never below the fixed window, never above 70% of the work area.
@@ -358,4 +372,53 @@ mod tests {
         // without a monitor the work area is the only truth: today's behaviour
         assert_eq!(island_window_rect_h(work, 1.0, ISLAND_WINDOW.1), island_window_rect_on(work, work, 1.0, ISLAND_WINDOW.1));
     }
+
+    // ── The display scale under XWayland native scaling (#503, handoff «isla escala 125») ──
+    // GNOME at 125 %: the logical screen is 1536x864 and Xwayland draws it at an integer 2x, so the X root is 3072x1728 and the
+    // monitor the island sees is 3072x1728 PHYSICAL px with GDK scale 2. With NO RandR output (the virtual screen-share monitor
+    // removed) GDK falls back to scale 1 while the root keeps its native geometry: reading that 1 as a measurement drew the island
+    // at half size and off-centre. A scale is only a measurement while a monitor backs it.
+    fn native_125() -> Rect { Rect { x: 0, y: 0, w: 3072, h: 1728 } }
+
+    #[test]
+    fn a_scale_is_a_reading_only_while_a_monitor_backs_it() {
+        assert_eq!(effective_scale(2.0, Some(native_125())), Some(2.0));
+        assert_eq!(effective_scale(1.0, Some(Rect { x: 0, y: 0, w: 1920, h: 1080 })), Some(1.0));
+        assert_eq!(effective_scale(1.0, None), None, "no monitor: GDK's 1 is a fallback, not a reading");
+        assert_eq!(effective_scale(2.0, None), None);
+        assert_eq!(effective_scale(2.0, Some(Rect { x: 0, y: 0, w: 0, h: 0 })), None, "a 0-wide monitor is no monitor");
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(effective_scale(bad, Some(native_125())), Some(1.0), "a junk reading with a monitor falls back to 1 like valid_scale");
+        }
+    }
+
+    #[test]
+    fn the_island_keeps_its_logical_size_and_the_screen_centre_at_1_1_25_native_and_2() {
+        // (monitor in X px, GDK scale, expected window in X px, expected centre x)
+        for (monitor, scale, size, centre) in [
+            (Rect { x: 0, y: 0, w: 1920, h: 1080 }, 1.0, (752, 340), 960),
+            (native_125(), 2.0, (1504, 680), 1536),
+            (Rect { x: 0, y: 0, w: 3840, h: 2160 }, 2.0, (1504, 680), 1920),
+        ] {
+            let r = island_window_rect_for(Some(monitor), monitor, scale, ISLAND_WINDOW.1).expect("a monitor is there");
+            assert_eq!((r.w, r.h), size, "logical 752x340 at scale {scale}");
+            assert_eq!(r.x + r.w / 2, centre, "centred on the monitor's X geometry at scale {scale}");
+            assert_eq!(r.y, monitor.y);
+            assert_eq!(r.w as f64 / scale, 752.0, "the same LOGICAL width whatever the scale");
+        }
+    }
+
+    #[test]
+    fn without_a_monitor_nothing_is_placed_and_the_decision_does_not_depend_on_launch_timing() {
+        let stale_area = Rect { x: 94, y: 64, w: 2978, h: 1664 };
+        for scale in [1.0, 2.0, 1.25] {
+            assert_eq!(island_window_rect_for(None, stale_area, scale, ISLAND_WINDOW.1), None, "no monitor at scale {scale}: keep the last placement");
+            assert_eq!(island_window_rect_for(Some(Rect { x: 0, y: 0, w: 0, h: 0 }), stale_area, scale, ISLAND_WINDOW.1), None);
+        }
+        // launching with no monitor and the monitor arriving later gives EXACTLY what launching with it present gives
+        let present = island_window_rect_for(Some(native_125()), native_125(), 2.0, ISLAND_WINDOW.1);
+        let waited = [None, None].into_iter().chain([Some(native_125())]).fold(None, |last, m| island_window_rect_for(m, native_125(), 2.0, ISLAND_WINDOW.1).or(last));
+        assert_eq!(waited, present);
+    }
+
 }
