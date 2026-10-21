@@ -364,7 +364,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #overview-view[data-ticker="on"] #overview-empty, #overview-view[data-spotify="on"] #overview-empty { display: none; }
 /* connection strip: nothing healthy to say → nothing drawn, and the right card takes its whole height */
 #capsule[data-notices-calm="true"] #notices { display: none; }
-#capsule[data-notices-calm="true"] #pill-choices { top: 0; }
+#capsule[data-notices-calm="true"] #blobs { padding-top: 0; }
 
 /* Spotify: the 36px art tile (Coucou .np-art). No artwork is ever fetched (CSP img-src 'self'), so the tile stays the empty slot with its note. */
 .np-art { position: relative; flex: 0 0 36px; width: 36px; height: 36px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35); display: grid; place-items: center; overflow: hidden; color: #1db954; }
@@ -823,7 +823,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .card-left { width: 438px; }
 .col-status { position: absolute; left: 12px; top: 74px; width: 96px; display: flex; flex-direction: column; gap: 1px; font: 400 11px/14px var(--font); color: var(--dim-2); pointer-events: none; }
 .col-status span:first-child { color: var(--ink); font-weight: 500; }
-#blobs { position: absolute; left: calc(50% + 136px); top: 42px; width: 174px; height: 108px; right: auto; bottom: auto; display: flex; flex-direction: column; overflow: hidden; z-index: 1; opacity: 0; visibility: hidden; pointer-events: none; }
+#blobs { position: absolute; left: calc(50% + 136px); top: 42px; width: 174px; height: 108px; padding-top: 44px; box-sizing: border-box; right: auto; bottom: auto; display: flex; flex-direction: column; overflow: hidden; z-index: 1; opacity: 0; visibility: hidden; pointer-events: none; }
 #capsule[data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-notice-view="notices"]) #blobs { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay); }
 #pill-choices { position: relative; left: auto; right: auto; top: auto; bottom: auto; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; grid-template-columns: none; grid-template-rows: none; grid-auto-rows: auto; align-content: flex-start; }
 #blobs-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 6px; font: 400 11px var(--font); color: var(--dim-2); }
@@ -864,3 +864,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .q-approval-btn:disabled { opacity: .4; cursor: default; }
 .q-approval-btn:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; border-radius: 999px; }
 .q-kbd { font: 500 10.5px var(--font); opacity: .55; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
+
+#capsule[data-layout="focus"] #blobs { padding-top: 0; }
+#capsule[data-layout="focus"] .pill-choice[data-overflow="true"] { display: none; }
+#blobs-more { font: 600 11px var(--font); color: var(--dim-2); }

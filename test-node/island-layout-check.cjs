@@ -277,4 +277,29 @@ test('wiring: notify.js renders approvalView (badge, mono box, Rechazar/Aprobar)
   assert.equal(decls('.q-approval-btn.q-approve').color, '#0b0c0e', 'dark text on it');
 });
 
+// ---- the notices band must not cover the blobs list; calm gives the room back ---------------------------------------------------
+test('CSS: the blobs card leaves the 44px notices band free; a calm strip (nothing to say) gives that room back', () => {
+  assert.equal(px(decls('#blobs')['padding-top']), 44, 'the band (y42..86 of the island) owns the top of the right card');
+  assert.equal(px(decls('#capsule[data-notices-calm="true"] #blobs')['padding-top']), 0);
+  assert.equal(px(decls('#capsule[data-layout="focus"] #blobs')['padding-top']), 0, 'focus mode hides the band behind the question card');
+});
+
+// ---- H: every agent has its own mascot colour (human audit: «4 puntos azules idénticos») --------------------------------------
+test('agentColor: a stable colour per agent class, the human\'s own pill colour wins, unknown falls back to blue', () => {
+  assert.deepEqual(['Pi', 'Claude Code', 'Codex', 'Gemini', 'OpenCode'].map(k => T.agentColor(k, {})), ['green', 'orange', 'purple', 'mint', 'blue']);
+  assert.equal(T.agentColor('Claude Code', { pillColors: { integration_claude: 'purple' } }), 'purple', 'the human\'s choice wins');
+  assert.equal(T.agentColor('Claude Code', { pillColors: { integration_claude: 'not-a-colour' } }), 'orange', 'a junk preference never reaches the DOM');
+  assert.equal(T.agentColor('Mystery', {}), 'blue');
+  assert.equal(T.agentColor(undefined, null), 'blue');
+  const rows = T.sessionRows(T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [
+    { id: 's-0000000a', kind: 'claude-code', cwd: 'a', state: 'running', origin: null }, { id: 's-0000000b', kind: 'codex', cwd: 'b', state: 'running', origin: null }] }), {});
+  assert.deepEqual(rows.map(r => r.color), ['orange', 'purple'], 'two agents are two colours');
+});
+test('wiring: the focus-mode blobs column shows «+N» for the overflow and the footer\'s «Ver todas» opens the full list', () => {
+  const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
+  assert.match(pv, /focusOverflow\(/);
+  assert.match(pv, /blobs-more/);
+  assert.match(css, /#capsule\[data-layout="focus"\] \.pill-choice\[data-overflow="true"\] \{[^}]*display: none/);
+});
+
 console.log(`island-layout-check: ${passed} checks ok`);

@@ -152,6 +152,15 @@
     if (host.children.length !== buttons.length || buttons.some((button, i) => host.children[i] !== button)) {
       host.replaceChildren(...buttons);
     }
+    // E (focus mode): the 64px column keeps up to four mascots and says «+N» for the rest; the others are hidden by CSS only here.
+    const L = root.AbitoIslandLayout, more = get('blobs-more');
+    if (L) {
+      const o = L.focusOverflow(buttons.map(b => ({ id: b.dataset.pillId })));
+      const shown = new Set(o.shown.map(r => r.id));
+      for (const b of buttons) b.dataset.overflow = shown.has(b.dataset.pillId) ? 'false' : 'true';
+      if (more) { more.hidden = !o.more; more.textContent = o.more ? `+${o.more}` : ''; more.setAttribute('aria-label', o.more ? `${o.more} más` : ''); }
+      const footer = get('blobs-footer'); if (footer) footer.hidden = !o.more;
+    }
     if (focusedEl) (get(focusedEl) || get(`pill-choice-${selected}`) || get(`pill-choice-${A.PRINCIPAL_ID}`))?.focus();
   }
   function apply(raw) {

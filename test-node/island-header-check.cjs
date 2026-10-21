@@ -156,7 +156,7 @@ test('overview: empty card + calm strip + static status lines kept for assistive
   assert.match(isl, /\.agentline, \.overview-detail, \.pill-summary \{\s*clip-path: inset\(50%\)/);
   assert.match(isl, /#overview-view\[data-ticker="on"\] #overview-empty[^{]*\{ display: none; \}/);
   assert.match(isl, /#capsule\[data-notices-calm="true"\] #notices \{ display: none; \}/);
-  assert.match(isl, /#capsule\[data-notices-calm="true"\] #pill-choices \{ top: 0; \}/);
+  assert.match(isl, /#capsule\[data-notices-calm="true"\] #blobs \{ padding-top: 0; \}/, 'A+E: a calm strip gives the 44px band back to the blobs card');
   const src = read('island.js');
   assert.match(src, /noticesEl\.dataset\.calm = \(!first && conn\.tone === 'go' && !bridge && !view\)/, 'a problem or a notice keeps its honest strip');
   assert.match(src, /\$\('hotkey'\)\.hidden/, 'a hotkey problem also keeps it');

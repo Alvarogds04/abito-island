@@ -74,10 +74,18 @@
   // Process identities stay separate from catalog identities: several projects
   // can share a source, and Pi is never relabeled as Claude Code.
   const SOURCES = { 'Claude Code': 'integration_claude', Codex: 'agent_codex', Gemini: 'agent_gemini', OpenCode: 'agent_opencode' };
+  // H: each agent class has its own mascot colour (no four identical blue dots); the human's own pill colour always wins.
+  const AGENT_COLOR = Object.freeze({ Pi: 'green', 'Claude Code': 'orange', Codex: 'purple', Gemini: 'mint', OpenCode: 'blue' });
+  const PALETTE = new Set(['green', 'blue', 'mint', 'orange', 'purple']);
+  function agentColor(kindLabel, prefs) {
+    const chosen = prefs && prefs.pillColors ? prefs.pillColors[SOURCES[kindLabel]] : null;
+    if (typeof chosen === 'string' && (PALETTE.has(chosen) || /^#[0-9a-fA-F]{6}$/.test(chosen))) return chosen;
+    return AGENT_COLOR[kindLabel] || 'blue';
+  }
   function sessionRows(view, prefs = {}) {
     return (view?.state === 'ready' ? view.rows : []).map(row => ({
       ...row, session: true, name: row.cwd ?? row.kindLabel, sourcePill: SOURCES[row.kindLabel] || null,
-      color: prefs.pillColors?.[SOURCES[row.kindLabel]] || 'blue',
+      color: agentColor(row.kindLabel, prefs),
       pose: row.tools?.steps.some(s => s.state === 'running') ? 'working' : row.tools?.steps.at(-1)?.state === 'error' ? 'error' : 'idle',
     })).sort((a, b) => Number(b.sourcePill === prefs.mainPill) - Number(a.sourcePill === prefs.mainPill) || Number(!!b.tools?.total) - Number(!!a.tools?.total));
   }
@@ -222,7 +230,7 @@
     return { active: true, ticker: true, task: { steps, stepSeq: memory.seq - 1, finalLine: steps.at(-1) ?? null }, who };
   }
 
-  return { moreView, listView, pendingAsker, piStateOf, SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
+  return { agentColor, moreView, listView, pendingAsker, piStateOf, SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
