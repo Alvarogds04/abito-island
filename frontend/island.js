@@ -58,6 +58,7 @@
   const RECAP_H = 184; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
   const QUESTION_H = 200; // default; a long question grows it (abito:question-size), capped by the fixed window
   let questionH = QUESTION_H;
+  let finishedH = 0; // D: the island height a long «terminó» result needs (0 = the normal overview)
   // const QUESTION_H doc: // Coucou QUESTION_PICKER_H: the fixed window already has room
   const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 101 };
   const BLOB_DROP = 10 / 140; // the drawn blob sits this fraction of the box below the box centre (measured, was drop 10 at box 140)
@@ -234,7 +235,7 @@
 
   function render() {
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
-    const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : OVERVIEW.h;
+    const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : finishedH || OVERVIEW.h;
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
     const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown && capsule.dataset.phase !== 'expanded' ? QT.shapeWithToast(shape, true) : shape);
     reportShape(withToast([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
@@ -923,16 +924,36 @@
   }
   // S10 (L22): Coucou's finished card for the confirmed-notice lane. «OK» is the same dismissal as the band's ×.
   const noticeCard = $('notice-card'), noticeCardOk = $('notice-card-ok');
+  // A+E CTA of the calm centre: it presses the header's own «+» (a new conversation), exactly as the human would
+  document.addEventListener('abito:centre-new', () => { const plus = $('open-new'); if (plus && !plus.disabled) plus.click(); });
+  // D: the finished result wraps (never a truncated line), so the card may need more than the 108px overview card. It asks the island
+  // for the height it needs (capped like a question, then it scrolls inside); the window grows through the existing on-demand verb.
+  function fitFinished(shown) {
+    const L = window.AbitoIslandLayout, card = noticeCard, msg = $('notice-card-message');
+    const el = $('notices');
+    if (!L || !card || !el) return;
+    if (!shown) { if (finishedH) { finishedH = 0; render(); } return; }
+    el.style.height = 'auto';
+    const need = card.scrollHeight + 8;
+    el.style.height = '';
+    const layout = L.finishedLayout(need);
+    const next = layout.islandH > 160 ? layout.islandH : 0;
+    el.style.setProperty('--finished-h', layout.cardH + 'px');
+    el.dataset.scroll = layout.scroll ? 'true' : 'false';
+    if (next !== finishedH) { finishedH = next; render(); }
+  }
   function paintNoticeCard(first) {
     if (!noticeCard) return;
     const selected = noticeLane?.view === 'notices' ? current?.notices?.find(n => n.id === noticeLane.id) : first;
     const v = selected && O.finishedCardView ? O.finishedCardView(selected, NV && NV.agentLabel) : null;
     noticeCard.hidden = !v;
-    if (!v) return;
+    document.dispatchEvent(new CustomEvent('abito:finished-shown', { detail: { shown: !!v && noticeLane?.view === 'notices' } }));
+    if (!v) { fitFinished(false); return; }
     $('notice-card-name').textContent = v.name;
     $('notice-card-verb').textContent = v.verb;
     const msg = $('notice-card-message'); msg.textContent = v.message; msg.title = v.message;
     const t = $('notice-card-terminal'); t.disabled = !v.terminal.available;
+    fitFinished(noticeLane?.view === 'notices');
   }
   // «Abrir terminal» = the closed host verb `focus_host {target:'terminal'}` (focushost.rs): no command, path or window id
   // ever leaves the page; a refusal is the host's public Spanish reason, shown on the button and announced politely.

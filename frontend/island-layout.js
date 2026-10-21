@@ -139,7 +139,59 @@
     return { left: box.left + box.size / 2 - 20 - 8, top: box.top + box.size / 2 - 21 - 8 };
   }
 
-  return { badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
+  // ---- E: the centre shows the focused session -----------------------------------------------------------------------------------
+  /** The session the centre shows: the human's selection if it still exists, else the attributed pending question's session, else
+   *  the first one that is working (a running tool counts), else the first the daemon lists (it sorts most recent first). */
+  function pickFocus(rows, selectedId, attributedId) {
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const has = id => typeof id === 'string' && rows.some(r => r && r.id === id);
+    if (has(selectedId)) return selectedId;
+    if (has(attributedId)) return attributedId;
+    const working = rows.find(isRunning);
+    return (working || rows[0]).id || null;
+  }
+  const STATE_WORD = Object.freeze({ working: 'Trabajando', idle: 'En reposo', waiting: 'Te espera', error: 'Con error' });
+  const STEP_LINES = 3, CENTRE_NAME_MAX = 32;
+  /** What the centre draws for one session: its real state (never invented) and its real tool steps (none -> no step lines at all). */
+  function centreView(row, ctx) {
+    if (!row || typeof row !== 'object' || typeof row.id !== 'string') return null;
+    const name = bound(row.cwd || row.kindLabel || 'Sesión', CENTRE_NAME_MAX), agent = row.kindLabel || '';
+    const tools = row.tools && Array.isArray(row.tools.steps) ? row.tools : null;
+    const raw = tools ? tools.steps : [];
+    const running = raw.some(s => s.state === 'running');
+    let state = running || row.state === 'running' ? 'working' : raw.at(-1) && raw.at(-1).state === 'error' ? 'error' : 'idle';
+    if (ctx && ctx.attributedId && ctx.attributedId === row.id) state = 'waiting';
+    const shown = raw.slice(-STEP_LINES);
+    const cur = running ? shown.map(x => x.state).lastIndexOf('running') : shown.length - 1;
+    const steps = shown.map((x, i) => ({ index: x.index, name: x.name, state: x.state, current: i === cur }));
+    return { id: row.id, name, agent, state, stateWord: STATE_WORD[state], steps,
+      count: tools && raw.length ? `${raw.at(-1).index}/${tools.total}` : '',
+      aria: `${name} · ${agent} · ${STATE_WORD[state].toLowerCase()}` };
+  }
+
+  // ---- I: the empty centre ---------------------------------------------------------------------------------------------------------
+  /** Calm + a way forward. A failed list is NOT calm (the engine row owns that), and anything waiting or finished owns the centre. */
+  function emptyView(o) {
+    if (!o || o.pending || o.finished) return null;
+    const v = o.view;
+    if (v && v.state === 'error') return null;
+    if (v && v.state === 'ready' && Array.isArray(v.rows) && v.rows.length) return null;
+    return { title: 'Todo tranquilo', sub: 'Nada en marcha por ahora. Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } };
+  }
+
+  // ---- D: «Pi terminó» in the centre, the result untruncated ----------------------------------------------------------------------
+  const CARD_MIN = 108, FINISHED_MAX_ISLAND = 332, OFFSET = 52;
+  /** The finished card wraps its result, so it may need more than the 108px overview card: it asks for the height it needs, capped
+   *  like a question (and by what the host granted), then scrolls inside. */
+  function finishedLayout(contentH, maxIslandH) {
+    const h = Number.isFinite(contentH) && contentH > 0 ? Math.ceil(contentH) : 0;
+    const cap = Number.isFinite(maxIslandH) && maxIslandH > 0 ? Math.floor(maxIslandH) : FINISHED_MAX_ISLAND;
+    const max = Math.max(CARD_MIN, cap - OFFSET);
+    const cardH = Math.min(max, Math.max(CARD_MIN, h));
+    return { cardH, islandH: cardH + OFFSET, scroll: h > max };
+  }
+
+  return { pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
 });
 
 function mount(L) {
@@ -148,7 +200,9 @@ function mount(L) {
   const overview = doc.getElementById('overview-view');
   if (!capsule || !overview) return;
   const status = doc.getElementById('col-status');
-  let view = null, pending = null, queuedCount = 0, focusId = null;
+  const centre = doc.getElementById('col-centre'), cState = doc.getElementById('centre-state'), cSteps = doc.getElementById('centre-steps');
+  const cEmpty = doc.getElementById('centre-empty'), cta = doc.getElementById('centre-cta');
+  let view = null, pending = null, queuedCount = 0, focusId = null, selectedId = null, finished = false;
   const state = { mode: 'normal', attributedId: null, counts: null };
   function publish() {
     const rows = view && view.state === 'ready' ? view.rows : [];
@@ -160,8 +214,36 @@ function mount(L) {
       for (const line of counts.lines.slice(0, 2)) { const s = doc.createElement('span'); s.textContent = line; status.append(s); }
       status.setAttribute('aria-label', counts.lines.join(', '));
     }
+    paintCentre(rows, attributedId);
     doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId } }));
   }
+  // E + I: the centre column. Real state, real tool steps only; nothing waiting and nothing running -> the calm state with a CTA.
+  function paintCentre(rows, attributedId) {
+    if (!centre) return;
+    const id = L.pickFocus(rows, selectedId, attributedId);
+    const row = id ? rows.find(r => r.id === id) : null;
+    const v = row ? L.centreView(row, { attributedId }) : null;
+    const empty = v ? null : L.emptyView({ view, pending, finished });
+    cState.hidden = !v; cSteps.hidden = !(v && v.steps.length); cEmpty.hidden = !empty;
+    centre.dataset.state = v ? v.state : (empty ? 'empty' : 'none');
+    if (v) {
+      cState.children[0].textContent = v.name; cState.children[1].textContent = v.agent; cState.children[2].textContent = v.stateWord;
+      cState.children[3].hidden = !v.count; cState.children[3].textContent = v.count;
+      cState.dataset.state = v.state; cState.setAttribute('aria-label', v.aria);
+      cSteps.replaceChildren(...v.steps.map(step => {
+        const li = doc.createElement('li'); li.textContent = step.name; li.dataset.state = step.state; li.dataset.current = String(step.current); return li;
+      }));
+    }
+    if (empty) {
+      cEmpty.querySelector('.centre-empty-title').textContent = empty.title;
+      cEmpty.querySelector('.centre-empty-sub').textContent = empty.sub;
+      cta.firstElementChild.textContent = empty.cta.label; cta.setAttribute('aria-label', empty.cta.label);
+    }
+  }
+  doc.addEventListener('abito:session-select', e => { selectedId = e.detail && typeof e.detail.id === 'string' ? e.detail.id : null; publish(); });
+  doc.addEventListener('abito:finished-shown', e => { finished = !!(e.detail && e.detail.shown); publish(); });
+  // the CTA is the header's own «+» (a new conversation): no new host verb
+  if (cta) cta.addEventListener('click', event => { if (event.isTrusted === true) doc.dispatchEvent(new CustomEvent('abito:centre-new')); });
   function syncMode() {
     const mode = L.layoutMode({ question: capsule.dataset.question, card: capsule.dataset.card });
     if (mode === state.mode && capsule.dataset.layout === mode) return;

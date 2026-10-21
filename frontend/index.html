@@ -132,6 +132,12 @@
             <div id="overview-engine" class="engine-row" hidden><span class="engine-dot" aria-hidden="true"></span><span id="overview-engine-label" class="engine-label"></span><button id="overview-engine-link" class="engine-link" type="button"></button></div>
             <button id="overview-ask" class="btn primary" type="button"><span>Preguntar</span></button>
           </div>
+          <!-- A+E centre: the FOCUSED session with its real state + real tool steps (island-layout.js), or the calm empty state + CTA -->
+          <div id="col-centre" class="col-centre">
+            <div id="centre-state" class="centre-state" hidden><span class="centre-name"></span><span class="centre-agent"></span><span class="centre-word"></span><span class="centre-count" hidden></span></div>
+            <ol id="centre-steps" class="centre-steps" aria-label="Pasos de herramientas" hidden></ol>
+            <div id="centre-empty" class="centre-empty" hidden><strong class="centre-empty-title"></strong><span class="centre-empty-sub"></span><button id="centre-cta" class="btn primary" type="button"><span></span></button></div>
+          </div>
           <div class="agentline"><strong>Abito</strong><span id="overview-status" class="source"></span></div>
           <p id="overview-detail" class="overview-detail"></p>
           <div id="overview-engine-live" class="engine-row engine-row-live" hidden><span class="engine-dot" aria-hidden="true"></span><span id="overview-engine-live-label" class="engine-label"></span><button id="overview-engine-live-link" class="engine-link" type="button"></button></div>

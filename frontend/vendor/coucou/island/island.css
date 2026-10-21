@@ -325,7 +325,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #notice-card .who-row .dot { width: 8px; height: 8px; margin: 0; background: #fff; flex: 0 0 8px; }
 #notice-card .who-row strong { font: 600 12px var(--font); color: var(--ink); }
 #notice-card .title { font: 600 15px var(--font); color: var(--ink); }
-#notice-card .title.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#notice-card .title.one-line { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; min-width: 0; }
 #notice-card .actions { display: flex; gap: 8px; }
 /* .btn 500 12.5px pill, 30px visual in a 44px hit */
 #notice-card .btn { position: relative; z-index: 0; min-height: 44px; margin: -7px 0; padding: 0 13px; border: 0; border-radius: 0; background: transparent; font: 500 12.5px var(--font); cursor: pointer; }
@@ -868,3 +868,36 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 #capsule[data-layout="focus"] #blobs { padding-top: 0; }
 #capsule[data-layout="focus"] .pill-choice[data-overflow="true"] { display: none; }
 #blobs-more { font: 600 11px var(--font); color: var(--dim-2); }
+
+/* D: «Pi terminó» wraps its result (never a truncated line); a long one grows the card, then scrolls INSIDE it */
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices { height: var(--finished-h, 108px); }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices[data-scroll="true"] { overflow-y: auto; }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notice-card:not([hidden]) { height: auto; min-height: 100%; }
+/* E: the centre column = the focused session's real state + real tool steps; I: the calm state with a CTA */
+.col-centre { position: absolute; left: 108px; right: 12px; top: 10px; bottom: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; pointer-events: none; }
+.centre-state { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 400 11px var(--font); color: var(--dim-2); }
+.centre-state[hidden], .centre-steps[hidden], .centre-empty[hidden] { display: none; }
+.centre-name { font: 600 12px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.centre-agent { white-space: nowrap; flex: 0 0 auto; }
+.centre-word { margin-left: auto; white-space: nowrap; flex: 0 0 auto; font-weight: 500; }
+.centre-state[data-state="working"] .centre-word { color: var(--go); }
+.centre-state[data-state="waiting"] .centre-word { color: var(--sun); }
+.centre-state[data-state="error"] .centre-word { color: var(--red-11); }
+.centre-count { font: 400 10px var(--font); color: var(--dim-3); flex: 0 0 auto; }
+.centre-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; }
+.centre-steps li { font: 500 13px/20px var(--font); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.centre-steps li[data-current="true"] { color: var(--ink); }
+.centre-steps li[data-state="running"] { color: var(--ink); }
+.centre-steps li[data-state="error"] { color: var(--red-11); }
+.centre-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; pointer-events: auto; }
+.centre-empty-title { font: 600 15px var(--font); color: var(--ink); }
+.centre-empty-sub { font: 400 12px/1.3 var(--font); color: var(--dim-2); overflow-wrap: anywhere; }
+#centre-cta { position: relative; z-index: 0; min-height: 44px; margin: 2px 0 -8px; padding: 0 13px; border: 0; border-radius: 0; background: transparent; color: #0b0c0e; font: 500 12.5px var(--font); cursor: pointer; }
+#centre-cta::after { content: ""; position: absolute; inset: 7px 0; z-index: -1; border-radius: 999px; background: var(--ink); }
+#centre-cta:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; }
+/* the old single-session lines and the old «Nothing running» card give way to the centre column */
+.card-left > #overview-empty { display: none !important; }
+/* the centre column is the single place for the session name + steps: the old who-row keeps only «Ver todas», the Coucou ticker is replaced */
+.who .name, .who .tool, .who .count, .who .who-dot { display: none; }
+.card-left > .ticker { display: none; }
+.card-left > .who { top: auto; bottom: 6px; left: 108px; right: 12px; justify-content: flex-start; }

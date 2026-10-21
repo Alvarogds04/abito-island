@@ -493,7 +493,8 @@ test('notices strip: its box stays inside the overview card and its content neve
   assert.ok(contentH > height, 'model: stacked content exceeds the band, so the box (not the content) is the bound');
   assert.ok(top >= 0 && top + height <= OVH, 'the band lies inside the 108px card');
   const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
-  assert.ok(px(lane.top) - OV_TOP + px(lane.height) <= OVH, 'the confirmed-notice lane lies inside the card too');
+  assert.equal(lane.height, 'var(--finished-h, 108px)', 'D: the confirmed-notice lane is 108px by default and grows only through --finished-h (a wrapped long result)');
+  assert.ok(px(lane.top) - OV_TOP + 108 <= OVH, 'and its default box lies inside the card');
 });
 
 test('reduced motion: the in-flight ring does not rotate (cue kept by blue ring shape)', () => {

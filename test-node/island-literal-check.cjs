@@ -109,11 +109,12 @@ test('fold and info: 16px round visual (inset 14 of 44), glyph 8px, 44px hit kep
   assert.equal(decls('#permission .icon-btn .ico svg').width, '8px');
 });
 
-test('notices: 44px band on the right card; a confirmed notice takes the whole 620x108 card', () => {
+test('notices: 44px band on the right card; a confirmed notice takes the whole 620px card, 108 by default and as tall as its wrapped result needs (--finished-h)', () => {
   const n = decls('#notices');
   assert.equal(n.left, 'calc(50% + 22px)'); assert.equal(n.width, '288px'); assert.equal(n.height, '44px'); assert.equal(n.top, '42px');
   const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
-  assert.equal(lane.width, '620px'); assert.equal(lane.height, '108px'); assert.equal(lane.padding, '4px 16px 4px 116px');
+  assert.equal(lane.width, '620px'); assert.equal(lane.padding, '4px 16px 4px 116px');
+  assert.equal(lane.height, 'var(--finished-h, 108px)', 'D: 108 unless a long result asked for more');
 });
 
 test('Spotify card: Coucou np-card (dot 6, title 600 12, sub 400 11, play 20 circle ink, icons 16x18) in the left card column', () => {

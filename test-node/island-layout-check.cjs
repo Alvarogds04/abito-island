@@ -302,4 +302,97 @@ test('wiring: the focus-mode blobs column shows «+N» for the overflow and the 
   assert.match(css, /#capsule\[data-layout="focus"\] \.pill-choice\[data-overflow="true"\] \{[^}]*display: none/);
 });
 
+// ---- E: the centre shows the FOCUSED session with its real state and real tool steps only ---------------------------------------
+const row = (over = {}) => ({ id: 's-0000000a', kindLabel: 'Claude Code', cwd: 'api', state: 'sleeping', stateLabel: 'inactiva', origin: null, ...over });
+test('pickFocus: the one selected in the blobs column, else the most recently active; never another session by accident', () => {
+  const a = row({ id: 's-0000000a', cwd: 'a' }), b = row({ id: 's-0000000b', cwd: 'b', state: 'running' }), c = row({ id: 's-0000000c', cwd: 'c' });
+  assert.equal(L.pickFocus([a, b, c], 's-0000000c', null), 's-0000000c', 'the human\'s selection wins');
+  assert.equal(L.pickFocus([a, b, c], null, null), 's-0000000b', 'default: a working session beats idle ones');
+  assert.equal(L.pickFocus([a, c], null, null), 's-0000000a', 'all idle: the first the daemon lists (it sorts most recent first)');
+  assert.equal(L.pickFocus([a, b, c], 's-9999999z', null), 's-0000000b', 'a selection that no longer exists is dropped, not shown');
+  assert.equal(L.pickFocus([], 's-0000000a', null), null);
+  assert.equal(L.pickFocus(null, null, null), null);
+  const withTools = row({ id: 's-0000000d', cwd: 'd', tools: { total: 1, steps: [{ index: 1, name: 'bash', state: 'running' }] } });
+  assert.equal(L.pickFocus([a, withTools], null, null), 's-0000000d', 'a running tool counts as working');
+  assert.equal(L.pickFocus([a, b], null, 's-0000000a'), 's-0000000a', 'the attributed pending question\'s session is the default focus when none is selected');
+});
+test('centreView: name, agent, REAL state word and real tool steps; no steps -> no step lines (no placeholder, no «…»)', () => {
+  const idle = L.centreView(row());
+  assert.deepEqual([idle.name, idle.agent, idle.state, idle.stateWord, idle.steps], ['api', 'Claude Code', 'idle', 'En reposo', []]);
+  assert.equal(idle.aria, 'api · Claude Code · en reposo');
+  const working = L.centreView(row({ state: 'running' }));
+  assert.deepEqual([working.state, working.stateWord], ['working', 'Trabajando']);
+  const tools = { total: 4, steps: [{ index: 2, name: 'read', state: 'done' }, { index: 3, name: 'grep', state: 'done' }, { index: 4, name: 'bash', state: 'running' }] };
+  const t = L.centreView(row({ state: 'sleeping', tools }));
+  assert.equal(t.state, 'working', 'a running tool overrides the process state');
+  assert.deepEqual(t.steps.map(x => [x.name, x.state]), [['read', 'done'], ['grep', 'done'], ['bash', 'running']]);
+  assert.equal(t.count, '4/4');
+  assert.deepEqual(t.steps.map(x => x.current), [false, false, true], 'the running step is the current one');
+  const done = L.centreView(row({ tools: { total: 2, steps: [{ index: 1, name: 'read', state: 'done' }, { index: 2, name: 'bash', state: 'done' }] } }));
+  assert.equal(done.steps.at(-1).current, true, 'when nothing runs the last step is the current one');
+  const err = L.centreView(row({ tools: { total: 1, steps: [{ index: 1, name: 'bash', state: 'error' }] } }));
+  assert.equal(err.state, 'error'); assert.equal(err.stateWord, 'Con error');
+  assert.equal(L.centreView(null), null);
+  assert.equal(L.centreView({}), null);
+});
+test('centreView: a session waiting for the human says so ONLY when the pending question is attributed to it', () => {
+  assert.equal(L.centreView(row(), { attributedId: 's-0000000a' }).state, 'waiting');
+  assert.equal(L.centreView(row(), { attributedId: 's-0000000a' }).stateWord, 'Te espera');
+  assert.equal(L.centreView(row(), { attributedId: 's-0000000b' }).state, 'idle', 'someone else\'s question is not this session\'s state');
+  assert.equal(L.centreView(row({ state: 'running' }), { attributedId: 's-0000000a' }).state, 'waiting', 'waiting beats working');
+});
+test('centreView: steps are bounded to what fits (last 3) and a long name is cut for the column', () => {
+  const steps = Array.from({ length: 6 }, (_, i) => ({ index: i + 1, name: `tool${i}`, state: 'done' }));
+  assert.equal(L.centreView(row({ tools: { total: 6, steps } })).steps.length, 3);
+  assert.equal(L.centreView(row({ tools: { total: 6, steps } })).steps[2].name, 'tool5');
+  const long = L.centreView(row({ cwd: 'un-proyecto-con-un-nombre-larguisimo-de-verdad' }));
+  assert.ok(Array.from(long.name).length <= 32 && long.name.endsWith('…'), long.name);
+});
+
+// ---- I: the empty state in the centre, with a CTA ------------------------------------------------------------------------------
+test('emptyView: nothing running -> «Todo tranquilo» + «Nueva conversación»; failures and unknown states are NOT empty', () => {
+  const e = L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [] }), pending: null, finished: false });
+  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Nada en marcha por ahora. Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } });
+  assert.deepEqual(L.emptyView({ view: null, pending: null, finished: false }).cta.action, 'new-chat', 'no list yet and nothing pending: still a calm empty centre');
+  assert.equal(L.emptyView({ view: { state: 'error' }, pending: null, finished: false }), null, 'a failed list is not "everything is calm": the engine row owns that');
+  assert.equal(L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [{ id: 's-0000000a', kind: 'pi', cwd: 'x', state: 'sleeping', origin: null }] }), pending: null, finished: false }), null, 'a session exists: the centre shows it');
+  assert.equal(L.emptyView({ view: null, pending: { id: 'x' }, finished: false }), null, 'something waits: focus mode owns the centre');
+  assert.equal(L.emptyView({ view: null, pending: null, finished: true }), null, 'a finished result owns the centre');
+});
+
+// ---- D: «Pi terminó» in the centre, full width, the result untruncated -------------------------------------------------------------
+test('finishedLayout: the result wraps (never one truncated line) and asks the island for the height it needs, capped like a question', () => {
+  const short = L.finishedLayout(40);
+  assert.deepEqual(short, { cardH: 108, islandH: 160, scroll: false }, 'a short result fits the normal overview card');
+  const mid = L.finishedLayout(150);
+  assert.deepEqual([mid.cardH, mid.islandH, mid.scroll], [150, 202, false]);
+  const huge = L.finishedLayout(900);
+  assert.deepEqual([huge.cardH, huge.islandH, huge.scroll], [280, 332, true], 'capped at the same 332 as a question, then scrolls inside');
+  const granted = L.finishedLayout(900, 600);
+  assert.deepEqual([granted.cardH, granted.islandH, granted.scroll], [548, 600, true], 'a window the host grew allows more');
+  for (const bad of [NaN, -3, undefined]) assert.deepEqual(L.finishedLayout(bad), { cardH: 108, islandH: 160, scroll: false }, String(bad));
+});
+test('wiring D/E/I: the centre is fed by island-layout.js; CSS lets the finished message wrap; a blob click selects it for the centre', () => {
+  const lay = fs.readFileSync(path.join(frontend, 'island-layout.js'), 'utf8');
+  for (const id of ['col-centre', 'centre-state', 'centre-steps', 'centre-empty']) assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), new RegExp(`id="${id}"`), id);
+  assert.match(lay, /pickFocus\(/); assert.match(lay, /centreView\(/); assert.match(lay, /emptyView\(/);
+  assert.match(lay, /abito:session-select/, 'selecting a blob sets the centre');
+  const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
+  assert.match(pv, /abito:session-select/, 'the blob click already dispatches the selection the centre listens to');
+  assert.equal(decls('#notice-card .title.one-line')['white-space'], 'normal', 'the finished result wraps');
+  assert.equal(decls('#notice-card .title.one-line')['text-overflow'], 'clip');
+  const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  assert.match(isl, /finishedLayout\(/, 'the island grows for a long result');
+  assert.match(isl, /abito:centre-new/, 'the CTA opens a new conversation through the existing «+»');
+});
+
+test('no duplicates: the centre column replaces the old who-row text and the Coucou ticker; only the «Ver todas» link stays of the who-row', () => {
+  for (const sel of ['.who .name', '.who .tool', '.who .count', '.who .who-dot']) assert.equal(decls(sel).display, 'none', `${sel}: the centre already says it`);
+  assert.equal(decls('.card-left > .ticker').display, 'none', 'the centre draws the real steps (3 lines) itself');
+  const who = decls('.card-left > .who');
+  assert.equal(who.bottom, '6px', 'the link sits at the bottom of the centre, away from the state line');
+  assert.equal(who.top, 'auto');
+  assert.ok(decls('.who .see-all'), 'the link keeps its own rule');
+});
+
 console.log(`island-layout-check: ${passed} checks ok`);
