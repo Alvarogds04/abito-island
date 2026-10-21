@@ -85,3 +85,19 @@ section.abito-card > h2 { gap: 8px; }
 .phone-devices { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 44px; }
 .phone-confirm { display: flex; align-items: center; gap: 8px; }
 .phone-confirm[hidden] { display: none !important; }
+
+/* #503 S25 (Atajos, Opción A): a table Acción | Tecla | Estado. DOM order keeps the switch first and the keycap last (the
+   existing contract); the visual order is Acción, Tecla, Estado. Rows are 44px; the state is icon + word. */
+.shortcut-table { display: flex; flex-direction: column; }
+.shortcut-table .shortcut { display: grid; grid-template-columns: 44px minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(120px, 1fr); align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--hairline); }
+.shortcut-table .shortcut-head { min-height: 28px; grid-template-columns: 44px minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(120px, 1fr); font: 600 11px var(--font); color: var(--dim); }
+.shortcut-table .shortcut-head > :first-child { grid-column: 2; }
+.shortcut-table .shortcut .keycap { grid-column: 3; grid-row: 1; justify-self: start; min-height: 36px; }
+.shortcut-table .shortcut .shortcut-state { grid-column: 4; grid-row: 1; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.shortcut-head > :nth-child(2) { grid-column: 3; } .shortcut-head > :nth-child(3) { grid-column: 4; }
+.shortcut-state .state-ico { font-weight: 700; width: 1em; text-align: center; }
+.shortcut-state.ok { color: var(--green); } .shortcut-state.warn { color: var(--amber); } .shortcut-state.err { color: var(--red, #f4505e); } .shortcut-state.off, .shortcut-state.unknown, .shortcut-state.none { color: var(--dim); }
+.capture-help { color: var(--ink); font-weight: 600; }
+.capture-help[hidden], #shortcut-reset-confirm[hidden] { display: none !important; }
+#shortcut-reset-confirm { gap: 8px; }
+.shortcut-table .switch { position: relative; } .shortcut-table .switch::before { content: ""; position: absolute; inset: -12px -6px; }

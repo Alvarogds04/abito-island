@@ -22,6 +22,8 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
   }
   const payloadFor=(id:string,payload:any)=>id==='toggleIsland'?payload:{...payload,id};
   const list=h('div',{id:'global-shortcuts',class:'shortcut-list'}),feedback=hint('');
+  // #503 S25: the instruction is visible while a capture is open (it used to appear only inside the intro line).
+  const guide=h('div',{id:'shortcut-capture-help',class:'hint capture-help',role:'status','aria-live':'polite',text:'Pulsá las teclas… Esc cancela · ⌫ quita'});guide.hidden=true;
   function save(id:string,payload:any){
     if(busy||!views[id]||!s.alive())return;
     const wasRecording=recording!==null;
@@ -30,7 +32,7 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
       .finally(async()=>{if(wasRecording)await resume().catch(()=>{});busy=false;if(s.alive())draw();});
   }
   function draw(){
-    clear(list);
+    clear(list);guide.hidden=recording===null;
     // Defaults are visible for unavailable bindings, not registered or treated as active.
     const dups=duplicates(Object.entries(views).filter(([,v])=>v?.enabled).map(([id,v])=>[id,v.combo]));
     for(const d of SHORTCUTS.filter(d=>d.ported)){
@@ -53,25 +55,37 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
         else if(result.kind==='combo')save(d.id,{action:'set',combo:result.text});
       });
       keycap.addEventListener('blur',()=>{if(recording===d.id)stopRecording();});
-      const r=h('div',{id:`shortcut-${d.id}`,class:enabled?'row shortcut':'row shortcut off'},sw,h('span',{class:'shortcut-name',text:t(SHORTCUT_TEXT[d.id])}));
-      if(known&&enabled){
-        if(dups.has(d.id))r.append(h('span',{class:'tag err',text:t('Used twice')}));
-        else if(hotkey.status==='taken')r.append(h('span',{class:'tag warn',text:t('In use by another app')}));
-        else if(hotkey.status==='invalid')r.append(h('span',{class:'tag err',text:t('Not a valid shortcut')}));
-        else if(hotkey.status==='unsupported')r.append(h('span',{class:'tag',text:t('Not available')}));
-        else if(hotkey.status==='permission_denied')r.append(h('span',{class:'tag warn',text:t('Not set by your desktop')}));
-      }
+      const r=h('div',{id:`shortcut-${d.id}`,role:'row',class:enabled?'row shortcut':'row shortcut off'},sw,h('span',{class:'shortcut-name',role:'cell',text:t(SHORTCUT_TEXT[d.id])}));
+      // #503 S25: the state is its own column, icon + word, never colour alone. Same situations as the old tags.
+      const [kind,icon,word]:[string,string,string]=!known?['unknown','·','No disponible todavía']
+        :!enabled?['off','○','apagado']
+        :dups.has(d.id)?['err','✗',t('Used twice')]
+        :hotkey.status==='taken'?['warn','⚠',t('In use by another app')]
+        :hotkey.status==='invalid'?['err','✗',t('Not a valid shortcut')]
+        :hotkey.status==='unsupported'?['none','·',t('Not available')]
+        :hotkey.status==='permission_denied'?['warn','⚠',t('Not set by your desktop')]
+        :['ok','✓','activo'];
+      const stateCell=h('span',{class:`shortcut-state ${kind}`,role:'cell'},h('span',{class:'state-ico','aria-hidden':'true',text:icon}),h('span',{class:'state-word',text:word}));
       if(!supported){(sw as HTMLButtonElement).title=keycap.title='No disponible todavía';}
-      r.append(keycap);list.append(r);
+      // Acción | Tecla | Estado: the keycap is the last child (its existing contract), the state column follows it visually via CSS order.
+      r.append(stateCell,keycap);list.append(r);
     }
     feedback.textContent=Object.values(views).some(v=>v?.status==='permission_pending')
       ? t('Asking your desktop to register the shortcuts. It may show its own window to confirm them.')
       : [...new Set(Object.values(views).map(hotkey=>V.generalView({hotkey}).hotkey).flatMap(view=>[view?.backendLabel,view?.note]).filter(Boolean))].join(' — ');
     reset.disabled=Object.values(views).some(v=>!v)||busy;
   }
-  const reset=trusted(h('button',{id:'shortcut-reset',text:t('Reset to defaults')})) as HTMLButtonElement;
-  reset.addEventListener('click',e=>{
+  // #503 S25: «Restablecer» asks first; only the trusted confirmation runs the (unchanged) clear-then-reset sequence.
+  const reset=trusted(h('button',{id:'shortcut-reset',type:'button',text:'Restablecer'})) as HTMLButtonElement;
+  const confirmBox=h('div',{id:'shortcut-reset-confirm',class:'row confirm',role:'group'});confirmBox.hidden=true;
+  const doReset=trusted(h('button',{type:'button',class:'danger',text:'Restablecer'})) as HTMLButtonElement;
+  const cancelReset=trusted(h('button',{type:'button',text:'Cancelar'})) as HTMLButtonElement;
+  confirmBox.append(h('span',{text:'¿Restablecer todos los atajos a sus teclas originales?'}),doReset,cancelReset);
+  reset.addEventListener('click',e=>{if(!e.isTrusted||reset.disabled)return;confirmBox.hidden=!confirmBox.hidden;});
+  cancelReset.addEventListener('click',e=>{if(!e.isTrusted)return;confirmBox.hidden=true;});
+  doReset.addEventListener('click',e=>{
     if(!e.isTrusted||reset.disabled)return;
+    confirmBox.hidden=true;
     busy=true;recording=null;draw();
     work(async()=>{
       // Release all reservations first: swapped/custom combinations must not
@@ -83,11 +97,13 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
       }
     },()=>{},()=>{}).finally(()=>{busy=false;if(s.alive())draw();});
   });
+  const head=h('div',{class:'row shortcut shortcut-head',role:'row'},...['Acción','Tecla','Estado'].map(c=>h('span',{role:'columnheader',text:c})));
+  const table=h('div',{class:'shortcut-table',role:'table','aria-label':'Atajos'},head,list);
   const island=h('div',{id:'island-shortcuts',class:'shortcut-list'});
   for(const r of ISLAND_SHORTCUTS)island.append(h('div',{class:'row shortcut'},h('span',{class:'shortcut-name',text:t(r.description)}),h('span',{class:'keycap static',text:r.keys})));
   const recap=await renderRecapRows({invoke,listen,timers});
   root.append(section(t('Shortcuts'),hint(t('Work from any app. Click a shortcut to change it, then press the new keys — Esc cancels, Backspace removes it.')),
-    h('div',{class:'subhead',text:t('From anywhere')}),list,feedback,h('div',{class:'row'},reset),h('div',{class:'subhead',text:t('In the open island')}),island),recap,s.message);
+    h('div',{class:'subhead',text:t('From anywhere')}),table,guide,feedback,h('div',{class:'row'},reset),confirmBox,h('div',{class:'subhead',text:t('In the open island')}),island),recap,s.message);
   draw();
   for(const id of Object.keys(views)){
     work(()=>call('hotkey_action',payloadFor(id,{action:'view'})),next=>{views[id]=next;draw();});
