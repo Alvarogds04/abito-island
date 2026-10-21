@@ -309,7 +309,10 @@ function mount(V) {
   jump.addEventListener('click', async event => {
     if (event.isTrusted !== true || !memory.focus || jump.hidden || jump.disabled) return;
     jump.disabled = true;
-    try { await invoke('focus_host', { payload: { target: 'terminal' } }); }
+    // The focused session's own key (the daemon's row id) lets Rust find THAT session's terminal from /proc; a row
+    // without a well-formed id, or no row, is the plain closed verb as before. Nothing but this id ever travels.
+    const key = memory.focus && typeof memory.focus.id === 'string' && /^s-[0-9a-f]{8}$/.test(memory.focus.id) ? memory.focus.id : null;
+    try { await invoke('focus_host', { payload: key ? { target: 'terminal', session: key } : { target: 'terminal' } }); }
     catch { const live = document.getElementById('pill-live'); if (live) live.textContent = 'No se pudo abrir una terminal.'; }
     finally { jump.disabled = false; }
   });

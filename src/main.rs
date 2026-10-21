@@ -1028,13 +1028,13 @@ async fn focus_host(
     crate::settingswindow::main_window_only(webview.label())?;
     let origin = webview.url().map(|u| u.to_string()).unwrap_or_default();
     let mut rate = state.rate.lock().expect("rate lock");
-    abito_island::focushost::focus_command(
+    abito_island::focushost::focus_command_for(
         webview.label(),
         &origin,
         &payload,
         &mut rate,
         now_ms(),
-        abito_island::focushost::focus_or_launch_running,
+        abito_island::focushost::focus_running,
     )
 }
 

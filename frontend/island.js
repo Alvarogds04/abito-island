@@ -92,6 +92,12 @@
       if (desktopCharacter) desktopCharacter.flyOutOrHome();
     }).catch(() => {});
   }
+  // The session the overview focuses (its daemon row id), kept for the Ctrl+Alt+T shortcut. Display state only.
+  let focusedSessionKey = null;
+  document.addEventListener('abito:sessions-view', event => {
+    const id = event && event.detail && event.detail.focusId;
+    focusedSessionKey = typeof id === 'string' && /^s-[0-9a-f]{8}$/.test(id) ? id : null;
+  });
   // #347: presentation-only producers; pending human requests outrank decorations.
   const character = window.AbitoCharacter.create({
     clay, applyState: next => { if (clay && clay.state !== next) clay.setState(next); }, choosePose: (chat, host) => O.choosePose(chat, host), validCard, setTimer: setTimeout, clearTimer: clearTimeout,
@@ -1404,10 +1410,10 @@
       }, () => feedback('No se pudo mostrar la solicitud pendiente.'));
     } else if (id === 'jumpToTerminal') {
       capsule.dataset.shortcutTerminal = 'pending';
-      // No exact session/window identity is available here. Keep the existing
-      // closed class-based host contract, never pretend this selected a session.
-      invoke('focus_host', { payload: { target: 'terminal' } }).then(() => {
-        capsule.dataset.shortcutTerminal = 'focused-class';
+      // The focused session's key (see sessions-ticker.js) lets the host open THAT session's terminal; without a
+      // well-formed key it is the plain closed verb. Nothing else ever travels.
+      invoke('focus_host', { payload: focusedSessionKey ? { target: 'terminal', session: focusedSessionKey } : { target: 'terminal' } }).then(() => {
+        capsule.dataset.shortcutTerminal = focusedSessionKey ? 'focused-session' : 'focused-class';
       }, error => {
         capsule.dataset.shortcutTerminal = 'unavailable';
         feedback(error && typeof error.message === 'string' ? error.message : 'No se pudo enfocar una terminal.');

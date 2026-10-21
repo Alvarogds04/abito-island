@@ -196,7 +196,8 @@ test('A02b trusted mini/pill focus updates the card; jump always opens a termina
   jump.fire('click', { isTrusted: false }); await flush();
   assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, 0);
   jump.fire('click'); await flush();
-  assert.deepEqual(b.calls.find(c => c.cmd === 'focus_host').payload, { target: 'terminal' });
+  // the focused session's own key travels (the daemon's row id): Rust finds THAT session's terminal from /proc
+  assert.deepEqual(b.calls.find(c => c.cmd === 'focus_host').payload, { target: 'terminal', session: 's-11111111' });
   b.emit({ mainPill: 'agent_codex' }); assert.equal(who(), 'beta');
   assert.equal(b.backend.specCalls.length, 0);
 });
@@ -214,6 +215,7 @@ test('the ↗ jump button is never a dead click: a visible, enabled button alway
     assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, before, 'synthetic click stays refused');
     jump.fire('click'); await flush();
     assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, before + 1, JSON.stringify(fields));
+    assert.deepEqual(b.calls.filter(c => c.cmd === 'focus_host').at(-1).payload, { target: 'terminal', session: 's-11111111' });
   }
 });
 
@@ -1232,4 +1234,15 @@ test('#489 the grid shows at most four pills, Coucou rule (otherTasks.slice(0, 4
   b.get('pill-choices').children[3].fire('click');
   assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_vercel'], 'the focused one leaves a free cell for the next');
   assert.match(read('style.css'), /#pill-choices \.pill-choice:nth-child\(n\+5\)\s*\{\s*display:\s*none/, 'CSS belt unchanged');
+});
+
+test('the session key sent for the terminal is always the well-formed row id, else none (never page text)', async () => {
+  const b = boot(); await flush();
+  b.backend.sessionRows = [{ id: 's-11111111', kind: 'pi', cwd: 'alpha', origin: null, state: 'running' }];
+  b.load('sessions-ticker.js'); await flush(); await flush();
+  const src = fs.readFileSync(path.join(__dirname, '../frontend/sessions-ticker.js'), 'utf8');
+  assert.match(src, /\/\^s-\[0-9a-f\]\{8\}\$\/\.test\(/, 'the key is checked against the daemon id grammar before it is sent');
+  const island = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
+  assert.match(island, /focusedSessionKey/, 'the Ctrl+Alt+T shortcut uses the same focused session');
+  assert.match(island, /abito:sessions-view/);
 });
