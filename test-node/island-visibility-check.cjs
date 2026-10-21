@@ -35,7 +35,7 @@ test('B1 reproduction: expand then collapse settles the visible island and input
   vm.runInContext(geometry + motion + entry, context);
   function drain() { for (let i = 0; frames.size && i < 300; i++) { now += 16.667; const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(now)); } assert.equal(frames.size, 0); }
   context.window.__islandSetState('overview'); drain();
-  assert.equal(capsule.dataset.phase, 'expanded'); assert.equal(island.style.width, '640px');
+  assert.equal(capsule.dataset.phase, 'expanded'); assert.equal(island.style.width, '720px');
   context.window.__islandSetState('compact'); drain();
   console.log('B1 rendered:', capsule.dataset.phase, island.style.width, island.style.height, 'shape:', JSON.stringify(calls.at(-1)));
   assert.equal(capsule.dataset.phase, 'compact');

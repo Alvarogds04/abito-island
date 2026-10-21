@@ -12,7 +12,7 @@
   mount(api);
 })(typeof self !== 'undefined' ? self : this, () => {
   // ---- widths ---------------------------------------------------------------------------------------------------------------
-  // The overview inner width is 620 (island 640 - 2 x 10). Left column = Abito's mascot + status (108, Coucou's 108px indent),
+  // The overview inner width is 700 (island 720 - 2 x 10). Left column = Abito's mascot + status (108, Coucou's 108px indent),
   // centre >= 330, blobs >= 150 (mascot 28 + a name of 12 characters + the status dot). Focus: the card takes left + centre and the
   // blobs keep a 64px mascot column. A width that cannot honour the minimums says so instead of squeezing the centre.
   const W = Object.freeze({ status: 108, gap: 8, centreMin: 330, blobsPref: 174, blobsMin: 150, focusBlobs: 64 });
@@ -107,7 +107,7 @@
     if (!n || typeof n !== 'object' || !Array.isArray(n.options) || n.options.length !== 2 || n.allowFreeText === true) return null;
     const label = typeof agentLabel === 'string' && agentLabel ? agentLabel : 'El agente';
     if (n.kind === 'approval') {
-      return { badge: '!', title: `${label} pide tu aprobación:`, tool: null, command: String(n.text || ''), secretsHidden: false,
+      return { badge: '!', title: "Aprobar:", tool: null, command: String(n.text || ''), secretsHidden: false,
         actions: n.options.map((o, i) => ({ role: 'option', label: o.label, key: String(i + 1), index: o.index })) };
     }
     const m = n.kind === 'question' && typeof n.text === 'string' ? ASKS.exec(n.text) : null;
@@ -119,7 +119,7 @@
     if (secretsHidden) detail = detail.replace(/ \(secrets hidden\)$/, '');
     const t = TOOL.exec(detail);
     const tool = t ? t[1] : null, command = t ? t[2] : detail;
-    return { badge: '!', title: tool === 'Bash' ? `${label} quiere ejecutar:` : `${label} pide permiso para:`, tool, command, secretsHidden,
+    return { badge: '!', title: tool === 'Bash' ? 'Ejecutar:' : 'Permiso:', tool, command, secretsHidden,
       actions: [{ role: 'reject', label: 'Rechazar', key: 'N', index: deny.index }, { role: 'approve', label: 'Aprobar', key: 'Y', index: allow.index }] };
   }
   /** Y approves / N rejects, only for the known pair, from a trusted unmodified key, never while typing. -1 = not ours. */
@@ -263,9 +263,16 @@ function mount(L) {
   if (tip) {
     let tipTimer = 0, tipFor = null;
     const hideTip = () => { clearTimeout(tipTimer); tipFor = null; tip.hidden = true; };
-    const titled = el => (el && el.closest ? el.closest('[title]') : null);
+    // v6: WebKitGTK also paints the NATIVE title tooltip (a second, wrapped one that lingers). Inside the island every title moves to
+    // data-tip (aria-label stays), so only #island-tip shows.
+    const moveTitles = el => {
+      for (let p = el; p && p.id !== 'island' && p.getAttribute; p = p.parentElement) {
+        if (p.hasAttribute('title')) { const t = p.getAttribute('title'); if (t) p.setAttribute('data-tip', t); p.removeAttribute('title'); }
+      }
+    };
+    const titled = el => { if (el && doc.getElementById('island') && doc.getElementById('island').contains(el)) moveTitles(el); return el && el.closest ? el.closest('[data-tip]') : null; };
     function showTip(el) {
-      const text = L.tipFor({ title: el.getAttribute('title'), visibleText: el.textContent });
+      const text = L.tipFor({ title: el.getAttribute('data-tip'), visibleText: el.textContent });
       if (!text) return;
       const island = doc.getElementById('island').getBoundingClientRect(), b = el.getBoundingClientRect();
       tip.textContent = text; tip.hidden = false; tipFor = el;
@@ -275,6 +282,8 @@ function mount(L) {
     const arm = el => { clearTimeout(tipTimer); if (!el || el === tipFor) return; hideTip(); tipTimer = setTimeout(() => showTip(el), 350); };
     doc.addEventListener('pointerover', e => { const el = titled(e.target); if (el && doc.getElementById('island').contains(el)) arm(el); else hideTip(); });
     doc.addEventListener('pointerleave', hideTip); doc.addEventListener('pointerdown', hideTip, true);
+    doc.addEventListener('pointerout', e => { const to = e.relatedTarget; if (!to || !doc.getElementById('island').contains(to)) hideTip(); });
+    window.addEventListener('blur', hideTip);
     doc.addEventListener('focusin', e => { const el = titled(e.target); if (el && doc.getElementById('island').contains(el)) arm(el); });
     doc.addEventListener('focusout', hideTip);
     doc.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); }, true);

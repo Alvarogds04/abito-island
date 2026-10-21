@@ -132,7 +132,7 @@ test('no Pi -> unplugged icon + "Sin motor" (design ov-error chip; the duplicate
   assert.doesNotMatch(JSON.stringify(v), /Sin conexión con Pi/);
   // T7.3 design diet: the visible detail is one short line; the long honest
   // sentence stays reachable in aria (was a two-sentence visible disclaimer).
-  assert.equal(v.detail, 'Conectá una sesión de Pi.');
+  assert.equal(v.detail, 'Conectá Pi.');
   assert.match(v.aria, /solo si conectás/);
   assert.doesNotMatch(v.aria, /conectas/);
 });
@@ -165,7 +165,7 @@ test('L37: with no Pi session connected there is NO red band and no «Sin conexi
   assert.equal(down.tone, 'faint', 'quiet, not red');
   assert.equal(down.word, 'Sin motor', 'the honest word stays');
   assert.match(down.aria, /Sin motor: no hay una sesión conectada/, 'the aria sentence is kept verbatim');
-  assert.equal(down.detail, 'Conectá una sesión de Pi.');
+  assert.equal(down.detail, 'Conectá Pi.');
   // the band that used to be built for it is gone (Coucou has no «disconnected» state: nothing running is idle)
   assert.equal(typeof O.connectionBandView, 'undefined', 'no transport-error band for an idle island');
   for (const f of ['overview-view.js', 'island.js']) assert.doesNotMatch(fs.readFileSync(path.join(frontend, f), 'utf8'), /Sin conexión'|connectionBandView/, f);
@@ -424,7 +424,7 @@ test('44px: every control (incl. the card «i») measures >= 44x44', () => {
 // box from x332; #notices is anchored to the ISLAND (640x160) through calc(50% + 22px), so
 // island = overview + 10 horizontally and + 42 vertically. Same rules as before (budget, zero overlap,
 // disjoint rects, bounded band), now measured on Coucou's numbers.
-const OVH = 108; // overview box height (Coucou's card row)
+const OVH = 132; // overview box height (Coucou's card row)
 const OV_TOP = 42; // overview box top inside the island
 
 test('R2: the active content keeps its vertical budget in the central column', () => {
@@ -458,7 +458,7 @@ test('R4 (A+E): the strip band sits over the blobs card\'s x range only and the 
   assert.equal(p['pointer-events'] || blobs['pointer-events'], 'auto', 'the blob choices stay clickable');
   // the blobs card is its own element in the overview frame: top 42, height 108
   assert.equal(px(blobs.top), OV_TOP); assert.equal(px(blobs.height), OVH);
-  assert.equal(n.left, 'calc(50% + 136px)'); assert.equal(n.right, 'auto'); assert.equal(n.width, '174px');
+  assert.equal(n.left, 'calc(50% + 176px)'); assert.equal(n.right, 'auto'); assert.equal(n.width, '174px');
   assert.ok(px(mb.right) >= 36 && mb.left === 'auto', `#minibots right ${mb.right} reaches into the blobs card`);
 });
 
@@ -479,7 +479,7 @@ test('R5 (A+E): the notices band is ONE 28px row over the top of the blobs card 
 test('notices strip: its box stays inside the overview card and its content never escapes the box', () => {
   // #335 F002 re-scope (S6.3). The strip is the approved 44px band on top of the right card; the SAME
   // assertion — content/height of the strip may never leave its bound — is proven through the box: it stays
-  // inside the 108px card, one visible row fits the band exactly, and the stacked content is carried by
+  // inside the 132px card, one visible row fits the band exactly, and the stacked content is carried by
   // internal overflow (it scrolls inside; it can never grow the box toward the grid).
   const n = decls('#notices');
   const top = px(n.top) - OV_TOP, height = px(n.height);
@@ -488,9 +488,9 @@ test('notices strip: its box stays inside the overview card and its content neve
   assert.ok(height >= row, `band ${height}px < one row ${row}px`);
   assert.match(String(n['overflow-y'] || n.overflow || ''), /(auto|scroll)/, 'stacked content must scroll INSIDE the box');
   assert.ok(contentH > height, 'model: stacked content exceeds the band, so the box (not the content) is the bound');
-  assert.ok(top >= 0 && top + height <= OVH, 'the band lies inside the 108px card');
+  assert.ok(top >= 0 && top + height <= OVH, 'the band lies inside the 132px card');
   const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
-  assert.equal(lane.height, 'var(--finished-h, 108px)', 'D: the confirmed-notice lane is 108px by default and grows only through --finished-h (a wrapped long result)');
+  assert.equal(lane.height, 'var(--finished-h, 132px)', 'D: the confirmed-notice lane is 132px by default and grows only through --finished-h (a wrapped long result)');
   assert.ok(px(lane.top) - OV_TOP + 108 <= OVH, 'and its default box lies inside the card');
 });
 
@@ -537,7 +537,7 @@ test('R6 visible size: Coucou botDiameter 58 plain overview, 56 with a card (sca
 test('R6 margins: card box keeps >=20px from the island edge (reject shake ~2px), viewBox top air', () => {
   const [clay, clayX] = /OVERVIEW_CARD = \{ clay: (\d+), clayX: (\d+)/.exec(islandSrc).slice(1).map(Number);
   assert.ok(clayX - clay / 2 >= 20, `box left ${clayX - clay / 2}`);
-  assert.deepEqual([/OVERVIEW = \{[^}]*clayX: (\d+), cy: (\d+)/.exec(islandSrc).slice(1).map(Number), [clayX, /OVERVIEW_CARD = \{[^}]*cy: (\d+)/.exec(islandSrc)[1] * 1]], [[68, 101], [62, 101]], 'Coucou VIEW_LAYOUTS botX 68 / 62, cy 101');
+  assert.deepEqual([/OVERVIEW = \{[^}]*clayX: (\d+), cy: (\d+)/.exec(islandSrc).slice(1).map(Number), [clayX, /OVERVIEW_CARD = \{[^}]*cy: (\d+)/.exec(islandSrc)[1] * 1]], [[68, 113], [62, 113]], 'Coucou VIEW_LAYOUTS botX 68 / 62, cy 101');
   const vb = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   assert.deepEqual(vb, [36, 32, 128, 128]);
 });
@@ -777,7 +777,7 @@ test('#304 wiring: the page decides motion itself (data-motion on <html>), start
 test('L34 Coucou\'s bar: the collapsed island is 288x32 with corners 0 0 14 14 inside the fixed native window', () => {
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
   assert.match(geo, /pub const COMPACT_BAR: \(i32, i32\) = \(288, 32\);/);
-  assert.match(geo, /pub const ISLAND_WINDOW: \(i32, i32\) = \(672, 340\);/);
+  assert.match(geo, /pub const ISLAND_WINDOW: \(i32, i32\) = \(752, 340\);/);
   assert.doesNotMatch(geo, /pub const DOT_DIAMETER/, 'the disc is gone');
   const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), clayX: (\d+), drop: (\d+) \}/.exec(islandSrc);
   assert.ok(m, 'COMPACT constant');
@@ -848,7 +848,7 @@ test('the window is BORN at ISLAND_WINDOW, independent of the visible compact ba
   const geo = fs.readFileSync(path.join(__dirname, '..', 'src', 'geometry.rs'), 'utf8');
   const fixed = /pub const ISLAND_WINDOW: \(i32, i32\) = \((\d+), (\d+)\);/.exec(geo).slice(1).map(Number);
   assert.deepEqual([conf.width, conf.height], fixed);
-  assert.deepEqual([conf.width, conf.height], [672, 340]);
+  assert.deepEqual([conf.width, conf.height], [752, 340]);
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
   assert.doesNotMatch(readme, /All sizes land exactly 304x44/, 'README must not document the old compact size as the contract');
 });
@@ -951,21 +951,21 @@ test('Pi status row (Coucou idle card): one short line + one link per real faili
   const down = O.connectionView({ connections: 0 }), up = O.connectionView({ connections: 1 });
   const acct = [{ configured: true, local: false }];
   // not connected (existing): the Agentes row
-  assert.deepEqual(O.engineRowView(down), { kind: 'down', label: 'Sin motor', link: 'Conectar Pi…', target: 'accounts:agentes', aria: 'Conectar Pi: abrir Ajustes → Agentes' });
+  assert.deepEqual(O.engineRowView(down), { kind: 'down', label: 'Sin motor', link: 'Conectar', target: 'accounts:agentes', aria: 'Conectar Pi: abrir Ajustes → Agentes' });
   assert.deepEqual(O.engineRowView(down, { connection: 'connected', accounts: acct, sessions: 'ready' }).kind, 'down');
   // engine failures the agent state really reports -> the Motor card (Reiniciar)
   for (const [connection, label] of [['lost', 'Motor caído'], ['refused', 'Motor no responde'], ['bad_session', 'Sesión no válida'], ['no_daemon', 'Sin motor']]) {
     const r = O.engineRowView(up, { connection, accounts: null, sessions: 'error' });
-    assert.deepEqual([r.kind, r.label, r.link, r.target], ['engine', label, 'Revisar Pi…', 'accounts:motor'], connection);
+    assert.deepEqual([r.kind, r.label, r.link, r.target], ['engine', label, 'Revisar', 'accounts:motor'], connection);
   }
   // engine up but no account/key configured (and none local) -> Proveedores
   const none = O.engineRowView(up, { connection: 'connected', accounts: [{ configured: false, local: false }], sessions: 'ready' });
-  assert.deepEqual([none.kind, none.label, none.link, none.target], ['account', 'Pi sin cuenta', 'Configurar Pi…', 'accounts:proveedores']);
+  assert.deepEqual([none.kind, none.label, none.link, none.target], ['account', 'Sin cuenta', 'Configurar', 'accounts:proveedores']);
   assert.equal(O.engineRowView(up, { connection: 'connected', accounts: [{ configured: false, local: true }], sessions: 'ready' }), null, 'a local account is enough');
   assert.equal(O.engineRowView(up, { connection: 'connected', accounts: [], sessions: 'ready' }).kind, 'account', 'no accounts at all');
   // the session list failed while the engine is up
   const sess = O.engineRowView(up, { connection: 'connected', accounts: acct, sessions: 'error' });
-  assert.deepEqual([sess.kind, sess.label, sess.link, sess.target], ['sessions', 'Sesiones no disponibles', 'Revisar Pi…', 'accounts:motor']);
+  assert.deepEqual([sess.kind, sess.label, sess.link, sess.target], ['sessions', 'Sesiones no disponibles', 'Revisar', 'accounts:motor']);
   // Pi works / unknown: no link, nothing invented
   assert.equal(O.engineRowView(up, { connection: 'connected', accounts: acct, sessions: 'ready' }), null);
   assert.equal(O.engineRowView(up, { connection: 'connected', accounts: acct, sessions: 'pending' }), null);

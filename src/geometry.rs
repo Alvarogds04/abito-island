@@ -13,10 +13,10 @@ impl Rect {
 pub enum Edge { #[default] Top, Bottom }
 
 pub const COMPACT_BAR: (i32, i32) = (288, 32);
-pub const OVERVIEW_VISIBLE: (i32, i32) = (640, 160);
+pub const OVERVIEW_VISIBLE: (i32, i32) = (720, 184);
 /// One logical native window for compact, overview, question/recap and chat.
-pub const ISLAND_WINDOW: (i32, i32) = (672, 340);
-pub const CHAT_COLUMN_W: i32 = 640;
+pub const ISLAND_WINDOW: (i32, i32) = (752, 340);
+pub const CHAT_COLUMN_W: i32 = 720;
 pub const CHAT_MIN_H: i32 = 240;
 pub const CHAT_MAX_H: i32 = 300;
 pub const CHAT_GROWTH_PER_MESSAGE: i32 = 40;
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn scaled_size_applies_scale_factor() {
         assert_eq!(scaled_size(COMPACT_BAR, 1.0), (288, 32));
-        assert_eq!(scaled_size(ISLAND_WINDOW, 1.0), (672, 340));
+        assert_eq!(scaled_size(ISLAND_WINDOW, 1.0), (752, 340));
         assert_eq!(scaled_size(COMPACT_BAR, 2.0), (576, 64));
         assert_eq!(scaled_size(COMPACT_BAR, 1.25), (360, 40));
         assert_eq!(scaled_size((304, 44), 1.25), (380, 55));
@@ -177,8 +177,8 @@ mod tests {
     }
     #[test]
     fn chat_column_width_is_fixed_and_every_view_uses_the_same_native_window() {
-        assert_eq!(CHAT_COLUMN_W,640); assert_eq!(CHAT_COLUMN_W,OVERVIEW_VISIBLE.0);
-        assert_eq!(view_sizes(View::Chat,1920,1048,1.0),(ISLAND_WINDOW,(640,240)));
+        assert_eq!(CHAT_COLUMN_W,720); assert_eq!(CHAT_COLUMN_W,OVERVIEW_VISIBLE.0);
+        assert_eq!(view_sizes(View::Chat,1920,1048,1.0),(ISLAND_WINDOW,(720,240)));
     }
     #[test]
     fn chat_height_follows_coucous_prompt_rule() {
@@ -186,12 +186,12 @@ mod tests {
         for (messages, expected) in [(0,240),(1,280),(2,300),(3,300),(50,300),(u32::MAX,300)] {
             assert_eq!(chat_prompt_height(messages),expected);
         }
-        assert_eq!(chat_visible(1048,1.0),(640,240));
+        assert_eq!(chat_visible(1048,1.0),(720,240));
     }
     #[test]
     fn the_desired_chat_height_is_clamped_in_rust_to_coucous_min_and_max() {
         for (desired,expected) in [(-5,240),(0,240),(239,240),(240,240),(270,270),(300,300),(301,300),(656,300),(i32::MAX,300)] {
-            assert_eq!(chat_visible_for(1048,1.0,desired),(640,expected));
+            assert_eq!(chat_visible_for(1048,1.0,desired),(720,expected));
         }
         assert_eq!(chat_visible_for(320,1.0,300).1,264);
         assert_eq!(chat_visible_for(100,1.0,300).1,240);
@@ -218,12 +218,12 @@ mod tests {
     fn chat_size_is_in_logical_px_whatever_the_scale() {
         assert_eq!(chat_visible(2096,2.0),chat_visible(1048,1.0));
         assert_eq!(chat_visible(1310,1.25),chat_visible(1048,1.0));
-        assert_eq!(scaled_size(ISLAND_WINDOW,2.0),(1344,680));
+        assert_eq!(scaled_size(ISLAND_WINDOW,2.0),(1504,680));
         for bad in [0.0,-1.0,f64::NAN,f64::INFINITY] { assert_eq!(chat_visible(1048,bad),chat_visible(1048,1.0)); }
     }
     #[test]
     fn approved_overview_and_compact_are_untouched_by_the_chat_view() {
-        assert_eq!(OVERVIEW_VISIBLE,(640,160)); assert_eq!(COMPACT_BAR,(288,32));
+        assert_eq!(OVERVIEW_VISIBLE,(720, 184)); assert_eq!(COMPACT_BAR,(288,32));
         assert_eq!(CHAT_COLUMN_W,OVERVIEW_VISIBLE.0); assert!(CHAT_MIN_H > OVERVIEW_VISIBLE.1);
     }
     #[test]
@@ -246,19 +246,19 @@ mod tests {
     }
     #[test]
     fn transition_input_shape_holds_both_endpoints_and_spring_air() {
-        assert_eq!(transition_shape((288, 32), (640, 160), ISLAND_WINDOW), (672, 176));
-        assert_eq!(transition_shape((640, 300), (288, 32), ISLAND_WINDOW), (672, 316));
-        assert_eq!(transition_shape((672, 340), (640, 300), ISLAND_WINDOW), ISLAND_WINDOW);
-        assert_eq!(transition_shape((640, 300), (288, 32), (500, 200)), (500, 200));
-        assert_eq!(transition_shape((640, 160), (288, 32), ISLAND_WINDOW),
-            transition_shape((288, 32), (640, 160), ISLAND_WINDOW));
+        assert_eq!(transition_shape((288, 32), (720, 184), ISLAND_WINDOW), (752, 200));
+        assert_eq!(transition_shape((720, 300), (288, 32), ISLAND_WINDOW), (752, 316));
+        assert_eq!(transition_shape((752, 340), (720, 300), ISLAND_WINDOW), ISLAND_WINDOW);
+        assert_eq!(transition_shape((720, 300), (288, 32), (500, 200)), (500, 200));
+        assert_eq!(transition_shape((720, 184), (288, 32), ISLAND_WINDOW),
+            transition_shape((288, 32), (720, 184), ISLAND_WINDOW));
     }
 
     // --- #493 step B (human: «Fija arriba al centro, como Coucou»): ONE fixed window ------------------------------------
 
     #[test]
     fn the_island_window_is_one_fixed_size_for_every_view() {
-        assert_eq!(ISLAND_WINDOW, (672, 340), "island 640 + 16 of air each side; chat max 300 + 16 + the spring's overshoot");
+        assert_eq!(ISLAND_WINDOW, (752, 340), "island 720 + 16 of air each side; chat max 300 + 16 + the spring's overshoot");
         for view in [View::Compact, View::Overview, View::Chat] {
             let (window, visible) = view_sizes(view, 1920, 1048, 1.0);
             assert_eq!(window, ISLAND_WINDOW, "{view:?}: the native window never changes with the view");
@@ -266,20 +266,20 @@ mod tests {
         }
         assert_eq!(view_sizes(View::Compact, 1920, 1048, 1.0).1, COMPACT_BAR);
         assert_eq!(view_sizes(View::Overview, 1920, 1048, 1.0).1, OVERVIEW_VISIBLE);
-        assert_eq!(view_sizes(View::Chat, 1920, 1048, 1.0).1, (640, 240));
+        assert_eq!(view_sizes(View::Chat, 1920, 1048, 1.0).1, (720, 240));
     }
 
     #[test]
     fn the_island_window_sits_top_centre_of_the_work_area_and_is_clamped_to_it() {
         let a = area();
         let r = island_window_rect(a, 1.0);
-        assert_eq!((r.w, r.h), (672, 340));
+        assert_eq!((r.w, r.h), (752, 340));
         assert_eq!(r.y, a.y, "stuck to the top edge");
         assert_eq!(r.x + r.w / 2, a.x + a.w / 2, "centred on the work area");
         // physical px at another scale
         let big = Rect { x: 0, y: 64, w: 3840, h: 2096 };
         let r2 = island_window_rect(big, 2.0);
-        assert_eq!((r2.w, r2.h, r2.y), (1344, 680, 64));
+        assert_eq!((r2.w, r2.h, r2.y), (1504, 680, 64));
         // a work area smaller than the window shrinks it onto the screen, never off it
         let tiny = Rect { x: 10, y: 20, w: 500, h: 300 };
         let r3 = island_window_rect(tiny, 1.0);
@@ -290,16 +290,16 @@ mod tests {
     #[test]
     fn the_input_shape_is_the_visible_island_clamped_between_the_bar_and_the_window() {
         // the page reports what it draws; Rust never lets it make the island unclickable (below the bar) or larger than the window
-        for (asked, expected) in [((288, 32), (288, 32)), ((640, 160), (640, 160)), ((640, 300), (640, 300)), ((0, 0), (288, 32)), ((-5, 9), (288, 32)),
-            ((10_000, 10_000), (672, 340)), ((640, 5_000), (640, 340)), ((100, 200), (288, 200))] {
+        for (asked, expected) in [((288, 32), (288, 32)), ((720, 184), (720, 184)), ((720, 300), (720, 300)), ((0, 0), (288, 32)), ((-5, 9), (288, 32)),
+            ((10_000, 10_000), (752, 340)), ((720, 5_000), (720, 340)), ((100, 200), (288, 200))] {
             assert_eq!(clamp_island_shape(asked.0, asked.1, ISLAND_WINDOW), expected, "{asked:?}");
         }
         // a window clamped by a small screen bounds it too
-        assert_eq!(clamp_island_shape(640, 300, (500, 300)), (500, 300));
+        assert_eq!(clamp_island_shape(720, 300, (500, 300)), (500, 300));
         // and the rect inside the window: horizontally centred, glued to the top
-        assert_eq!(island_shape_rect((640, 160), ISLAND_WINDOW), (16, 0, 640, 160));
-        assert_eq!(island_shape_rect((288, 32), ISLAND_WINDOW), (192, 0, 288, 32));
-        assert_eq!(island_shape_rect((672, 340), ISLAND_WINDOW), (0, 0, 672, 340));
+        assert_eq!(island_shape_rect((720, 184), ISLAND_WINDOW), (16, 0, 720, 184));
+        assert_eq!(island_shape_rect((288, 32), ISLAND_WINDOW), (232, 0, 288, 32));
+        assert_eq!(island_shape_rect((752, 340), ISLAND_WINDOW), (0, 0, 752, 340));
     }
 
     #[test]
@@ -340,11 +340,11 @@ mod tests {
         let work = Rect { x: 46, y: 0, w: 1874, h: 1080 };
         let r = island_window_rect_on(monitor, work, 1.0, ISLAND_WINDOW.1);
         assert_eq!(r.x + r.w / 2, 960, "window centre = monitor centre");
-        assert_eq!((r.x, r.w), (624, 672));
+        assert_eq!((r.x, r.w), (584, 752));
         assert_eq!(r.y, work.y, "the top still honours the work area (a top panel pushes it down)");
         // a top panel: y comes from the work area, x from the monitor
         let top = island_window_rect_on(monitor, Rect { x: 0, y: 32, w: 1920, h: 1048 }, 1.0, ISLAND_WINDOW.1);
-        assert_eq!((top.x, top.y), (624, 32));
+        assert_eq!((top.x, top.y), (584, 32));
         // a second monitor to the right keeps its own centre
         let second = Rect { x: 1920, y: 0, w: 2560, h: 1440 };
         let r2 = island_window_rect_on(second, second, 1.0, ISLAND_WINDOW.1);

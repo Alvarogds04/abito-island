@@ -42,7 +42,7 @@ async function open(scenario = {}) {
   const server = await serve();
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await pw.chromium.launch({ args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 672, height: 340 } });
+  const page = await browser.newPage({ viewport: { width: 752, height: 340 } });
   await page.addInitScript(({ scenario, SESSIONS, UUID }) => {
     const listeners = {};
     const sessions = scenario.sessions === undefined ? SESSIONS : scenario.sessions;
@@ -67,6 +67,7 @@ async function open(scenario = {}) {
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         const a = args && args.payload && args.payload.action;
+        if (cmd === 'island_shape') { (window.__shapes = window.__shapes || []).push(args.payload); return {}; }
         if (cmd === 'desktop_action') {
           // the host's own dismissals: one id removes exactly that notice, no id removes the first (M2/#437), then the new snapshot is pushed
           if (a === 'dismiss') {
@@ -108,7 +109,7 @@ async function open(scenario = {}) {
   if (scenario.theme) await page.evaluate(t => { document.documentElement.dataset.theme = t; }, scenario.theme);
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__islandSetState('overview'));
-  if (scenario.chat) { await page.evaluate(() => window.__islandSetView('chat', 640, 240)); await page.waitForTimeout(800); }
+  if (scenario.chat) { await page.evaluate(() => window.__islandSetView('chat', 720, 240)); await page.waitForTimeout(800); }
   if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
   if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(scenario.quick ? 1800 : 4200); // spring + the ticker's first poll (`quick`: measurements that only need the card, not the first ticker poll)

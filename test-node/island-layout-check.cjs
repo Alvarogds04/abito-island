@@ -29,12 +29,12 @@ test('the sessions view keeps each row\'s raw state and the real total when the 
 
 // ---- widths ---------------------------------------------------------------------------------------------------------------------
 test('columnWidths: status 108 | centre >= 330 | gap 8 | blobs, summing to the overview width; focus shrinks blobs to a mascot column', () => {
-  const n = L.columnWidths(620, false);
-  assert.deepEqual(n, { fits: true, focus: false, status: 108, centre: 330, gap: 8, blobs: 174, main: 438 });
-  assert.equal(n.status + n.centre + n.gap + n.blobs, 620);
-  const f = L.columnWidths(620, true);
-  assert.deepEqual(f, { fits: true, focus: true, status: 108, centre: 440, gap: 8, blobs: 64, main: 548 });
-  assert.equal(f.main + f.gap + f.blobs, 620, 'the focus card takes left + centre and leaves only the mascot column');
+  const n = L.columnWidths(700, false);
+  assert.deepEqual(n, { fits: true, focus: false, status: 108, centre: 410, gap: 8, blobs: 174, main: 518 });
+  assert.equal(n.status + n.centre + n.gap + n.blobs, 700);
+  const f = L.columnWidths(700, true);
+  assert.deepEqual(f, { fits: true, focus: true, status: 108, centre: 520, gap: 8, blobs: 64, main: 628 });
+  assert.equal(f.main + f.gap + f.blobs, 700, 'the focus card takes left + centre and leaves only the mascot column');
   assert.ok(f.centre >= n.centre, 'focus gives the content MORE room');
 });
 test('columnWidths: the minimums are honest; a width that cannot fit says so instead of squeezing the centre', () => {
@@ -147,14 +147,14 @@ const harness = (text, opts = [opt(0, 'Allow once'), opt(1, 'Deny')]) => ({ id: 
 test('approvalView: a Claude/Codex permission (a question the harness words «asks permission») gets the approval look', () => {
   const v = L.approvalView(harness('Claude Code asks permission: Bash: rm -rf build/ && npm run build'), 'Claude Code');
   assert.equal(v.badge, '!');
-  assert.equal(v.title, 'Claude Code quiere ejecutar:');
+  assert.equal(v.title, 'Ejecutar:');
   assert.equal(v.command, 'rm -rf build/ && npm run build');
   assert.equal(v.tool, 'Bash');
   assert.deepEqual(v.actions.map(a => [a.role, a.label, a.key, a.index]), [['reject', 'Rechazar', 'N', 1], ['approve', 'Aprobar', 'Y', 0]], 'reject on the left, approve primary on the right; indexes come from the labels');
   assert.equal(v.secretsHidden, false);
   assert.equal(L.approvalView(harness('Codex asks permission: Edit: src/a.js (secrets hidden)'), 'Codex').secretsHidden, true);
   const other = L.approvalView(harness('Claude Code asks permission: WebFetch: https://example.com'), 'Claude Code');
-  assert.equal(other.title, 'Claude Code pide permiso para:');
+  assert.equal(other.title, 'Permiso:');
   assert.equal(other.command, 'https://example.com');
   assert.equal(other.tool, 'WebFetch');
 });
@@ -173,7 +173,7 @@ test('approvalView: Pi\'s kind=approval keeps ITS OWN two labels (no assumption 
   const pi = { id: '0b3a5c9e-8f27-4d11-9a0e-1c2d3e4f5a6b', kind: 'approval', agent: 'pi', text: '¿Borrar la carpeta build?', options: [opt(0, 'Borrar'), opt(1, 'Mantener')], allowFreeText: false };
   const v = L.approvalView(pi, 'Pi');
   assert.equal(v.badge, '!');
-  assert.equal(v.title, 'Pi pide tu aprobación:');
+  assert.equal(v.title, 'Aprobar:');
   assert.equal(v.command, '¿Borrar la carpeta build?');
   assert.deepEqual(v.actions.map(a => [a.role, a.label, a.key, a.index]), [['option', 'Borrar', '1', 0], ['option', 'Mantener', '2', 1]]);
 });
@@ -226,13 +226,13 @@ function decls(sel) {
   return out;
 }
 const px = v => parseFloat(v);
-test('CSS: the columns add up to the 620px overview — status 108 | centre | 8 gap | blobs — with the blobs column scrolling inside its card', () => {
+test('CSS: the columns add up to the 700px overview — status 108 | centre | 8 gap | blobs — with the blobs column scrolling inside its card', () => {
   const left = decls('.card-left'), blobs = decls('#blobs'), list = decls('#pill-choices');
-  assert.equal(px(left.width) + px(blobs.width) + 8, 620, 'the columns still sum to the overview width');
-  assert.equal(px(left.width), 438, 'left + centre = status 108 + centre 330');
+  assert.equal(px(left.width) + px(blobs.width) + 8, 700, 'the columns still sum to the overview width');
+  assert.equal(px(left.width), 518, "left + centre = status 108 + centre 410");
   assert.equal(px(blobs.width), 174);
-  assert.equal(blobs.left, 'calc(50% + 136px)', 'island centre - 310 (overview left) + 446 (main card 438 + 8px gap)');
-  assert.equal(px(blobs.top), 42); assert.equal(px(blobs.height), 108);
+  assert.equal(blobs.left, 'calc(50% + 176px)', 'island centre - 350 (overview left) + 526 (main card 518 + 8px gap)');
+  assert.equal(px(blobs.top), 42); assert.equal(px(blobs.height), 132);
   assert.equal(list['overflow-y'], 'auto', 'the blobs scroll, nothing is capped or pushed out');
   assert.equal(list.display, 'flex');
   assert.equal(list['flex-direction'], 'column');
@@ -242,10 +242,10 @@ test('CSS: the columns add up to the 620px overview — status 108 | centre | 8 
 });
 test('CSS: focus mode — the card takes left + centre and the blobs shrink to a 64px mascot column (names hidden, dots kept)', () => {
   const left = decls('#capsule[data-layout="focus"] #question'), blobs = decls('#capsule[data-layout="focus"] #blobs');
-  assert.equal(px(left.width), 548, 'status 108 + centre 440');
+  assert.equal(px(left.width), 628, "status 108 + centre 520");
   assert.equal(px(blobs.width), 64);
-  assert.equal(blobs.left, 'calc(50% + 246px)', 'island centre - 310 + 556');
-  assert.equal(px(left.width) + 8 + px(blobs.width), 620);
+  assert.equal(blobs.left, 'calc(50% + 286px)', 'island centre - 350 + 636');
+  assert.equal(px(left.width) + 8 + px(blobs.width), 700);
   assert.equal(decls('#capsule[data-layout="focus"] .pill-choice span:not(.ico)').display, 'none', 'only mascots in focus mode');
   assert.notEqual(decls('#capsule[data-layout="focus"] .blob-dot').display, 'none', 'but the status dots stay');
 });

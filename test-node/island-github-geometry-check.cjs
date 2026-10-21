@@ -52,7 +52,7 @@ if (!H.findPlaywright()) { console.log('SKIPPED island-github-geometry-check: pl
         const q = s => document.querySelector(s), list = q('.gh-card .gh-list');
         return { card: b(q('.gh-card')), list: b(list), row: b(q('.gh-card .gh-row')), canScroll: list.scrollHeight >= list.clientHeight, listMax: getComputedStyle(list).maxHeight };
       });
-      assert.equal(Math.round(m.card.h), 106, 'the card is the 108px overview row minus its 1px borders');
+      assert.equal(Math.round(m.card.h), 130, 'the card is the 132px overview row minus its 1px borders');
       assert.equal(Math.round(m.row.h), 36, 'design 16: 36px rows');
       const visible = m.list.h / m.row.h;
       assert.ok(visible >= 1.5 && visible < 4, `rows visible at once: ${visible.toFixed(1)} (list ${Math.round(m.list.h)}px of ${m.row.h}px rows; the MD wants 4 = 144px, which the 106px card cannot hold)`);

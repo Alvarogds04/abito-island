@@ -211,8 +211,8 @@ test('the mounted ticker hides its row when there is nothing to draw, and the ca
 // ---- «Ver todas» (part 1 of the human's two-part decision) --------------------------
 const two = () => T.sessionsView(frame({ sessions: [row(), row({ id: 's-0123abce', kind: 'claude-code', cwd: 'otro', state: 'running', origin: null })] }));
 test('moreView: «Ver todas» (no number: the frame has no total) only when there is more than the card shows', () => {
-  assert.deepEqual(T.moreView(two()), { label: 'Ver todas', aria: 'Ver todas las sesiones' });
-  assert.deepEqual(T.moreView(T.sessionsView(frame({ truncated: true }))), { label: 'Ver todas', aria: 'Ver todas las sesiones' });
+  assert.deepEqual(T.moreView(two()), { label: 'Todas', aria: 'Ver todas las sesiones' });
+  assert.deepEqual(T.moreView(T.sessionsView(frame({ truncated: true }))), { label: 'Todas', aria: 'Ver todas las sesiones' });
   assert.equal(T.moreView(T.sessionsView(frame())), null, 'one session: nothing more to see');
   assert.equal(T.moreView(T.sessionsView(frame({ sessions: [] }))), null);
   assert.equal(T.moreView({ state: 'error' }), null);

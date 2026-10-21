@@ -32,9 +32,9 @@ test('Coucou palette tokens (style.css :root) are defined with the reference val
     assert.equal(root[k], v, k);
 });
 
-test('header: 640x34 at y=8, tabs left (30x22 r11 visual), settings right; tabs pitch 35', () => {
+test('header: 720x34 at y=8, tabs left (30x22 r11 visual), settings right; tabs pitch 35', () => {
   const h = decls('#island-header');
-  assert.equal(h.top, '8px'); assert.equal(h.width, '640px'); assert.equal(h.height, '34px');
+  assert.equal(h.top, '8px'); assert.equal(h.width, '720px'); assert.equal(h.height, '34px');
   assert.equal(h['flex-direction'], 'row'); assert.equal(h['justify-content'], 'space-between');
   const v = decls('#island-header .tab::after, #island-header .hdr-action::after');
   assert.equal(v.inset, '11px 7px', '44x44 hit -> 30x22 visual');
@@ -47,12 +47,12 @@ test('header: 640x34 at y=8, tabs left (30x22 r11 visual), settings right; tabs 
   assert.equal(decls('#island-header .tab[aria-pressed="true"]::after').background, 'var(--tab-on)');
 });
 
-test('overview (A+E): row at y=42 of 108px; main card 438 (status 108 + centre 330), 8px gap, blobs card 174 from x=446', () => {
+test('overview (A+E): row at y=42 of 132px; main card 518 (status 108 + centre 410), 8px gap, blobs card 174 from x=446', () => {
   const o = decls('#overview-view');
-  assert.equal(o.top, '42px'); assert.equal(o.height, '108px'); assert.equal(o.width, '620px');
-  assert.equal(o.left, 'calc(50% - 310px)');
-  assert.equal(decls('.card-left').width, '438px');
-  assert.equal(decls('#blobs').left, 'calc(50% + 136px)');
+  assert.equal(o.top, '42px'); assert.equal(o.height, '132px'); assert.equal(o.width, '700px');
+  assert.equal(o.left, 'calc(50% - 350px)');
+  assert.equal(decls('.card-left').width, '518px');
+  assert.equal(decls('#blobs').left, 'calc(50% + 176px)');
   assert.equal(decls('#blobs').width, '174px');
   const c = decls('.card');
   assert.equal(c['border-radius'], '20px'); assert.equal(c.background, 'var(--card)'); assert.equal(c.border, '1px solid var(--hairline)');
@@ -82,9 +82,9 @@ test('pill hit area extends 2px into every 4px gap (no overlap between neighbour
   assert.equal(decls('.pill-choice::after').inset, '-2px');
 });
 
-test('approval/question: one 620x108 card at y=42, padding 4px 16px 4px 116px, gap 5, wash amber/cyan (280px at 50% 130%)', () => {
+test('approval/question: one 700x132 card at y=42, padding 4px 16px 4px 116px, gap 5, wash amber/cyan (280px at 50% 130%)', () => {
   const c = decls('#permission, #question');
-  assert.equal(c.width, '620px'); assert.equal(c.height, '108px'); assert.equal(c.top, '42px'); assert.equal(c.left, 'calc(50% - 310px)');
+  assert.equal(c.width, '700px'); assert.equal(c.height, '132px'); assert.equal(c.top, '42px'); assert.equal(c.left, 'calc(50% - 350px)');
   assert.equal(c.padding, '4px 16px 4px 116px'); assert.equal(c.gap, '5px'); assert.equal(c['border-radius'], '20px');
   assert.equal(decls('#permission')['--wash'], 'rgba(245, 165, 36, 0.42)');
   assert.equal(decls('#question')['--wash'], 'rgba(34, 211, 238, 0.38)');
@@ -111,10 +111,10 @@ test('fold and info: 16px round visual (inset 14 of 44), glyph 8px, 44px hit kep
 
 test('notices (A+E): a 28px band over the TOP of the blobs card (x446..620, the card pads 32px for it); a confirmed notice takes the whole 620px card, 108 by default and as tall as its wrapped result needs (--finished-h)', () => {
   const n = decls('#notices');
-  assert.equal(n.left, 'calc(50% + 136px)'); assert.equal(n.width, '174px'); assert.equal(n.height, '28px'); assert.equal(n.top, '42px');
+  assert.equal(n.left, 'calc(50% + 176px)'); assert.equal(n.width, '174px'); assert.equal(n.height, '28px'); assert.equal(n.top, '42px');
   const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
-  assert.equal(lane.width, '620px'); assert.equal(lane.padding, '4px 16px 4px 116px');
-  assert.equal(lane.height, 'var(--finished-h, 108px)', 'D: 108 unless a long result asked for more');
+  assert.equal(lane.width, '700px'); assert.equal(lane.padding, '4px 16px 4px 116px');
+  assert.equal(lane.height, 'var(--finished-h, 132px)', 'D: 108 unless a long result asked for more');
 });
 
 test('Spotify card (design 17 A): Coucou np-card type scale kept (dot 6, title 600 12, sub 400 11), 44px transport boxes with the 20px ink disc inside, 56px cover, no volume bar', () => {

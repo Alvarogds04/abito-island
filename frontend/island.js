@@ -54,13 +54,13 @@
   // viewBox units; only scale/position change, the engine is frozen. `cy` is the visible blob centre.
   // S10 (L24, «Notch pegado arriba como Coucou»): the expanded island is stuck to the top edge of the screen (gap 0) with
   // Coucou's corners 0 0 14 14; Rust pins every view with geometry::island_window_rect.
-  const OVERVIEW = { w: 640, h: 160, r: 14, gap: 0, clay: 66, clayX: 68, cy: 101 };
-  const RECAP_H = 184; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
-  const QUESTION_H = 200; // default; a long question grows it (abito:question-size), capped by the fixed window
+  const OVERVIEW = { w: 720, h: 184, r: 14, gap: 0, clay: 66, clayX: 68, cy: 113 };
+  const RECAP_H = 208; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
+  const QUESTION_H = 224; // default; a long question grows it (abito:question-size), capped by the fixed window
   let questionH = QUESTION_H;
   let finishedH = 0; // D: the island height a long «terminó» result needs (0 = the normal overview)
   // const QUESTION_H doc: // Coucou QUESTION_PICKER_H: the fixed window already has room
-  const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 101 };
+  const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 113 };
   const BLOB_DROP = 10 / 140; // the drawn blob sits this fraction of the box below the box centre (measured, was drop 10 at box 140)
   // The engine draws its body ~112 viewBox units wide inside its 200x160
   // canvas (measured from the captures), so a box of 128px shows a ~70px
@@ -73,7 +73,7 @@
   // only the pre-first-push default and must match geometry::CHAT_COLUMN_W / CHAT_MIN_H.
   // §5: the character is ~40px VISIBLE in the chat header: with the tight framing
   // (128 units show ~112) a 46px box shows ~40px.
-  const CHAT = { w: 640, h: 240, r: 22, clay: 46, clayLeft: 52, clayTop: 3 }; // S10 #480: 640 wide like the overview (geometry::CHAT_COLUMN_W); clayLeft is replaced below
+  const CHAT = { w: 720, h: 240, r: 22, clay: 46, clayLeft: 52, clayTop: 3 }; // S10 #480: 640 wide like the overview (geometry::CHAT_COLUMN_W); clayLeft is replaced below
 
   // Tauri IPC bridge (app.withGlobalTauri in tauri.conf.json).
   const invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
@@ -237,7 +237,7 @@
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
     const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : finishedH || OVERVIEW.h;
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
-    const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown && capsule.dataset.phase !== 'expanded' ? QT.shapeWithToast(shape, true) : shape);
+    const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown ? QT.shapeWithToast(shape, true) : shape);
     reportShape(withToast([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
       lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target]), withToast([w, h - 28 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
@@ -938,7 +938,7 @@
     const need = card.scrollHeight + 8;
     el.style.height = '';
     const layout = L.finishedLayout(need);
-    const next = layout.islandH > 160 ? layout.islandH : 0;
+    const next = layout.islandH > 184 ? layout.islandH : 0;
     el.style.setProperty('--finished-h', layout.cardH + 'px');
     el.dataset.scroll = layout.scroll ? 'true' : 'false';
     if (next !== finishedH) { finishedH = next; render(); }
