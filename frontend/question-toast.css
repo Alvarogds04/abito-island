@@ -42,3 +42,9 @@ html[data-motion="reduce"] .q-toast[data-ready="true"] { transition: opacity 120
   .q-toast, .q-toast *, .q-toast *::before, .q-toast *::after { animation-duration: 0.01ms; animation-iteration-count: 1; transition-duration: 0.01ms; }
 }
 html[data-motion="reduce"] .q-toast, html[data-motion="reduce"] .q-toast * { animation: none; transition: none; }
+
+/* S13 (13 Sileo, A): a thin progress bar on the pill; it pauses with hover/focus (JS keeps the matching timer) */
+.q-toast-progress { position: absolute; left: 10px; right: 10px; bottom: 2px; height: 2px; border-radius: 1px; background: currentColor; opacity: .5; transform-origin: left center; animation: q-toast-progress 8s linear forwards; pointer-events: none; }
+.q-toast:hover .q-toast-progress, .q-toast:focus-visible .q-toast-progress, .q-toast:focus-within .q-toast-progress { animation-play-state: paused; }
+@keyframes q-toast-progress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+html[data-motion="reduce"] .q-toast-progress { animation: none; transform: none; opacity: .35; }
