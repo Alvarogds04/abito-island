@@ -948,6 +948,14 @@ test('#423 the notice title keeps a readable width in the 228px band (measured 1
   assert.match(islandSrc, /noticesEl\.dataset\.count\s*=/, 'renderNotices still publishes the notice count for the aria/CSS');
 });
 
+test('Sin motor is actionable: the down view carries a real action (open Conexiones); connected/unavailable carry none', () => {
+  const down = O.connectionView({ unavailable: false, connections: 0 });
+  assert.deepEqual(down.action, { target: 'accounts', label: 'Abrir Ajustes' });
+  assert.match(down.actionAria, /Sin motor.*Ajustes/);
+  assert.equal(O.connectionView({ connections: 1 }).action, undefined);
+  assert.equal(O.connectionView({ unavailable: true, connections: 0 }).action, undefined);
+});
+
 console.log(`overview-view-check: ${passed} passed`);
 
 test('T7.3 approval card markup: «Espera tu respuesta» caption, fold inside the action row, command strip', () => {

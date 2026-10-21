@@ -90,7 +90,7 @@ test('feed: process discovery and idle state changes never impersonate tool step
   const v1 = T.sessionsView(frame());
   let r = T.feed(m, v1);
   assert.equal(r.active, true);
-  assert.deepEqual(r.task, { steps: ['Pasos de herramientas no disponibles'], stepSeq: 0, finalLine: null });
+  assert.deepEqual(r.task, { steps: ['Pasos de herramientas no disponibles'], stepSeq: 0, finalLine: 'Pasos de herramientas no disponibles' });
   assert.equal(r.who.count, '', 'no invented n/m without tool events');
   r = T.feed(m, v1);
   assert.equal(r.task.steps.length, 1, 'unchanged list: no new step');
@@ -177,6 +177,15 @@ test('real tool history drives n/m; missing and malformed streams remain honest'
   assert.equal(T.focus(m, v, 'not-a-session'), null);
   const malformed = T.sessionsView(frame({ sessions: [row({ tools: { total: 2, steps: [] } })] }));
   assert.match(T.feed(T.newMemory(), malformed).task.steps[0], /no disponibles/);
+});
+
+test('feed: an unavailable line is STILL (finalLine set -> no shimmer, Coucou shimmers only live work); a live tool stream keeps shimmering', () => {
+  const m = T.newMemory();
+  assert.equal(T.feed(m, T.sessionsView(frame())).task.finalLine, 'Pasos de herramientas no disponibles');
+  assert.equal(T.feed(m, { state: 'error' }).task.finalLine, 'Sesiones no disponibles');
+  const b = T.newMemory();
+  const bounded = T.feed(b, T.sessionsView(frame({ truncated: true })));
+  assert.equal(bounded.task.finalLine, bounded.task.steps.at(-1));
 });
 
 Promise.all(async).then(() => { console.log(`sessions-ticker-view-check: ${passed} checks ok`); process.exit(0); }, (e) => { console.error(e); process.exit(1); });

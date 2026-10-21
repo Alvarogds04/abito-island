@@ -176,7 +176,8 @@
     const steps = memory.log.slice();
     // Neither the availability notice nor the bounded-list notice is a tool.
     const who = f ? { name: f.cwd ?? '—', tool: f.kindLabel, count: '' } : null;
-    return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: null }, who };
+    // An unavailable/bounded notice is not live work: finalLine makes Coucou's Ticker hold it still (no shimmer).
+    return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: steps.at(-1) ?? null }, who };
   }
 
   return { SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };

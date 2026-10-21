@@ -101,10 +101,22 @@ test('texts, aria and behaviour are untouched: the same ids, the same closed ver
   for (const id of ['notices', 'notice-row', 'connection', 'hotkey', 'bridge', 'notice-info', 'notice-pill', 'notice-open', 'notice-ring', 'notice-title', 'notice-dismiss', 'notice-detail', 'notice-live'])
     assert.match(html, new RegExp(`id="${id}"`), id);
   const notices = html.slice(html.indexOf('<div id="notices"'), html.indexOf('<p id="notice-live"'));
-  assert.equal((notices.match(/<button/g) || []).length, 5, 'info, open, dismiss and the finished card\'s two buttons: no invented one');
+  assert.equal((notices.match(/<button/g) || []).length, 6, 'info, open, dismiss, the finished card\'s two buttons and the «Sin motor» action: no other invented one');
   const src = read('island.js');
   assert.match(src, /noticeAction\.hidden = view\.action == null;/);
   assert.match(src, /aria-label', view\.grouped \? `Ver los \$\{view\.count\} avisos`/);
+});
+
+test('«Sin motor» is a real button (keyboard + mouse), enabled only when the connection view carries an action, and it opens Ajustes through the existing seam', () => {
+  const html = read('index.html');
+  assert.match(html, /<button id="connection" class="chip" type="button"/);
+  const src = read('island.js');
+  assert.match(src, /connectionEl\.disabled = !conn\.action;/);
+  assert.match(src, /connectionEl\.addEventListener\('click', event => \{ if \(event\.isTrusted === true && lastConn && lastConn\.action\) document\.dispatchEvent\(new CustomEvent\('abito:settings-select', \{ detail: lastConn\.action\.target \}\)\); \}\);/);
+  assert.match(src, /connectionEl\.setAttribute\('aria-label', conn\.action \? conn\.actionAria : conn\.aria\);/);
+  const css = read('style.css');
+  assert.match(css, /#notice-row button\.chip:not\(:disabled\)\s*\{[^}]*cursor: pointer/);
+  assert.match(css, /#notice-row button\.chip:focus-visible/);
 });
 
 if (failed) process.exit(1);

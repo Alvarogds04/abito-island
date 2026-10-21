@@ -76,7 +76,10 @@
     }
     return { kind: 'down', tone: 'faint', icon: 'plug-off', word: 'Sin motor',
       aria: 'Sin motor: no hay una sesión conectada. Los avisos están disponibles solo si conectás una sesión de Pi de forma explícita.',
-      detail: 'Conectá una sesión de Pi.' };
+      detail: 'Conectá una sesión de Pi.',
+      // Coucou's no-agent state is a way forward, not a dead label: the action opens Ajustes -> Conexiones (Agentes).
+      action: { target: 'accounts', label: 'Abrir Ajustes' },
+      actionAria: 'Sin motor: no hay una sesión conectada. Abrir Ajustes para conectar un agente.' };
   }
 
   // ---- L37: no Pi session is NOT an error --------------------------------------------------------------------------------

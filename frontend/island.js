@@ -622,6 +622,8 @@
   // `/execute`, and only through a trusted human click.
   const noticesEl = $('notices');
   const connectionEl = $('connection');
+  let lastConn = null;
+  connectionEl.addEventListener('click', event => { if (event.isTrusted === true && lastConn && lastConn.action) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: lastConn.action.target })); });
   const noticeTitle = $('notice-title');
   const noticeDetail = $('notice-detail');
   const noticeDismiss = $('notice-dismiss');
@@ -804,7 +806,9 @@
     if (overviewStatus) overviewStatus.textContent = conn.word || 'Conexión local';
     if (overviewDetail) overviewDetail.textContent = conn.detail;
     connectionEl.dataset.tone = conn.tone;
-    connectionEl.setAttribute('aria-label', conn.aria);
+    connectionEl.setAttribute('aria-label', conn.action ? conn.actionAria : conn.aria);
+    connectionEl.disabled = !conn.action;
+    lastConn = conn;
     putIcon($('connection-icon'), iconNode(icon(conn.icon)));
     $('connection-word').textContent = conn.word;
     const bridge = O.bridgeView(snapshot);

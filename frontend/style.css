@@ -926,6 +926,10 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 .overview-detail { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 #notices { display: flex; flex-direction: column; gap: 8px; }
 #notice-row { position: static; flex-wrap: wrap; justify-content: flex-start; gap: 4px 10px; min-height: 44px; padding-right: 48px; /* align-content left to its default (stretch): in the 44px band the single row stretches and the chips centre; wrapped content packs from the start and scrolls inside the band */ }
+#notice-row button.chip { appearance: none; background: transparent; border: 0; padding: 0 6px; font: inherit; }
+#notice-row button.chip:not(:disabled) { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+#notice-row button.chip:not(:disabled):hover { color: var(--dim-2); }
+#notice-row button.chip:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; border-radius: 6px; }
 #notice-row .chip { min-height: 28px; white-space: nowrap; margin-left: 0; }
 #bridge, #card-bridge, #hotkey { margin-left: 0; }
 #notice-info { position: absolute; top: 0; right: 4px; flex: none; } /* top 0: the 44px control fills the 44px band exactly, no phantom overflow scroll */
