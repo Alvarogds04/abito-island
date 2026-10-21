@@ -221,7 +221,42 @@
     return { left, top: below + 24 > H ? Math.max(4, at.y - h - 8) : below };
   }
 
-  return { tipFor, tipPlacement, ROW, rowsViewport, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
+  // ---- T1 · S1 (01 oculta, A): the hidden island is ONE thread whose colour is the most urgent state -----------------------------
+  const EDGE_STRIP = Object.freeze({ w: 160, h: 3, zone: 8 });
+  function edgeStripView(o) {
+    const pending = o && (o.pending === 'question' || o.pending === 'approval') ? o.pending : null;
+    const queued = o && Number.isInteger(o.queued) && o.queued > 0 && o.queued <= MAX_QUEUED ? o.queued : 0;
+    if (pending) {
+      const n = 1 + queued;
+      const what = pending === 'approval' ? (n === 1 ? 'un permiso espera' : `${n} permisos esperan`) : (n === 1 ? 'una pregunta espera' : `${n} preguntas esperan`);
+      return { state: pending, pulse: true, aria: `Abito: ${what}` };
+    }
+    if (o && o.finished) return { state: 'finished', pulse: true, aria: 'Abito: algo terminó' };
+    return { state: 'rest', pulse: false, aria: 'Abito, en reposo' };
+  }
+
+  // ---- T1 · S2 (02 compacta, A): the mascot + up to 3 coloured mini-mascots + «+N», the real activity line, a state badge -----------
+  const COMPACT_W = 288, COMPACT_WIDE = 440, MINIS = 3;
+  function compactView(o) {
+    const rows = o && Array.isArray(o.rows) ? o.rows.filter(r => r && typeof r.id === 'string') : [];
+    const pending = o && o.pending && typeof o.pending === 'object' ? o.pending : null;
+    const focus = rows.find(r => r.id === (o && o.focusId)) || rows.find(isRunning) || rows[0] || null;
+    const minis = rows.slice(0, MINIS).map(r => ({ id: r.id, color: r.color || 'blue', name: bound(r.cwd || r.kindLabel || 'Sesión', NAME_MAX), pose: isRunning(r) ? 'working' : 'idle' }));
+    let activity = '', badge = '';
+    if (focus) {
+      const name = bound(focus.cwd || focus.kindLabel || 'Sesión', 18);
+      const step = focus.tools && Array.isArray(focus.tools.steps) ? focus.tools.steps.find(s => s.state === 'running') : null;
+      activity = step ? `${name} · ${step.name}…` : name;
+      if (isRunning(focus)) badge = 'working';
+    }
+    if (pending) {
+      badge = approvalView(pending, '') ? 'approval' : (pending.kind === 'approval' ? 'approval' : 'question');
+      if (!activity) activity = bound(String(pending.text || '').split(/\r?\n/)[0], 40);
+    }
+    return { minis, more: Math.max(0, rows.length - MINIS), activity, badge, width: rows.length || pending ? COMPACT_WIDE : COMPACT_W };
+  }
+
+  return { tipFor, tipPlacement, ROW, rowsViewport, EDGE_STRIP, edgeStripView, compactView, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
 });
 
 function mount(L) {
@@ -255,6 +290,7 @@ function mount(L) {
       status.setAttribute('aria-label', counts.lines.join(', '));
     }
     paintCentre(rows, attributedId);
+    paintCompact(rows);
     doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId } }));
   }
   // One delegated tooltip for every element of the island that carries a title: hover (after a short delay) and keyboard focus show it,
@@ -288,6 +324,18 @@ function mount(L) {
     doc.addEventListener('focusout', hideTip);
     doc.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); }, true);
   }
+  // S1 + S2 + S3: the compact pill and the hidden thread, from the same real data.
+  const strip = doc.getElementById('edge-strip');
+  function paintCompact(rows) {
+    const kind = pending ? (approvalView(pending, '') || pending.kind === 'approval' ? 'approval' : 'question') : null;
+    const c = L.compactView({ rows, focusId, pending });
+    doc.dispatchEvent(new CustomEvent('abito:compact-view', { detail: c }));
+    if (strip) {
+      const e = L.edgeStripView({ pending: kind, queued: queuedCount, finished });
+      strip.dataset.state = e.state; strip.dataset.pulse = String(e.pulse); strip.setAttribute('aria-label', e.aria);
+    }
+  }
+  function approvalView(p, label) { return L.approvalView(p && Object.assign({}, p, { options: Array.isArray(p.options) ? p.options.map((o, i) => ({ index: Number.isInteger(o && o.index) ? o.index : i, label: String((o && o.label) || '') })) : [], allowFreeText: p && p.allow_free_text === true }), label); }
   // E + I: the centre column. Real state, real tool steps only; nothing waiting and nothing running -> the calm state with a CTA.
   function paintCentre(rows, attributedId) {
     if (!centre) return;

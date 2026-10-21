@@ -471,4 +471,52 @@ test('wiring: ONE delegated tooltip in the island — shows on hover AND keyboar
   assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /id="island-tip"/);
 });
 
+// ======== T1 · S1 (01 oculta A) + S2 (02 compacta A) ========================================================================
+test('S1 edgeStripView: ONE strip whose colour is the most urgent state (reposo gris / pregunta cian / permiso ámbar / listo verde) and never colour alone', () => {
+  assert.deepEqual(L.edgeStripView({}), { state: 'rest', pulse: false, aria: 'Abito, en reposo' });
+  assert.deepEqual(L.edgeStripView({ pending: 'question' }), { state: 'question', pulse: true, aria: 'Abito: una pregunta espera' });
+  assert.deepEqual(L.edgeStripView({ pending: 'approval' }), { state: 'approval', pulse: true, aria: 'Abito: un permiso espera' });
+  assert.deepEqual(L.edgeStripView({ finished: true }), { state: 'finished', pulse: true, aria: 'Abito: algo terminó' });
+  assert.equal(L.edgeStripView({ pending: 'question', finished: true }).state, 'question', 'pending beats finished');
+  assert.equal(L.edgeStripView({ pending: 'approval', finished: true }).state, 'approval');
+  assert.equal(L.edgeStripView({ pending: 'question', queued: 2 }).aria, 'Abito: 3 preguntas esperan', 'the aria says how many wait (the colour cannot)');
+  assert.equal(L.edgeStripView(null).state, 'rest');
+  assert.deepEqual(L.EDGE_STRIP, { w: 160, h: 3, zone: 8 });
+});
+test('S2 compactView: up to 3 coloured minis + «+N», the activity line from REAL data, the status badge, and the width it needs', () => {
+  const rows = [row({ id: 's-0000000a', kindLabel: 'Pi', cwd: 'workspace', state: 'running', tools: { total: 2, steps: [{ index: 1, name: 'read', state: 'done' }, { index: 2, name: 'bash', state: 'running' }] }, color: 'green' }),
+    row({ id: 's-0000000b', kindLabel: 'Claude Code', cwd: 'api', color: 'orange' }), row({ id: 's-0000000c', kindLabel: 'Codex', cwd: 'web', color: 'purple' }),
+    row({ id: 's-0000000d', kindLabel: 'Gemini', cwd: 'docs', color: 'mint' }), row({ id: 's-0000000e', kindLabel: 'OpenCode', cwd: 'x', color: 'blue' })];
+  const c = L.compactView({ rows, focusId: 's-0000000a', pending: null });
+  assert.deepEqual(c.minis.map(m => [m.id, m.color]), [['s-0000000a', 'green'], ['s-0000000b', 'orange'], ['s-0000000c', 'purple']]);
+  assert.equal(c.more, 2, '5 sessions: 3 minis + «+2»');
+  assert.equal(c.activity, 'workspace · bash…', 'the real running tool of the focused session, never an invented verb');
+  assert.equal(c.badge, 'working');
+  assert.equal(c.width, 440);
+  const idle = L.compactView({ rows: rows.slice(1, 2), focusId: 's-0000000b', pending: null });
+  assert.deepEqual([idle.activity, idle.badge, idle.more, idle.minis.length], ['api', '', 0, 1], 'idle: the session name only, no «…» and no badge');
+  const none = L.compactView({ rows: [], focusId: null, pending: null });
+  assert.deepEqual([none.minis, none.more, none.activity, none.badge, none.width], [[], 0, '', '', 288], 'nothing running: the plain 288 pill');
+  assert.equal(L.compactView({ rows, focusId: null, pending: { kind: 'question', agent: 'pi', text: '¿Qué editor?' } }).badge, 'question');
+  assert.equal(L.compactView({ rows: [], focusId: null, pending: { kind: 'question', agent: 'pi', text: 'x' } }).width, 440, 'a question widens the pill (S3)');
+  assert.equal(L.compactView(null).width, 288);
+});
+test('S1/S2 wiring + CSS: the strip element, the 8px activation zone (24px hidden offset), the mini row and the activity line exist', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  for (const id of ['edge-strip', 'compact-activity', 'compact-badge']) assert.match(html, new RegExp(`id="${id}"`), id);
+  const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  assert.match(isl, /24 \* conceal\.target/, 'hidden = 24px up: 8px of activation zone stay under the pointer');
+  assert.doesNotMatch(isl, /28 \* conceal/, 'the old 4px slice is gone');
+  assert.match(isl, /abito:compact-view/);
+  assert.match(isl, /compactW/);
+  assert.equal(decls('#edge-strip').width, '160px'); assert.equal(decls('#edge-strip').height, '3px');
+  assert.equal(decls('#capsule[data-edge-hidden="true"] #island').background, 'transparent', 'only the coloured thread is seen, not the black slice');
+  for (const st of ['rest', 'question', 'approval', 'finished']) assert.ok(decls(`#edge-strip[data-state="${st}"]`).background, st);
+  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{[^}]*#edge-strip\[data-pulse="true"\]/, 'the slow pulse exists only when motion is allowed');
+  assert.equal(decls('#mini-grid')['flex-direction'], 'row', 'a row of minis, not a 2x2 grid');
+  assert.equal(decls('#capsule[data-phase="compact"] #mini-grid[data-count]:not([data-count="0"])').display, 'flex');
+  assert.ok(decls('.mini-more'));
+  assert.equal(decls('.compact-activity')['text-overflow'], 'ellipsis');
+});
+
 console.log(`island-layout-check: ${passed} checks ok`);

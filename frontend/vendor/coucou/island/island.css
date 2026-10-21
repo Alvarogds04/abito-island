@@ -1060,3 +1060,30 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
 /* v5-04: the island's own tooltip (WebKitGTK did not paint native `title` tooltips in this window). Never takes the pointer. */
 #island-tip { position: absolute; z-index: 30; max-width: 260px; padding: 5px 9px; border-radius: 8px; background: var(--card-flat, #1b1c20); color: var(--ink); border: 1px solid var(--hairline, rgba(255, 255, 255, 0.14)); font: 400 11px/1.35 var(--font); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); pointer-events: none; overflow-wrap: anywhere; white-space: normal; }
 #island-tip[hidden] { display: none; }
+/* ══ T1 · S1 (01 oculta A): ONE coloured thread. Hidden = the island is 24px up; 8px of it stay under the pointer as the activation zone ═══
+   Only the thread is seen (the black slice is transparent); its colour is the most urgent state and it pulses slowly only if motion is allowed. */
+#edge-strip { position: absolute; left: 50%; top: 0; width: 160px; height: 3px; margin-left: -80px; border-radius: 0 0 3px 3px; background: var(--dim-3); opacity: 0; pointer-events: none; transition: opacity 160ms var(--ease-out), background 160ms var(--ease-out); z-index: 6; }
+#capsule[data-edge-hidden="true"] #edge-strip { opacity: 1; }
+#capsule[data-edge-hidden="true"] #island { background: transparent; box-shadow: none; }
+#capsule[data-edge-hidden="true"] #island > *:not(#edge-strip) { opacity: 0; pointer-events: none; }
+#edge-strip[data-state="rest"] { background: var(--dim-3); }
+#edge-strip[data-state="question"] { background: #22d3ee; }
+#edge-strip[data-state="approval"] { background: #f5a524; }
+#edge-strip[data-state="finished"] { background: #22c55e; }
+@media (prefers-reduced-motion: no-preference) { #edge-strip[data-pulse="true"] { animation: edge-pulse 2.4s ease-in-out infinite; } }
+html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
+@keyframes edge-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* ══ T1 · S2 (02 compacta A): mascot + up to 3 coloured minis + «+N», the activity line, a state badge ═══════════════════════════════ */
+#mini-grid { left: auto; right: 12px; top: 50%; width: auto; height: 18px; margin-top: -9px; display: none; flex-direction: row; align-items: center; gap: 4px; grid-template-columns: none; grid-auto-rows: auto; }
+#capsule[data-phase="compact"] #mini-grid[data-count]:not([data-count="0"]) { display: flex; }
+#mini-grid .mini { width: 18px; height: 18px; flex: 0 0 18px; }
+#mini-grid .mini svg { width: 20px; height: 20px; }
+.mini-more { font: 600 11px var(--font); color: var(--dim-2); margin-left: 2px; white-space: nowrap; }
+.compact-activity { position: absolute; left: 76px; right: 96px; top: 50%; transform: translateY(-50%); display: none; font: 500 12px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+#capsule[data-phase="compact"] .compact-activity:not(:empty) { display: block; }
+#compact-badge { position: absolute; left: 56px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #0b0c0e; display: none; place-items: center; pointer-events: none; z-index: 4; font: 700 9px/1 var(--font); }
+#capsule[data-phase="compact"] #compact-badge:not([hidden]) { display: grid; }
+#compact-badge[data-kind="working"]::before { content: "•••"; color: #7aa7ff; letter-spacing: -1px; }
+#compact-badge[data-kind="question"]::before { content: "?"; color: #22d3ee; }
+#compact-badge[data-kind="approval"]::before { content: "!"; color: #f5a524; }
