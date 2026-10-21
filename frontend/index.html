@@ -96,7 +96,11 @@
       <button id="island-toggle" type="button" class="sr-only" aria-expanded="false">Abrir Abito</button>
       <svg id="clay" aria-hidden="true" focusable="false"></svg>
       <div id="island-tip" role="tooltip" hidden></div>
+      <span id="compact-badge" aria-hidden="true" hidden></span>
+      <span id="compact-activity" class="compact-activity"></span>
       <div id="mini-grid" aria-hidden="true"></div>
+      <!-- S1 (01 oculta, A): the hidden island is ONE thread; its colour is the most urgent state (island-layout.js edgeStripView) -->
+      <div id="edge-strip" data-state="rest" data-pulse="false" role="img" aria-label="Abito, en reposo"></div>
       <!-- S10 (L22): Coucou's state badge on the character («!» approval, «?» question, ✓ finished); decoration only. -->
       <span id="clay-badge" aria-hidden="true" hidden><i></i></span>
       <!-- #419: visual auto-close countdown — pure decoration (aria-hidden,
