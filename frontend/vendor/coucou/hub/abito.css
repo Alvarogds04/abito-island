@@ -62,3 +62,17 @@ section.abito-card > h2 { gap: 8px; }
 .voice-sensitivity-value { min-width: 4ch; text-align: right; font: 600 12px var(--font); font-variant-numeric: tabular-nums; }
 .voice-privacy > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font: 600 13px var(--font); }
 .voice-privacy[open] > summary { margin-bottom: 6px; }
+
+/* #503 S23 (Integraciones, Opción A): one card per service: head (switch, colour, name, state, actions), a key panel that
+   opens on demand and a plain-text «¿Dónde?». Targets keep 44px; the state is icon + word, never colour alone. */
+#integration-list { gap: 10px !important; }
+.int-card { gap: 8px; }
+.int-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 44px; }
+.int-name { font-size: 13px; font-weight: 600; min-width: 96px; }
+.int-actions { display: inline-flex; gap: 8px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.int-actions .hub-btn { min-height: 36px; }
+.int-connect { padding-top: 4px; border-top: 1px solid var(--hairline); }
+.int-connect[hidden], .int-where[hidden], .int-card [hidden] { display: none !important; }
+.int-verdict:empty { display: none; }
+.int-head .switch { position: relative; }
+.int-head .switch::before { content: ""; position: absolute; inset: -12px -6px; }

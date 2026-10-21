@@ -24,6 +24,11 @@ const INTEGRATIONS = [
   {id:'mail_smtp',name:'Mail (SMTP)',color:'#8C8C8C',noPill:true,fields:[['smtp-host','Server (port 465 = TLS, otherwise STARTTLS)','smtp.example.com:587'],['smtp-user','User','you@example.com'],['smtp-password','Password','…'],['smtp-from','Sender (optional)','Abito <you@example.com>']],hint:'Used to send mail from the island when no Resend key and sender are saved. The connection is always encrypted.'},
   {id:'mail_imap',name:'Mail (IMAP)',color:'#8C8C8C',noPill:true,fields:[['imap-host','Server (TLS, port 993 by default)','imap.example.com'],['imap-user','User','you@example.com'],['imap-password','Password','…']],hint:'Your inbox in the island: unread, sender, time and preview. Abito only reads; it changes a message only when you press Mark as read. The connection is always encrypted.'},
 ];
+// #503 S23: where each key is created. Plain text, shown on demand; Abito opens nothing and asks the host nothing.
+const KEY_SITE: Record<string, string> = {
+  integration_stripe: 'dashboard.stripe.com/apikeys', integration_github: 'github.com/settings/tokens', integration_vercel: 'vercel.com/account/tokens',
+  integration_resend: 'resend.com/api-keys', integration_notion: 'notion.so/profile/integrations', integration_calcom: 'app.cal.com/settings/developer/api-keys',
+};
 export async function renderIntegrations({ invoke, V, P, C, listen, timers }: any) {
   const s = session(invoke, listen, timers), { root, call, work, watch } = s;
   root.style.setProperty('display','contents');
@@ -31,6 +36,9 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
   let prefs: any = {}, known = false, busy = false;
   const switches = new Map<string,HTMLButtonElement>(), dots: ReturnType<typeof colorDot>[] = [];
   const refreshColors: (()=>void)[] = [];
+  // #503 S23: a service is «conectado» only when EVERY one of its keys is stored; unknown until the keychain answered.
+  const hasKey: Record<string, boolean | undefined> = {};
+  const cardUpdaters: (()=>void)[] = [];
   function refresh() {
     const cur = P.normalize(prefs);
     // Owner-approved security exception: a persistent OS keychain is not "never on disk".
@@ -60,6 +68,40 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
       save({action:'toggle_declared_pill',id:def.id});
     });if(!noPill)switches.set(def.id,sw);
     const rows=h('div',{style:'display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0'});
+    const keyIds=def.fields.map(f=>f[0]);
+    const badge=h('span',{class:'card-state'});
+    const connectBtn=trusted(h('button',{type:'button',class:'hub-btn primary',text:'Conectar','aria-expanded':'false'})) as HTMLButtonElement;
+    const testBtn=trusted(h('button',{type:'button',class:'hub-btn',text:'Probar'})) as HTMLButtonElement;
+    const removeBtn=trusted(h('button',{type:'button',class:'hub-btn danger',text:'Quitar'})) as HTMLButtonElement;
+    const connectPanel=h('div',{class:'int-connect'});connectPanel.hidden=true;
+    const verdict=h('div',{class:'hint int-verdict',role:'status','aria-live':'polite'});
+    let open=false,serviceBusy=false;
+    const setOpen=(on:boolean)=>{open=on;connectPanel.hidden=!on;connectBtn.setAttribute('aria-expanded',String(on));};
+    // The card's state: every key stored = connected; a service with no keys needs none; unknown until the keychain answered.
+    function updateCard(){
+      const known=keyIds.length>0&&keyIds.every(k=>typeof hasKey[k]==='boolean'), all=known&&keyIds.every(k=>hasKey[k]===true);
+      const [kind,icon,word]=keyIds.length===0?['none','·','no necesita clave']:!known&&!keyIds.some(k=>hasKey[k]===false)?['unknown','·',UNAVAILABLE]:all?['ok','✓','conectado']:['missing','✗','sin clave'];
+      badge.replaceChildren(h('span',{class:'state-ico','aria-hidden':'true',text:icon}),h('span',{class:'state-word',text:word}));
+      badge.className=`card-state ${kind}`;
+      const connected=kind==='ok',needsKey=keyIds.length>0;
+      connectBtn.hidden=connected||!needsKey;testBtn.hidden=removeBtn.hidden=!connected;
+      if(connected&&open)setOpen(false);
+    }
+    cardUpdaters.push(updateCard);
+    connectBtn.addEventListener('click',e=>{if(!e.isTrusted)return;setOpen(!open);});
+    testBtn.addEventListener('click',e=>{
+      if(!e.isTrusted||serviceBusy||!s.alive())return;serviceBusy=true;verdict.textContent='';
+      // Local on purpose: it re-reads the keychain's presence flags; the service itself is never contacted.
+      work(async()=>{const out:Record<string,boolean>={};for(const k of keyIds)out[k]=(await call('secret_action',V.keyPayload('present',k)))?.present===true;return out;},
+        out=>{Object.assign(hasKey,out);updateCard();verdict.textContent=keyIds.every(k=>out[k])?'Claves guardadas. No se contactó al servicio.':'Faltan claves de este servicio.';},
+        ()=>{verdict.textContent='No se pudo comprobar.';}).finally(()=>{serviceBusy=false;});
+    });
+    removeBtn.addEventListener('click',e=>{
+      if(!e.isTrusted||serviceBusy||!s.alive())return;serviceBusy=true;verdict.textContent='';
+      work(async()=>{for(const k of keyIds){const r=await call('secret_action',V.keyPayload('clear',k));if(r?.present!==false)throw Error('unconfirmed');}},
+        ()=>{for(const k of keyIds)hasKey[k]=false;updateCard();},
+        ()=>{verdict.textContent='No se pudo quitar.';}).finally(()=>{serviceBusy=false;});
+    });
     for(const [key,label,placeholder] of def.fields) {
       const supported=V.KEY_IDS.includes(key);
       // n8n-url lives in the keystore too: mask it rather than expose a stored secret.
@@ -77,6 +119,7 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
           if(result?.present!==(payload.action==='set'))throw Error('unconfirmed');
           input.placeholder=result.present?`••••••••  ${t('(stored)')}`:placeholder;
           dot.style.setProperty('background',result.present?'#22c55e':'#f4505e');
+          hasKey[key]=result.present;updateCard();
         },()=>{dot.style.setProperty('background','#f5a524');})
           .finally(()=>{keyBusy=false;if(s.alive())saveBtn.disabled=false;});
       });
@@ -86,14 +129,25 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
         if(typeof result?.present!=='boolean')return;
         input.placeholder=result.present?`••••••••  ${t('(stored)')}`:placeholder;
         dot.style.setProperty('background',result.present?'#22c55e':'#f4505e');
+        hasKey[key]=result.present;updateCard();
       });
     }
     if(def.hint)rows.append(hint(t(def.hint)));
     // spotify_action is NOT reachable from settings: preserve the hint slot, not a fabricated state.
     if(def.id==='integration_spotify')rows.append(h('div',{class:'hint',style:'padding-top:5px'}));
+    connectPanel.append(rows);
+    // «¿Dónde? ↗»: where the key is created, as plain text on demand. Nothing is opened and the host is never asked.
+    const site=KEY_SITE[def.id];let helpBtn:HTMLButtonElement|null=null;
+    const where=h('div',{class:'hint int-where',text:site?`Créala en ${site}.`:''});where.hidden=true;
+    if(site){
+      helpBtn=trusted(h('button',{type:'button',class:'hub-btn int-help',text:'¿Dónde? ↗','aria-expanded':'false'})) as HTMLButtonElement;
+      helpBtn.addEventListener('click',e=>{if(!e.isTrusted)return;where.hidden=!where.hidden;helpBtn!.setAttribute('aria-expanded',String(!where.hidden));});
+    }
+    const actions=h('div',{class:'int-actions'},connectBtn,testBtn,removeBtn);if(helpBtn)actions.append(helpBtn);
+    const body=(head:HTMLElement)=>h('section',{id:def.id,class:'int-card abito-card'},head,connectPanel,where,verdict);
+    updateCard();
     if(noPill){
-      list.append(h('div',{id:def.id,style:'display:flex;gap:12px;align-items:flex-start'},
-        h('div',{style:'display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px'},h('span',{style:'font-size:12.5px',text:def.name})),rows));
+      list.append(body(h('div',{class:'int-head'},h('span',{class:'int-name',text:def.name}),badge,actions)));
       continue;
     }
     const dot=colorDot(def,'',()=>prefs.pillColors,next=>{
@@ -101,8 +155,7 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
       const color=next[def.id];save(color?{action:'set_pill_color',id:def.id,color}:{action:'clear_pill_color',id:def.id});
     },true);dots.push(dot);
     refreshColors.push(()=>dot.style.setProperty('background',pillColor(def.id,def.color,prefs.pillColors)));
-    list.append(h('div',{id:def.id,style:'display:flex;gap:12px;align-items:flex-start'},
-      h('div',{style:'display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px'},sw,dot,h('span',{style:'font-size:12.5px',text:def.name})),rows));
+    list.append(body(h('div',{class:'int-head'},sw,dot,h('span',{class:'int-name',text:def.name}),badge,actions)));
   }
   root.append(section(t('Integrations'),note,list),s.message);
   refresh();
