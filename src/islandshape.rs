@@ -23,8 +23,9 @@ pub(crate) fn parse_window_height(payload: &Value) -> Option<i32> {
 
 // Only the compact strip may be shorter than the normal compact bar.
 fn input_rect(report: Report, window: (i32, i32), protected: bool) -> (i32,i32,i32,i32) {
-    if !protected && report.w == 288 && (4..32).contains(&report.h) && report.settled {
-        let w = 288.min(window.0.max(0));
+    // The hidden strip (S1): only the compact pill's two widths, 288 or 440 (session rows / a pending ask), can be one.
+    if !protected && abito_island::geometry::COMPACT_WIDTHS.contains(&report.w) && (4..32).contains(&report.h) && report.settled {
+        let w = report.w.min(window.0.max(0));
         return ((window.0-w)/2, 0, w, report.h.min(window.1.max(0)));
     }
     abito_island::geometry::island_shape_rect((report.w,report.h), window)
@@ -104,4 +105,23 @@ fn edge_input_tracks_four_pixel_strip_and_protected_cards_refuse_it() {
     assert_eq!(input_rect(strip, (752,340), false), (232,0,288,4));
     assert_eq!(input_rect(strip, (752,340), true), (232,0,288,32));
     assert_eq!(input_rect(Report {h:-1,..strip}, (752,340), false), (232,0,288,32));
+}
+
+#[cfg(test)]
+#[test]
+fn the_hidden_strip_input_zone_is_the_drawn_8px_at_both_compact_widths_and_never_wider_than_the_pill() {
+    // S1: the hidden strip is 24 px up, leaving an 8 px activation zone. The pill is 288 wide, or 440 once there are session rows or a
+    // pending ask (island-layout.js COMPACT_WIDE), so the zone must be 8 px tall at BOTH widths (it used to be 32 at 440).
+    for w in [288, 440] {
+        let strip = Report { w, h: 8, settled: true };
+        let (x, y, rw, rh) = input_rect(strip, (752, 340), false);
+        assert_eq!((rw, rh), (w, 8), "zone {w} wide, 8 px tall");
+        assert_eq!((x, y), ((752 - w) / 2, 0), "centred, at the very top");
+        assert_eq!(input_rect(strip, (752, 340), true), (x, 0, w, 32), "a protected ask refuses the thin strip at {w} too");
+        assert_eq!(input_rect(Report { settled: false, ..strip }, (752, 340), false).3, 32, "moving: never the thin zone");
+    }
+    // a pill or card that is NOT a strip keeps today's rule
+    assert_eq!(input_rect(Report { w: 440, h: 32, settled: true }, (752, 340), false), (156, 0, 440, 32));
+    assert_eq!(input_rect(Report { w: 720, h: 8, settled: true }, (752, 340), false).3, 32, "only compact widths can be a strip");
+    assert_eq!(input_rect(Report { w: 300, h: 8, settled: true }, (752, 340), false).3, 32, "an unknown width is not a strip");
 }

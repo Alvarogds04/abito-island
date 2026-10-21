@@ -13,6 +13,8 @@ impl Rect {
 pub enum Edge { #[default] Top, Bottom }
 
 pub const COMPACT_BAR: (i32, i32) = (288, 32);
+/// The compact pill's widths in logical px: at rest, and widened for session rows or a pending ask (island-layout.js COMPACT_W / COMPACT_WIDE).
+pub const COMPACT_WIDTHS: [i32; 2] = [288, 440];
 pub const OVERVIEW_VISIBLE: (i32, i32) = (720, 184);
 /// One logical native window for compact, overview, question/recap and chat.
 pub const ISLAND_WINDOW: (i32, i32) = (752, 340);
