@@ -19,6 +19,19 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../frontend/vendor/coucou/hub/shell.js'), 'utf8');
 const ids = [...source.matchAll(/\{ id: "([a-z]+)", icon:/g)].map(m => m[1]);
 assert.deepEqual([...hubPages].sort(), ids.sort());
+// #503 S26: the Conexiones scene must have its OWN branch: the generic one clicks the first `.switch`, and this page has none (the gate
+// failed with «no se encontró control seguro en accounts»). The branch is read-only: it may never press a button of the page.
+{
+  const browser = fs.readFileSync(path.join(__dirname, '../packaging/validate/browser.js'), 'utf8');
+  const at = browser.indexOf("page==='accounts'"); assert(at > 0, 'ajustes-accounts has no explicit branch');
+  const branch = browser.slice(at, browser.indexOf("page==='styles'", at));
+  assert(/agent_action[^)]*view/.test(branch), 'it reads the host state');
+  assert(!/click\(|key\(|daemon_action|account_logout|auth_start|account_create|secret_action|set_prefs/.test(branch), 'the scene must never act: no click, no restart, no login/logout, no key');
+  assert(hubPages.includes('accounts') && extraScenes.includes('ajustes-accounts'), 'the page is in the validator catalogue');
+  // the island deep link («Configurar Pi…») names this page, and Rust accepts exactly that id
+  assert(/PI_SECTIONS, e\.detail\) \|\| e\.detail === 'accounts:oauth'[^\n]*'accounts'/.test(fs.readFileSync(path.join(__dirname, '../frontend/settings.js'), 'utf8')), 'the deep link opens the window on accounts');
+  assert(/"accounts"/.test(fs.readFileSync(path.join(__dirname, '../src/settingswindow.rs'), 'utf8')), 'Rust lists accounts among its closed pages');
+}
 console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.length + 6} scenes)`);
 
 // Exercise the real browser scene driver; emulate only the external trusted-input boundary.
