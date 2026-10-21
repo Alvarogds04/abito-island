@@ -332,3 +332,36 @@ test('S3 wiring: the island paints the asker line and the queue label with textC
   assert.match(src, /queueEl\.textContent = N\.queueLabel\(snapshot\)/);
   assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /id="question-queue"/);
 });
+
+// ---- «Enviada» race: a delivered answer must end as «Recibida» ----------------------------------------------------
+// Pi acks in <1 ms, so the pushed `question:state` (notice «answered») can land BEFORE the invoke of the send resolves with the
+// view computed right after the write (notice «sent»). Applying that older reply used to roll the island back to «Enviada».
+test('race: a reply to a send is applied only when no pushed state arrived while it was in flight', () => {
+  assert.equal(N.replyIsCurrent(3, 3), true, 'nothing pushed meanwhile: the reply is the newest state');
+  assert.equal(N.replyIsCurrent(3, 4), false, 'a push arrived while the invoke was in flight: the reply is older');
+  assert.equal(N.replyIsCurrent(0, 0), true);
+  for (const bad of [undefined, null, NaN, '3']) assert.equal(N.replyIsCurrent(bad, 3), false, String(bad));
+});
+test('race: a terminal outcome never regresses to «sent» (answered/human_cancelled/rejected/ack_lost/outcome_unknown stay)', () => {
+  for (const terminal of ['answered', 'human_cancelled', 'rejected', 'ack_lost', 'outcome_unknown', 'cancelled', 'expired', 'disconnected']) {
+    assert.equal(N.regressesToSent({ pending: null, notice: terminal }, { pending: null, notice: 'sent' }), true, terminal);
+  }
+  assert.equal(N.regressesToSent({ pending: null, notice: 'sent' }, { pending: null, notice: 'sent' }), false);
+  assert.equal(N.regressesToSent({ pending: null, notice: null }, { pending: null, notice: 'sent' }), false);
+  assert.equal(N.regressesToSent({ pending: null, notice: 'answered' }, { pending: null, notice: 'answered' }), false);
+  assert.equal(N.regressesToSent(null, { pending: null, notice: 'sent' }), false);
+  // a NEW question in between is a different send: never blocked
+  assert.equal(N.regressesToSent({ pending: { id: 'x' }, notice: null }, { pending: null, notice: 'sent' }), false);
+  assert.equal(N.regressesToSent({ pending: null, notice: 'answered' }, { pending: { id: 'y' }, notice: null }), false);
+});
+test('race wiring: notify.js counts pushed states, ignores stale replies and never lets apply() regress a terminal outcome', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /let pushSeq = 0;/);
+  assert.match(src, /listen\('question:state', event => \{ pushSeq \+= 1; apply\(event && event\.payload\); \}\)/);
+  assert.match(src, /N\.replyIsCurrent\(sent, pushSeq\)/);
+  assert.match(src, /N\.regressesToSent\(snapshot, next\)/);
+  for (const fn of ['choose', 'decline', 'submitText']) {
+    const body = src.slice(src.indexOf(`function ${fn}(`));
+    assert.match(body.slice(0, 900), /const sent = pushSeq;/, fn);
+  }
+});

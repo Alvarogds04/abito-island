@@ -282,6 +282,17 @@
   // The host's byte budget is authoritative: no answer yet, or «not allowed», means no send.
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
-  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  // ---- «Enviada» race ---------------------------------------------------------------------------------------------
+  // The reply to a send is the view computed right after the write (notice «sent»); the producer's ack can push the newer
+  // state (notice «answered») BEFORE that reply resolves. A reply is current only if no push arrived while it was in flight,
+  // and a terminal outcome never rolls back to «sent» for the same send.
+  const replyIsCurrent = (sentAt, now) => Number.isSafeInteger(sentAt) && Number.isSafeInteger(now) && sentAt === now;
+  const TERMINAL = new Set(['answered', 'human_cancelled', 'rejected', 'ack_lost', 'outcome_unknown', 'cancelled', 'expired', 'disconnected']);
+  function regressesToSent(previous, next) {
+    if (!previous || !next || next.notice !== 'sent' || next.pending) return false;
+    return !previous.pending && TERMINAL.has(previous.notice);
+  }
+
+  return { replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });
