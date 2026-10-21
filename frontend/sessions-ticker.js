@@ -337,13 +337,14 @@ function mount(V) {
   function paintMiniGrid(view) {
     if (!grid) return;
     grid.setAttribute('aria-hidden', 'false'); grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', 'Sesiones activas');
-    const rows = V.sessionRows(view, prefs).slice(0, 4);
-    const key = rows.map(r => `${r.id}:${r.text}:${r.color}:${r.pose}:${r.id === memory.focus?.id}`).join('|');
+    const all = V.sessionRows(view, prefs), rows = all.slice(0, 3); // S2: 3 coloured minis + «+N»
+    const key = all.length + '|' + rows.map(r => `${r.id}:${r.text}:${r.color}:${r.pose}:${r.id === memory.focus?.id}`).join('|');
     if (key === gridKey) return;
     gridKey = key;
     for (const m of minis) { try { m.destroy(); } catch { /* decoration */ } }
     const activeId = grid.contains(document.activeElement) ? document.activeElement?.dataset.sessionId : null;
     minis = []; grid.replaceChildren(); grid.dataset.count = String(rows.length);
+    if (all.length > rows.length) { const more = document.createElement('span'); more.className = 'mini-more'; more.textContent = `+${all.length - rows.length}`; more.setAttribute('aria-label', `${all.length - rows.length} sesiones más`); grid.dataset.more = '1'; grid.append(more); } else delete grid.dataset.more;
     if (typeof AbitoClay === 'undefined') return;
     for (const r of rows) {
       const slot = document.createElement('button'); slot.className = 'mini'; slot.type = 'button'; slot.title = r.text;

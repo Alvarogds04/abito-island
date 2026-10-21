@@ -58,6 +58,7 @@
   const RECAP_H = 208; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
   const QUESTION_H = 224; // default; a long question grows it (abito:question-size), capped by the fixed window
   let questionH = QUESTION_H;
+  let compactW = COMPACT.w; // S2/S3: the compact pill widens for the minis, the activity line and a waiting question (island-layout.js compactView)
   let finishedH = 0; // D: the island height a long «terminó» result needs (0 = the normal overview)
   // const QUESTION_H doc: // Coucou QUESTION_PICKER_H: the fixed window already has room
   const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 113 };
@@ -234,12 +235,12 @@
   }
 
   function render() {
-    const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
+    const w = lerp(compactW, lerp(OVERVIEW.w, CHAT.w, q.x), p);
     const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : finishedH || OVERVIEW.h;
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
     const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown ? QT.shapeWithToast(shape, true) : shape);
-    reportShape(withToast([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
-      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target]), withToast([w, h - 28 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
+    reportShape(withToast([lerp(compactW, lerp(OVERVIEW.w, CHAT.w, q.target), target),
+      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 24 * conceal.target]), withToast([w, h - 24 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
     const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
@@ -251,7 +252,7 @@
     put(island, 'width', w + 'px');
     put(island, 'height', h + 'px');
     put(island, 'borderRadius', `${rTop}px ${rTop}px ${rBottom}px ${rBottom}px`);
-    put(island, 'top', (gap - 28 * conceal.x) + 'px');
+    put(island, 'top', (gap - 24 * conceal.x) + 'px');
     put(island, 'bottom', 'auto');
     // R6 is only scaled and positioned (never redrawn): centred in the
     // overview, small at the left of the header in the chat view.
@@ -1355,6 +1356,15 @@
       if (!window.desktop || typeof window.desktop.expand !== 'function') return;
       return window.desktop.expand().then(snap => { if (snap) { current = snap; syncToggle(snap.state); } }, () => {});
     });
+  });
+  // S2/S3 (02 compacta A, 03 alerta A): the compact pill's width follows what it shows; the layout module computes it from real data.
+  document.addEventListener('abito:compact-view', event => {
+    const v = event.detail || {};
+    const next = Number.isFinite(v.width) && v.width >= COMPACT.w ? v.width : COMPACT.w;
+    const badge = $('compact-badge'), act = $('compact-activity');
+    if (act && act.textContent !== (v.activity || '')) act.textContent = v.activity || '';
+    if (badge) { badge.hidden = !v.badge; badge.dataset.kind = v.badge || ''; }
+    if (next !== compactW) { compactW = next; render(); }
   });
   document.addEventListener('abito:question-size', event => {
     const h = Number(event.detail && event.detail.islandH);

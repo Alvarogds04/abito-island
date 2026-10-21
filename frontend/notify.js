@@ -26,7 +26,16 @@
   const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) || null;
   const action = payload => (invoke ? invoke('question_action', { payload }) : Promise.reject(new Error('no ipc')));
   const icon = name => ICONS.svg(name);
-  for (const el of root.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
+  // Icons are DOM NODES parsed from the CLOSED own registry's literal markup (never data), like island.js: no markup sink in this file.
+  const svgParser = typeof DOMParser === 'function' ? new DOMParser() : null;
+  function putIcon(host, name) {
+    if (!host) return;
+    const markup = icon(name);
+    const parsed = svgParser && markup ? svgParser.parseFromString(markup, 'image/svg+xml').documentElement : null;
+    const nodes = parsed && parsed.nodeName === 'svg' ? [document.importNode(parsed, true)] : [];
+    if (typeof host.replaceChildren === 'function') host.replaceChildren(...nodes); else host.textContent = '';
+  }
+  for (const el of root.querySelectorAll('[data-icon]')) putIcon(el, el.dataset.icon);
 
   const body = $('question-body');
   const optionsEl = $('question-options');
@@ -337,7 +346,7 @@
     stateEl.dataset.tone = o.tone;
     stateEl.dataset.kind = o.outcome === 'sent' ? 'sent' : '';
     stateEl.setAttribute('aria-label', o.aria);
-    $('question-state-icon').innerHTML = icon(o.icon);
+    putIcon($('question-state-icon'), o.icon);
     $('question-state-word').textContent = o.word;
   }
 
