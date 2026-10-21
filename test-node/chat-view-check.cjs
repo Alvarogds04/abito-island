@@ -63,6 +63,20 @@ test('S14 send rule (design 14, option A): the disc is disabled only for an empt
   assert.equal(V.canSend({ ...ready, availability: { state: 'unavailable' } }, 'hola', false), false);
 });
 
+test('S14 validation: a model that stays «unchecked» while the chat is open must be re-checked (the chip shows a spinner, never «Conectado», until someone asks)', () => {
+  const view = (state, target = { alias: 'Abito-gpt', origin: 'http://127.0.0.1:11002' }) => ({ target, availability: { state }, active_turn: null });
+  assert.equal(V.needsCheck(view('unchecked')), true);
+  for (const state of ['ready', 'busy', 'unavailable', 'blocked']) assert.equal(V.needsCheck(view(state)), false, state + ' is an answer, not a pending check');
+  assert.equal(V.needsCheck(view('unchecked', null)), false, 'no target: nothing to check');
+  assert.equal(V.needsCheck(null), false);
+  assert.equal(V.needsCheck({ target: { alias: 'a' }, active_turn: 't-1', availability: { state: 'unchecked' } }), false, 'a running turn already proves the model');
+  // bounded: the page asks at most 3 times per «unchecked» episode, 4 s apart
+  assert.deepEqual(V.checkPlan(0, 1000, 0), { ask: true, wait: 0 });
+  assert.deepEqual(V.checkPlan(1, 1000, 1000), { ask: false, wait: 4000 }, 'a second ask only after 4 s');
+  assert.deepEqual(V.checkPlan(1, 5000, 1000), { ask: true, wait: 0 });
+  assert.equal(V.checkPlan(3, 99999, 0).ask, false, 'never more than 3 asks per episode'); assert.equal(V.checkPlan(3, 99999, 0).giveUp, true);
+});
+
 test('status line: active turn first, then availability, never a guess', () => {
   const view = {
     active_turn: 't-2', queue_note: 'en su cola',

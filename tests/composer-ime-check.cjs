@@ -361,6 +361,20 @@ async function main() {
     assert.match(page.dom.el('chat-problem').textContent, /modelo/i, 'and the refusal says why');
   });
 
+  await check('S14: an «unchecked» model while the chat is open makes the page ask the host for its metadata-only check, and the chip then says Conectado', async () => {
+    const page = await loadPage({ availability: { state: 'unchecked', message: 'Todavía no se comprobó el modelo local.' } });
+    page.dom.el('capsule').dataset.view = 'chat';
+    await page.pushState({ target: { alias: 'Abito-gpt', origin: 'http://127.0.0.1:11002' }, availability: { state: 'unchecked', message: '' }, active_turn: null, queue_note: null, turns: [] });
+    const checks = () => page.invocations.filter(i => i.cmd === 'chat_action' && i.payload && i.payload.action === 'check');
+    assert.equal(checks().length, 1, 'one check is requested as soon as the chat shows «unchecked»');
+    assert.deepEqual(Object.keys(checks()[0].payload), ['action'], 'the closed command, nothing model-shaped');
+    assert.equal(page.dom.el('chat-state').dataset.kind, 'checking');
+    await page.pushState({ target: { alias: 'Abito-gpt', origin: 'http://127.0.0.1:11002' }, availability: { state: 'ready', message: 'Modelo local listo.' }, active_turn: null, queue_note: null, turns: [] });
+    assert.equal(page.dom.el('chat-state').dataset.kind, 'ready'); assert.equal(page.dom.el('chat-state').dataset.tone, 'go');
+    await page.pushState({ target: { alias: 'Abito-gpt', origin: 'http://127.0.0.1:11002' }, availability: { state: 'ready', message: 'Modelo local listo.' }, active_turn: null, queue_note: null, turns: [] });
+    assert.equal(checks().length, 1, 'a ready model is never re-checked');
+  });
+
   await check('Enter on an empty draft sends nothing and changes nothing', async () => {
     const page = await loadPage();
     await page.type('   ');

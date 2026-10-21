@@ -133,14 +133,17 @@ const rowOpens = new WeakMap<Element, () => void>();
 
 /** A 36px row: state icon, two lines of text, and an explicit [Abrir] — the row itself is not a button. */
 function row(onOpen: () => void, ref: string, fullTitle: string, ci: GitHubPR["ci"], line1: HTMLElement[], tail: (HTMLElement | null)[]): HTMLElement {
-  const open = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
+  // One tooltip text on every element the pointer can land on in the row (the title span truncates, but the pointer may be over the
+  // reference, the CI word or the gap between them): validation v4 could not read the full title on hover.
+  const full = `${ref} ${fullTitle}`;
+  const open = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), title: GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
   const el = h(
     "div",
-    { class: "gh-row", title: `${ref} ${fullTitle}` },
+    { class: "gh-row", title: full },
     ciIcon(ci),
-    h("span", { class: "gh-text" },
-      h("span", { class: "gh-line1" }, ...line1),
-      h("span", { class: "gh-line2" }, h("span", { class: "gh-word", style: `color:${CI_COLORS[ci]}`, text: ciText(ci) }), ...tail)),
+    h("span", { class: "gh-text", title: full },
+      h("span", { class: "gh-line1", title: full }, ...line1),
+      h("span", { class: "gh-line2", title: full }, h("span", { class: "gh-word", title: full, style: `color:${CI_COLORS[ci]}`, text: ciText(ci) }), ...tail)),
     open,
   );
   rowOpens.set(el, onOpen);
@@ -151,7 +154,7 @@ function prRow(pr: GitHubPR, _showCI: boolean): HTMLElement {
   const ref = `${shortRepo(pr.repo)}#${pr.number}`;
   return row(
     () => open(pr.url), ref, pr.title, pr.ci,
-    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", title: `${ref} ${pr.title}`, text: pr.title })],
+    [h("span", { class: "gh-ref", title: `${ref} ${pr.title}`, text: ref }), h("span", { class: "gh-title", title: `${ref} ${pr.title}`, text: pr.title })],
     [pr.isDraft ? h("span", { class: "gh-draft", text: `· ${GH_STRINGS.draft}` }) : null],
   );
 }

@@ -40,6 +40,22 @@
     return draftProblem(draft) === null;
   }
 
+  // The chip says «checking» (a spinner) while the model's availability is still `unchecked`. The host resets it to `unchecked` whenever the
+  // chosen model changes and only re-checks when the chat is OPENED; a model picked while the chat is already open used to leave the spinner
+  // there for good (screen validation v4). The page therefore asks the host for the (metadata-only) check itself, a bounded number of times.
+  const CHECK_TRIES = 3, CHECK_GAP_MS = 4000;
+  function needsCheck(view) {
+    if (!view || !view.target || view.active_turn) return false;
+    return !!view.availability && view.availability.state === 'unchecked';
+  }
+  /** tries = asks already made in this «unchecked» episode, now/last = ms clocks: {ask, wait, giveUp?}. */
+  function checkPlan(tries, now, last) {
+    if (tries >= CHECK_TRIES) return { ask: false, wait: 0, giveUp: true };
+    if (tries === 0) return { ask: true, wait: 0 };
+    const due = last + CHECK_GAP_MS;
+    return now >= due ? { ask: true, wait: 0 } : { ask: false, wait: due - now };
+  }
+
   // Design 14 (option A): the send disc is grey ONLY when there is nothing to send (empty draft), a turn runs, or a submit is in flight.
   // A model that is not ready no longer greys it out silently: pressing it says why (`blocked`), and canSend() still decides what is sent.
   const BLOCKED = Object.freeze({ unavailable: 'El modelo no está disponible todavía.', blocked: 'El modelo está bloqueado.', unchecked: 'Todavía se está revisando el modelo.' });
@@ -537,5 +553,5 @@
     return n;
   }
   function chatHeight(view) { return Math.min(CHAT_MAX_H, CHAT_MIN_H + messageCount(view) * CHAT_GROWTH); }
-  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, sendState, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, sendState, needsCheck, checkPlan, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

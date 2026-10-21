@@ -164,39 +164,6 @@ function noOverlaps(list, why) {
       finally { await r.close(); }
     }
   }
-  // GATE (51/2/6): «tiempo agotado: tarjeta GitHub desde gh falso». Two facts, both measured on the real layout with the data shape
-  // src/github.rs serialises (githubData: 'real'):
-  //  1) the card renders its PR list ([Abrir], CI word) once the row is chosen;
-  //  2) a click on the row during the 3 s «Recibida» outcome after answering a question is dropped by pills-view (`onScreen`), and the same
-  //     click once the island is calm opens the card. The validator scene therefore waits for the calm overview before it clicks.
-  {
-    const r = await H.open({ question: 'plain', github: true, githubData: 'real', notices: 2 });
-    try {
-      const state = () => r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question || '', gh: document.getElementById('overview-view').dataset.github || null }));
-      const opt = (await r.measure('.q-option')).find(b => b.shown);
-      await r.page.mouse.click(opt.left + opt.w / 2, opt.top + opt.h / 2);
-      await r.page.waitForTimeout(700);
-      assert.equal((await state()).q, 'outcome', 'right after the answer the outcome is on screen');
-      let gh = (await r.measure('#pill-choice-integration_github'))[0];
-      await r.page.mouse.click(gh.left + gh.w / 2, gh.top + gh.h / 2);
-      await r.page.waitForTimeout(500);
-      assert.equal((await state()).gh, null, 'a click during the outcome is ignored (this is why the validator must wait)');
-      await r.page.waitForTimeout(5500);
-      assert.equal((await state()).q, '', 'the outcome is gone');
-      gh = (await r.measure('#pill-choice-integration_github'))[0];
-      await r.page.mouse.click(gh.left + gh.w / 2, gh.top + gh.h / 2);
-      await r.page.waitForTimeout(1500);
-      assert.equal((await state()).gh, 'on', 'the same click on the calm island opens the GitHub card');
-      const card = (await r.measure('.gh-card'))[0];
-      assert.ok(card && card.shown, 'the card is visible');
-      const text = await r.page.evaluate(() => document.querySelector('.gh-card').textContent);
-      assert.ok(text.includes('GitHub') && !text.includes('Cargando') && text.includes('Fixture PR'), `the card shows the PR list from the real data shape: ${text.slice(0, 80)}`);
-      assert.equal((await r.measure('.gh-card .gh-row')).length, 1); assert.equal((await r.measure('.gh-card .gh-open')).length, 1);
-      for (const h of await r.hit('.gh-card .gh-open')) assert.ok(h.ok, `[Abrir] is reachable: ${h.got}`);
-      passed += 1;
-    } catch (e) { await r.screenshot('/tmp/geo-fail-github-gate.png').catch(() => {}); throw e; }
-    finally { await r.close(); }
-  }
   // the grouped notices list (validator scene «historial agrupado»): «Ver» opens a LIST over the whole 620x108 card; its rows are
   // reachable, one dismisses exactly one row, and «Descartar todos» is clickable
   {

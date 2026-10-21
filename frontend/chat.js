@@ -364,6 +364,23 @@
     action({ action: 'height', height: wanted }).then(() => { reportedHeight = wanted; }, () => {}).finally(() => { reporting = false; });
   }
   document.addEventListener('island:view', event => { if (event.detail === 'chat') { reportedHeight = 0; reportHeight(); } else reportedHeight = 0; });
+  // The «checking» spinner never outlives the chat's own look at the model: while the chat is open and the availability is still
+  // `unchecked`, ask the host for its metadata-only check (never a prompt), at most V.CHECK_TRIES times, 4 s apart. A re-pick of the model
+  // (which resets the state to `unchecked`) starts a new episode.
+  let checkTries = 0, checkLast = 0, checkTimer = 0;
+  function scheduleCheck() {
+    const wanted = capsule.dataset.view === 'chat' && V.needsCheck(view);
+    if (!wanted) { checkTries = 0; clearTimeout(checkTimer); checkTimer = 0; return; }
+    const plan = V.checkPlan(checkTries, Date.now(), checkLast);
+    if (plan.ask) {
+      checkTries += 1; checkLast = Date.now();
+      action({ action: 'check' }).then(apply, () => {});
+    } else if (!plan.giveUp && !checkTimer) {
+      checkTimer = setTimeout(() => { checkTimer = 0; scheduleCheck(); }, plan.wait);
+    }
+  }
+  document.addEventListener('island:view', () => scheduleCheck());
+
   function apply(next) {
     if (!next || typeof next !== 'object') return;
     // Events and view RPCs can arrive out of capture order. Never resurrect a
@@ -381,6 +398,7 @@
     renderLog();
     renderControls();
     renderModelRow();
+    scheduleCheck();
     if (capsule.dataset.view === 'chat') setLive(said);
     // #313: turns and the model going down become cues by TRANSITION (history and the first snapshot are baselines)
     try { const w = window.AbitoSoundWiringInstance; if (w) w.observeChat(next); } catch { /* sound never breaks the chat */ }
