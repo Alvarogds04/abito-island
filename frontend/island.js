@@ -230,8 +230,9 @@
     const w = lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.x), p);
     const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : OVERVIEW.h;
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
-    reportShape([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
-      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target], [w, h - 28 * conceal.x], mode === 'idle' && q.mode === 'idle' && !conceal.moving);
+    const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown && capsule.dataset.phase !== 'expanded' ? QT.shapeWithToast(shape, true) : shape);
+    reportShape(withToast([lerp(COMPACT.w, lerp(OVERVIEW.w, CHAT.w, q.target), target),
+      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 28 * conceal.target]), withToast([w, h - 28 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
     const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
@@ -1295,6 +1296,16 @@
     const show = !!(event.detail && event.detail.show);
     if (show !== recapShown) { recapShown = show; render(); }
   });
+  // Sileo-style toast (question-toast.js) below the island: a trusted click opens the island on the question; the card answers.
+  let toastShown = false;
+  document.addEventListener('abito:question-toast', event => {
+    const shown = !!(event.detail && event.detail.shown);
+    if (shown !== toastShown) { toastShown = shown; render(); }
+  });
+  document.addEventListener('abito:question-open', () => {
+    if (!window.desktop || typeof window.desktop.expand !== 'function') return;
+    window.desktop.expand().then(snap => { if (snap) { current = snap; syncToggle(snap.state); } }, () => {});
+  });
   document.addEventListener('abito:question-size', event => {
     const h = Number(event.detail && event.detail.islandH);
     const next = Number.isFinite(h) && h >= QUESTION_H ? Math.min(h, 332) : QUESTION_H;
@@ -1305,7 +1316,11 @@
     if (show) finishedCycle?.cancel(); // never cover a pending question with finished content
     if (show !== questionShown) { questionShown = show; render(); }
     paintCompactFlag();
-    if (event.detail && event.detail.reveal) revealIsland(); // #266: a genuinely new question reveals
+    if (event.detail && event.detail.reveal) {
+      // #266: a genuinely new question reveals. With the toast the island stays as it is (the human opens it from the toast).
+      const T = window.AbitoQuestionToast;
+      if (T && T.revealByToast({ phase: capsule.dataset.phase })) edgeInteraction?.alert(); else revealIsland();
+    }
   });
 
   // ---- Q1: keyboard control of the island itself -------------------------
