@@ -200,7 +200,7 @@ test('chat wears Coucou\'s tokens: bubble .13 r12 6/10 12.5px, reply #b0b5be, in
 // ---- #480: the chat in the island's own visual language -------------------------------------------------------------
 test('chat: keeps every id and verb; the island header stays on top at the island width (640); body is a Coucou card; controls are Coucou tabs/discs with 44px hits', () => {
   const html = read('index.html');
-  for (const id of ['chat-header', 'chat-title', 'chat-target-chip', 'chat-specialist', 'open-screen-settings', 'chat-back', 'chat-status-strip', 'chat-state', 'chat-history-controls', 'chat-create', 'chat-conversations', 'chat-history-label', 'chat-log', 'chat-model-btn', 'chat-composer', 'chat-input', 'chat-send', 'chat-cancel'])
+  for (const id of ['chat-header', 'chat-title', 'chat-target-chip', 'chat-specialist', 'open-screen-settings', 'chat-back', 'chat-state', 'chat-history-controls', 'chat-create', 'chat-conversations', 'chat-history-label', 'chat-log', 'chat-model-btn', 'chat-composer', 'chat-input', 'chat-mic', 'chat-send', 'chat-cancel'])
     assert.match(html, new RegExp(`id="${id}"`), id + ' is still there');
   const isl = read('vendor/coucou/island/island.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const from = isl.indexOf('#capsule[data-phase="expanded"][data-view="chat"] #island-header');

@@ -93,12 +93,6 @@ test('chat top bar: visible title «Abito» before the gear/back buttons (design
   assert.equal(t['font-size'], 'var(--fs-body)');
   assert.equal(t['font-weight'], '600');
 });
-test('chat status chip (S10 L35): drawn over the card\'s top-right corner on Coucou\'s 240px chat, still never moving the log (it takes no flow room)', () => {
-  const o = decls('#chat-status-strip');
-  assert.equal(o.position, 'absolute', 'out of flow: a chip that appears and disappears never pushes the history');
-  assert.equal(o['min-height'], '0');
-  assert.equal(o.right, '70px');
-});
 test('chat body top row: «+» and history left-aligned, then the label «Conversación nueva» (existing verbs only)', () => {
   const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
   const row = html.slice(html.indexOf('id="chat-history-controls"'), html.indexOf('<ol id="chat-log"'));
@@ -154,7 +148,7 @@ test('B the card keeps room below the last option (Coucou ~35px of air, never 6p
 test('F the chat input\'s focus ring is 1px in a muted accent, not the global 2px lime; it stays visible (>= 1px, not transparent, not none)', () => {
   const ring = decls('#chat-input:focus-visible');
   assert.ok(Object.keys(ring).length > 0, 'the chat field has its own focus rule');
-  assert.equal(ring.outline, '1px solid var(--focus-ring)');
+  assert.equal(ring.outline, '1px solid var(--island-live)', 'design 14 A: a 1px accent edge');
   assert.equal(ring['outline-offset'], '0', 'drawn on the field\'s own edge, not floating 2px away');
   const base = decls(':focus-visible');
   assert.equal(base.outline, '2px solid var(--go)', 'the global ring is untouched for every other control');
@@ -166,5 +160,6 @@ test('F --focus-ring is a muted accent token defined once, never lime and never 
   assert.match(root['--focus-ring'], /rgba\(255, 255, 255, 0?\.[3-9]\d*\)|var\(--dim-[123]\)/, 'a muted white or a dim token');
 });
 test('F the same thin ring applies to the other text fields of the island (question free text, model search), not to buttons', () => {
-  for (const sel of ['#question-text:focus-visible', '#chat-input:focus-visible']) assert.equal(decls(sel).outline, '1px solid var(--focus-ring)', sel);
+  assert.equal(decls('#question-text:focus-visible').outline, '1px solid var(--focus-ring)');
+  assert.equal(decls('#chat-input:focus-visible').outline, '1px solid var(--island-live)');
 });

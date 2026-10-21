@@ -40,6 +40,17 @@
     return draftProblem(draft) === null;
   }
 
+  // Design 14 (option A): the send disc is grey ONLY when there is nothing to send (empty draft), a turn runs, or a submit is in flight.
+  // A model that is not ready no longer greys it out silently: pressing it says why (`blocked`), and canSend() still decides what is sent.
+  const BLOCKED = Object.freeze({ unavailable: 'El modelo no está disponible todavía.', blocked: 'El modelo está bloqueado.', unchecked: 'Todavía se está revisando el modelo.' });
+  function sendState(view, draft, inFlight) {
+    const empty = !String(draft).trim();
+    if (empty || inFlight || (view && view.active_turn)) return { disabled: true, blocked: null };
+    const a = view && view.availability;
+    if (!a || !SENDABLE.has(a.state)) return { disabled: false, blocked: (a && BLOCKED[a.state]) || 'El modelo no está listo todavía.' };
+    return { disabled: false, blocked: null };
+  }
+
   // Rust increments a turn's seq for every accepted event. A delayed view
   // response or publisher must not undo an event already rendered. Turn ids
   // are scoped to the conversation, so switching conversations is never stale.
@@ -526,5 +537,5 @@
     return n;
   }
   function chatHeight(view) { return Math.min(CHAT_MAX_H, CHAT_MIN_H + messageCount(view) * CHAT_GROWTH); }
-  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, sendState, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

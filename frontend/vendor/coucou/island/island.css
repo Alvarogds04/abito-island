@@ -964,3 +964,14 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
 /* air between the notices capsule and the first blob row (its ring/shadow used to touch the row below) */
 #capsule[data-notices-calm="false"]:not([data-layout="focus"]) #blobs { padding-top: 32px; }
 #capsule[data-notices-calm="false"]:not([data-layout="focus"]) #notices { box-shadow: none; }
+
+/* ── Design 14, option A: tidy header + subtle focus ──
+   «● Abito · local · Conectado» on the left (the state chip left its own strip and joined the header's left block),
+   the controls on the right. Focus on the field is a 1px accent edge, not a halo. The send disc is white/primary and only
+   dims when there is nothing to send; the microphone is a 44px twin of the paperclip. */
+#chat-state { position: static; display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 0; }
+#chat-state:not([data-kind=""]):not([data-kind="busy"])::before, #chat-target-chip::before, #chat-state[data-kind="busy"]::before { content: "·"; color: var(--dim-3); margin-right: 2px; }
+#chat-header #chat-state[data-kind=""] { display: none; }
+#chat-mic[hidden] { display: none; }
+#chat-composer #chat-mic::after { background: rgba(255, 255, 255, 0.09); }
+#chat-composer #chat-mic:hover::after { background: rgba(255, 255, 255, 0.16); }

@@ -470,7 +470,8 @@ async function main() {
       // are part of the closed set now — same gate (sender + rate) in Rust.
       // #414: prefs_action joins it READ-ONLY (view) so the row can honour the
       // Ajustes → Modelos allowlist; a listen to prefs:state keeps it current.
-      ['chat_action', 'chat_attach', 'chat_attach_data', 'models_action', 'open_chat_url', 'prefs_action', 'specialists_action'],
+      // Design 14 (S14): dictation_action joins it for the composer's microphone; the verbs are pinned just below.
+      ['chat_action', 'chat_attach', 'chat_attach_data', 'dictation_action', 'models_action', 'open_chat_url', 'prefs_action', 'specialists_action'],
       'the closed set of commands this file may put on the wire');
     const actionsOf = name => {
       const sites = src.match(new RegExp(`\\b${name}\\(`, 'g')) || [];
@@ -480,6 +481,9 @@ async function main() {
     };
     assert.deepEqual(actionsOf('modelsAction'), ['list', 'select'], 'models_action may only list and select (the Ajustes → Modelos verbs)');
     assert.deepEqual(actionsOf('specialistsAction'), ['view'], 'specialists_action may only read the role');
+    const dictation = [...src.matchAll(/\bsay\('([a-z_]+)'\)/g)].map(m => m[1]).sort();
+    assert.deepEqual(dictation, ['hands_free', 'status'], 'the microphone may only ask the status and start hands-free (never finish/cancel another flow)');
+    assert.equal((src.match(/call\('dictation_action', \{ action: verb \}\)/g) || []).length, 1, 'dictation_action has exactly one call site, fed only by those two literals');
     const prefsSites = src.match(/\bprefs_action', \{\s*action:\s*'([a-z_]+)'/g) || [];
     assert.equal(prefsSites.length, 1, `prefs_action has exactly one call site, a literal { action: … } (got ${prefsSites.length})`);
     assert.ok(/action:\s*'view'/.test(prefsSites[0]), 'prefs_action may only READ the prefs (view)');

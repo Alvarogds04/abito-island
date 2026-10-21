@@ -351,12 +351,14 @@ async function main() {
       availability: { state: 'unavailable', message: 'Modelo local caído.' },
       active_turn: null, queue_note: null, turns: [],
     });
-    assert.equal(page.dom.el('chat-send').disabled, true, 'the send control reflects the refusal');
+    // design 14 (option A): the disc is grey only for an EMPTY draft; a model that is down answers when pressed instead of looking dead
+    assert.equal(page.dom.el('chat-send').disabled, false, 'a non-empty draft keeps the send control live');
     const ev = page.key();
     await page.settle();
     assert.equal(page.sends().length, 0);
     assert.equal(ev.defaultPrevented, true, 'Enter adds no line either');
     assert.equal(page.input.value, 'borrador', 'the draft survives a refused Enter');
+    assert.match(page.dom.el('chat-problem').textContent, /modelo/i, 'and the refusal says why');
   });
 
   await check('Enter on an empty draft sends nothing and changes nothing', async () => {
