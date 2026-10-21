@@ -346,10 +346,17 @@
     await wait(async()=> (await invoke('prefs_action',{action:'view'})).sound===before.sound,'sonido restaurado');
     await key('Ctrl+Alt+Shift+a');
     await wait(()=>byId('notice-live').textContent==='No hay permisos ni preguntas pendientes.','alerta vacía explica que no hay solicitud');
+    // The previous scene (sesiones-foco-pildoras) leaves a session focused, and since fc7f679 the shortcut then opens THAT session's own terminal
+    // (found from /proc), not the class fixture this scene's native readback expects. Publish «no focused session» through the event island.js
+    // already listens to, right before the press (the key is read at press time; the 2 s ticker poll cannot restore it in between).
+    document.dispatchEvent(new CustomEvent('abito:sessions-view',{detail:{view:null,focusId:null}}));
     await key('Ctrl+Alt+t');
     // fc7f679: with a session focused the shortcut opens THAT session's terminal («focused-session»); «focused-class» is the plain verb with none
     await wait(()=>['focused-session','focused-class'].includes(byId('capsule').dataset.shortcutTerminal),'terminal confirmó foco (de la sesión enfocada o, sin ella, por clase)');
-    return {ok:true,chat_view:chat.view,sound_before:before.sound,sound_after:muted.sound,terminal:'class-based focus_host; native X11 readback follows'};
+    // fc7f679: with a session focused (the previous scene leaves one) the shortcut opens THAT session's own terminal, found from /proc; only
+    // with none focused is it the class fixture. Say which one happened so the native readback is judged against the right expectation.
+    const mode=byId('capsule').dataset.shortcutTerminal;
+    return {ok:true,chat_view:chat.view,sound_before:before.sound,sound_after:muted.sound,terminal_mode:mode,class_only:mode==='focused-class',terminal:mode==='focused-session'?'session-key focus_host (the session\'s own terminal); class fixture not expected':'class-based focus_host; native X11 readback follows'};
   }
   // Human (21/10): with no terminal open, «ir a la terminal» opens a new one (55b69b9). The validation
   // build swaps the real spawn for a fake launcher that only counts, so nothing opens on the desktop.

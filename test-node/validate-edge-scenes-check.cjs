@@ -59,4 +59,22 @@ test('the focus scene encodes the A+E rules: every session is a blob row (no 2x2
   assert.match(f, /\.centre-name/);
   assert.doesNotMatch(f, /querySelector\('\.who \.name'\)/, 'the who-row text is gone: the centre column says the session name');
 });
+test('the terminal shortcut scene REPORTS which mode the product wrote, so the native readback is judged against the right expectation (stale class-only assumption after fc7f679)', () => {
+  const a = between('async function shortcutDispatch()', 'async function shortcutTerminalAbsent()');
+  assert.match(a, /terminal_mode:mode/);
+  assert.match(a, /class_only:mode==='focused-class'/);
+  const probe = fs.readFileSync(path.join(__dirname, '../src/probe.rs'), 'utf8');
+  const focusAt = probe.indexOf('AbitoValidate.sessionsFocus()'), shortcutAt = probe.indexOf('AbitoValidate.shortcutDispatch()');
+  assert.ok(focusAt > 0 && shortcutAt > focusAt, 'the focus scene runs BEFORE the shortcut scene and leaves a session focused: the order is the cause');
+});
+test('the terminal shortcut scene STARTS with no focused session: it publishes focusId null right before Ctrl+Alt+T, so the class fixture stays the expected window', () => {
+  const a = between('async function shortcutDispatch()', 'async function shortcutTerminalAbsent()');
+  const press = a.indexOf("await key('Ctrl+Alt+t')");
+  const clear = a.indexOf("new CustomEvent('abito:sessions-view',{detail:{view:null,focusId:null}})");
+  assert.ok(press > 0, 'the scene presses the terminal shortcut');
+  assert.ok(clear > 0 && clear < press, 'the focus is cleared BEFORE the press (the session key is read at press time)');
+  assert.ok(a.slice(clear, press).length < 400, 'and right before it, so the 2 s ticker poll cannot restore the focus in between');
+  const isl = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
+  assert.match(isl, /abito:sessions-view[\s\S]{0,200}focusedSessionKey = typeof id === 'string'/, 'island.js derives the key from that same event: null in, plain class verb out');
+});
 console.log(`validate-edge-scenes: ${passed} checks ok`);

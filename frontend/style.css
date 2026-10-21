@@ -1014,7 +1014,7 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
    Layers are pinned to the 640x160 overview box centred on the island, and the island clips
    them (a clean wipe). Only existing --dur-* / --ease-* tokens; geometry numbers unchanged.
    ========================================================================== */
-#island { overflow: hidden; }
+#island { overflow: hidden; overflow: clip; } /* clip is NOT a scroll container: scrollIntoView() on a control can no longer move the island's content (it shifted every card 31px up) */
 #overview-view {
   transition: opacity var(--dur-view-out) var(--ease-in), visibility 0s linear var(--dur-view-out);
 }

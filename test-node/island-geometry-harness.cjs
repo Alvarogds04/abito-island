@@ -46,8 +46,8 @@ async function open(scenario = {}) {
   await page.addInitScript(({ scenario, SESSIONS, UUID }) => {
     const listeners = {};
     const sessions = scenario.sessions === undefined ? SESSIONS : scenario.sessions;
-    const notices = Array.from({ length: scenario.notices || 0 }, (_, i) => ({ id: `n${i + 1}`, title: 'Pi terminó su turno', detail: `Resultado número ${i + 1}`, severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: 'pi', projectName: 'workspace' }));
-    const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: false, connections: scenario.engine === 'down' || !scenario.engine ? 0 : 1 };
+    const notices = Array.from({ length: scenario.notices || 0 }, (_, i) => ({ id: `n${i + 1}`, title: scenario.noticeTitle || 'Pi terminó su turno', detail: `Resultado número ${i + 1}`, severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: 'pi', projectName: 'workspace' }));
+    const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' || !scenario.engine ? 0 : 1 };
     const accounts = scenario.engine === 'account' ? [] : [{ configured: true, local: false }];
     const connection = scenario.engine === 'down' ? 'no_daemon' : 'connected';
     const pending = scenario.question ? {
@@ -80,6 +80,7 @@ async function open(scenario = {}) {
           if (a === 'answer' || a === 'decline' || a === 'text') { window.__answered = true; const v = { available: true, pending: null, queued: [], queued_count: 0, deliveries: [], notice: 'sent' }; setTimeout(() => window.__emit('question:state', { ...v, notice: 'answered' }), 20); return v; }
           return { available: true, pending: window.__answered ? null : pending, queued: [], queued_count: 0, deliveries: [], notice: window.__answered ? 'answered' : null };
         }
+        if (cmd === 'focus_host') { (window.__focusCalls ||= []).push(args.payload); return {}; }
         if (cmd === 'island_window_height') return { h: (args.payload && args.payload.h) || 340 };
         return {};
       } },

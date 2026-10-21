@@ -207,5 +207,87 @@ function noOverlaps(list, why) {
     } catch (e) { await r.screenshot('/tmp/geo-fail-after-answer.png').catch(() => {}); throw e; }
     finally { await r.close(); }
   }
+  // THE REAL FAILURE (screen gate 50/3/6): with 2 sessions present, a click on the GitHub row must make GitHub the CENTRE. The first fix made
+  // the centre follow the ticker focus for sessions only; the integration selection was overridden and the centre kept «proyecto-beta».
+  {
+    const sessions = [{ id: 's-eb4fc4bc', kind: 'pi', cwd: 'workspace', state: 'sleeping', origin: null }, { id: 's-3b48a1be', kind: 'codex', cwd: 'proyecto-beta', state: 'sleeping', origin: null }];
+    const r = await H.open({ sessions, github: true, githubData: true, notices: 4, engine: 'account', theme: 'light', unavailable: true });
+    try {
+      const gh = (await r.measure('#pill-choice-integration_github'))[0];
+      await r.page.mouse.click(gh.left + gh.w / 2, gh.top + gh.h / 2);
+      await r.page.waitForTimeout(1500);
+      const st = await r.page.evaluate(() => ({ gh: document.getElementById('overview-view').dataset.github || null, card: !!document.querySelector('.gh-card:not([hidden])'),
+        centre: getComputedStyle(document.querySelector('.col-centre')).display, name: document.querySelector('.centre-name') ? document.querySelector('.centre-name').textContent : '' }));
+      assert.equal(st.gh, 'on', `GitHub is the centre: ${JSON.stringify(st)}`);
+      assert.ok(st.card, 'the GitHub card is drawn');
+      assert.equal(st.centre, 'none', 'the session centre gives way (an integration selection wins over the ticker focus)');
+      // the selected row reads as selected, and clicking a SESSION row returns the centre to that session
+      const sess = (await r.measure('#pill-choice-s-3b48a1be'))[0];
+      await r.page.mouse.click(sess.left + sess.w / 2, sess.top + sess.h / 2);
+      await r.page.waitForTimeout(900);
+      const back = await r.page.evaluate(() => ({ gh: document.getElementById('overview-view').dataset.github || null, name: document.querySelector('.centre-name').textContent }));
+      assert.deepEqual(back, { gh: null, name: 'proyecto-beta' }, `a session row returns the centre to that session: ${JSON.stringify(back)}`);
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-github-click.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
+  // The screen validator clicks like click(): scrollIntoView({block:'center'}) on the target, THEN a click at the target's NEW centre. A blob
+  // inside the overview must not make an ancestor scroll: #island is overflow:hidden and used to move 31px, shifting every card up (the band
+  // from y42 to y11), so the real click landed where the blob no longer was and GitHub never became the centre.
+  {
+    const sessions = [{ id: 's-eb4fc4bc', kind: 'pi', cwd: 'workspace', state: 'sleeping', origin: null }, { id: 's-3b48a1be', kind: 'codex', cwd: 'proyecto-beta', state: 'sleeping', origin: null }];
+    const r = await H.open({ sessions, github: true, githubData: true, notices: 4, engine: 'account', theme: 'light', unavailable: true });
+    try {
+      const probe = await r.page.evaluate(async () => {
+        const el = document.getElementById('pill-choice-integration_github');
+        const bandBefore = document.getElementById('notices').getBoundingClientRect().top;
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+        const scrolled = [...document.querySelectorAll('*')].filter(n => (n.scrollTop || n.scrollLeft) && n.id !== 'pill-choices').map(n => n.id || n.className);
+        return { bandBefore, bandAfter: document.getElementById('notices').getBoundingClientRect().top, scrolled };
+      });
+      assert.deepEqual(probe.scrolled, [], `scrollIntoView must scroll ONLY the blobs list, not the island (it scrolled: ${probe.scrolled})`);
+      assert.equal(probe.bandAfter, probe.bandBefore, 'no card moves when a control is scrolled into view');
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-scrollintoview.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
+  // the notice capsule with a LONG title («Conexión caída»): the title ellipsizes inside its own box, never runs under «Abrir» or spills out of the column
+  {
+    for (const title of ['Conexión caída', 'Conexión caída con el motor del agente local: reintentando en segundo plano']) {
+      const r = await H.open({ notices: 1, noticeTitle: title, engine: 'account', github: true });
+      try {
+        const cap = (await r.measure('#notice-pill'))[0], blobs = (await r.measure('#blobs'))[0];
+        assert.ok(cap && cap.shown, 'the notice capsule is shown');
+        assert.ok(cap.left >= blobs.left - 0.5 && cap.right <= blobs.right + 0.5, `the capsule stays inside the blobs column: ${label(cap)} vs ${label(blobs)}`);
+        const parts = [];
+        for (const sel of ['#notice-ring', '#notice-title', '#notice-sub', '#notice-action', '#notice-dismiss']) for (const b of await r.measure(sel)) if (b.shown) {
+          // the × keeps a 44px hit box over a 28px band: compare what is DRAWN (its 16px glyph), not the hit area
+          parts.push(sel === '#notice-dismiss' ? { ...b, left: b.left + 14, right: b.right - 14, top: b.top + 14, bottom: b.bottom - 14 } : { ...b, sel });
+        }
+        noOverlaps(parts, `notice capsule «${title.slice(0, 20)}…»`);
+        for (const b of parts) assert.ok(b.right <= cap.right + 14 && b.left >= cap.left - 0.5, `${label(b)} leaves the capsule ${label(cap)}`);
+        passed += 1;
+      } catch (e) { await r.screenshot('/tmp/geo-fail-notice-capsule.png').catch(() => {}); throw e; }
+      finally { await r.close(); }
+    }
+  }
+  // Ctrl+Alt+T on the REAL island.js: with a session focused the shortcut sends THAT session's key; after the validator scene publishes
+  // «no focused session» it sends the plain class verb, so its class fixture stays the window the native readback expects.
+  {
+    const r = await H.open({});
+    try {
+      const press = async () => { await r.page.evaluate(() => window.__emit('global-shortcut', 'jumpToTerminal')); await r.page.waitForTimeout(300); return r.page.evaluate(() => (window.__focusCalls || []).at(-1)); };
+      const focused = await press();
+      assert.equal(focused.target, 'terminal');
+      assert.match(String(focused.session), /^s-[0-9a-f]{8}$/, `with a session focused the key travels: ${JSON.stringify(focused)}`);
+      await r.page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:sessions-view', { detail: { view: null, focusId: null } })));
+      const cleared = await press();
+      assert.deepEqual(cleared, { target: 'terminal' }, `with no focused session it is the plain class verb: ${JSON.stringify(cleared)}`);
+      const mode = await r.page.evaluate(() => document.getElementById('capsule').dataset.shortcutTerminal);
+      assert.equal(mode, 'focused-class', 'and the product reports «focused-class», which is what the class-fixture readback is judged against');
+      passed += 1;
+    } finally { await r.close(); }
+  }
   console.log(`island-geometry-check: ${passed} real-layout checks ok`);
 })().catch(e => { console.error(e); process.exit(1); });
