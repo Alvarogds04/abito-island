@@ -1062,9 +1062,6 @@ html[data-motion="reduce"] #overview-view { transition: none !important; }
 .pill-summary p { overflow: hidden; text-overflow: ellipsis; }
 #overview-detail { -webkit-line-clamp: 1; }
 #pill-choices { position: absolute; display: grid; overflow: hidden; pointer-events: auto; }
-/* #335 F002 (S6.2): the fifth of pills.visible() stays in the data only — the
-   four visible are mainPill + the first three declarations in catalog order. */
-#pill-choices .pill-choice:nth-child(n+5) { display: none; }
 .pill-choice { min-width: 0; display: flex; align-items: center; cursor: pointer; }
 .pill-choice .ico { width: 16px; height: 16px; flex: none; }
 

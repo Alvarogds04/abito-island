@@ -76,7 +76,6 @@ html[data-theme="light"] {
 
 #overview-view { left: calc(50% - 310px); right: auto; width: 620px; top: 42px; bottom: auto; height: 108px; }
 .card-left { width: 322px; inset: 0 auto 0 0; }
-#pill-choices { left: 332px; right: 0; bottom: 0; }
 
 /* .who (name 600 12px ink, tool 400 11px dim-2) padded 0 36px 0 108px, 10px under the card top */
 .agentline { top: 10px; left: 108px; right: 36px; flex-wrap: nowrap; gap: 6px; line-height: 15px; min-width: 0; }
@@ -815,3 +814,53 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 #question-summary { grid-column: 1 / -1; grid-row: 4; }
 #question-freeform { grid-column: 1 / -1; grid-row: 5; }
 #question-nav { grid-column: 1 / -1; grid-row: 6; }
+
+/* ══ Expanded layout «A + E» (human decision 21/10; validacion/ESQUEMA-isla-A-E.md) ═══════════════════════════════════════════
+   A: three columns inside the 620px overview — status 108 | centre 330 | 8px gap | blobs 174. The left card (438) holds Abito's
+   status and the centre; the blobs are their own card to the right and scroll, so sessions never push the declared pills out.
+   E: while something waits for the human the question/approval card takes left + centre (548) and the blobs shrink to a 64px
+   mascot column. Widths come from island-layout.js columnWidths(); the numbers here are its output for 620. */
+.card-left { width: 438px; }
+.col-status { position: absolute; left: 12px; top: 74px; width: 96px; display: flex; flex-direction: column; gap: 1px; font: 400 11px/14px var(--font); color: var(--dim-2); pointer-events: none; }
+.col-status span:first-child { color: var(--ink); font-weight: 500; }
+#blobs { position: absolute; left: calc(50% + 136px); top: 42px; width: 174px; height: 108px; right: auto; bottom: auto; display: flex; flex-direction: column; overflow: hidden; z-index: 1; opacity: 0; visibility: hidden; pointer-events: none; }
+#capsule[data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-notice-view="notices"]) #blobs { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity var(--dur-state) var(--ease-out) var(--dur-view-delay); }
+#pill-choices { position: relative; left: auto; right: auto; top: auto; bottom: auto; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; grid-template-columns: none; grid-template-rows: none; grid-auto-rows: auto; align-content: flex-start; }
+#blobs-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 6px; font: 400 11px var(--font); color: var(--dim-2); }
+#blobs-footer[hidden], #blobs-more[hidden], #blobs-all[hidden] { display: none; }
+.pill-choice { width: 100%; height: 32px; min-height: 32px; flex: 0 0 32px; }
+.pill-choice .island-agent-clay { margin-left: 5px; width: 24px; height: 24px; }
+.pill-choice span:not(.ico) { padding: 0 24px 0 34px; text-align: left; }
+.blob-dot { position: absolute; right: 10px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; box-sizing: border-box; flex: 0 0 8px; pointer-events: none; }
+.blob-dot[data-status="working"] { background: var(--go); }
+.blob-dot[data-status="idle"] { background: transparent; border: 1.5px solid var(--dim-3); }
+.blob-dot[data-status="needs"] { background: var(--sun); box-shadow: 0 0 6px var(--sun); }
+.blob-dot[data-status="news"] { background: var(--island-live); }
+/* E: focus mode */
+#capsule[data-layout="focus"] #question, #capsule[data-layout="focus"] #permission { width: 548px; }
+#capsule[data-layout="focus"] #blobs { left: calc(50% + 246px); width: 64px; opacity: 1; visibility: visible; pointer-events: auto; }
+#capsule[data-layout="focus"][data-phase="expanded"][data-view="overview"] #blobs { left: calc(50% + 246px); width: 64px; }
+#capsule[data-layout="focus"] .pill-choice { padding: 0; justify-content: center; }
+#capsule[data-layout="focus"] .pill-choice span:not(.ico) { display: none; }
+#capsule[data-layout="focus"] .pill-choice .island-agent-clay { margin-left: 0; }
+#capsule[data-layout="focus"] .blob-dot { right: 4px; top: 4px; margin-top: 0; }
+#capsule[data-layout="focus"] #blobs-footer { justify-content: center; padding: 0 0 6px; }
+
+/* E: the approval look on the question card — «!» badge, the command in a mono well, «Rechazar N» / «Aprobar Y» (Coucou views.ts buildApproval) */
+#question-approval[hidden] { display: none; }
+#question-approval { grid-column: 1 / -1; grid-row: 3 / 6; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 8px; align-items: start; }
+#question[data-look="approval"] { --wash: rgba(245, 165, 36, 0.42); }
+#question[data-look="approval"] #question-body, #question[data-look="approval"] #question-options { display: none; }
+#question-approval-badge { grid-row: 1; grid-column: 1; width: 22px; height: 22px; border-radius: 50%; background: #f5a524; color: #000; font: 700 13px/22px var(--font); text-align: center; box-shadow: 0 0 6px rgba(245, 165, 36, 0.6); }
+#question-approval-body { grid-row: 1; grid-column: 2; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#question-approval-title { font: 600 15px/1.25 var(--font); color: var(--ink); overflow-wrap: anywhere; }
+#question-approval .q-cmd { display: block; padding: 6px 10px; border-radius: 10px; font: 400 12px var(--mono); color: #e8e9ec; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.06); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 96px; overflow-y: auto; user-select: text; }
+#question-approval-note { font: 400 11px var(--font); color: var(--dim-2); }
+#question-approval-actions { grid-row: 2; grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.q-approval-btn { appearance: none; position: relative; z-index: 0; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin: -6px 0; padding: 0 14px; border: 0; background: transparent; color: var(--ink-2); font: 500 12.5px var(--font); cursor: pointer; }
+.q-approval-btn::after { content: ""; position: absolute; inset: 6px 0; z-index: -1; border-radius: 999px; background: var(--btn-bg); }
+.q-approval-btn.q-approve { color: #0b0c0e; }
+.q-approval-btn.q-approve::after { background: var(--ink); }
+.q-approval-btn:disabled { opacity: .4; cursor: default; }
+.q-approval-btn:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; border-radius: 999px; }
+.q-kbd { font: 500 10.5px var(--font); opacity: .55; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }

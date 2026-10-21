@@ -45,7 +45,7 @@
     // Plain text row: `Pi · mi-proyecto · inactiva · en herdr`. An unknown cwd is
     // an honest «—»; an unknown origin simply has no segment.
     const text = [kindLabel, cwd ?? '—', stateLabel].concat(origin ? [`en ${origin}`] : []).join(' · ');
-    const row = { id, kindLabel, cwd, stateLabel, origin, text };
+    const row = { id, kindLabel, cwd, stateLabel, state: raw.state, origin, text };
     const tools = raw.tools;
     if (isObject(tools) && (tools.epoch === undefined || (Number.isSafeInteger(tools.epoch) && tools.epoch >= 0)) && Number.isSafeInteger(tools.total) && tools.total >= 0 && tools.total <= 4096 && Array.isArray(tools.steps) && tools.steps.length === Math.min(20, tools.total) && tools.steps.every((s, i) => isObject(s) && s.index === tools.total - tools.steps.length + i + 1 && typeof s.name === 'string' && /^[a-zA-Z0-9_.-]{1,64}$/.test(s.name) && ['running', 'done', 'error'].includes(s.state))) {
       row.tools = { ...(tools.epoch === undefined ? {} : { epoch: tools.epoch }), total: tools.total, steps: tools.steps.map(s => ({ index: s.index, name: s.name, state: s.state })) };
@@ -66,7 +66,9 @@
       const row = rowOf(raw);
       if (row) rows.push(row);
     }
-    return { state: 'ready', rows, truncated: frame.truncated };
+    // The real number of sessions the daemon saw when it cut the list (additive `total`, never below the rows we hold nor above its cap).
+    const total = frame.truncated && Number.isSafeInteger(frame.total) && frame.total >= rows.length && frame.total <= 4096 ? frame.total : rows.length;
+    return { state: 'ready', rows, truncated: frame.truncated, total };
   }
 
   // Process identities stay separate from catalog identities: several projects
@@ -107,7 +109,7 @@
     if (typeof onState === 'function') onState(piStateOf(state));
     const sessions = state && state.sessions;
     if (sessions && Array.isArray(sessions.rows)) {
-      return sessionsView({ type: 'sessions', schema: SCHEMA, sessions: sessions.rows, truncated: sessions.truncated === true }) || { state: 'error' };
+      return sessionsView({ type: 'sessions', schema: SCHEMA, sessions: sessions.rows, truncated: sessions.truncated === true, total: sessions.total }) || { state: 'error' };
     }
     return { state: state && state.connection === 'connected' ? 'pending' : 'error' };
   }

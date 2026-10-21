@@ -47,12 +47,13 @@ test('header: 640x34 at y=8, tabs left (30x22 r11 visual), settings right; tabs 
   assert.equal(decls('#island-header .tab[aria-pressed="true"]::after').background, 'var(--tab-on)');
 });
 
-test('overview: row at y=42 of 108px, left card 322, right card from x=332 (gap 10)', () => {
+test('overview (A+E): row at y=42 of 108px; main card 438 (status 108 + centre 330), 8px gap, blobs card 174 from x=446', () => {
   const o = decls('#overview-view');
   assert.equal(o.top, '42px'); assert.equal(o.height, '108px'); assert.equal(o.width, '620px');
   assert.equal(o.left, 'calc(50% - 310px)');
-  assert.equal(decls('.card-left').width, '322px');
-  assert.equal(decls('#pill-choices').left, '332px');
+  assert.equal(decls('.card-left').width, '438px');
+  assert.equal(decls('#blobs').left, 'calc(50% + 136px)');
+  assert.equal(decls('#blobs').width, '174px');
   const c = decls('.card');
   assert.equal(c['border-radius'], '20px'); assert.equal(c.background, 'var(--card)'); assert.equal(c.border, '1px solid var(--hairline)');
 });
@@ -66,15 +67,15 @@ test('who row and ticker: 600 12px name, 400 11px tool, 500 13px/22px rows, 108p
   assert.equal(d.left, '108px'); assert.equal(d.height, '44px'); assert.equal(d.font, '500 13px/22px var(--font)');
 });
 
-test('agent pills: 1fr 1fr grid, 28px pill (r999, card-flat, .14 border), label centred, padding 0 8px', () => {
+test('blobs (A+E): one pill per row, 32px, full width, (r999, card-flat, .14 border), label left of the status dot', () => {
   const g = decls('#pill-choices');
-  assert.equal(g['grid-template-columns'], '1fr 1fr'); assert.equal(g.padding, '0 8px'); assert.equal(g['align-content'], 'center');
-  assert.equal(g['grid-auto-rows'], '28px'); assert.equal(g.gap, '4px');
+  assert.equal(g.display, 'flex'); assert.equal(g['flex-direction'], 'column'); assert.equal(g.padding, '6px 8px'); assert.equal(g.gap, '4px');
+  assert.equal(g['overflow-y'], 'auto');
   const p = decls('.pill-choice');
-  assert.equal(p.height, '28px'); assert.equal(p['border-radius'], '999px'); assert.equal(p.background, 'var(--card-flat)');
+  assert.equal(p.height, '32px'); assert.equal(p.width, '100%'); assert.equal(p['border-radius'], '999px'); assert.equal(p.background, 'var(--card-flat)');
   assert.match(p.border, /rgba\(255, 255, 255, 0\.14\)/); assert.equal(p.font, '600 10px var(--font)'); assert.equal(p.color, 'var(--dim-3)');
-  assert.equal(decls('.pill-choice span:not(.ico)').padding, '0 8px 0 34px');
-  assert.equal(decls('.pill-choice .island-agent-clay')['margin-left'], '7px');
+  assert.equal(decls('.pill-choice span:not(.ico)').padding, '0 24px 0 34px');
+  assert.equal(decls('.pill-choice .island-agent-clay')['margin-left'], '5px');
 });
 
 test('pill hit area extends 2px into every 4px gap (no overlap between neighbours)', () => {

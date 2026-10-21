@@ -97,7 +97,7 @@ test('S4 the Rust store keeps the shipped keys and the closed action names', () 
 
 test('S5 the index aria group and the failure copy speak of blobs', () => {
   const html = read('index.html');
-  assert.match(html, /aria-label="Blobs declaradas"/);
+  assert.match(html, /aria-label="Blobs"/, 'the right column list speaks of blobs');
   assert.ok(!/aria-label="Pills declaradas"/.test(html));
   const overview = read('pills-view.js');
   assert.match(overview, /blobs guardados/, 'the failure copy the human reads says blobs');

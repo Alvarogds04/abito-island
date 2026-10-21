@@ -452,18 +452,14 @@ test('R3: the pill-summary slot never reaches the mini-bots (zero overlap)', () 
   assert.equal(String(mb['pointer-events'] || decls('#minibots')['pointer-events']), 'none');
 });
 
-test('R4: the strip band and the pills grid own disjoint rects (right card uncovered)', () => {
-  const n = decls('#notices'), p = decls('#pill-choices'), mb = decls('#minibots');
-  assert.equal(p.display, 'grid');
-  assert.equal(p['pointer-events'], 'auto', 'the other-bot choices stay clickable');
-  // #notices sits in the island frame, #pill-choices in the overview frame (+42)
-  const bandBottomOv = px(n.top) - OV_TOP + px(n.height);
-  assert.ok(px(p.top) >= bandBottomOv,
-    `pills top ${px(p.top)} < band bottom ${bandBottomOv}: the strip covers the grid — the F002 "partial" bug`);
-  assert.equal(n.left, 'calc(50% + 22px)', 'the band covers the right card only (x342..630 of the island)');
-  assert.equal(n.right, 'auto'); assert.equal(n.width, '288px');
-  // mini-bots live in the left card's who row: they never draw over the right card (x332+)
-  assert.ok(px(mb.right) >= 36 && mb.left === 'auto', `#minibots right ${mb.right} reaches into the right card`);
+test('R4 (A+E): the strip band sits over the blobs card\'s x range only and the blobs list owns its own card (no overlap with the band)', () => {
+  const n = decls('#notices'), blobs = decls('#blobs'), p = decls('#pill-choices'), mb = decls('#minibots');
+  assert.equal(p.display, 'flex');
+  assert.equal(p['pointer-events'] || blobs['pointer-events'], 'auto', 'the blob choices stay clickable');
+  // the blobs card is its own element in the overview frame: top 42, height 108
+  assert.equal(px(blobs.top), OV_TOP); assert.equal(px(blobs.height), OVH);
+  assert.equal(n.left, 'calc(50% + 22px)'); assert.equal(n.right, 'auto'); assert.equal(n.width, '288px');
+  assert.ok(px(mb.right) >= 36 && mb.left === 'auto', `#minibots right ${mb.right} reaches into the blobs card`);
 });
 
 test('R5: two stacked notices stay inside the fixed 44px band and never reach the grid', () => {
@@ -476,14 +472,11 @@ test('R5: two stacked notices stay inside the fixed 44px band and never reach th
   const stacked = px(decls('#notice-row')['min-height']) + (px(n.gap) || 0) + px(decls('#notice-pill')['min-height']);
   assert.equal(stacked, 80, 'model: chips row + gap + Coucou 28px pill capsule stack to 80px');
   assert.ok(stacked > px(n.height), 'the stacked content exceeds the band, so it must scroll');
-  assert.ok(px(n.top) - OV_TOP + px(n.height) <= px(p.top), 'even stacked, the band box ends before the grid: zero touch');
   assert.equal(px(decls('#notice-info').top), 0, 'the «i» fits the band: no phantom 4px scroll');
   assert.equal(String(decls('#notice-pill').order), '-1', 'the actionable notice sits in the first visible row of the band');
   assert.equal(p.overflow, 'hidden', 'the grid clips its own box, it never grows upward');
-  assert.equal(p['grid-template-rows'], '28px 28px', 'exactly two 28px rows (2x2, Coucou .pills)');
-  assert.ok(px(p.top) + 28 * 2 + px(p.gap) <= OVH, 'both pill rows fit under the band inside the card');
-  assert.match(css, /#pill-choices \.pill-choice:nth-child\(n\+5\) \{[^}]*display:\s*none/,
-    'the fifth of pills.visible() stays in the data only — visible() untouched (S6.2)');
+  assert.equal(p['flex-direction'], 'column', 'A+E: one blob per row');
+  assert.doesNotMatch(css, /#pill-choices \.pill-choice:nth-child\(n\+5\)/, 'A+E: no CSS belt hides the fifth blob any more; the column scrolls');
 });
 
 test('notices strip: its box stays inside the overview card and its content never escapes the box', () => {

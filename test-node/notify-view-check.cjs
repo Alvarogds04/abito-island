@@ -228,7 +228,8 @@ function harness(dataset) {
   };
   const ids = ['question', 'capsule', 'question-body', 'question-options', 'question-freeform', 'question-text', 'question-word', 'question-send',
     'question-skip', 'question-live', 'question-expiry', 'question-state', 'question-expiry-word', 'question-state-icon', 'question-state-word',
-    'question-step', 'question-step-header', 'question-summary', 'question-nav', 'question-prev', 'question-primary', 'question-queue'];
+    'question-step', 'question-step-header', 'question-summary', 'question-nav', 'question-prev', 'question-primary', 'question-queue',
+    'question-approval', 'question-approval-title', 'question-approval-cmd', 'question-approval-note', 'question-approval-actions'];
   const nodes = Object.fromEntries(ids.map(id => [id, node(id)]));
   Object.assign(nodes.capsule.dataset, dataset);
   const doc = { getElementById: id => nodes[id] || null, createElement: tag => node(tag), addEventListener(t, f) { (listeners[t] = listeners[t] || []).push(f); },

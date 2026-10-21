@@ -1201,14 +1201,15 @@ test('GitHub without a declaration or a successful gh answer never enters the gr
   }
 });
 
-test('GitHub obeys the Coucou four-cell grid cap when its focused pill moves to the card', async () => {
+test('A+E: the right column has NO four-cell cap (every declared pill stays); the focused one still moves to the card', async () => {
   const b = boot({ github: true, specs: SPECS, prefs: { declaredPills: ['integration_github', 'integration_n8n', 'integration_vercel'] } });
   b.load('specialists.js'); b.load('island-github.js'); await flush();
   b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_vercel'] } });
-  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_github']);
+  // human (A+E): «las sesiones empujan las pastillas declaradas» — the column scrolls instead of dropping anything
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_github', 'integration_n8n', 'integration_vercel']);
   b.click('pill-choice-integration_github');
-  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_n8n']);
-  assert.equal(b.leftCard.children[0].hidden, false, 'four grid cells plus the focused card, never more');
+  assert.deepEqual(b.get('pill-choices').children.map(n => n.dataset.pillId), ['abito', 'esp-a', 'esp-b', 'integration_n8n', 'integration_vercel'], 'the focused pill is the card, not a row');
+  assert.equal(b.leftCard.children[0].hidden, false, 'the focused card still shows');
 });
 
 test('#489 an unseen event puts a badge on an unfocused integration pill; focusing clears it', async () => {
@@ -1226,14 +1227,14 @@ test('#489 an unseen event puts a badge on an unfocused integration pill; focusi
   assert.equal(pill().dataset.badge, 'false', 'focusing cleared it');
 });
 
-test('#489 the grid shows at most four pills, Coucou rule (otherTasks.slice(0, 4)); the focused one is the card (main + 4 in total)', async () => {
+test('A+E: five declared integrations all stay in the right column (it scrolls; the old 2x2 cap of four is gone); the focused one is the card', async () => {
   const b = boot({ specs: SPECS, prefs: { declaredPills: ['integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'] } }); b.load('specialists.js'); await flush();
   b.doc.dispatchEvent({ type: 'abito:integration-seen', detail: { ids: ['integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'] } });
   const ids = () => b.get('pill-choices').children.map(n => n.dataset.pillId);
-  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_n8n'], 'a fifth never enters the 2x2 grid');
+  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_resend'], 'nothing is dropped');
   b.get('pill-choices').children[3].fire('click');
-  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_vercel'], 'the focused one leaves a free cell for the next');
-  assert.match(read('style.css'), /#pill-choices \.pill-choice:nth-child\(n\+5\)\s*\{\s*display:\s*none/, 'CSS belt unchanged');
+  assert.deepEqual(ids(), ['abito', 'esp-a', 'esp-b', 'integration_vercel', 'integration_stripe', 'integration_resend'], 'the focused one is the card, not a row');
+  assert.doesNotMatch(read('style.css'), /#pill-choices \.pill-choice:nth-child\(n\+5\)\s*\{\s*display:\s*none/, 'the CSS belt that hid the fifth is gone');
 });
 
 test('the session key sent for the terminal is always the well-formed row id, else none (never page text)', async () => {

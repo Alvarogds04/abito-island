@@ -31,6 +31,7 @@
   <script defer src="pill-catalog.js"></script>
   <script defer src="pills.js"></script>
   <script defer src="pills-view.js"></script>
+  <script defer src="island-layout.js"></script>
   <script defer src="spotify-view.js"></script>
   <!-- N6: notification with 1..N reply options (Pi questions QP/1 are one case). -->
   <script defer src="notify-view.js"></script>
@@ -122,6 +123,8 @@
       </header>
       <section id="overview-view" aria-label="Vista general">
         <div class="card card-left">
+          <!-- A+E: Abito's global status (real active sessions / real queue), fed by island-layout.js -->
+          <div id="col-status" class="col-status" role="status" aria-live="off"></div>
           <!-- S10 (L22): Coucou's empty card («Nothing running right now.» + [Ask]); shown while no session runs (island.css). -->
           <div id="overview-empty" class="stack-empty">
             <div class="title">Nada en ejecución ahora mismo.</div>
@@ -137,11 +140,16 @@
             <p id="pill-detail"></p>
           </div>
         </div>
-        <div id="pill-choices" class="card" role="group" aria-label="Blobs declaradas"></div>
         <span id="pill-live" class="sr-only" role="status" aria-live="polite"></span>
         <ul id="minibots" aria-label="Turnos activos" hidden></ul>
         <div id="spotify-card" class="spotify-card" role="group" hidden></div>
       </section>
+      <!-- A+E right column: the blobs (agent sessions AND declared pills), one per row, scrolling. Its own element so focus mode can
+           keep it (as a mascot column) while the question/approval card takes left + centre. -->
+      <div id="blobs" class="card">
+        <div id="pill-choices" role="group" aria-label="Blobs"></div>
+        <div id="blobs-footer"><span id="blobs-more" hidden></span><button id="blobs-all" class="see-all" type="button" hidden></button></div>
+      </div>
       <span id="open-chat-hint" class="sr-only">Abre la conversación con el modelo local dentro de la isla.</span>
       <!-- M2: Sileo-style notice, display only (own code, silence).
            A notice never decides or approves anything. -->
@@ -211,6 +219,11 @@
         </div>
         <div id="question-step" hidden><span id="question-step-header" class="chip"></span></div>
         <div id="question-summary" role="list" aria-label="Resumen de tus respuestas" hidden></div>
+        <div id="question-approval" hidden>
+          <span id="question-approval-badge" aria-hidden="true">!</span>
+          <div id="question-approval-body"><span id="question-approval-title"></span><code id="question-approval-cmd" class="q-cmd"></code><span id="question-approval-note" hidden>Se ocultaron datos secretos del comando.</span></div>
+          <div id="question-approval-actions"></div>
+        </div>
         <div id="question-options" role="group" aria-label="Opciones de respuesta"></div>
         <div id="question-nav" hidden>
           <button id="question-prev" type="button">Anterior</button>

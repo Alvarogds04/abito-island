@@ -269,8 +269,10 @@
       const kind = noticeLane && noticeLane.view === 'notices' ? 'finished' : cardShown ? 'approval' : questionShown ? 'question' : '';
       badge.hidden = !kind || p < 1;
       if (badge.dataset.kind !== kind) badge.dataset.kind = kind;
-      badge.style.left = (ov.clayX - 28) + 'px';
-      badge.style.top = (ov.cy - 29) + 'px';
+      // G: the badge rides the mascot's OWN rendered box (the same left/top/size just written above), in every view
+      const clayLeft = lerp(lerp(COMPACT.clayX, ov.clayX, p), CHAT.clayLeft, q.x), clayTop = lerp(overviewTop, CHAT.h - 76, q.x);
+      const at = window.AbitoIslandLayout && window.AbitoIslandLayout.badgePosition({ left: clayLeft, top: clayTop, size: csv });
+      if (at) { badge.style.left = at.left + 'px'; badge.style.top = at.top + 'px'; }
     }
     if (capsule.dataset.edge !== edge) capsule.dataset.edge = edge;
     const view = q.target === 1 ? 'chat' : noticeLane && noticeLane.view === 'notices' ? 'notices' : 'overview';

@@ -101,6 +101,32 @@
   const multiItemOf = n => ({ header: '', text: n.text, options: n.options, multiSelect: true, allowFreeText: n.allowFreeText });
   const stepDraft = n => (n.form ? (wizard && !wizard.review ? wizard.drafts[wizard.step] : null) : multiDraft);
   const setStepDraft = (n, draft) => { if (n.form) wizard = { ...wizard, drafts: wizard.drafts.map((d, i) => (i === wizard.step ? draft : d)) }; else multiDraft = draft; };
+  // E: a permission request (harness «asks permission», or Pi's kind=approval with two labels) wears the approval look instead of a
+  // numbered list. It is the SAME answer path: the buttons send the option index through choose().
+  const approvalEl = $('question-approval');
+  const layout = () => window.AbitoIslandLayout;
+  const approvalOf = n => (layout() && n ? layout().approvalView(n, N.askerName(n)) : null);
+  function renderApproval(n, view) {
+    const a = approvalOf(n);
+    const on = !!a && !isStructured(n);
+    approvalEl.hidden = !on;
+    root.dataset.look = on ? 'approval' : '';
+    if (!on) return false;
+    $('question-approval-title').textContent = a.title;
+    const cmd = $('question-approval-cmd'); cmd.textContent = a.command; cmd.title = a.command;
+    $('question-approval-note').hidden = !a.secretsHidden;
+    const box = $('question-approval-actions'); box.textContent = '';
+    for (const act of a.actions) {
+      const b = el('button', `q-approval-btn q-${act.role}`);
+      b.type = 'button'; b.disabled = !view.controlsEnabled; b.dataset.index = String(act.index);
+      b.append(el('span', 'q-label', act.label), el('span', 'q-kbd', act.key));
+      b.setAttribute('aria-label', `${act.label} (${act.key})`);
+      b.setAttribute('aria-keyshortcuts', act.key);
+      b.addEventListener('click', event => choose(event, act.index));
+      box.append(b);
+    }
+    return true;
+  }
   let rowsKey = '';
   function rowNode(r, enabled) {
     const b = el('button', r.kind === 'other' ? 'q-option q-other' : 'q-option');
@@ -117,6 +143,7 @@
     return b;
   }
   function renderOptions(n, enabled) {
+    if (renderApproval(n, { controlsEnabled: enabled })) { rowsKey = ''; optionsEl.textContent = ''; return; }
     const item = stepItem(n), draft = stepDraft(n);
     if (!item) { rowsKey = ''; optionsEl.textContent = ''; if (n.form && wizard && wizard.review) renderSummary(n); return; }
     const model = N.optionRows(item, draft);
@@ -426,6 +453,11 @@
     const view = current();
     if (!view.notification || !view.controlsEnabled || root.inert || !onScreen()) return;
     if (/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '') && document.activeElement !== textEl) return;
+    const pend = snapshot && N.fromPending(snapshot.pending), look = pend && approvalOf(pend);
+    if (look && layout()) {
+      const at = layout().approvalKey(event, look, { typing: document.activeElement === textEl });
+      if (at >= 0) { event.preventDefault(); choose(event, at); return; }
+    }
     cardKey(event);
   });
 

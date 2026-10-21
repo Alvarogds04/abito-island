@@ -55,8 +55,12 @@
   }
   // Coucou (views.ts otherTasks.slice(0, 4)): the grid shows every pill but the focused one, at most four; the focused
   // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
-  const MAX_PILLS = 4;
-  const gridRows = all => all.filter(r => r.id !== focused && r.id !== sessionFocus).slice(0, MAX_PILLS);
+  // A+E: the right column is ONE scrolling list. The human's declared pills (Abito, specialists, integrations) come FIRST and are
+  // never pushed out; the live agent sessions follow. No cap of four: the column scrolls.
+  const gridRows = all => {
+    const rest = all.filter(r => r.id !== focused && r.id !== sessionFocus);
+    return [...rest.filter(r => !r.session), ...rest.filter(r => r.session)];
+  };
   const CARD_PILLS = Object.freeze({ integration_github: 'GitHub', integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
   let focused = null; const badges = new Set(), connected = new Set(), seenBySource = new Map();
   const integrationRows = () => {
@@ -67,6 +71,15 @@
       color: typeof colors[id] === 'string' && A.normalizeChosenColor(colors[id]) ? colors[id] : 'blue',
     }));
   };
+  const blobStatus = row => {
+    const L = root.AbitoIslandLayout;
+    if (!L) return 'idle';
+    const out = L.blobRows({ declared: row.session ? [] : [{ id: row.id, name: row.name || 'x', color: row.color }], sessions: row.session ? [row] : [],
+      attributedId: attributedId, badges });
+    return out[0] ? out[0].status : 'idle';
+  };
+  let attributedId = null;
+  doc.addEventListener('abito:layout', e => { const next = e.detail ? e.detail.attributedId : null; if (next !== attributedId) { attributedId = next; paint(); } });
   function focusIntegration(id) {
     focused = id; badges.delete(id);
     doc.dispatchEvent(new CustomEvent('abito:integration-focus', { detail: { id: focused } }));
@@ -115,6 +128,9 @@
         });
       }
       item.row = row;
+      // status dot: working / idle / needs you / news (the pure rule lives in island-layout.js)
+      if (!item.dot) { item.dot = doc.createElement('i'); item.dot.className = 'blob-dot'; item.dot.setAttribute('aria-hidden', 'true'); item.button.append(item.dot); }
+      item.dot.dataset.status = blobStatus(row);
       item.label.textContent = row.name; item.button.dataset.color = row.color; item.svg.dataset.color = row.color;
       paintChosenColor(item.button, row.color); paintChosenColor(item.svg, row.color);
       if (row.session) {

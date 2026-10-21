@@ -178,7 +178,7 @@ test('character badge: «!» approval, «?» question, ✓ finished lane, decora
   assert.match(html, /<span id="clay-badge" aria-hidden="true" hidden>/);
   const src = read('island.js');
   assert.match(src, /noticeLane && noticeLane\.view === 'notices' \? 'finished' : cardShown \? 'approval' : questionShown \? 'question' : ''/);
-  assert.match(src, /badge\.style\.left = \(ov\.clayX - 28\) \+ 'px'/);
+  assert.match(src, /badge\.style\.left = at\.left \+ 'px'/, 'the badge sits where AbitoIslandLayout.badgePosition (centre - (20, 21)) puts it, from the mascot\'s own box');
   const isl = read('vendor/coucou/island/island.css');
   for (const [k, g, c] of [['approval', '!', '#f5a524'], ['question', '?', '#22d3ee'], ['finished', '✓', '#22c55e']]) {
     assert.ok(isl.includes(`#clay-badge[data-kind="${k}"] i { background: ${c}; }`), k);

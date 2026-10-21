@@ -23,7 +23,7 @@ test('the frame maps to a ready view with closed labels', () => {
   const v = T.sessionsView(frame());
   assert.equal(v.state, 'ready');
   assert.equal(v.truncated, false);
-  assert.deepEqual(v.rows, [{ id: 's-0123abcd', kindLabel: 'Pi', cwd: 'mi-proyecto', stateLabel: 'inactiva', origin: 'herdr', text: 'Pi · mi-proyecto · inactiva · en herdr' }]);
+  assert.deepEqual(v.rows, [{ id: 's-0123abcd', kindLabel: 'Pi', cwd: 'mi-proyecto', stateLabel: 'inactiva', state: 'sleeping', origin: 'herdr', text: 'Pi · mi-proyecto · inactiva · en herdr' }]);
 });
 
 test('the closed vocabularies: kinds and states label in Spanish; unknown rows never render', () => {
