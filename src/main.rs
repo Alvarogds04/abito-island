@@ -59,7 +59,7 @@ mod probe;
 mod platform;
 mod questionhost;
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -84,7 +84,7 @@ fn ensure_island_window(app: &AppHandle) -> Rect {
     let area = refresh_work_area(app, &state);
     let Some(win) = main_window(app) else { return area };
     let io = TauriIo(&win);
-    let wanted = geometry::island_window_rect(area, io.scale());
+    let wanted = geometry::island_window_rect_h(area, io.scale(), state.window_h.load(Ordering::SeqCst));
     if io.size() != (wanted.w, wanted.h) {
         io.set_size(wanted.w, wanted.h);
     }
@@ -307,6 +307,9 @@ struct AppState {
     /// Set on the first real character press: startup placement must not
     /// interfere once the human is interacting with the island.
     user_touch: AtomicBool,
+    /// Logical height of the native island window: the fixed 340 unless a long question asked for more
+    /// (island_window_height); Rust clamps it to 70% of the work area and ensure_island_window applies it.
+    window_h: AtomicI32,
     /// Bumped on every plan application; stale click plans and startup
     /// placement requests must not replace a newer transition.
     generation: AtomicU64,
@@ -904,6 +907,25 @@ fn island_shape(app: AppHandle, webview: tauri::Webview, state: State<AppState>,
     state.chat_rate.lock().expect("shape rate lock").check(now_ms())?;
     islandshape::apply(&app, Some(report));
     Ok(())
+}
+
+/// A long question asks the island window to grow (and gives the height back when it closes). Same gate as island_shape: main
+/// window, sender, closed payload `{h}`, rate limit; Rust alone decides the size (>= 340, <= 70% of the work area), keeps the
+/// top anchor and width, then the single native funnel applies it. Answers with the granted logical height.
+#[tauri::command]
+fn island_window_height(app: AppHandle, webview: tauri::Webview, state: State<AppState>, payload: Value) -> Result<Value, BridgeError> {
+    settingswindow::main_window_only(webview.label())?;
+    let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    bridge::sender_ok(webview.label(), &url)?;
+    let asked = islandshape::parse_window_height(&payload).ok_or_else(|| BridgeError::denied("invalid window height"))?;
+    state.chat_rate.lock().expect("shape rate lock").check(now_ms())?;
+    let area = refresh_work_area(&app, &state);
+    let scale = main_window(&app).map(|w| TauriIo(&w).scale()).unwrap_or(1.0);
+    let granted = geometry::clamp_window_height(asked, area.h, scale);
+    if state.window_h.swap(granted, Ordering::SeqCst) != granted {
+        ensure_island_window(&app);
+    }
+    Ok(serde_json::json!({ "h": granted }))
 }
 
 #[tauri::command]
@@ -1769,6 +1791,7 @@ fn main() {
         // U2: resolved from the saved selection in `setup` (fail closed).
         chat_target: Mutex::new(None),
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
+        window_h: AtomicI32::new(geometry::ISLAND_WINDOW.1),
         hotkey: hotkeyhost::HotkeyHost::default(),
         settings: settingshost::SettingsHost::default(),
         specialists: specialistshost::SpecialistsHost::default(),
@@ -1809,6 +1832,7 @@ fn main() {
             drag_move,
             drag_release,
             island_shape,
+            island_window_height,
             desktop_action,
             open_chat_url,
             characterhost::character_info,

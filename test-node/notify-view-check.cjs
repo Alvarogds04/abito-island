@@ -400,3 +400,18 @@ test('auto-size wiring: notify.js measures, sets the card height and tells the i
   assert.match(css, /\.q-label \{[^}]*white-space: normal/);
   assert.match(css, /#question-text \{[^}]*overflow-y: hidden/);
 });
+
+// ---- the window grows on demand (cap decided by Rust: 70% of the work area) ---------------------------------------------
+test('questionLayout takes the island cap the host granted; the default stays the fixed window', () => {
+  assert.deepEqual(N.questionLayout(900, 600), { cardH: 548, islandH: 600, scroll: true }, 'capped at the granted height, scrolls inside');
+  assert.deepEqual(N.questionLayout(400, 600), { cardH: 400, islandH: 452, scroll: false }, 'fits: the island grows with the card, no scroll');
+  assert.deepEqual(N.questionLayout(900), { cardH: 280, islandH: 332, scroll: true }, 'no cap given: the fixed window as before');
+  assert.deepEqual(N.questionLayout(900, 100), { cardH: 148, islandH: 200, scroll: true }, 'a nonsense cap never goes below the minimum card');
+  for (const bad of [NaN, undefined, null, 'x', -1]) assert.equal(N.questionLayout(900, bad).islandH, 332, String(bad));
+});
+test('windowHeightFor: the native window needs the island plus a margin; a closed question gives the fixed window back', () => {
+  assert.equal(N.windowHeightFor(332), 340);
+  assert.equal(N.windowHeightFor(600), 608);
+  assert.equal(N.windowHeightFor(0), 340, 'closed: the fixed window (Rust clamps up to it anyway)');
+  for (const bad of [NaN, undefined, -3, Infinity]) assert.equal(N.windowHeightFor(bad), 340, String(bad));
+});
