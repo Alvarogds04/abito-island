@@ -72,9 +72,10 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
   page.append(ctx.hero("flowsettings", t("Settings"), null));
 
   // ── Probar (#503 S27, Opción B) ──
-  // The host delivers dictation to the CLIPBOARD (never into a field) and emits no microphone level, so this area is honest
-  // about both: the field shows the LAST dictation read from the local history when a new one lands (the event carries no
-  // text), and there is no level meter. It adds no command: `history` is the closed read the history page already uses.
+  // The host delivers dictation to the CLIPBOARD (never into a field), so the field shows the LAST dictation read from the
+  // local history when a new one lands (the event carries no text). The meter is read-only: `dictation:level {level}` is the RMS of
+  // the input frames normalized to 0..1 (dBFS -60..0), published by the host only while dictation is listening, at most 20 a second;
+  // nothing is recorded for it. No event for a moment (or ever) reads «sin señal». It adds no command.
   const keyName = keyLabel('wayland', status.platform), micName = prefs.mic || '';
   const mic = status.mics.find((m) => m.name === prefs.mic);
   const tryField = h('textarea', { id: 'dictation-try-field', class: 'hub-input', rows: '3', readonly: 'true', 'aria-label': 'Lo que dictaste', placeholder: 'Lo que dictes aparece acá' }) as HTMLTextAreaElement;
@@ -87,6 +88,20 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
     check(!micName || !!mic, !micName ? 'Micrófono: predeterminado del sistema' : mic ? `Micrófono: ${mic.name}` : `Micrófono: ${micName} (no está conectado)`),
     check(keysOk, keysOk ? `Tecla: ${keyName}` : 'Tecla: no disponible aquí'),
     check(parakeetReady, parakeetReady ? 'Reconocimiento: Parakeet' : 'Reconocimiento: falta descargar Parakeet'));
+  const SEGMENTS = 5, NO_SIGNAL_MS = 1200;
+  const segs = Array.from({ length: SEGMENTS }, () => h('span', { class: 'mic-seg' }));
+  const meterWord = h('span', { class: 'mic-meter-word', text: 'sin señal' });
+  const meter = h('div', { id: 'dictation-mic-meter', class: 'mic-meter', role: 'meter', 'aria-label': 'Nivel del micrófono', 'aria-valuemin': '0', 'aria-valuemax': '1', 'aria-valuenow': '0', 'data-state': 'none' },
+    h('span', { class: 'mic-meter-title', text: 'Micrófono' }), h('span', { class: 'mic-segs' }, ...segs), meterWord);
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  const noSignal = () => { meter.dataset.state = 'none'; meter.setAttribute('aria-valuenow', '0'); segs.forEach(sg => sg.classList.remove('on')); meterWord.textContent = 'sin señal'; };
+  void life.listen('dictation:level', (p: any) => {
+    const v = typeof p?.level === 'number' && Number.isFinite(p.level) ? Math.min(1, Math.max(0, p.level)) : null;
+    if (v === null) return;
+    meter.dataset.state = 'live'; meter.setAttribute('aria-valuenow', v.toFixed(2)); meterWord.textContent = '';
+    const lit = Math.round(v * SEGMENTS); segs.forEach((sg, i) => sg.classList.toggle('on', i < lit));
+    clearTimeout(quiet); quiet = setTimeout(() => { if (life.alive()) noSignal(); }, NO_SIGNAL_MS);
+  });
   const refreshTry = () => void life.work(async () => {
     const entries = await FlowBridge.history();
     if (!life.alive()) return;
@@ -95,7 +110,7 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
   });
   void life.listen('dictation:history', () => refreshTry());
   page.append(label('Probar'), h('div', { id: 'dictation-try', class: 'dictation-try' },
-    h('div', { class: 'dictation-try-title', text: `Probar: mantené ${keyName} y hablá` }), tryField, tryStatus,
+    h('div', { class: 'dictation-try-title', text: `Probar: mantené ${keyName} y hablá` }), tryField, meter, tryStatus,
     h('div', { class: 'hub-note', text: 'Se copia al portapapeles: pegá con Ctrl+V donde escribas.' }), checks));
 
   // ── Keys ──

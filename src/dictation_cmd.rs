@@ -178,6 +178,7 @@ pub fn event(update: flow::Update) -> (&'static str, Value) {
             Phase::Thinking => "thinking", Phase::Copied => "copied", Phase::Failed => "failed",
         }})),
         Update::Bands(bands) => ("dictation:bands", json!({"bands":bands})),
+        Update::Level(level) => ("dictation:level", json!({"level":level})),
         Update::Note(n) => ("dictation:note", json!({"note":match n {
             Note::NeedModel => "needModel", Note::NoMicrophone => "noMicrophone",
             Note::ClipboardRefused => "clipboardRefused",

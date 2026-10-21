@@ -63,6 +63,7 @@ fn dictation_events_pin_names_and_payloads() {
     for (note, name) in [(NeedModel,"needModel"),(NoMicrophone,"noMicrophone"),(ClipboardRefused,"clipboardRefused")] {
         assert_eq!(event(Update::Note(note)), ("dictation:note",json!({"note":name})));
     }
+    assert_eq!(event(Update::Level(0.25)), ("dictation:level",json!({"level":0.25})));
     assert_eq!(event(Update::Bands([0.5;9])), ("dictation:bands",json!({"bands":vec![0.5;9]})));
     for (state, expected) in [(ModelState::Missing,json!({"state":"missing"})),
         (ModelState::Ready,json!({"state":"ready"})),

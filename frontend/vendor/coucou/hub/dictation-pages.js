@@ -120,6 +120,36 @@ async function flowSettingsPage(page, ctx, invoke) {
     check(keysOk, keysOk ? `Tecla: ${keyName}` : "Tecla: no disponible aquí"),
     check(parakeetReady, parakeetReady ? "Reconocimiento: Parakeet" : "Reconocimiento: falta descargar Parakeet")
   );
+  const SEGMENTS = 5, NO_SIGNAL_MS = 1200;
+  const segs = Array.from({ length: SEGMENTS }, () => h("span", { class: "mic-seg" }));
+  const meterWord = h("span", { class: "mic-meter-word", text: "sin señal" });
+  const meter = h(
+    "div",
+    { id: "dictation-mic-meter", class: "mic-meter", role: "meter", "aria-label": "Nivel del micrófono", "aria-valuemin": "0", "aria-valuemax": "1", "aria-valuenow": "0", "data-state": "none" },
+    h("span", { class: "mic-meter-title", text: "Micrófono" }),
+    h("span", { class: "mic-segs" }, ...segs),
+    meterWord
+  );
+  let quiet;
+  const noSignal = () => {
+    meter.dataset.state = "none";
+    meter.setAttribute("aria-valuenow", "0");
+    segs.forEach((sg) => sg.classList.remove("on"));
+    meterWord.textContent = "sin señal";
+  };
+  void life.listen("dictation:level", (p) => {
+    const v = typeof p?.level === "number" && Number.isFinite(p.level) ? Math.min(1, Math.max(0, p.level)) : null;
+    if (v === null) return;
+    meter.dataset.state = "live";
+    meter.setAttribute("aria-valuenow", v.toFixed(2));
+    meterWord.textContent = "";
+    const lit = Math.round(v * SEGMENTS);
+    segs.forEach((sg, i) => sg.classList.toggle("on", i < lit));
+    clearTimeout(quiet);
+    quiet = setTimeout(() => {
+      if (life.alive()) noSignal();
+    }, NO_SIGNAL_MS);
+  });
   const refreshTry = () => void life.work(async () => {
     const entries = await FlowBridge.history();
     if (!life.alive()) return;
@@ -132,6 +162,7 @@ async function flowSettingsPage(page, ctx, invoke) {
     { id: "dictation-try", class: "dictation-try" },
     h("div", { class: "dictation-try-title", text: `Probar: mantené ${keyName} y hablá` }),
     tryField,
+    meter,
     tryStatus,
     h("div", { class: "hub-note", text: "Se copia al portapapeles: pegá con Ctrl+V donde escribas." }),
     checks
