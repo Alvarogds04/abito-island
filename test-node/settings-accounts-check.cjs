@@ -48,7 +48,9 @@ if (require.main === module) (async () => {
   for (const action of ['view','connectors_list','agents_list','hooks_preview']) assert(calls.some(([c,p]) => c === 'agent_action' && p.action === action));
   assert(timers.some(t => t.ms === V.AGENTS_WAIT_MS)); assert(timers.some(t => t.ms === V.CONNECT_WAIT_MS));
   assert.deepEqual(calls.filter(([c]) => c === 'secret_action').map(([,p]) => p), V.KEY_IDS.map(id => V.keyPayload('present', id)));
-  const click = (word, trusted = true) => { const b = all(ui).find(e => e.tagName === 'button' && e.textContent === word); assert(b, word); b.fire('click', trusted); };
+  // #503 S26: the login buttons now read «Conectar…» on the card; the closed words API / Auth are their accessible names' ends
+  const ACCESSIBLE = { API: /^Conectar con clave de API: /, Auth: /^Conectar con autentificación: /, 'Cerrar sesión': /^Cerrar sesión: / };
+  const click = (word, trusted = true) => { const b = all(ui).find(e => e.tagName === 'button' && (e.textContent === word || (ACCESSIBLE[word] && ACCESSIBLE[word].test(e.attrs['aria-label'] || '')))); assert(b, word); b.fire('click', trusted); };
   calls.length = 0; click('Reiniciar', false); await ui.settled(); assert.deepEqual(calls, []);
   click('Reiniciar'); await ui.settled(); assert.deepEqual(calls[0], ['daemon_action', { action: 'restart' }]);
   calls.length = 0; click('Configurar proveedor');

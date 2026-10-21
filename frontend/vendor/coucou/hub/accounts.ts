@@ -1,6 +1,7 @@
 // Abito-owned migration of settings.js/accounts and models.js; rendered with MIT hub/ui.ts.
 import { h, clear } from '../views/dom.js';
 import { card, row, select, label } from './ui.js';
+import { notchCard } from './notch.js';
 import { action, field, note, section, status, trusted, session, preserveFocus } from './runtime.js';
 const PRESETS = [
   ['anthropic', 'Anthropic', 'https://api.anthropic.com/v1', 'anthropic-messages'],
@@ -143,6 +144,18 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all', 
       if (daemonBusy) return; daemonBusy = true; paint();
       work(() => call('daemon_action', { action: 'restart' }), result => { message.textContent = V.daemonRestartOutcome(result).say; work(() => agent({ action: 'view' }), apply); }).finally(() => { daemonBusy = false; if (s.alive()) paint(); });
     }, daemonBusy);
+    // #503 S26 (Opción A): the engine's state comes FIRST, as icon + word, with «Reintentar» on a failure. Same closed
+    // restart command; the manual restart row stays below for a healthy engine.
+    const failing = !!conn && ['lost', 'refused', 'bad_session'].includes(conn.kind);
+    const engineWord = !conn ? ['on', '●', 'Motor corriendo'] : conn.kind === 'connecting' ? ['busy', '…', 'Conectando'] : conn.kind === 'no_daemon' ? ['off', '○', conn.word] : ['error', '✗', conn.word];
+    const retry = failing ? action('Reintentar', () => {
+      if (daemonBusy) return; daemonBusy = true; paint();
+      work(() => call('daemon_action', { action: 'restart' }), result => { message.textContent = V.daemonRestartOutcome(result).say; work(() => agent({ action: 'view' }), apply); }).finally(() => { daemonBusy = false; if (s.alive()) paint(); });
+    }, daemonBusy) : null;
+    const engine = h('div', { id: 'engine-status', class: `engine-status ${engineWord[0]}`, role: 'status', 'aria-live': 'polite' },
+      h('span', { class: 'state-ico', 'aria-hidden': 'true', text: engineWord[1] }), h('span', { class: 'state-word', text: engineWord[2] }),
+      ...(conn?.aria && conn.kind !== 'connecting' ? [h('span', { class: 'hint', text: conn.aria.replace(/^[^:]+: /, '') })] : []), ...(retry ? [retry] : []));
+    if (page !== 'integrations') root.append(engine);
     if (page !== 'integrations') root.append(section('Motor', row(d.rowTitle, conn?.aria || d.rowSub, restart)));
     const ownedSec = section('Configuración de proveedores');
     if (form) ownedSec.append(card(form));
@@ -164,16 +177,26 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all', 
     const search = field('settings-filter', 'Buscar proveedor', 'search', filter);
     search.addEventListener('input', e => { if (e.isTrusted) { filter = search.value; paint(); } });
     const providers = section('Proveedores', row('Buscar proveedor', null, search));
+    // One card per provider: its state as icon + word and ONE action. «Conectar…» / «Salir» are the card's words; the
+    // old long words stay as the accessible name so nothing that names them changes.
+    const cards: HTMLElement[] = [];
     for (const r of V.providerRows(state, { filter, flow: login })) {
-      const controls: HTMLElement[] = [];
-      for (const a of [r.api, r.auth]) if (a) controls.push(action(a.word, () => start(r.id, a.method), a.disabled));
-      if (r.cancel) controls.push(action(r.cancel.word, cancel));
-      if (r.logout) controls.push(action(V.LOGOUT_WORD, () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`)));
-      providers.append(card(row(r.name, [r.status.word, r.error, r.note].filter(Boolean).join(' · '), ...controls)));
+      const account = r.accountId ? (state?.accounts || []).find((a: any) => a.accountId === r.accountId) : null;
+      const [kind, icon, word] = r.status.kind === 'connected' ? ['ok', '✓', String(account?.label || r.status.word).slice(0, 48)] : r.cancel ? ['busy', '…', 'conectando'] : r.error ? ['error', '✗', 'error'] : ['missing', '✗', 'sin cuenta'];
+      const primary = r.logout ? action('Salir', () => send({ action: 'account_logout', accountId: r.accountId }, `${r.name}: sesión cerrada.`))
+        : r.cancel ? action(r.cancel.word, cancel)
+        : (() => { const a = r.auth || r.api; return a ? action('Conectar…', () => start(r.id, a.method), a.disabled) : null; })();
+      if (primary) primary.setAttribute('aria-label', r.logout ? `${V.LOGOUT_WORD}: ${r.name}` : r.cancel ? r.cancel.aria : `${(r.auth || r.api).aria}`);
+      const extra: HTMLElement[] = []; // a provider that offers both OAuth and an API key keeps both ways in, behind the same card
+      if (!r.logout && !r.cancel && r.auth && r.api) extra.push(action(r.api.word, () => start(r.id, r.api.method), r.api.disabled));
+      const c = notchCard(r.name, h('span', { class: `card-state ${kind}` }, h('span', { class: 'state-ico', 'aria-hidden': 'true', text: icon }), h('span', { class: 'state-word', text: word })),
+        ...(primary ? [primary] : []), ...extra, ...([r.error, r.note].filter(Boolean).length ? [h('div', { class: 'hint', text: [r.error, r.note].filter(Boolean).join(' · ') })] : []));
+      c.setAttribute('id', `provider-${r.id}`);
+      cards.push(c);
     }
     if (flowLive) providers.append(card(renderFlow(auth, prompt, ev)));
     else if (flow) { for (const input of flow.querySelectorAll('input')) (input as HTMLInputElement).value = ''; flow = null; }
-    if (page !== 'integrations') root.append(providers);
+    if (page !== 'integrations') root.append(...cards, providers);
     const connectors = section('Conectores'), av = V.agentsView(state, { askedAtError: ask.at, timedOut: ask.timedOut });
     connectors.append(label('Agentes'));
     if (av.kind !== 'ready') connectors.append(status(av));

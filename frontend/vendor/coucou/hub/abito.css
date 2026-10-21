@@ -101,3 +101,9 @@ section.abito-card > h2 { gap: 8px; }
 .capture-help[hidden], #shortcut-reset-confirm[hidden] { display: none !important; }
 #shortcut-reset-confirm { gap: 8px; }
 .shortcut-table .switch { position: relative; } .shortcut-table .switch::before { content: ""; position: absolute; inset: -12px -6px; }
+
+/* #503 S26 (Cuentas / Conexiones, Opción A): the engine's state first (icon + word), then one card per provider. */
+.engine-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; padding: 10px 14px; border-radius: 12px; background: var(--hub-card); font: 600 13px var(--font); min-height: 44px; }
+.engine-status .state-ico { width: 1em; text-align: center; }
+.engine-status.on { color: var(--green); } .engine-status.busy { color: var(--amber); } .engine-status.error { color: var(--red, #f4505e); } .engine-status.off { color: var(--dim); }
+.engine-status .hint { flex: 1 1 200px; font-weight: 400; }
