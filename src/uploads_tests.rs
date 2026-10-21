@@ -366,3 +366,31 @@ fn a_symlink_that_was_dropped_is_still_refused() {
     assert!(listing(&dir).is_empty());
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn r22_total_bytes_cap_refuses_and_leaves_the_directory_untouched() {
+    let dir = temp_root("quota");
+    let first = attach_with_cap(&dir, "a.png", PNG, 20).unwrap();
+    assert_eq!(first.size, PNG.len() as u64);
+    let before = listing(&dir);
+    for _ in 0..3 {
+        let err = attach_with_cap(&dir, "b.png", PNG, 20).expect_err("over quota");
+        assert!(err.safe_message.contains("límite de espacio"), "{}", err.safe_message);
+    }
+    assert_eq!(listing(&dir), before);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn r22_sweep_removes_only_stale_tmp_files() {
+    let dir = temp_root("sweep");
+    let kept = attach(&dir, "keep.png", PNG).unwrap().file;
+    fs::write(dir.join("tmp-deadbeef"), b"partial").unwrap();
+    fs::write(dir.join("other.txt"), b"x").unwrap();
+    sweep_stale_tmp(&dir, 3600); // fresh tmp file survives
+    assert!(dir.join("tmp-deadbeef").exists());
+    sweep_stale_tmp(&dir, 0);
+    assert!(!dir.join("tmp-deadbeef").exists());
+    assert!(dir.join(&kept).exists() && dir.join("other.txt").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
