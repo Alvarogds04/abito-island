@@ -225,6 +225,7 @@
       const v = N.multiView(n, multiDraft);
       prevEl.hidden = true;
       primaryEl.textContent = v.label; primaryEl.dataset.kind = 'done'; primaryEl.disabled = !view.controlsEnabled || !v.canDone;
+      if (v.reason) { primaryEl.title = v.reason; primaryEl.setAttribute('aria-description', v.reason); } else { primaryEl.removeAttribute('title'); primaryEl.removeAttribute('aria-description'); }
     }
     if (item && showText && textEl.value !== draft.text && document.activeElement !== textEl) { textEl.value = draft.text; growText(); } // each step keeps its own draft
   }

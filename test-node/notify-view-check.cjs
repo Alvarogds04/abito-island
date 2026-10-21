@@ -537,8 +537,10 @@ test('draftAnswered / itemPayload: the exact shapes the closed IPC takes; text c
 });
 test('multi-select: «Hecho» needs >= 1 option or text; the payload is answer_many {id, indexes, text?}', () => {
   const n = N.fromPending(multiP({ allow_free_text: true }));
-  assert.deepEqual(N.multiView(n, N.newDraft()), { label: 'Hecho', canDone: false });
+  assert.deepEqual(N.multiView(n, N.newDraft()), { label: 'Hecho', canDone: false, reason: 'Marcá al menos una' });
   assert.equal(N.multiView(n, D([1])).canDone, true);
+  assert.equal(N.multiView(n, D([0, 2])).label, 'Hecho (2)', 'S7: the primary counts the marked options');
+  assert.equal(N.multiView(n, D([1])).reason, '');
   assert.equal(N.multiView(n, D([], 'algo', true)).canDone, true);
   assert.equal(N.multiView(n, D([], '  ', true)).canDone, false);
   assert.deepEqual(N.manyPayload(n, D([2, 1])), { action: 'answer_many', id: n.id, indexes: [1, 2] });

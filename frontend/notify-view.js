@@ -387,7 +387,12 @@
     return typed ? { text: typed } : null;
   }
   const multiItem = n => ({ header: '', text: n.text, options: n.options, multiSelect: true, allowFreeText: n.allowFreeText });
-  const multiView = (n, draft) => ({ label: 'Hecho', canDone: draftAnswered(multiItem(n), draft, n.freeTextMax) });
+  const multiView = (n, draft) => {
+    const canDone = draftAnswered(multiItem(n), draft, n.freeTextMax);
+    const count = draft.picked.length + (draft.other && draft.text.trim() ? 1 : 0);
+    // S7: «Hecho (N)» counts what is marked; at 0 it stays «Hecho», disabled, with the reason as its accessible/tooltip text
+    return { label: count > 0 ? `Hecho (${count})` : 'Hecho', canDone, reason: canDone ? '' : 'Marcá al menos una' };
+  };
   function manyPayload(n, draft) {
     if (!n || !n.multiSelect || n.form) return null;
     const p = itemPayload(multiItem(n), draft, n.freeTextMax);
