@@ -430,4 +430,18 @@ test('wiring: the mount applies rowsViewport to #pill-choices on every layout/no
   assert.match(lay, /data-notices-calm|noticesCalm|attributeFilter: \[[^\]]*'data-notices-calm'/);
 });
 
+test('CSS: the «Recibida» / «Enviada» outcome card keeps the A layout width (438), so the blobs column (x446..) never overlaps its corner', () => {
+  assert.equal(px(decls('#capsule[data-question="outcome"]:not([data-card]) #question').width), 438);
+  assert.equal(px(decls('#capsule[data-question="expired"]:not([data-card]) #question').width), 438, 'an expired card is layout A too (not pending, so the blobs are the normal column and must stay free)');
+});
+test('CSS: a questionnaire/multi-select row shows its SELECTION without hover: filled background, a visible mark and a heavier label', () => {
+  const on = decls('.q-option[data-selected="true"]::after'), mark = decls('.q-option[data-selected="true"]::before');
+  assert.ok(on.background && on.background !== 'var(--btn-bg)', 'the selected row has its own fill');
+  assert.ok(mark.content && mark.content !== 'none', 'and a mark');
+  assert.equal(decls('.q-option[data-selected="true"] .q-label')['font-weight'], '700');
+  const notify = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(notify, /dataset\.selected = r\.checked \? 'true' : 'false'/, 'notify.js writes the state on every row');
+  assert.match(notify, /aria-checked/, 'and exposes it to assistive tech');
+});
+
 console.log(`island-layout-check: ${passed} checks ok`);

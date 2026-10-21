@@ -332,5 +332,63 @@ function noOverlaps(list, why) {
       passed += 1;
     } finally { await r.close(); }
   }
+  // v4-01b: a notice capsule in the blobs column must keep its title readable (the real capture showed «Pi… Hace…» and only 3 rows)
+  {
+    const r = await H.open({ notices: 1, noticeTitle: 'Pi terminó su turno', github: true, engine: 'account' });
+    try {
+      const title = (await r.measure('#notice-title'))[0], cap = (await r.measure('#notice-pill'))[0];
+      const fits = await r.page.evaluate(() => { const t = document.getElementById('notice-title'); return { sw: t.scrollWidth, cw: t.clientWidth, text: t.textContent }; });
+      assert.ok(fits.sw <= fits.cw + 1, `the notice title is not truncated in the column: «${fits.text}» needs ${fits.sw}px, has ${fits.cw}px`);
+      const sub = await r.page.evaluate(() => { const s = document.getElementById('notice-sub'); const st = getComputedStyle(s); return { shown: st.display !== 'none' && s.getBoundingClientRect().width > 0, w: s.getBoundingClientRect().width }; });
+      assert.ok(!sub.shown || sub.w >= 40, `the secondary text is either dropped or readable, never a 12px stub («Hace…»): ${JSON.stringify(sub)}`);
+      const rows = (await r.measure('.pill-choice')).filter(b => b.shown);
+      const list = (await r.measure('#pill-choices'))[0];
+      const whole = rows.filter(b => b.top >= list.top - 0.5 && b.bottom <= list.bottom + 0.5);
+      assert.ok(whole.length >= 3, `with a notice capsule the column still shows >= 3 whole rows, got ${whole.length}`);
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-notice-column.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
+  // v4-12 «Recibida»: after answering, the outcome card and the blobs column must not share pixels (the column overlapped the card's corner)
+  {
+    for (const kind of ['multi', 'form']) {
+      const r = await H.open({ question: kind, github: true });
+      try {
+        const q0 = (await r.measure('#question'))[0];
+        const opt = (await r.measure('.q-option')).find(b => b.shown);
+        await r.page.mouse.click(opt.left + opt.w / 2, opt.top + opt.h / 2);
+        if (kind === 'form') { for (let i = 0; i < 2; i++) { await r.page.waitForTimeout(250); const p = (await r.measure('#question-primary')).find(b => b.shown); if (p) await r.page.mouse.click(p.left + p.w / 2, p.top + p.h / 2); } }
+        else { await r.page.waitForTimeout(250); const p = (await r.measure('#question-primary')).find(b => b.shown); if (p) await r.page.mouse.click(p.left + p.w / 2, p.top + p.h / 2); }
+        await r.page.waitForTimeout(500);
+        const state = await r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question, text: (document.getElementById('question-state-word') || {}).textContent }));
+        if (state.q === 'outcome') {
+          const card = (await r.measure('#question'))[0], blobs = (await r.measure('#blobs'))[0];
+          assert.ok(!overlap(card, blobs) || !blobs.shown, `${kind}: the «${state.text}» card ${label(card)} and the blobs column ${label(blobs)} share pixels`);
+        } else { await r.screenshot(`/tmp/geo-note-${kind}.png`).catch(() => {}); }
+        passed += 1;
+      } catch (e) { await r.screenshot(`/tmp/geo-fail-recibida-${kind}.png`).catch(() => {}); throw e; }
+      finally { await r.close(); }
+    }
+  }
+  // v4-12-q4-paso1: in a questionnaire step the CHOSEN option shows a clear selected mark (not only the hover highlight)
+  {
+    const r = await H.open({ question: 'form', github: true });
+    try {
+      const rows = (await r.measure('.q-option')).filter(b => b.shown);
+      assert.ok(rows.length >= 3, 'the step shows its options');
+      const before = await r.page.evaluate(() => [...document.querySelectorAll('.q-option')].map(b => b.getAttribute('aria-checked') || b.dataset.selected || ''));
+      await r.page.mouse.click(rows[1].left + rows[1].w / 2, rows[1].top + rows[1].h / 2);
+      await r.page.waitForTimeout(300);
+      await r.page.mouse.move(5, 5); // the pointer leaves: nothing but the selection may still mark the row
+      await r.page.waitForTimeout(200);
+      const after = await r.page.evaluate(() => [...document.querySelectorAll('.q-option')].map(b => ({ checked: b.getAttribute('aria-checked'), selected: b.dataset.selected, mark: getComputedStyle(b, '::before').content, bg: getComputedStyle(b, '::after').backgroundColor, weight: getComputedStyle(b.querySelector('.q-label')).fontWeight })));
+      assert.equal(after[1].selected, 'true', `the chosen row is marked selected: ${JSON.stringify(after[1])}`);
+      assert.notEqual(after[1].selected, after[0].selected, 'only the chosen row');
+      assert.notEqual(after[1].bg, after[0].bg, `the chosen row looks different WITHOUT hover (background ${after[1].bg} vs ${after[0].bg})`);
+      assert.ok(after[1].mark && after[1].mark !== 'none', `a visible mark (a check or a filled radio): ${after[1].mark}`);
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-selected-step.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
   console.log(`island-geometry-check: ${passed} real-layout checks ok`);
 })().catch(e => { console.error(e); process.exit(1); });

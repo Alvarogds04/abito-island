@@ -50,7 +50,15 @@ async function open(scenario = {}) {
     const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' || !scenario.engine ? 0 : 1 };
     const accounts = scenario.engine === 'account' ? [] : [{ configured: true, local: false }];
     const connection = scenario.engine === 'down' ? 'no_daemon' : 'connected';
-    const pending = scenario.question ? {
+    const OPT = (i, label, description = '') => ({ index: i, label, description });
+    const pending = scenario.question === 'form' ? {
+      id: UUID, kind: 'question', agent: 'pi', agent_label: 'Pi', project_name: 'e1-ajustes', text: 'Configurar', allow_free_text: false, options: [], expires_at: Date.now() + 600000, free_text_max: 4000,
+      form: [{ header: 'Editor', text: '¿Cuál es tu editor favorito?', options: [OPT(0, 'vim'), OPT(1, 'emacs'), OPT(2, 'vscode')], multi_select: false, allow_free_text: false },
+        { header: 'Extras', text: '¿Qué extras?', options: [OPT(0, 'eslint'), OPT(1, 'prettier')], multi_select: true, allow_free_text: true }],
+    } : scenario.question === 'multi' ? {
+      id: UUID, kind: 'question', agent: 'pi', agent_label: 'Pi', project_name: 'e1-ajustes', text: '¿Qué querés instalar?', allow_free_text: true, multi_select: true,
+      options: [OPT(0, 'eslint'), OPT(1, 'prettier'), OPT(2, 'vitest')], expires_at: Date.now() + 600000, free_text_max: 4000,
+    } : scenario.question ? {
       id: UUID, kind: scenario.question === 'approval' ? 'question' : 'question', agent: scenario.question === 'approval' ? 'claude-code' : 'pi', agent_label: 'Pi', project_name: 'api',
       text: scenario.question === 'approval' ? 'Claude Code asks permission: Bash: rm -rf build/ && npm run build' : '¿Qué editor preferís?',
       options: scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: '' }, { index: 1, label: 'emacs', description: '' }, { index: 2, label: 'vscode', description: '' }],
@@ -64,9 +72,9 @@ async function open(scenario = {}) {
           if (a === 'dismiss') {
             const id = args.payload.id; const at = id ? snap.notices.findIndex(n => n.id === id) : 0;
             if (at >= 0) snap.notices.splice(at, 1);
-            snap.revision += 1; queueMicrotask(() => window.__emit('desktop:state', JSON.parse(JSON.stringify(snap))));
+            snap.revision += 1; queueMicrotask(() => window.__emit('desktop:state', structuredClone(snap)));
           }
-          return JSON.parse(JSON.stringify(snap));
+          return structuredClone(snap);
         }
         if (cmd === 'agent_action') return a === 'sessions_list' ? { connection, accounts, sessions: { rows: sessions, truncated: false } } : { connection, accounts };
         if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
@@ -84,7 +92,7 @@ async function open(scenario = {}) {
           : { available: false, reason: 'gh_missing' };
         if (cmd === 'question_action') {
           // answering consumes the pending question and the host reports «answered» (the producer's ack), like the real receiver
-          if (a === 'answer' || a === 'decline' || a === 'text') { window.__answered = true; const v = { available: true, pending: null, queued: [], queued_count: 0, deliveries: [], notice: 'sent' }; setTimeout(() => window.__emit('question:state', { ...v, notice: 'answered' }), 20); return v; }
+          if (a === 'answer' || a === 'decline' || a === 'text' || a === 'answer_many' || a === 'answer_form') { window.__answered = true; const v = { available: true, pending: null, queued: [], queued_count: 0, deliveries: [], notice: 'sent' }; setTimeout(() => window.__emit('question:state', { ...v, notice: 'answered' }), 20); return v; }
           return { available: true, pending: window.__answered ? null : pending, queued: [], queued_count: 0, deliveries: [], notice: window.__answered ? 'answered' : null };
         }
         if (cmd === 'focus_host') { (window.__focusCalls ||= []).push(args.payload); return {}; }
