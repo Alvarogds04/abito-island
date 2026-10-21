@@ -57,7 +57,7 @@ export type FlowPageRenderer = (container: HTMLElement, ctx: HubContext) => void
 export interface HubOptions {
   version: string;
   flowPages: Partial<Record<PageId, FlowPageRenderer>>;
-  renderNotch(page: PageId, container: HTMLElement): Promise<void | (() => void)>;
+  renderNotch(page: PageId, container: HTMLElement, navigate?: (page: PageId) => void): Promise<void | (() => void)>;
 }
 const DEFAULT_STATUS: FlowStatus = {
   prefs: {
@@ -148,7 +148,7 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
       page_.append(hero(def.id, def.title(), def.subtitle?.() ?? null));
       const container = h("div", { id: "settings-root" });
       page_.append(container);
-      const dispose = await opts.renderNotch(def.id, container);
+      const dispose = await opts.renderNotch(def.id, container, ctx.navigate);
       if (token !== rendering) { dispose?.(); return; }
       if (dispose) ctx.onLeave = dispose;
     }

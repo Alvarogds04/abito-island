@@ -14,3 +14,16 @@ body.settings-window { background: #000; color: #f5f6f8; }
 body.hub-window section.abito-card { gap: 6px; }
 body.hub-window section.abito-card > .row { min-height: 44px; }
 body.hub-window section.abito-card .switch::before { content: ""; position: absolute; inset: -12px -6px; }
+
+/* #503 S19 (Pestañas activas, Opción A): each row = dot, name, state as icon + word, switch, one contextual action.
+   The state is never colour alone; rows and their buttons are 44px high (touch-target-size). */
+.pill-row { min-height: 44px; }
+.pill-row .state { display: inline-flex; align-items: center; gap: 6px; }
+.pill-row .state-ico { font-weight: 700; width: 1em; text-align: center; }
+.pill-row .state.ok { color: var(--green); }
+.pill-row .state.missing { color: var(--amber); }
+.pill-row .state.main { color: var(--dim); }
+.pill-row .hub-btn { min-height: 32px; }
+.pill-row .pill-more { min-width: 44px; min-height: 44px; font-size: 18px; background: transparent; border: 0; color: var(--dim); }
+.pill-row .switch { position: relative; }
+.pill-row .switch::before { content: ""; position: absolute; inset: -12px -6px; }

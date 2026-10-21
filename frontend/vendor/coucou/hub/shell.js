@@ -138,7 +138,7 @@ async function startHub(root, opts) {
       page_.append(hero(def.id, def.title(), def.subtitle?.() ?? null));
       const container = h("div", { id: "settings-root" });
       page_.append(container);
-      const dispose = await opts.renderNotch(def.id, container);
+      const dispose = await opts.renderNotch(def.id, container, ctx.navigate);
       if (token !== rendering) {
         dispose?.();
         return;

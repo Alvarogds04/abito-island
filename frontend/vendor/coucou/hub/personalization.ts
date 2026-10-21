@@ -54,7 +54,27 @@ export async function renderAppearance({ invoke, listen, V, S, A }: any) {
   return s.finish();
 }
 
-export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all' }: any) {
+// #503 S19: what a pill row says about itself, as words and an icon (never colour alone), and the ONE fix it offers.
+// `to` is the Ajustes page where that fix lives; keys are in Integraciones, hooks in Agentes, local servers in Chat.
+export type PillState = { kind: 'ok' | 'missing' | 'soon' | 'unknown'; icon: string; word: string; fix?: { label: string; to: string } };
+export function pillStatus(d: any, hooks: any[], hookIds: Record<string, string>, presence: Record<string, boolean>, connection: any): PillState {
+  if (d.support === 'soon') return { kind: 'soon', icon: '·', word: 'próximamente' };
+  if (d.connect?.kind === 'hooks') {
+    const state = hooks.find((r: any) => r.id === hookIds[d.id])?.state;
+    if (state === 'connected') return { kind: 'ok', icon: '✓', word: 'lista' };
+    if (state && state !== 'unknown') return { kind: 'missing', icon: '✗', word: 'sin hooks', fix: { label: 'Instalar', to: 'agents' } };
+    return { kind: 'unknown', icon: '·', word: 'no disponible todavía' };
+  }
+  if (d.connect?.kind === 'key') return presence[d.connect.key] ? { kind: 'ok', icon: '✓', word: 'lista' } : { kind: 'missing', icon: '✗', word: 'falta llave', fix: { label: 'Configurar', to: 'integrations' } };
+  if (d.connect?.kind === 'server') {
+    const provider = d.id === 'ai_ollama' ? 'ollama' : 'lmstudio';
+    const connected = (connection?.accounts || []).some((a: any) => a.provider === provider && a.configured === true);
+    return connected ? { kind: 'ok', icon: '✓', word: 'conectado' } : { kind: 'missing', icon: '✗', word: 'sin conectar', fix: { label: 'Configurar', to: 'chat' } };
+  }
+  return { kind: 'ok', icon: '✓', word: 'lista' };
+}
+
+export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all', navigate }: any) {
   const s = session(invoke, listen), { root, call, work, watch, message } = s;
   let prefs: any = {}, store: any = null, listing: any = null, saving = false;
   let connection: any = null, presence: Record<string, boolean> = {};
@@ -166,21 +186,23 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all' 
         run({type:'prefs',payload:Object.hasOwn(next,d.id) ? {action:'set_pill_color',id:d.id,color:next[d.id]} : {action:'clear_pill_color',id:d.id}});
       }, true); dots.add(dot);
       const el = h('div', { class: full ? 'pill-row full' : 'pill-row' }, dot, h('span', { class: 'name', text: d.name }));
-      if (isMain) { el.append(h('span', { class: 'state', text: t('Main') })); return el; }
-      let why = '';
-      if (d.support === 'soon') why = t('Coming soon');
-      else if (d.connect?.kind === 'hooks') {
-        const state = hooks.find((r: any) => r.id === hookIds[d.id])?.state;
-        why = state === 'connected' ? '' : state && state !== 'unknown' ? t('Hooks not installed') : 'No disponible todavía';
-      } else if (d.connect?.kind === 'key') why = presence[d.connect.key] ? '' : t('Key not configured');
-      else if (d.connect?.kind === 'server') {
-        const provider = d.id === 'ai_ollama' ? 'ollama' : 'lmstudio';
-        const connected = (connection?.accounts || []).some((a: any) => a.provider === provider && a.configured === true);
-        why = connected ? '' : t('Not connected');
-      }
+      const stateEl = (st: PillState | { kind: 'main'; icon: string; word: string }) =>
+        h('span', { class: `state ${st.kind}` }, h('span', { class: 'state-ico', 'aria-hidden': 'true', text: st.icon }), h('span', { class: 'state-word', text: st.word }));
+      if (isMain) { el.append(stateEl({ kind: 'main', icon: '★', word: t('Main').toLowerCase() })); return el; }
+      const st = pillStatus(d, hooks, hookIds, presence, connection);
       const sw = trusted(toggle(on, () => { if(P.toggle(P.normalize(prefs),d.id)) run({type:'prefs',payload:{action:'toggle_declared_pill',id:d.id}}); }));
       (sw as HTMLButtonElement).disabled = saving || full; sw.setAttribute('aria-label',d.name);
-      el.append(h('span', { class: 'state', text: why }), sw); return el;
+      el.append(stateEl(st), sw);
+      // One contextual action: the fix when something is missing, the ⋮ menu (colour) when the pill is ready.
+      if (st.fix) {
+        const to = st.fix.to, fix = action(st.fix.label, () => navigate?.(to), typeof navigate !== 'function');
+        fix.setAttribute('aria-label', `${st.fix.label} ${d.name}`); el.append(fix);
+      } else if (st.kind === 'ok') {
+        const more = action('⋮', () => dot.open());
+        more.setAttribute('aria-label', `Más opciones de ${d.name}`); more.setAttribute('aria-haspopup', 'true'); more.title = 'Color'; more.className += ' pill-more';
+        el.append(more);
+      }
+      return el;
     }
     for (const cat of PILL_CATEGORIES) {
       if (cat.id === 'service') continue;

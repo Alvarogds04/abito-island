@@ -80,7 +80,7 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
   version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
-  async renderNotch(page, container) {
+  async renderNotch(page, container, navigate) {
     if (page === 'general') {
       try {
         const general = await renderGeneral({ invoke, V: window.AbitoSettings }); container.append(general);
@@ -92,7 +92,7 @@ startHub(root, {
       // Each renderer retains its closed IPC planner and per-mount cleanup.
       try {
         if (page === 'agents') mounted.push(await renderAgentSettings(options));
-        if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page }));
+        if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page, navigate }));
         if (page === 'chat') {
           const chat = await renderChatSettings(options); mounted.push(chat);
           const models = await renderModels(options);

@@ -77,7 +77,23 @@ async function renderAppearance({ invoke, listen, V, S, A }) {
   });
   return s.finish();
 }
-async function renderPills({ invoke, listen, V, S, A, P, C, page = "all" }) {
+function pillStatus(d, hooks, hookIds, presence, connection) {
+  if (d.support === "soon") return { kind: "soon", icon: "·", word: "próximamente" };
+  if (d.connect?.kind === "hooks") {
+    const state = hooks.find((r) => r.id === hookIds[d.id])?.state;
+    if (state === "connected") return { kind: "ok", icon: "✓", word: "lista" };
+    if (state && state !== "unknown") return { kind: "missing", icon: "✗", word: "sin hooks", fix: { label: "Instalar", to: "agents" } };
+    return { kind: "unknown", icon: "·", word: "no disponible todavía" };
+  }
+  if (d.connect?.kind === "key") return presence[d.connect.key] ? { kind: "ok", icon: "✓", word: "lista" } : { kind: "missing", icon: "✗", word: "falta llave", fix: { label: "Configurar", to: "integrations" } };
+  if (d.connect?.kind === "server") {
+    const provider = d.id === "ai_ollama" ? "ollama" : "lmstudio";
+    const connected = (connection?.accounts || []).some((a) => a.provider === provider && a.configured === true);
+    return connected ? { kind: "ok", icon: "✓", word: "conectado" } : { kind: "missing", icon: "✗", word: "sin conectar", fix: { label: "Configurar", to: "chat" } };
+  }
+  return { kind: "ok", icon: "✓", word: "lista" };
+}
+async function renderPills({ invoke, listen, V, S, A, P, C, page = "all", navigate }) {
   const s = session(invoke, listen), { root, call, work, watch, message } = s;
   let prefs = {}, store = null, listing = null, saving = false;
   let connection = null, presence = {};
@@ -279,27 +295,30 @@ async function renderPills({ invoke, listen, V, S, A, P, C, page = "all" }) {
       }, true);
       dots.add(dot);
       const el = h("div", { class: full ? "pill-row full" : "pill-row" }, dot, h("span", { class: "name", text: d.name }));
+      const stateEl = (st2) => h("span", { class: `state ${st2.kind}` }, h("span", { class: "state-ico", "aria-hidden": "true", text: st2.icon }), h("span", { class: "state-word", text: st2.word }));
       if (isMain) {
-        el.append(h("span", { class: "state", text: t("Main") }));
+        el.append(stateEl({ kind: "main", icon: "★", word: t("Main").toLowerCase() }));
         return el;
       }
-      let why = "";
-      if (d.support === "soon") why = t("Coming soon");
-      else if (d.connect?.kind === "hooks") {
-        const state = hooks.find((r) => r.id === hookIds[d.id])?.state;
-        why = state === "connected" ? "" : state && state !== "unknown" ? t("Hooks not installed") : "No disponible todavía";
-      } else if (d.connect?.kind === "key") why = presence[d.connect.key] ? "" : t("Key not configured");
-      else if (d.connect?.kind === "server") {
-        const provider = d.id === "ai_ollama" ? "ollama" : "lmstudio";
-        const connected = (connection?.accounts || []).some((a) => a.provider === provider && a.configured === true);
-        why = connected ? "" : t("Not connected");
-      }
+      const st = pillStatus(d, hooks, hookIds, presence, connection);
       const sw = trusted(toggle(on, () => {
         if (P.toggle(P.normalize(prefs), d.id)) run({ type: "prefs", payload: { action: "toggle_declared_pill", id: d.id } });
       }));
       sw.disabled = saving || full;
       sw.setAttribute("aria-label", d.name);
-      el.append(h("span", { class: "state", text: why }), sw);
+      el.append(stateEl(st), sw);
+      if (st.fix) {
+        const to = st.fix.to, fix = action(st.fix.label, () => navigate?.(to), typeof navigate !== "function");
+        fix.setAttribute("aria-label", `${st.fix.label} ${d.name}`);
+        el.append(fix);
+      } else if (st.kind === "ok") {
+        const more = action("⋮", () => dot.open());
+        more.setAttribute("aria-label", `Más opciones de ${d.name}`);
+        more.setAttribute("aria-haspopup", "true");
+        more.title = "Color";
+        more.className += " pill-more";
+        el.append(more);
+      }
       return el;
     }
     for (const cat of PILL_CATEGORIES) {
@@ -430,6 +449,7 @@ async function renderPills({ invoke, listen, V, S, A, P, C, page = "all" }) {
   } });
 }
 export {
+  pillStatus,
   renderAppearance,
   renderPills
 };

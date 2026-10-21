@@ -86,7 +86,7 @@ function colorDot(def, size, colors, pick, trustedOnly = false) {
     e.preventDefault();
     open();
   });
-  return Object.assign(dot, { dispose: () => release() });
+  return Object.assign(dot, { dispose: () => release(), open: () => closeOpen ? closeOpen() : open() });
 }
 export {
   colorDot

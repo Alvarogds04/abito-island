@@ -20,7 +20,7 @@ export function colorDot(
   colors: () => unknown,
   pick: (next: Record<string, string>) => void,
   trustedOnly = false, // Abito: opt-in boundary for the settings webview.
-): HTMLElement & { dispose(): void } {
+): HTMLElement & { dispose(): void; open(): void } {
   let release = () => {};
   const current = () => pillColor(def.id, def.color, colors());
   const dot = h("i", {
@@ -102,5 +102,6 @@ export function colorDot(
     e.preventDefault();
     open();
   });
-  return Object.assign(dot, { dispose: () => release() });
+  // Abito (#503 S19): the row's ⋮ menu opens this same palette; it is the caller's trusted gesture that asks.
+  return Object.assign(dot, { dispose: () => release(), open: () => (closeOpen ? closeOpen() : open()) });
 }
