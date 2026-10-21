@@ -191,7 +191,7 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
       if (isMain) { el.append(stateEl({ kind: 'main', icon: '★', word: t('Main').toLowerCase() })); return el; }
       const st = pillStatus(d, hooks, hookIds, presence, connection);
       const sw = trusted(toggle(on, () => { if(P.toggle(P.normalize(prefs),d.id)) run({type:'prefs',payload:{action:'toggle_declared_pill',id:d.id}}); }));
-      (sw as HTMLButtonElement).disabled = saving || full; sw.setAttribute('aria-label',d.name);
+      (sw as HTMLButtonElement).disabled = saving || full; sw.setAttribute('aria-label',d.name); sw.setAttribute('aria-pressed',String(on));
       el.append(stateEl(st), sw);
       // One contextual action: the fix when something is missing, the ⋮ menu (colour) when the pill is ready.
       if (st.fix) {

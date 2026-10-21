@@ -91,7 +91,7 @@ startHub(root, {
       const mounted = [];
       // Each renderer retains its closed IPC planner and per-mount cleanup.
       try {
-        if (page === 'agents') mounted.push(await renderAgentSettings(options));
+        if (page === 'agents') mounted.push(await renderAgentSettings(options));  // options.P = the pills module: «En isla» is the pill declaration
         if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page, navigate }));
         if (page === 'chat') {
           const chat = await renderChatSettings(options); mounted.push(chat);

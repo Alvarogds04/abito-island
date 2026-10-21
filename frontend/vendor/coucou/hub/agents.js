@@ -5,6 +5,7 @@ import { toggle } from "./ui.js";
 import { notchSection as section, notchRow as row, notchHint as hint } from "./notch.js";
 import { session, trusted } from "./runtime.js";
 import { t } from "./i18n-es.js";
+import { MAX_DECLARED } from "../core/pills.js";
 const UNAVAILABLE = "No disponible todavía";
 const AGENTS = [
   ["codex", "Codex", true],
@@ -30,7 +31,20 @@ const button = (key, fn, kind = "", disabled = false) => {
   if (disabled) b.title = UNAVAILABLE;
   return b;
 };
-async function renderAgentSettings({ invoke, V, listen, timers }) {
+const AGENT_PILL = {
+  "claude-code": "integration_claude",
+  codex: "agent_codex",
+  "copilot-cli": "agent_copilot",
+  muse: "agent_muse",
+  "gemini-cli": "agent_gemini",
+  antigravity: "agent_antigravity",
+  cursor: "agent_cursor",
+  opencode: "agent_opencode",
+  amp: "agent_amp",
+  hermes: "agent_hermes"
+};
+const TONE_ICON = { go: "✓", red: "✗", sun: "!", faint: "○", live: "…" };
+async function renderAgentSettings({ invoke, V, P, listen, timers }) {
   const s = session(invoke, listen, timers), { root, call, work, watch } = s;
   root.style.setProperty("display", "contents");
   s.message.className = "abito-settings-feedback notice err";
@@ -115,19 +129,115 @@ async function renderAgentSettings({ invoke, V, listen, timers }) {
     redraw();
     return block;
   }
+  const stateCell = (icon, word) => h("span", { class: "agent-state", role: "cell" }, h("span", { class: "state-ico", "aria-hidden": "true", text: icon }), h("span", { class: "state-word", text: word }));
+  function islandSwitch(id) {
+    const pill = AGENT_PILL[id], cur = P && prefsKnown ? P.normalize(prefs) : null;
+    const isMain = !!cur && cur.mainPill === pill, on = isMain || !!cur?.declaredPills.includes(pill);
+    const sw = trusted(toggle(on, () => {
+      if (cur && pill && !isMain && P.toggle(P.normalize(prefs), pill)) work(() => call("prefs_action", { action: "toggle_declared_pill", id: pill }), (next) => {
+        prefs = next;
+        paint();
+      }, () => paint());
+    }));
+    sw.setAttribute("aria-label", `En la isla: ${id}`);
+    sw.setAttribute("aria-pressed", String(on));
+    const full = !!cur && !on && cur.declaredPills.length >= MAX_DECLARED;
+    sw.disabled = !cur || !pill || isMain || full;
+    if (isMain) sw.setAttribute("title", "Es la píldora principal de la isla.");
+    else if (full) sw.setAttribute("title", "Ya usas las 4 píldoras; quita una en Pestañas activas.");
+    else if (!cur || !pill) sw.setAttribute("title", UNAVAILABLE);
+    return h("span", { class: "agent-island", role: "cell" }, sw);
+  }
+  function agentRow(id, name, claude = false) {
+    const r = V.agentsView(state, { timedOut: true }).rows?.find((a) => a.id === id);
+    const installed = r?.state === "connected" || r?.state === "outdated";
+    const unknown = !r || r.state === "unknown";
+    const detail = flex(10), actions = h("span", { class: "agent-actions", role: "cell" }), menu = h("div", { class: "agent-menu", role: "group" });
+    let open = false;
+    const entry = h("div", { class: "agent-entry", id: `agent-row-${id}` });
+    const line = h(
+      "div",
+      { class: "agent-row", role: "row" },
+      h("span", { class: "agent-name", role: "cell", text: name }),
+      unknown ? stateCell("·", UNAVAILABLE) : stateCell(TONE_ICON[r.tone] || "○", r.word),
+      islandSwitch(id),
+      actions
+    );
+    entry.append(line, menu, detail);
+    const redraw = () => {
+      clear(actions);
+      clear(menu);
+      clear(detail);
+      const installable = !!r?.primary?.command?.plan_hash && !!r?.summary && r?.reviewable && !busy;
+      const install = button(
+        claude ? installed ? "Reinstall hooks…" : "Install hooks…" : installed ? "Reinstall…" : "Install…",
+        () => {
+          open = false;
+          reviewChange(detail, r, true, redraw);
+        },
+        installed ? "" : "primary",
+        !installable
+      );
+      const remove = r?.secondary ? button(claude ? "Uninstall hooks…" : "Uninstall…", () => {
+        open = false;
+        reviewChange(detail, r, false, redraw);
+      }, "danger", busy) : null;
+      if (installed || remove) {
+        const more = trusted(h("button", { class: "agent-more", text: "⋮", onclick: () => {
+          open = !open;
+          redraw();
+        } }));
+        more.type = "button";
+        more.setAttribute("aria-label", `Más opciones de ${name}`);
+        more.setAttribute("aria-haspopup", "true");
+        more.setAttribute("aria-expanded", String(open));
+        actions.append(more);
+        if (open) {
+          menu.append(install);
+          if (remove) menu.append(remove);
+        }
+      } else if (!unknown) actions.append(install);
+      if (claude) detail.append(hint(t(installed ? "Abito is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there." : "Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.")));
+      if (r?.note) detail.append(hint(r.note));
+    };
+    redraw();
+    return entry;
+  }
+  function piRow() {
+    const rows = state?.sessions?.rows, known = Array.isArray(rows), active = known && rows.some((x) => x?.kind === "pi");
+    const sw = trusted(toggle(true, () => {
+    }));
+    sw.disabled = true;
+    sw.setAttribute("title", "Pi es el agente principal: siempre está en la isla.");
+    sw.setAttribute("aria-label", "En la isla: Pi");
+    sw.setAttribute("aria-pressed", "true");
+    return h("div", { class: "agent-entry", id: "agent-row-pi" }, h(
+      "div",
+      { class: "agent-row", role: "row" },
+      h("span", { class: "agent-name", role: "cell", text: "Pi" }),
+      known ? stateCell(active ? "✓" : "○", active ? "activo" : "sin sesión") : stateCell("·", UNAVAILABLE),
+      h("span", { class: "agent-island", role: "cell" }, sw),
+      h("span", { class: "agent-actions", role: "cell" })
+    ));
+  }
   function paint() {
     if (reviewing) return;
     clear(root);
-    const list = flex(14);
+    const list = flex(0);
     list.setAttribute("id", "agent-hook-list");
     const reported = new Set((V.agentsView(state, { timedOut: true }).rows || []).filter((r) => r.state !== "unknown").map((r) => r.id));
     const unavailable = h("details", { id: "agent-hook-unavailable" }, h("summary", { class: "hint", text: UNAVAILABLE }));
-    const catalogue = flex(14);
-    for (const [id, name, approvals] of AGENTS) {
-      (reported.has(id) ? list : catalogue).append(agentBlock(id, name, approvals));
-    }
-    if (!list.children.length) list.append(hint(t("Abito could not list the agents.")));
+    const catalogue = flex(0);
+    list.append(agentRow("claude-code", "Claude Code", true));
+    for (const [id, name] of AGENTS) (reported.has(id) ? list : catalogue).append(agentRow(id, name));
+    list.append(piRow());
     unavailable.append(catalogue);
+    const header = h(
+      "div",
+      { class: "agent-row agent-head", role: "row" },
+      ...["Agente", "Estado", "En isla", "Acciones"].map((c) => h("span", { role: "columnheader", text: c }))
+    );
+    const table = h("div", { class: "agent-table", role: "table", "aria-label": "Agentes" }, header, list);
     const planBody = flex(12);
     const claudeUp = plans.claude?.available === true, codexUp = plans.codex?.available === true;
     const sw = (on, action, key) => {
@@ -150,8 +260,13 @@ async function renderAgentSettings({ invoke, V, listen, timers }) {
       row(t("Show Codex plan in the notch"), sw(prefs.showCodexPlanInNotch === true, "set_show_codex_plan_in_notch", "show_codex_plan_in_notch"))
     );
     root.append(
-      agentBlock("claude-code", "Claude Code", true, true),
-      section(t("Agents"), hint(t("Show other coding agents in the island. Abito adds its entries to each agent's own config: you see the exact change and where the backup goes before anything is written, and uninstalling removes only what Abito added.")), list, ...catalogue.children.length ? [unavailable] : []),
+      section(
+        t("Agents"),
+        hint(t("Show other coding agents in the island. Abito adds its entries to each agent's own config: you see the exact change and where the backup goes before anything is written, and uninstalling removes only what Abito added.")),
+        hint("Desinstalar quita solo lo que Abito agregó; antes se guarda un respaldo."),
+        table,
+        unavailable
+      ),
       section(t("Plan usage"), planBody),
       section(t("Weekly recap"), agentBlock("recap", t("Weekly recap"), false, false, true)),
       s.message

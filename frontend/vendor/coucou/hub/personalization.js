@@ -306,6 +306,7 @@ async function renderPills({ invoke, listen, V, S, A, P, C, page = "all", naviga
       }));
       sw.disabled = saving || full;
       sw.setAttribute("aria-label", d.name);
+      sw.setAttribute("aria-pressed", String(on));
       el.append(stateEl(st), sw);
       if (st.fix) {
         const to = st.fix.to, fix = action(st.fix.label, () => navigate?.(to), typeof navigate !== "function");

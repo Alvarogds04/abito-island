@@ -27,3 +27,19 @@ body.hub-window section.abito-card .switch::before { content: ""; position: abso
 .pill-row .pill-more { min-width: 44px; min-height: 44px; font-size: 18px; background: transparent; border: 0; color: var(--dim); }
 .pill-row .switch { position: relative; }
 .pill-row .switch::before { content: ""; position: absolute; inset: -12px -6px; }
+
+/* #503 S20 (Agentes, Opción B): a compact table, one 40px row per agent: name | state (icon + word) | «En isla» | actions. */
+.agent-table { display: flex; flex-direction: column; }
+.agent-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(130px, 1.2fr) 72px minmax(120px, 1fr); align-items: center; gap: 12px; min-height: 40px; border-bottom: 1px solid var(--hairline); }
+.agent-head { min-height: 28px; font: 600 11px var(--font); color: var(--dim); }
+.agent-name { font-size: 12.5px; }
+.agent-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.agent-state .state-ico { font-weight: 700; width: 1em; text-align: center; }
+.agent-island { display: inline-flex; }
+.agent-island .switch { position: relative; }
+.agent-island .switch::before { content: ""; position: absolute; inset: -12px -6px; }
+.agent-actions { display: inline-flex; justify-content: flex-end; gap: 8px; }
+.agent-more { min-width: 44px; min-height: 40px; font-size: 18px; background: transparent; border: 0; color: var(--dim); }
+.agent-menu { display: flex; gap: 8px; justify-content: flex-end; padding: 6px 0; }
+.agent-menu:empty { display: none; }
+.agent-entry > .agent-row:last-child { border-bottom: 0; }
