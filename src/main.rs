@@ -84,7 +84,9 @@ fn ensure_island_window(app: &AppHandle) -> Rect {
     let area = refresh_work_area(app, &state);
     let Some(win) = main_window(app) else { return area };
     let io = TauriIo(&win);
-    let wanted = geometry::island_window_rect_h(area, io.scale(), state.window_h.load(Ordering::SeqCst));
+    let monitor = *state.monitor.lock().expect("monitor lock");
+    let monitor = if monitor.w > 0 && monitor.h > 0 { monitor } else { area };
+    let wanted = geometry::island_window_rect_on(monitor, area, io.scale(), state.window_h.load(Ordering::SeqCst));
     if io.size() != (wanted.w, wanted.h) {
         io.set_size(wanted.w, wanted.h);
     }
@@ -299,6 +301,9 @@ struct Evidence {
 struct AppState {
     core: Mutex<Core>,
     work_area: Mutex<Rect>,
+    /// The monitor the island centres on (the screen, like a notch): a side dock shrinks `work_area` asymmetrically and used to shift
+    /// the island sideways. Empty (0x0) until the first placement: the work area is then the only truth.
+    monitor: Mutex<Rect>,
     requested: Mutex<Requested>,
     evidence: Mutex<Option<Evidence>>,
     /// One-shot: spawn the settle-and-retry geometry pin the first time the
@@ -496,7 +501,12 @@ fn store_requested(
 fn refresh_work_area(app: &AppHandle, state: &AppState) -> Rect {
     let Some(win) = main_window(app) else { return *state.work_area.lock().unwrap_or_else(|e| e.into_inner()) };
     let wa = workarea::current(&win);
-    let rect = placement_area(&win, wa.rect, settingshost::chosen_monitor(app).as_deref());
+    let chosen = settingshost::chosen_monitor(app);
+    let rect = placement_area(&win, wa.rect, chosen.as_deref());
+    // The screen the island centres on: the chosen monitor's bounds when one is chosen (its bounds ARE its work area there), else
+    // the monitor the window lives on. Unknown -> the work area (today's behaviour).
+    let monitor = if chosen.is_some() { rect } else { wa.monitor.unwrap_or(rect) };
+    *state.monitor.lock().expect("monitor lock") = monitor;
     *state.work_area.lock().expect("work area lock") = rect;
     rect
 }
@@ -1767,6 +1777,7 @@ fn main() {
             w: 0,
             h: 0,
         }),
+        monitor: Mutex::new(Rect { x: 0, y: 0, w: 0, h: 0 }),
         requested: Mutex::new(Requested::default()),
         evidence: Mutex::new(None),
         initial_pin: AtomicBool::new(false),

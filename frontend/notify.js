@@ -313,10 +313,18 @@
       return true;
     }, () => false);
   }
+  let sentIslandH = -1;
+  function publishSize(islandH) {
+    // always tell the island, even the first time: a stale larger height must never survive a question that closed
+    if (islandH !== sentIslandH) { sentIslandH = islandH; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH } })); }
+  }
   function fitCard() {
-    if (capsule.dataset.question !== 'pending' && capsule.dataset.question !== 'expired') {
-      if (sizedKey) { sizedKey = ''; root.style.height = ''; root.style.overflowY = ''; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: 0 } })); }
-      askWindow(0); maxIslandH = N.QUESTION_MAX_ISLAND_H; // closed: the fixed window again
+    const state = capsule.dataset.question;
+    if (state !== 'pending' && state !== 'expired') {
+      const closed = N.sizeSync({ question: state, islandH: 0 });
+      sizedKey = ''; root.style.height = ''; root.style.overflowY = '';
+      publishSize(closed.islandH);
+      askWindow(closed.islandH); maxIslandH = N.QUESTION_MAX_ISLAND_H; // closed: the fixed window again
       return;
     }
     root.style.height = 'auto'; root.style.overflowY = 'hidden';
@@ -324,7 +332,7 @@
     const layout = N.questionLayout(content, maxIslandH);
     root.style.height = `${layout.cardH}px`; root.style.overflowY = layout.scroll ? 'auto' : 'hidden';
     const key = `${layout.cardH}:${layout.scroll}`;
-    if (key !== sizedKey) { sizedKey = key; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: layout.islandH } })); }
+    if (key !== sizedKey) { sizedKey = key; publishSize(N.sizeSync({ question: state, islandH: layout.islandH }).islandH); }
     // does the content want more than the window granted so far? ask once for the uncapped size, then refit inside the grant
     const wanted = N.questionLayout(content, 10000);
     if (wanted.islandH > maxIslandH) askWindow(wanted.islandH).then(changed => { if (changed) { sizedKey = ''; fitCard(); } });

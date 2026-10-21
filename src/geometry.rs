@@ -83,8 +83,15 @@ pub fn island_window_rect(area: Rect, scale: f64) -> Rect {
 /// The same top-centred window, `height` logical pixels tall (grown on demand for a long question). Width and the top anchor
 /// never change; a work area shorter than the request wins (clamp_rect keeps the window on screen).
 pub fn island_window_rect_h(area: Rect, scale: f64, height: i32) -> Rect {
+    island_window_rect_on(area, area, scale, height)
+}
+/// Horizontally centred on `monitor` (the island hangs from the top centre of the SCREEN, like a notch), vertically from `area`
+/// (a top panel pushes it down) and kept inside `area`. A side dock shrinks the work area asymmetrically, so centring on the work
+/// area put the island 23 px off to one side on a 46 px dock.
+pub fn island_window_rect_on(monitor: Rect, area: Rect, scale: f64, height: i32) -> Rect {
     let (w, h) = scaled_size((ISLAND_WINDOW.0, height), scale);
-    clamp_rect(initial_position(area, w, h), area)
+    let centred = Rect { x: monitor.x + (monitor.w - w) / 2, y: area.y, w, h };
+    clamp_rect(centred, area)
 }
 /// A long question may grow the native window up to this share of the work-area height (human: «abito se ajusta al tamaño»).
 pub const WINDOW_GROWTH_PERCENT: i32 = 70;
@@ -323,5 +330,32 @@ mod tests {
         let huge = island_window_rect_h(area, 1.0, 5000);
         assert_eq!((huge.y, huge.h), (area.y, area.h));
         assert_eq!(island_window_rect_h(area, 2.0, 500).h, 1000, "the height is logical, scaled to physical");
+    }
+
+    #[test]
+    fn the_window_is_centred_on_the_monitor_not_on_a_work_area_a_side_dock_has_shifted() {
+        // 1920x1080 monitor, a 46 px dock on the LEFT: GNOME's work area is x=46, w=1874, so its centre is 983 (23 px right of the
+        // screen centre 960). The island hangs from the top centre of the SCREEN (like a notch), not of what a dock left over.
+        let monitor = Rect { x: 0, y: 0, w: 1920, h: 1080 };
+        let work = Rect { x: 46, y: 0, w: 1874, h: 1080 };
+        let r = island_window_rect_on(monitor, work, 1.0, ISLAND_WINDOW.1);
+        assert_eq!(r.x + r.w / 2, 960, "window centre = monitor centre");
+        assert_eq!((r.x, r.w), (624, 672));
+        assert_eq!(r.y, work.y, "the top still honours the work area (a top panel pushes it down)");
+        // a top panel: y comes from the work area, x from the monitor
+        let top = island_window_rect_on(monitor, Rect { x: 0, y: 32, w: 1920, h: 1048 }, 1.0, ISLAND_WINDOW.1);
+        assert_eq!((top.x, top.y), (624, 32));
+        // a second monitor to the right keeps its own centre
+        let second = Rect { x: 1920, y: 0, w: 2560, h: 1440 };
+        let r2 = island_window_rect_on(second, second, 1.0, ISLAND_WINDOW.1);
+        assert_eq!(r2.x + r2.w / 2, 1920 + 1280);
+        // the dock on the RIGHT shifts the other way: still the monitor centre
+        let right = island_window_rect_on(monitor, Rect { x: 0, y: 0, w: 1874, h: 1080 }, 1.0, ISLAND_WINDOW.1);
+        assert_eq!(right.x + right.w / 2, 960);
+        // a monitor narrower than the window clamps inside the work area (being on screen wins)
+        let tiny = island_window_rect_on(Rect { x: 0, y: 0, w: 500, h: 400 }, Rect { x: 0, y: 0, w: 500, h: 400 }, 1.0, ISLAND_WINDOW.1);
+        assert!(tiny.x >= 0 && tiny.right() <= 500);
+        // without a monitor the work area is the only truth: today's behaviour
+        assert_eq!(island_window_rect_h(work, 1.0, ISLAND_WINDOW.1), island_window_rect_on(work, work, 1.0, ISLAND_WINDOW.1));
     }
 }

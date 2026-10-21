@@ -1323,6 +1323,7 @@
   document.addEventListener('abito:question', event => {
     const show = !!(event.detail && event.detail.show);
     if (show) finishedCycle?.cancel(); // never cover a pending question with finished content
+    if (!show) questionH = QUESTION_H; // closing the question resets the island height regardless of the size event
     if (show !== questionShown) { questionShown = show; render(); }
     paintCompactFlag();
     if (event.detail && event.detail.reveal) {
