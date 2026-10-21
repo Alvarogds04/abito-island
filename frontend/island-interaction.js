@@ -95,7 +95,7 @@
     let preferences = DEFAULTS, facts = {}, inside = false, hoverOnly = false;
     let timer = null, deadline = null, stopped = false, opening = false, closing = false;
     let exhausted = false, generation = 0, timerGeneration = 0, published = 'null';
-    let pinned = false;
+    let pinned = false, closeFailures = 0;
 
     function emit(value) {
       const key = JSON.stringify(value);
@@ -120,7 +120,19 @@
           opening = false;
           if (!ok) { hoverOnly = false; exhausted = true; }
           reconcile();
-        } else closing = false; // never retry a rejected/spent close on churn
+        } else {
+          closing = false;
+          if (ok) { closeFailures = 0; return; }
+          // The host refused (or failed) the close. It used to be spent for the rest of the expansion, so ONE transient refusal
+          // disabled the auto-close for good. Now the CLOCK retries it on a backoff (one period, then x2, capped at 120 s); snapshot
+          // churn never does, and a user action or a fresh expansion starts again at one period.
+          closeFailures++;
+          const seconds = preferences.autoCloseSeconds;
+          if (seconds === 0 || !eligible(facts)) return;
+          exhausted = false;
+          deadline = now() + Math.min(120000, seconds * 1000 * 2 ** (closeFailures - 1));
+          reconcile();
+        }
       }
       try { Promise.resolve(options[kind]()).then(() => settled(true), () => settled(false)); }
       catch { settled(false); }
@@ -176,7 +188,7 @@
       if ((previousState === 'expanded' && facts.state !== 'expanded') || facts.state === 'hidden') {
         hoverOnly = false; pinned = false; invalidate(); clearDeadline();
       }
-      if (!before && eligible(facts)) exhausted = false;
+      if (!before && eligible(facts)) { exhausted = false; closeFailures = 0; }
       reconcile();
     }
     function setPreferences(next) {
@@ -202,7 +214,7 @@
     function engage(event) {
       if (stopped || !deliberate(event) || facts.state !== 'expanded') return false;
       const consumedHover = hoverOnly;
-      hoverOnly = false; exhausted = false; reconcile(true);
+      hoverOnly = false; exhausted = false; closeFailures = 0; reconcile(true);
       // Native adapter uses this intent, but still classifies real short-click
       // versus drag itself. This return value is NOT permission to cancel drag.
       return consumedHover;
@@ -220,8 +232,27 @@
       if (stopped) return;
       stopped = true; invalidate(); hoverOnly = false; pinned = false; exhausted = true; clearDeadline();
     }
+    // WHY the island is (not) closing, as one short word for the live preview to show (capsule.dataset.autoClose).
+    function why() {
+      if (stopped) return 'detenido';
+      if (!facts || Object.keys(facts).length === 0) return 'sin-hechos';
+      if (facts.state !== 'expanded') return `estado:${facts.state}`;
+      if (facts.view !== 'overview') return `vista:${facts.view}`;
+      if (facts.settled !== true) return 'sin-asentar';
+      if (facts.nativeReady !== true) return 'nativo-no-listo';
+      const blocker = BLOCKERS.find(key => facts[key] !== false);
+      if (blocker) return blocker;
+      if (pinned) return 'fijada';
+      if (inside) return 'puntero-dentro';
+      if (opening) return 'abriendo';
+      if (closing) return 'cerrando';
+      if (preferences.autoCloseSeconds === 0 && !hoverOnly) return 'nunca';
+      if (deadline === null) return exhausted ? 'agotado' : 'sin-plazo';
+      const left = Math.max(0, Math.ceil((deadline - now()) / 1000));
+      return closeFailures > 0 ? `rechazado:reintento ${left}s` : `armado:${left}s`;
+    }
     function snapshot() {
-      return { preferences: { ...preferences }, inside, hoverOnly, pinned, deadline, stopped, opening, closing,
+      return { why: why(), preferences: { ...preferences }, inside, hoverOnly, pinned, deadline, stopped, opening, closing,
         eligible: eligible(facts), countdown: deadline === null ? null : countdown(deadline, now(), preferences.autoCloseSeconds) };
     }
     return Object.freeze({ update, setPreferences, enter, leave, engage, togglePin, reset, stop, snapshot });
