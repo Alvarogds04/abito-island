@@ -20,6 +20,7 @@ use std::fmt;
 #[path = "hotkey_tests.rs"]
 mod tests;
 
+pub mod gnome;
 pub mod portal;
 pub mod x11;
 // U3a: the Win32 grabber seam; its whole body is cfg(windows)-gated, so this
@@ -544,6 +545,9 @@ pub struct View {
     /// Why the portal route was dropped (the human declined the OS dialog, or the
     /// portal failed), so the chip can keep saying it after the X11 fallback took over.
     pub portal_note: Option<Status>,
+    /// The combination the OS reports as really bound (the human may have changed it in GNOME's
+    /// settings). `None` until the OS answered or when the portal does not hold the shortcut.
+    pub effective: Option<String>,
 }
 
 /// The status a configuration implies before any grab happened.

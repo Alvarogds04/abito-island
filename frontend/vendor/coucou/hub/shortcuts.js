@@ -64,7 +64,7 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
     for (const d of SHORTCUTS.filter((d2) => d2.ported)) {
       const supported = Object.hasOwn(views, d.id), hotkey = views[d.id], known = supported && !!hotkey;
       const enabled = supported ? hotkey?.enabled === true : d.enabledByDefault;
-      const keys = hotkey ? hotkey.combo : d.defaultKeys;
+      const keys = hotkey ? hotkey.effective || hotkey.combo : d.defaultKeys;
       const sw = trusted(toggle(enabled, (on) => {
         if (known && !busy) save(d.id, { action: on ? "enable" : "disable" });
       }));

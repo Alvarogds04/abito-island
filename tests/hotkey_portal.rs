@@ -3,7 +3,7 @@
 //! The fake follows the documented Request/Response protocol, including the OS
 //! permission dialog (accept / decline / never answered).
 #![cfg(target_os = "linux")] // Requires the Linux private-bus D-Bus runner.
-use abito_island::hotkey::{portal::client::{probe, PortalGrabber}, portal::{PortalState, SHORTCUT_ID}, Combo, Status};
+use abito_island::hotkey::{portal::client::{probe, PortalGrabber, PortalHub}, portal::{bind_requests, route_activation, PortalState, ShortcutSignal, SHORTCUT_ID}, Combo, Status};
 use std::collections::HashMap;
 use std::os::unix::fs::DirBuilderExt;
 use std::process::{Child, Command, Stdio};
@@ -43,7 +43,7 @@ struct FakePortal { strict_app_id: bool, version_delay: Duration, dialog: Dialog
 
 /// Everything one fake portal remembers; NEVER shared between tests running in parallel.
 #[derive(Default)]
-struct ServerState { descriptions: std::sync::Mutex<HashMap<String, String>>, active_session: std::sync::Mutex<Option<String>>, last_sender: std::sync::Mutex<String>, registered: std::sync::Mutex<HashMap<String, String>> }
+struct ServerState { trigger_overrides: std::sync::Mutex<HashMap<String, String>>, bind_calls: std::sync::Mutex<Vec<Vec<String>>>, descriptions: std::sync::Mutex<HashMap<String, String>>, active_session: std::sync::Mutex<Option<String>>, last_sender: std::sync::Mutex<String>, registered: std::sync::Mutex<HashMap<String, String>> }
 
 #[zbus::interface(name = "org.freedesktop.portal.GlobalShortcuts")]
 impl FakePortal {
@@ -77,11 +77,19 @@ impl FakePortal {
     fn bind_shortcuts(&self, #[zbus(header)] hdr: zbus::message::Header<'_>, session: ObjectPath<'_>, shortcuts: Vec<(String, HashMap<String, OwnedValue>)>, _parent: String, options: HashMap<String, OwnedValue>) -> OwnedObjectPath {
         if let Some(sender) = hdr.sender() { *self.state.last_sender.lock().unwrap() = sender.as_str().trim_start_matches(':').replace('.', "_"); }
         let token: String = options.get("handle_token").and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap();
-        let (id, props) = &shortcuts[0];
-        let trigger: String = props.get("preferred_trigger").and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
-        self.binds.lock().unwrap().push((id.clone(), trigger));
-        let description=props.get("description").and_then(|v|String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
-        self.state.descriptions.lock().unwrap().insert(id.clone(),description);
+        let mut answered: Vec<(String, HashMap<String, Value<'static>>)> = Vec::new();
+        self.state.bind_calls.lock().unwrap().push(shortcuts.iter().map(|(id, _)| id.clone()).collect());
+        for (id, props) in &shortcuts {
+            let trigger: String = props.get("preferred_trigger").and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
+            self.binds.lock().unwrap().push((id.clone(), trigger.clone()));
+            let description=props.get("description").and_then(|v|String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
+            self.state.descriptions.lock().unwrap().insert(id.clone(),description);
+            // like GNOME: the combination the HUMAN picked wins over the preferred one
+            let shown = self.state.trigger_overrides.lock().unwrap().get(id).cloned().unwrap_or(trigger);
+            let mut p: HashMap<String, Value<'static>> = HashMap::new();
+            p.insert("trigger_description".into(), Value::from(shown));
+            answered.push((id.clone(), p));
+        }
         let conn = self.conn.get().unwrap().clone();
         let path = format!("/org/freedesktop/portal/desktop/request/{}/{}", self.state.last_sender.lock().unwrap().clone(), token);
         let dialog = self.dialog;
@@ -92,7 +100,8 @@ impl FakePortal {
             // the OS permission dialog: the human takes a moment
             std::thread::sleep(Duration::from_millis(250));
             let code = match dialog { Dialog::Accept => 0u32, Dialog::Decline => 1, Dialog::Silent => return, Dialog::FailCreate => 2 };
-            let results: HashMap<&str, Value<'_>> = HashMap::new();
+            let mut results: HashMap<&str, Value<'_>> = HashMap::new();
+            if code == 0 { results.insert("shortcuts", Value::from(answered)); }
             let _ = conn.emit_signal(None::<&str>, ObjectPath::try_from(p2.as_str()).unwrap(), "org.freedesktop.portal.Request", "Response", &(code, results));
             if code == 0 { st.active_session.lock().unwrap().replace(session); }
         });
@@ -360,4 +369,80 @@ fn every_catalog_action_sends_its_own_human_description_to_the_portal() {
         assert_eq!(server.descriptions.lock().unwrap().get(target.portal_id()).map(String::as_str),Some(description));
         grab.stop();
     }
+}
+
+// ---- one session, one BindShortcuts for every enabled target ------------------------------------------
+fn hub(bus: &Bus) -> (PortalHub, mpsc::Receiver<String>) {
+    let (tx, rx) = mpsc::channel();
+    let tx = std::sync::Mutex::new(tx);
+    let hub = PortalHub::new(Some(&bus.address), move |id, bound| {
+        let sig = ShortcutSignal { shortcut_id: id.to_owned(), activated: true };
+        if let Some(target) = route_activation(&sig, bound) { let _ = tx.lock().unwrap().send(target.id().to_owned()); }
+    });
+    (hub, rx)
+}
+fn all_targets() -> Vec<(abito_island::hotkey::Target, abito_island::hotkey::HotkeyConfig)> {
+    abito_island::hotkey::Target::ALL.into_iter().map(|t| (t, abito_island::hotkey::HotkeyConfig::default_for(t))).collect()
+}
+fn hub_wait(h: &PortalHub, want: Status, ms: u64) -> bool {
+    let end = std::time::Instant::now() + Duration::from_millis(ms);
+    while std::time::Instant::now() < end { if h.status() == want { return true; } std::thread::sleep(Duration::from_millis(20)); }
+    false
+}
+
+#[test]
+fn every_enabled_target_is_bound_in_one_bind_call_of_one_session() {
+    let bus = Bus::start();
+    let (srv, _binds) = serve(&bus, Dialog::Accept);
+    let (h, rx) = hub(&bus);
+    h.apply(bind_requests(&all_targets()), false);
+    assert!(hub_wait(&h, Status::Active, 4000), "{:?}", h.status());
+    let state = STATES.lock().unwrap().get(&bus.address).unwrap().clone();
+    let calls = state.bind_calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1, "ONE BindShortcuts for the whole set (one OS dialog), not one per target");
+    assert_eq!(calls[0], abito_island::hotkey::Target::ALL.iter().map(|t| t.portal_id().to_string()).collect::<Vec<_>>());
+    remember(&bus);
+    for t in abito_island::hotkey::Target::ALL {
+        activate(&srv, t.portal_id());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(3)).as_deref(), Ok(t.id()), "the press reaches the target that owns the id");
+    }
+    activate(&srv, "someone-else");
+    assert!(rx.recv_timeout(Duration::from_millis(400)).is_err(), "an unknown id fires nothing");
+    h.stop();
+}
+
+#[test]
+fn applying_the_same_set_again_keeps_the_session_and_never_asks_twice() {
+    let bus = Bus::start();
+    let _srv = serve(&bus, Dialog::Accept);
+    let (h, _rx) = hub(&bus);
+    h.apply(bind_requests(&all_targets()), false);
+    assert!(hub_wait(&h, Status::Active, 4000));
+    h.apply(bind_requests(&all_targets()), true);
+    std::thread::sleep(Duration::from_millis(500));
+    let state = STATES.lock().unwrap().get(&bus.address).unwrap().clone();
+    assert_eq!(state.bind_calls.lock().unwrap().len(), 1, "an identical set is a no-op");
+    assert_eq!(h.status(), Status::Active);
+    let mut fewer = all_targets();
+    fewer[1].1.enabled = false;
+    h.apply(bind_requests(&fewer), false);
+    assert!(hub_wait(&h, Status::Active, 4000));
+    let calls = state.bind_calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 2);
+    assert!(!calls[1].contains(&abito_island::hotkey::Target::DesktopToggle.portal_id().to_string()), "a disabled target is not bound");
+    h.stop();
+}
+
+#[test]
+fn the_trigger_the_human_picked_in_the_os_is_read_back() {
+    let bus = Bus::start();
+    let _srv = serve(&bus, Dialog::Accept);
+    STATES.lock().unwrap().get(&bus.address).unwrap().trigger_overrides.lock().unwrap().insert(SHORTCUT_ID.into(), "Ctrl+Shift+N".into());
+    let (h, _rx) = hub(&bus);
+    assert_eq!(h.effective_trigger(SHORTCUT_ID), None, "nothing is claimed before the OS answered");
+    h.apply(bind_requests(&all_targets()), false);
+    assert!(hub_wait(&h, Status::Active, 4000));
+    assert_eq!(h.effective_trigger(SHORTCUT_ID).as_deref(), Some("Ctrl+Shift+N"));
+    assert_eq!(h.effective_trigger(abito_island::hotkey::Target::DesktopToggle.portal_id()).as_deref(), Some("CTRL+ALT+d"));
+    h.stop();
 }

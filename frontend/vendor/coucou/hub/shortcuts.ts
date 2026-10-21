@@ -36,7 +36,7 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
     for(const d of SHORTCUTS.filter(d=>d.ported)){
       const supported=Object.hasOwn(views,d.id),hotkey=views[d.id],known=supported&&!!hotkey;
       const enabled=supported?hotkey?.enabled===true:d.enabledByDefault;
-      const keys=hotkey?hotkey.combo:d.defaultKeys;
+      const keys=hotkey?(hotkey.effective||hotkey.combo):d.defaultKeys;
       const sw=trusted(toggle(enabled,on=>{if(known&&!busy)save(d.id,{action:on?'enable':'disable'});}));
       (sw as HTMLButtonElement).disabled=!known||busy||!keys;sw.setAttribute('aria-label',t(SHORTCUT_TEXT[d.id]));
       if(known&&!keys)sw.title='Graba una combinación antes de activar este atajo.';

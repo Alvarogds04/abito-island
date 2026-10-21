@@ -8,7 +8,8 @@
 use crate::{dispatch_verb, now_ms, questionhost, restore, AppState, QUITTING};
 use abito_island::bridge::{self, Action, BridgeError};
 use abito_island::desktop::IslandState;
-use abito_island::hotkey::portal::{self, client::PortalGrabber, Backend, PortalState};
+use abito_island::hotkey::gnome;
+use abito_island::hotkey::portal::{self, client::PortalHub, Backend, PortalState};
 use abito_island::hotkey::{backend_limited, backend_name,
     self, idle_status, session_kind, toggle_decision, x11::GrabEvent, x11::Grabber, Command, HotkeyConfig, Target, ToggleDecision, View,
 };
@@ -25,7 +26,9 @@ const TARGETS: [Target; 9] = Target::ALL;
 /// promotes it when the human declines / the portal fails.
 enum Held {
     X11 { grab: Grabber, backend: Backend, portal_note: Option<hotkey::Status> },
-    Portal { portal: PortalGrabber, x11: Option<Grabber> },
+    Portal { hub: std::sync::Arc<PortalHub>, x11: Option<Grabber> },
+    /// GNOME custom keybinding written to dconf (no OS dialog ever): the desktop runs `abito --action <id>`.
+    Gnome { status: hotkey::Status },
 }
 impl Held {
     fn status(&self) -> hotkey::Status {
@@ -33,26 +36,30 @@ impl Held {
             Held::X11 { grab, .. } => grab.status(),
             // while the dialog is pending, say so (the human has something to do): the
             // parallel X11 grab already answers the shortcut meanwhile
-            Held::Portal { portal, .. } => portal.status(),
+            Held::Portal { hub, .. } => hub.status(),
+            Held::Gnome { status } => *status,
         }
     }
     fn backend(&self) -> Backend {
         match self {
             Held::X11 { backend, .. } => *backend,
             Held::Portal { .. } => Backend::Portal,
+            Held::Gnome { .. } => Backend::X11 { limited: false },
         }
     }
     fn portal_note(&self) -> Option<hotkey::Status> {
         match self {
             Held::X11 { portal_note, .. } => *portal_note,
-            Held::Portal { .. } => None,
+            Held::Portal { .. } | Held::Gnome { .. } => None,
         }
     }
     fn stop(self) {
         match self {
             Held::X11 { grab, .. } => grab.stop(),
-            Held::Portal { portal, x11 } => {
-                portal.stop();
+            // the keybinding entries are shared too: `sync_gnome` / `release_gnome` own them
+            Held::Gnome { .. } => {}
+            // the shared portal session outlives one target: `sync_portal` decides what it carries
+            Held::Portal { x11, .. } => {
                 if let Some(g) = x11 {
                     g.stop();
                 }
@@ -60,6 +67,9 @@ impl Held {
         }
     }
 }
+
+/// The wanted set last written to GNOME and the status of every target.
+type GnomeSynced = (gnome::Wanted, Vec<(Target, hotkey::Status)>);
 
 #[derive(Default)]
 struct Slot {
@@ -76,10 +86,14 @@ pub struct HotkeyHost {
     actions: Vec<(Target, Slot)>,
     // Serialize cross-slot mutations: two concurrent sets must not both pass the clash check.
     mutation: Mutex<()>,
+    /// The ONE portal session that carries every target (created on first use).
+    portal: Mutex<Option<std::sync::Arc<PortalHub>>>,
+    /// What the GNOME keybindings currently carry (and the status of each), so an unchanged set writes nothing.
+    gnome: Mutex<Option<GnomeSynced>>,
 }
 impl Default for HotkeyHost {
     fn default() -> Self {
-        Self { island: Slot::default(), desktop: Slot { config: Mutex::new(HotkeyConfig::default_for(Target::DesktopToggle)), ..Slot::default() }, actions: TARGETS.into_iter().skip(2).map(|t| (t, Slot { config: Mutex::new(HotkeyConfig::default_for(t)), ..Slot::default() })).collect(), mutation: Mutex::new(()) }
+        Self { island: Slot::default(), desktop: Slot { config: Mutex::new(HotkeyConfig::default_for(Target::DesktopToggle)), ..Slot::default() }, actions: TARGETS.into_iter().skip(2).map(|t| (t, Slot { config: Mutex::new(HotkeyConfig::default_for(t)), ..Slot::default() })).collect(), mutation: Mutex::new(()), portal: Mutex::new(None), gnome: Mutex::new(None) }
     }
 }
 impl HotkeyHost {
@@ -113,6 +127,8 @@ fn persist(app: &AppHandle, target: Target, cfg: &HotkeyConfig) {
 
 /// Marshal a press to the main thread exactly like the X11 listener does (window
 /// work belongs there); the probe uses this same entry point.
+pub(crate) fn press_target_from_action(app: &AppHandle, target: Target) { press_target_on_main(app, target); }
+
 pub(crate) fn press_on_main(app: &AppHandle) {
     press_target_on_main(app, Target::ToggleIsland);
 }
@@ -183,20 +199,29 @@ fn session() -> hotkey::Session {
     session_kind(std::env::var("XDG_SESSION_TYPE").ok().as_deref(), std::env::var("WAYLAND_DISPLAY").ok().as_deref())
 }
 
-fn view_of(host: &Slot) -> View {
+fn view_of(host: &Slot, target: Target) -> View {
     let cfg = host.config.lock().expect("hotkey config lock").clone();
     let held = host.grabber.lock().expect("hotkey grabber lock");
     let (status, backend, portal_note) = match held.as_ref() {
         Some(h) => (h.status(), h.backend(), h.portal_note()),
         None => (idle_status(&cfg), portal::choose_backend(session(), PortalState::Unavailable), None),
     };
-    View { combo: if cfg.bound { cfg.combo.to_string() } else { String::new() }, enabled: cfg.enabled, status, limited: backend_limited(backend), backend: backend_name(backend), portal_note }
+    // what the OS really bound (the human may have picked another combo in GNOME)
+    let effective = match held.as_ref() {
+        Some(Held::Portal { hub, .. }) if status == hotkey::Status::Active => hub.effective_trigger(target.portal_id()),
+        _ => None,
+    };
+    let effective = match held.as_ref() {
+        Some(Held::Gnome { status: hotkey::Status::Active }) => Some(cfg.combo.to_string()),
+        _ => effective,
+    };
+    View { effective, combo: if cfg.bound { cfg.combo.to_string() } else { String::new() }, enabled: cfg.enabled, status, limited: backend_limited(backend), backend: if matches!(held.as_ref(), Some(Held::Gnome { .. })) { "gnome" } else { backend_name(backend) }, portal_note }
 }
 
 fn publish(app: &AppHandle, target: Target) {
     let state = app.state::<AppState>();
     let event = match target { Target::ToggleIsland => "hotkey:state".into(), Target::DesktopToggle => "hotkey-desktop:state".into(), _ => format!("hotkey-{}:state", target.id()) };
-    let _ = app.emit(&event, view_of(state.hotkey.slot(target)));
+    let _ = app.emit(&event, view_of(state.hotkey.slot(target), target));
 }
 
 /// One decision, two backends. On Wayland the XDG portal is primary (the OS asks the
@@ -204,6 +229,12 @@ fn publish(app: &AppHandle, target: Target) {
 /// declines, the X11 grab takes over and the chip says «Atajo limitado».
 fn grab(app: &AppHandle, target: Target, combo: hotkey::Combo) -> Held {
     let sess = session();
+    // GNOME on Wayland: custom keybindings. The portal would open GNOME's confirmation dialog.
+    if sess == hotkey::Session::Wayland && gnome::is_gnome_desktop(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
+        if let Some(status) = sync_gnome(app, target) {
+            return Held::Gnome { status };
+        }
+    }
     // The probe is time-boxed (a slow portal must not freeze startup) and runs off the
     // caller's critical path: an `Unavailable` just means the X11 grab holds the shortcut.
     let portal_state = if sess == hotkey::Session::Wayland { portal::client::probe(None) } else { PortalState::Unavailable };
@@ -211,15 +242,66 @@ fn grab(app: &AppHandle, target: Target, combo: hotkey::Combo) -> Held {
     let x11_handle = app.clone();
     let x11 = || Grabber::start(None, combo, move |GrabEvent::Pressed| press_target_on_main(&x11_handle, target));
     if backend == Backend::Portal {
-        let handle = app.clone();
-        let id = target.portal_id();
-        let portal = PortalGrabber::start_with_id(None, combo, id, move || press_target_on_main(&handle, target));
+        let hub = sync_portal(app, false).expect("an enabled target has a portal session");
         // the limited X11 grab runs meanwhile: no route is ever missing while the OS dialog is open
-        let held = Held::Portal { portal, x11: Some(x11()) };
+        let held = Held::Portal { hub, x11: Some(x11()) };
         watch_portal(app.clone(), target);
         return held;
     }
     Held::X11 { grab: x11(), backend, portal_note: None }
+}
+
+/// Make Abito's own GNOME keybinding entries equal the enabled targets (idempotent) and return `target`'s
+/// status; `None` when this machine has no usable gsettings/exe path, so the caller falls through to the portal.
+fn sync_gnome(app: &AppHandle, target: Target) -> Option<hotkey::Status> {
+    let state = app.state::<AppState>();
+    let wanted: gnome::Wanted = TARGETS.into_iter().filter_map(|t| {
+        let cfg = state.hotkey.slot(t).config.lock().expect("hotkey config lock").clone();
+        (cfg.enabled && cfg.bound).then_some((t, cfg.combo))
+    }).collect();
+    let mut cache = state.hotkey.gnome.lock().expect("hotkey gnome lock");
+    if let Some((last, statuses)) = cache.as_ref() {
+        if *last == wanted { return statuses.iter().find(|(t, _)| *t == target).map(|(_, s)| *s); }
+    }
+    let gs = gnome::Gsettings::system();
+    if !gs.usable() { return None; }
+    let exe = std::env::current_exe().ok()?;
+    let statuses = gnome::sync(&gs, &exe, &wanted);
+    if statuses.iter().all(|(_, s)| *s == hotkey::Status::Unsupported) { return None; }
+    let mine = statuses.iter().find(|(t, _)| *t == target).map(|(_, s)| *s);
+    *cache = Some((wanted, statuses));
+    mine
+}
+
+/// Give the keys back (recorder open, quit): Abito's entries leave dconf; the human's stay.
+fn release_gnome(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if state.hotkey.gnome.lock().expect("hotkey gnome lock").take().is_some() {
+        gnome::remove_all(&gnome::Gsettings::system());
+    }
+}
+
+/// Make the ONE portal session carry exactly the enabled targets (a single `BindShortcuts`, so the OS
+/// asks to confirm once). Idempotent: an unchanged set keeps the live session. `None` when nothing is
+/// enabled (the session is closed) or the portal was never used.
+fn sync_portal(app: &AppHandle, retry_failed: bool) -> Option<std::sync::Arc<PortalHub>> {
+    let state = app.state::<AppState>();
+    let configs: Vec<(Target, HotkeyConfig)> = TARGETS.into_iter().map(|t| (t, state.hotkey.slot(t).config.lock().expect("hotkey config lock").clone())).collect();
+    let binds = portal::bind_requests(&configs);
+    let mut slot = state.hotkey.portal.lock().expect("hotkey portal lock");
+    if binds.is_empty() {
+        if let Some(hub) = slot.as_ref() { hub.stop(); }
+        return None;
+    }
+    let hub = slot.get_or_insert_with(|| {
+        let handle = app.clone();
+        std::sync::Arc::new(PortalHub::new(None, move |id, bound| {
+            let signal = portal::ShortcutSignal { shortcut_id: id.to_owned(), activated: true };
+            if let Some(target) = portal::route_activation(&signal, bound) { press_target_on_main(&handle, target); }
+        }))
+    }).clone();
+    hub.apply(binds, retry_failed);
+    Some(hub)
 }
 
 /// While the portal route is the holder, watch it: when the human declines the OS
@@ -235,7 +317,7 @@ fn watch_portal(app: AppHandle, target: Target) {
         let state = app.state::<AppState>();
         let mut held = state.hotkey.slot(target).grabber.lock().expect("hotkey grabber lock");
         let plan = match held.as_ref() {
-            Some(Held::Portal { portal, .. }) => portal::plan_for(portal.status()),
+            Some(Held::Portal { hub, .. }) => portal::plan_for(hub.status()),
             _ => return, // the holder changed (rebind/disable/quit): this watcher is done
         };
         match plan {
@@ -258,8 +340,7 @@ fn watch_portal(app: AppHandle, target: Target) {
                 // the human declined / the portal failed: the parallel X11 grab becomes the route and
                 // the reason is KEPT so the chip can still explain it after this moment
                 let old = held.take();
-                if let Some(Held::Portal { portal, x11 }) = old {
-                    portal.stop();
+                if let Some(Held::Portal { x11, .. }) = old {
                     let grab = x11.unwrap_or_else(|| {
                         let combo = state.hotkey.slot(target).config.lock().expect("hotkey config lock").combo;
                         let handle = app.clone();
@@ -288,6 +369,11 @@ fn rebind(app: &AppHandle, target: Target) {
     let cfg = host.config.lock().expect("hotkey config lock").clone();
     if cfg.enabled {
         *host.grabber.lock().expect("hotkey grabber lock") = Some(grab(app, target, cfg.combo));
+    } else if state.hotkey.gnome.lock().expect("hotkey gnome lock").is_some() {
+        sync_gnome(app, target);
+    } else if state.hotkey.portal.lock().expect("hotkey portal lock").is_some() {
+        // a disabled target leaves the shared session's set
+        sync_portal(app, true);
     }
     publish(app, target);
 }
@@ -333,6 +419,9 @@ pub fn stop(app: &AppHandle) {
         let taken = state.hotkey.slot(target).grabber.lock().expect("hotkey grabber lock").take();
         if let Some(g) = taken { g.stop(); }
     }
+    let hub = state.hotkey.portal.lock().expect("hotkey portal lock").clone();
+    if let Some(hub) = hub { hub.stop(); }
+    release_gnome(app);
 }
 
 fn err(code: &str) -> BridgeError {
@@ -351,7 +440,10 @@ pub async fn hotkey_action(app: AppHandle, webview: tauri::Webview, state: State
         Command::View => {}
         Command::Suspend => {
             let _mutation = state.hotkey.mutation.lock().expect("hotkey mutation lock");
-            // The recorder owns the keyboard, not just its selected action.
+            // The recorder owns the keyboard, not just its selected action. The shared portal
+            // session is closed too (the OS remembers the set: re-binding it asks nothing).
+            if let Some(hub) = state.hotkey.portal.lock().expect("hotkey portal lock").as_ref() { hub.stop(); }
+            release_gnome(&app);
             for target in TARGETS {
                 let slot = state.hotkey.slot(target);
                 let token = slot.suspend.lock().expect("hotkey suspend lock").suspend();
@@ -400,6 +492,6 @@ pub async fn hotkey_action(app: AppHandle, webview: tauri::Webview, state: State
             rebind(&app, target);
         }
     }
-    Ok(json!(view_of(host)))
+    Ok(json!(view_of(host, target)))
 }
 

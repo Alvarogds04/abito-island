@@ -395,7 +395,7 @@ fn portal_plan_keeps_a_parallel_x11_grab_until_the_portal_is_really_active() {
 
 #[test]
 fn the_view_remembers_why_the_portal_was_dropped() {
-    let v = View { combo: "Ctrl+Alt+A".into(), enabled: true, status: Status::Active, limited: true, backend: "x11", portal_note: Some(Status::PermissionDenied) };
+    let v = View { combo: "Ctrl+Alt+A".into(), enabled: true, status: Status::Active, limited: true, backend: "x11", portal_note: Some(Status::PermissionDenied), effective: None };
     let json = serde_json::to_value(&v).unwrap();
     assert_eq!(json["portal_note"], serde_json::json!("permission_denied"));
     let none = View { portal_note: None, ..v };
@@ -524,4 +524,58 @@ fn cleared_binding_stays_cleared_across_restart_and_releases_combo() {
     assert_eq!(HotkeyConfig::from_text(Some(&cfg.to_text())), cfg);
     assert!(parse_command(&serde_json::json!({"action":"clear"})).is_ok());
     assert!(parse_command(&serde_json::json!({"action":"clear","combo":"Ctrl+K"})).is_err());
+}
+
+// ---- one portal session, one BindShortcuts for every enabled target ---------------------------------
+fn all_configs() -> Vec<(Target, HotkeyConfig)> {
+    Target::ALL.into_iter().map(|t| (t, HotkeyConfig::default_for(t))).collect()
+}
+
+#[test]
+fn one_bind_request_carries_every_enabled_target_with_its_id_description_and_trigger() {
+    let binds = portal::bind_requests(&all_configs());
+    assert_eq!(binds.len(), Target::ALL.len());
+    for (bind, target) in binds.iter().zip(Target::ALL) {
+        assert_eq!(bind.id, target.portal_id());
+        assert_eq!(bind.description, target.description());
+        assert_eq!(bind.trigger, HotkeyConfig::default_for(target).combo.portal_trigger());
+    }
+    let ids: std::collections::HashSet<_> = binds.iter().map(|b| b.id.as_str()).collect();
+    assert_eq!(ids.len(), binds.len(), "portal ids are unique inside the one session");
+}
+
+#[test]
+fn a_disabled_or_unbound_target_is_not_bound() {
+    let mut cfgs = all_configs();
+    cfgs[1].1.enabled = false;
+    cfgs[4].1.enabled = false;
+    cfgs[4].1.bound = false;
+    let ids: Vec<_> = portal::bind_requests(&cfgs).into_iter().map(|b| b.id).collect();
+    assert_eq!(ids.len(), Target::ALL.len() - 2);
+    assert!(!ids.contains(&Target::DesktopToggle.portal_id().to_string()));
+    assert!(!ids.contains(&Target::JumpToTerminal.portal_id().to_string()));
+    assert!(portal::bind_requests(&[]).is_empty());
+}
+
+#[test]
+fn an_activation_routes_to_the_target_that_owns_the_shortcut_id() {
+    use portal::{route_activation, ShortcutSignal};
+    let binds = portal::bind_requests(&all_configs());
+    for target in Target::ALL {
+        let sig = ShortcutSignal { shortcut_id: target.portal_id().into(), activated: true };
+        assert_eq!(route_activation(&sig, &binds), Some(target));
+    }
+}
+
+#[test]
+fn an_unknown_id_a_release_or_a_target_that_was_not_bound_routes_nowhere() {
+    use portal::{route_activation, ShortcutSignal};
+    let mut cfgs = all_configs();
+    cfgs[1].1.enabled = false;
+    let binds = portal::bind_requests(&cfgs);
+    let sig = |id: &str, activated| ShortcutSignal { shortcut_id: id.into(), activated };
+    assert_eq!(route_activation(&sig("someone-else", true), &binds), None);
+    assert_eq!(route_activation(&sig("", true), &binds), None);
+    assert_eq!(route_activation(&sig(Target::ToggleIsland.portal_id(), false), &binds), None, "a release never fires");
+    assert_eq!(route_activation(&sig(Target::DesktopToggle.portal_id(), true), &binds), None, "disabled target is not bound");
 }

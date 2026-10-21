@@ -72,6 +72,7 @@ fn view_of(config: &HotkeyConfig, held: Option<&Grabber>) -> View {
         limited: false,
         backend: "win32",
         portal_note: None,
+        effective: None,
     }
 }
 
@@ -175,6 +176,9 @@ pub async fn hotkey_action(
 /// A real WM_HOTKEY press lands here (pump thread → main thread), and the
 /// probe calls the same function: one route, the Unix `on_press` minus the
 /// X11 focus hand-back that has no twin here.
+#[allow(dead_code)]
+pub(crate) fn press_target_from_action(app: &AppHandle, _target: abito_island::hotkey::Target) { press_on_main(app); }
+
 pub(crate) fn press_on_main(app: &AppHandle) {
     let inner = app.clone();
     let _ = app.run_on_main_thread(move || {

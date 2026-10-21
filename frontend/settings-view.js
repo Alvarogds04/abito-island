@@ -237,9 +237,11 @@
     const h = i.hotkey || null;
     const hotkey = !h ? null : {
       combo: String(h.combo || ''), enabled: h.enabled !== false, status: String(h.status || ''),
-      backend: h.backend === 'portal' ? 'portal' : (h.backend === 'win32' ? 'win32' : 'x11'),
-      backendLabel: h.backend === 'portal' ? 'Atajo del sistema' : (h.backend === 'win32' ? 'Atajo de Windows' : (h.limited ? 'Atajo limitado (X11)' : 'Atajo de X11')),
-      note: h.portal_note === 'permission_denied' ? 'Rechazaste el permiso del sistema, por eso usa el atajo limitado.'
+      backend: h.backend === 'portal' ? 'portal' : (h.backend === 'gnome' ? 'gnome' : (h.backend === 'win32' ? 'win32' : 'x11')),
+      backendLabel: h.backend === 'portal' ? 'Atajo del sistema' : h.backend === 'gnome' ? 'Atajo de GNOME' : (h.backend === 'win32' ? 'Atajo de Windows' : (h.limited ? 'Atajo limitado (X11)' : 'Atajo de X11')),
+      effective: typeof h.effective === 'string' ? h.effective : '',
+      note: h.backend === 'gnome' ? (h.status === 'taken' ? 'Esa combinación ya la usa GNOME u otro atajo: elegí otra.' : 'Funciona sin pedir confirmación; podés cambiarla acá.')
+        : h.portal_note === 'permission_denied' ? 'Rechazaste el permiso del sistema, por eso usa el atajo limitado.'
         : h.portal_note === 'unsupported' ? 'El portal del sistema no respondió o no pudo registrarlo.' : '',
     };
     return {

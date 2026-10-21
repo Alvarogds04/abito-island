@@ -93,6 +93,36 @@ pub fn is_our_activation_for(signal: &ShortcutSignal, id: &str) -> bool {
     signal.activated && signal.shortcut_id == id
 }
 
+/// One shortcut inside the single portal session: its stable id, the human description GNOME shows and
+/// the trigger Abito PREFERS (the human may pick another one in the OS dialog / Settings).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindRequest {
+    pub id: String,
+    pub description: String,
+    pub trigger: String,
+}
+
+/// Everything one `BindShortcuts` must carry: every ENABLED, bound target, in catalog order. A disabled
+/// or unbound target is never requested. ONE call for all of them is what lets the OS remember the
+/// whole set, so its confirmation dialog appears once and not on every launch.
+pub fn bind_requests(configs: &[(super::Target, super::HotkeyConfig)]) -> Vec<BindRequest> {
+    configs
+        .iter()
+        .filter(|(_, c)| c.enabled && c.bound)
+        .map(|(t, c)| BindRequest { id: t.portal_id().to_owned(), description: t.description().to_owned(), trigger: c.combo.portal_trigger() })
+        .collect()
+}
+
+/// The target an `Activated` signal belongs to: only a PRESS of an id we bound; a release, an
+/// unknown id (another app, an old session) or a target that was not requested routes nowhere.
+pub fn route_activation(signal: &ShortcutSignal, bound: &[BindRequest]) -> Option<super::Target> {
+    if !signal.activated {
+        return None;
+    }
+    bound.iter().find(|b| b.id == signal.shortcut_id)?;
+    super::Target::ALL.into_iter().find(|t| t.portal_id() == signal.shortcut_id)
+}
+
 /// While the OS dialog is open the limited X11 grab runs IN PARALLEL, so a dialog
 /// nobody answers can never leave the shortcut without a route. Once the portal
 /// really holds the shortcut the X11 grab is dropped (one press must not toggle

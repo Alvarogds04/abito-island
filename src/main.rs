@@ -1787,6 +1787,11 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Q1: a plain second launch restores WITHOUT stealing focus; only
             // the exact `--chat` flag is a deliberate request to type.
+            // A GNOME keybinding runs `<exe> --action <id>`: a closed set of catalog ids, nothing else.
+            if let Some(target) = abito_island::hotkey::gnome::parse_action(&argv) {
+                hotkeyhost::press_target_from_action(app, target);
+                return;
+            }
             match desktop::launch_intent(&argv) {
                 desktop::LaunchIntent::Restore => restore(app),
                 desktop::LaunchIntent::Chat => {
