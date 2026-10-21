@@ -412,4 +412,22 @@ test('wiring: the centre is painted from the ticker\'s focusId (sessions-view ev
   assert.match(tk, /abito:session-select', event => \{ if \(canFocus\(\)\) selectSession/, 'the blob click reaches the ticker\'s own focus');
 });
 
+// ---- the blobs list shows WHOLE rows only: a 4th row peeking 3px under the 3rd looked like a cut row without a label (real preview) -----
+test('rowsViewport: the list is sized to a whole number of rows (>= 3) plus its own 1px padding, the rest of the card is padding, never a sliver', () => {
+  const V = L.rowsViewport;
+  assert.deepEqual(V(72), { rows: 3, height: 72, rest: 0 }, '3 rows of 22 + 2 gaps of 2 + 2px of list padding = 72 exactly');
+  assert.deepEqual(V(78), { rows: 3, height: 72, rest: 6 }, '6px left: NOT enough for a 4th row, so it becomes padding (it used to be a visible sliver)');
+  assert.deepEqual(V(96), { rows: 4, height: 96, rest: 0 }, '4 rows = 4x22 + 3x2 + 2px of padding');
+  assert.deepEqual(V(106), { rows: 4, height: 96, rest: 10 }, 'calm strip: the whole card height, 4 whole rows, the remainder is padding');
+  assert.deepEqual(V(40), { rows: 3, height: 72, rest: 0 }, 'a card too short still gets the 3-row minimum');
+  for (const bad of [NaN, -5, undefined, null]) assert.deepEqual(V(bad), { rows: 3, height: 72, rest: 0 }, String(bad));
+  assert.deepEqual(L.ROW, { h: 22, gap: 2, min: 3, pad: 1 });
+});
+test('wiring: the mount applies rowsViewport to #pill-choices on every layout/notices change', () => {
+  const lay = fs.readFileSync(path.join(frontend, 'island-layout.js'), 'utf8');
+  assert.match(lay, /L\.rowsViewport\(/);
+  assert.match(lay, /maxHeight = /);
+  assert.match(lay, /data-notices-calm|noticesCalm|attributeFilter: \[[^\]]*'data-notices-calm'/);
+});
+
 console.log(`island-layout-check: ${passed} checks ok`);

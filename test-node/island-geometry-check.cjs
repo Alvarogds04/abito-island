@@ -70,6 +70,9 @@ function noOverlaps(list, why) {
       const rows = (await r.measure('.pill-choice')).filter(b => b.shown);
       const full = rows.filter(b => b.top >= list.top - 0.5 && b.bottom <= list.bottom + 0.5);
       assert.ok(full.length >= 3, `at least 3 blob rows fully visible, got ${full.length} of ${rows.length} (list ${label(list)})`);
+      // NO row may be partly visible: every row is fully inside the list or fully outside it (a 3px sliver of the next row read as a cut row)
+      const partial = rows.filter(b => { const vis = Math.min(b.bottom, list.bottom) - Math.max(b.top, list.top); return vis > 0.5 && vis < b.h - 0.5; }).map(b => `${label(b)} shows ${Math.round(Math.min(b.bottom, list.bottom) - Math.max(b.top, list.top))}px of ${Math.round(b.h)}`);
+      assert.deepEqual(partial, [], `no blob row is cut by the bottom of the list: ${partial.join(' | ')}`);
       const ids = (await r.page.evaluate(() => [...document.querySelectorAll('.pill-choice')].map(b => b.dataset.pillId)));
       assert.deepEqual(ids.slice(0, 2), ['abito', 'integration_github'], 'declared pills first, sessions after');
       assert.ok(ids.length >= 4, `sessions are rows too (declared + ${ids.length - 2} sessions)`);

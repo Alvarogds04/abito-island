@@ -195,7 +195,16 @@
     return { cardH, islandH: cardH + OFFSET, scroll: h > max };
   }
 
-  return { pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
+  // ---- the blobs list shows WHOLE rows: its height is n rows + (n-1) gaps; whatever is left of the card is padding, never a sliver ------
+  const ROW = Object.freeze({ h: 22, gap: 2, min: 3, pad: 1 });
+  function rowsViewport(avail) {
+    const room = Number.isFinite(avail) && avail > 0 ? avail : 0;
+    const rows = Math.max(ROW.min, Math.floor((room - ROW.pad * 2 + ROW.gap) / (ROW.h + ROW.gap)));
+    const height = rows * ROW.h + (rows - 1) * ROW.gap + ROW.pad * 2; // the list's own 1px top/bottom padding is inside its box
+    return { rows, height, rest: Math.max(0, Math.round(room - height)) };
+  }
+
+  return { ROW, rowsViewport, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
 });
 
 function mount(L) {
@@ -208,7 +217,17 @@ function mount(L) {
   const cEmpty = doc.getElementById('centre-empty'), cta = doc.getElementById('centre-cta');
   let view = null, pending = null, queuedCount = 0, focusId = null, selectedId = null, finished = false;
   const state = { mode: 'normal', attributedId: null, counts: null };
+  // the list is sized to a whole number of rows from the card's real inner height (it changes with the notices band and focus mode)
+  const blobsCard = doc.getElementById('blobs'), blobsList = doc.getElementById('pill-choices');
+  function fitList() {
+    if (!blobsCard || !blobsList || typeof getComputedStyle !== 'function') return;
+    const cs = getComputedStyle(blobsCard);
+    const avail = blobsCard.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+    const v = L.rowsViewport(avail);
+    blobsList.style.maxHeight = `${v.height}px`; blobsList.style.flex = '0 0 auto'; blobsList.style.height = `${v.height}px`;
+  }
   function publish() {
+    fitList();
     const rows = view && view.state === 'ready' ? view.rows : [];
     const attributedId = L.attribute(pending, rows);
     const counts = L.statusCounts({ view, pending, queuedCount });
@@ -265,5 +284,6 @@ function mount(L) {
   if (listen) listen('question:state', e => apply(e && e.payload)).catch(() => {});
   if (invoke) invoke('question_action', { payload: { action: 'view' } }).then(apply, () => {});
   new MutationObserver(syncMode).observe(capsule, { attributes: true, attributeFilter: ['data-question', 'data-card'] });
+  new MutationObserver(fitList).observe(capsule, { attributes: true, attributeFilter: ['data-notices-calm', 'data-layout', 'data-phase', 'data-view'] });
   syncMode(); publish();
 }
