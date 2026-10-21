@@ -204,7 +204,24 @@
     return { rows, height, rest: Math.max(0, Math.round(room - height)) };
   }
 
-  return { ROW, rowsViewport, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
+  // ---- tooltips: the island draws its own (WebKitGTK may not paint `title` in this undecorated, transparent, focus:false window) -----------
+  const TIP_MAX = 160;
+  const CTRL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
+  function tipFor(o) {
+    if (!o || typeof o.title !== 'string') return '';
+    const t = Array.from(o.title.replace(CTRL, ' ').replace(/\s+/g, ' ').trim());
+    const text = t.length > TIP_MAX ? `${t.slice(0, TIP_MAX - 1).join('')}…` : t.join('');
+    const seen = typeof o.visibleText === 'string' ? o.visibleText.replace(/\s+/g, ' ').trim() : '';
+    return text && text !== seen ? text : '';
+  }
+  function tipPlacement(at, box) {
+    const w = at.w || 120, h = at.h || 18, W = box.w, H = box.h;
+    const left = Math.max(4, Math.min(at.x, W - w - 4));
+    const below = at.y + h;
+    return { left, top: below + 24 > H ? Math.max(4, at.y - h - 8) : below };
+  }
+
+  return { tipFor, tipPlacement, ROW, rowsViewport, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
 });
 
 function mount(L) {
@@ -239,6 +256,28 @@ function mount(L) {
     }
     paintCentre(rows, attributedId);
     doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId } }));
+  }
+  // One delegated tooltip for every element of the island that carries a title: hover (after a short delay) and keyboard focus show it,
+  // leave/blur/Escape hide it. It never takes the pointer, so it cannot swallow a click.
+  const tip = doc.getElementById('island-tip');
+  if (tip) {
+    let tipTimer = 0, tipFor = null;
+    const hideTip = () => { clearTimeout(tipTimer); tipFor = null; tip.hidden = true; };
+    const titled = el => (el && el.closest ? el.closest('[title]') : null);
+    function showTip(el) {
+      const text = L.tipFor({ title: el.getAttribute('title'), visibleText: el.textContent });
+      if (!text) return;
+      const island = doc.getElementById('island').getBoundingClientRect(), b = el.getBoundingClientRect();
+      tip.textContent = text; tip.hidden = false; tipFor = el;
+      const p = L.tipPlacement({ x: b.left - island.left, y: b.top - island.top, w: Math.min(tip.offsetWidth || 160, 220), h: b.height }, { w: island.width, h: island.height });
+      tip.style.left = `${p.left}px`; tip.style.top = `${p.top}px`;
+    }
+    const arm = el => { clearTimeout(tipTimer); if (!el || el === tipFor) return; hideTip(); tipTimer = setTimeout(() => showTip(el), 350); };
+    doc.addEventListener('pointerover', e => { const el = titled(e.target); if (el && doc.getElementById('island').contains(el)) arm(el); else hideTip(); });
+    doc.addEventListener('pointerleave', hideTip); doc.addEventListener('pointerdown', hideTip, true);
+    doc.addEventListener('focusin', e => { const el = titled(e.target); if (el && doc.getElementById('island').contains(el)) arm(el); });
+    doc.addEventListener('focusout', hideTip);
+    doc.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); }, true);
   }
   // E + I: the centre column. Real state, real tool steps only; nothing waiting and nothing running -> the calm state with a CTA.
   function paintCentre(rows, attributedId) {

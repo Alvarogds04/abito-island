@@ -435,13 +435,40 @@ test('CSS: the «Recibida» / «Enviada» outcome card keeps the A layout width 
   assert.equal(px(decls('#capsule[data-question="expired"]:not([data-card]) #question').width), 438, 'an expired card is layout A too (not pending, so the blobs are the normal column and must stay free)');
 });
 test('CSS: a questionnaire/multi-select row shows its SELECTION without hover: filled background, a visible mark and a heavier label', () => {
-  const on = decls('.q-option[data-selected="true"]::after'), mark = decls('.q-option[data-selected="true"]::before');
+  const on = decls('.q-option[data-selected="true"]::after');
   assert.ok(on.background && on.background !== 'var(--btn-bg)', 'the selected row has its own fill');
-  assert.ok(mark.content && mark.content !== 'none', 'and a mark');
+  assert.equal(Object.keys(decls('.q-option[data-selected="true"]::before')).length, 0, 'NO ::before on a row: it is one more grid cell and broke the label letter by letter (v5-06)');
+  assert.ok(decls('.q-option[data-selected="true"] .q-dot').background || decls('.q-option[data-selected="true"] .q-box').background, 'the mark is the existing .q-dot / .q-box element, which is already a grid cell');
   assert.equal(decls('.q-option[data-selected="true"] .q-label')['font-weight'], '700');
   const notify = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
   assert.match(notify, /dataset\.selected = r\.checked \? 'true' : 'false'/, 'notify.js writes the state on every row');
   assert.match(notify, /aria-checked/, 'and exposes it to assistive tech');
+});
+
+// ---- v5-04: tooltips. WebKitGTK may not paint `title` tooltips in this undecorated, transparent, focus:false X11 window; the island draws its own ----
+test('tipFor: the text a hovered element shows — its own title, only when it differs from what is visible, bounded and clean', () => {
+  const tip = L.tipFor;
+  assert.equal(tip({ title: 'tokens_plugin#2 feat(telemetry): add local Pi sessions', visibleText: 'tokens_plugin#2 feat(telemetry): add local Pi…' }), 'tokens_plugin#2 feat(telemetry): add local Pi sessions');
+  assert.equal(tip({ title: 'Abrir', visibleText: 'Abrir' }), '', 'a title equal to the visible text adds nothing');
+  assert.equal(tip({ title: '', visibleText: 'x' }), '');
+  assert.equal(tip({ title: 'a\u0000b\u202ec', visibleText: '' }), 'a b c', 'control and bidi characters are flattened');
+  assert.ok(Array.from(tip({ title: 'x'.repeat(500), visibleText: '' })).length <= 160 && tip({ title: 'x'.repeat(500), visibleText: '' }).endsWith('…'));
+  assert.equal(tip(null), ''); assert.equal(tip({ title: 7 }), '');
+});
+test('tipPlacement: below the pointer, kept inside the island, flipped above near the bottom edge', () => {
+  const P = L.tipPlacement;
+  assert.deepEqual(P({ x: 100, y: 60, w: 120, h: 18 }, { w: 672, h: 160 }), { left: 100, top: 78 });
+  assert.deepEqual(P({ x: 640, y: 60, w: 120, h: 18 }, { w: 672, h: 160 }), { left: 548, top: 78 }, 'never past the right edge');
+  assert.deepEqual(P({ x: 100, y: 150, w: 120, h: 18 }, { w: 672, h: 160 }), { left: 100, top: 124 }, 'near the bottom: above the pointer');
+  assert.deepEqual(P({ x: -20, y: 10, w: 50, h: 18 }, { w: 672, h: 160 }), { left: 4, top: 28 }, 'never past the left edge');
+});
+test('wiring: ONE delegated tooltip in the island — shows on hover AND keyboard focus after a short delay, hides on leave/blur/Escape, role=tooltip, never steals clicks', () => {
+  const lay = fs.readFileSync(path.join(frontend, 'island-layout.js'), 'utf8');
+  assert.match(lay, /L\.tipFor\(/); assert.match(lay, /L\.tipPlacement\(/);
+  assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /id="island-tip" role="tooltip"/); assert.match(lay, /pointerover/); assert.match(lay, /focusin/); assert.match(lay, /Escape/);
+  assert.equal(decls('#island-tip')['pointer-events'], 'none');
+  assert.ok(decls('#island-tip')['z-index']);
+  assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /id="island-tip"/);
 });
 
 console.log(`island-layout-check: ${passed} checks ok`);

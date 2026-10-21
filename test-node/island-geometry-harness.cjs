@@ -95,6 +95,7 @@ async function open(scenario = {}) {
           if (a === 'answer' || a === 'decline' || a === 'text' || a === 'answer_many' || a === 'answer_form') { window.__answered = true; const v = { available: true, pending: null, queued: [], queued_count: 0, deliveries: [], notice: 'sent' }; setTimeout(() => window.__emit('question:state', { ...v, notice: 'answered' }), 20); return v; }
           return { available: true, pending: window.__answered ? null : pending, queued: [], queued_count: 0, deliveries: [], notice: window.__answered ? 'answered' : null };
         }
+        if (cmd === 'chat_action') { if (a === 'back') { (window.__chatCalls ||= []).push('back'); queueMicrotask(() => window.__islandSetView && window.__islandSetView('overview')); } return {}; }
         if (cmd === 'focus_host') { (window.__focusCalls ||= []).push(args.payload); return {}; }
         if (cmd === 'island_window_height') return { h: (args.payload && args.payload.h) || 340 };
         return {};
@@ -107,6 +108,7 @@ async function open(scenario = {}) {
   if (scenario.theme) await page.evaluate(t => { document.documentElement.dataset.theme = t; }, scenario.theme);
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__islandSetState('overview'));
+  if (scenario.chat) { await page.evaluate(() => window.__islandSetView('chat', 640, 240)); await page.waitForTimeout(800); }
   if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
   if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(scenario.quick ? 1800 : 4200); // spring + the ticker's first poll (`quick`: measurements that only need the card, not the first ticker poll)
