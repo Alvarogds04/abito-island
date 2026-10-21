@@ -271,6 +271,7 @@ function mount(V) {
   const overlayList = mkEl('ul', 'sessions-all-list'); overlayList.setAttribute('aria-label', 'Sesiones');
   overlay.append(overlayHead, overlayAsk, overlayNote, overlayList);
   leftCard.append(overlay);
+  let overlayMinis = [];
   const overlayButtons = () => [...overlayList.querySelectorAll('button')];
   function paintOverlay() {
     const model = V.listView(lastView, pendingQuestion, memory.focus?.id ?? null);
@@ -278,11 +279,27 @@ function mount(V) {
     overlayNote.hidden = !model.note; overlayNote.textContent = model.note || '';
     overlayAsk.hidden = !model.pending; overlayAsk.textContent = model.pending ? model.pending.text : '';
     const had = doc_active_id();
+    // S12 (12 «Ver todas», B): a GRID of mascots, one cell (>= 44x44) per session: coloured mascot, name, state dot
+    for (const m of overlayMinis) { try { m.destroy(); } catch { /* decoration */ } }
+    overlayMinis = [];
+    const styled = new Map(V.sessionRows(lastView, prefs).map(x => [x.id, x]));
     overlayList.replaceChildren(...model.rows.map(r => {
       const li = mkEl('li', 'sessions-all-row');
       const b = mkEl('button', 'sessions-all-pick'); b.type = 'button'; b.dataset.sessionId = r.id;
       b.setAttribute('aria-label', r.aria); if (r.focused) b.setAttribute('aria-current', 'true');
-      b.append(mkEl('span', 'sa-cwd', r.cwd), mkEl('span', 'sa-agent', r.agent), mkEl('span', 'sa-state', r.state));
+      const st = styled.get(r.id);
+      const slot = mkEl('span', 'sa-mascot');
+      if (typeof AbitoClay !== 'undefined') {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'island-agent-clay'); svg.dataset.color = st?.color || 'blue';
+        const stops = window.AbitoAvatarColors?.gradientStops(st?.color || 'blue');
+        for (let i = 0; i < 3; i++) svg.style.setProperty(`--chosen-${i + 1}`, stops?.[i] || '');
+        slot.append(svg);
+        try { overlayMinis.push(AbitoClay.create(svg, { state: st?.pose || 'idle', live: document.documentElement.dataset.motion !== 'reduce', viewBox: '36 32 128 128', shadow: false })); } catch { /* decoration */ }
+      }
+      const dot = mkEl('i', 'sa-dot'); dot.dataset.state = r.state === 'ejecutando' ? 'working' : 'idle'; dot.setAttribute('aria-hidden', 'true');
+      b.setAttribute('data-tip', `${r.cwd} · ${r.agent} · ${r.state}`);
+      b.append(slot, mkEl('span', 'sa-cwd', r.cwd), dot);
       b.addEventListener('click', event => { if (event.isTrusted === true && canFocus()) { selectSession(r.id); closeOverlay(true); } });
       li.append(b); return li;
     }));
@@ -295,11 +312,11 @@ function mount(V) {
   overlayBack.addEventListener('click', event => { if (event.isTrusted === true) closeOverlay(true); });
   overlay.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeOverlay(true); return; }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     const items = overlayButtons(); const at = items.indexOf(document.activeElement);
     if (!items.length) return;
     event.preventDefault();
-    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+    items[(at + (event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : items.length - 1)) % items.length].focus();
   });
   if (listen) {
     listen('question:state', event => { pendingQuestion = event?.payload?.pending ?? null; if (!overlay.hidden) paintOverlay(); }).catch(() => {});

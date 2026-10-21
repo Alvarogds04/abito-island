@@ -48,7 +48,7 @@ async function open(scenario = {}) {
     const sessions = scenario.sessions === undefined ? SESSIONS : scenario.sessions;
     const notices = Array.from({ length: scenario.notices || 0 }, (_, i) => ({ id: `n${i + 1}`, title: scenario.noticeTitle || 'Pi terminó su turno', detail: `Resultado número ${i + 1}`, severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: 'pi', projectName: 'workspace' }));
     if (scenario.finishedCard) notices.push({ id: UUID, title: 'Pi terminó su turno', detail: scenario.finishedText || 'Migración aplicada, 14 tests pasan.', severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: scenario.finishedCard, projectName: 'api' });
-    const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' || !scenario.engine ? 0 : 1 };
+    const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' ? 0 : 1 };
     const accounts = scenario.engine === 'account' ? [] : [{ configured: true, local: false }];
     const connection = scenario.engine === 'down' ? 'no_daemon' : 'connected';
     const OPT = (i, label, description = '') => ({ index: i, label, description });

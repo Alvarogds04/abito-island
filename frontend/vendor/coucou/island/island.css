@@ -1121,3 +1121,32 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 #notice-card .actions { flex: 0 0 auto; display: flex; gap: 8px; margin: 0; }
 #notice-card .btn { min-height: 24px; height: 24px; margin: 0; padding: 0 12px; border-radius: 12px; font: 600 12px var(--font); }
 #notice-card .btn::after { inset: -4px -2px; }
+
+/* ══ T1 · S11 (11 error / sin motor, B): a 32px band under the overview, red or amber, with the action and «Omitir» ═══════════════════ */
+.engine-row, .engine-row-live { display: none !important; }
+#engine-band { position: absolute; left: calc(50% - 350px); width: 700px; top: 178px; height: 32px; box-sizing: border-box; padding: 0 8px 0 14px; display: none; align-items: center; gap: 8px; border-radius: 16px; background: var(--card); border: 1px solid var(--hairline); font: 500 12.5px var(--font); color: var(--ink); z-index: 3; }
+#capsule[data-phase="expanded"][data-view="overview"]:not([data-card]):not([data-question="pending"]):not([data-question="outcome"]):not([data-notice-view="notices"]) #engine-band:not([hidden]) { display: flex; }
+#engine-band .eb-icon { flex: 0 0 16px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font: 700 10px/1 var(--font); color: #0b0c0e; background: var(--sun, #e0b23a); }
+#engine-band .eb-icon::before { content: "!"; }
+#engine-band[data-kind="engine"] .eb-icon, #engine-band[data-kind="down"] .eb-icon { background: var(--red-11, #ff8d97); }
+#engine-band[data-kind="engine"] .eb-icon::before, #engine-band[data-kind="down"] .eb-icon::before { content: "✕"; }
+#engine-band-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#engine-band button { position: relative; flex: 0 0 auto; height: 24px; min-width: 44px; padding: 0 12px; border: 0; border-radius: 12px; font: 600 12px var(--font); cursor: pointer; }
+#engine-band button::after { content: ""; position: absolute; inset: -4px -2px; }
+#engine-band-link { background: var(--ink); color: var(--primary-ink); }
+#engine-band-skip { background: transparent; color: var(--dim-2); }
+#engine-band button:focus-visible { outline: 2px solid var(--island-live); outline-offset: 2px; }
+
+/* ══ T1 · S12 (12 «Ver todas», B): the full session list is a grid of mascots; every cell >= 44x44 ═════════════════════════════════ */
+.sessions-all-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); grid-auto-rows: 44px; gap: 4px 6px; align-content: start; overflow-y: auto; }
+.sessions-all-row { min-width: 0; }
+.sessions-all-pick { height: 44px; padding: 0 8px; gap: 6px; border-radius: 12px; font: 500 12px var(--font); color: var(--ink); background: rgba(255, 255, 255, 0.04); }
+.sessions-all-pick:focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
+.sessions-all-pick[aria-current="true"] { background: rgba(255, 255, 255, 0.12); }
+.sessions-all-pick .sa-mascot { flex: 0 0 28px; width: 28px; height: 28px; display: grid; place-items: center; }
+.sessions-all-pick .sa-mascot svg { width: 30px; height: 30px; overflow: visible; }
+.sessions-all-pick .sa-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--dim-3); }
+.sessions-all-pick .sa-dot[data-state="working"] { background: var(--go); border-color: var(--go); }
+.card-left > .sessions-all { padding: 4px 12px 4px 108px; }
+.sessions-all-list { margin-top: 2px; gap: 4px 6px; }
+.card-left > .sessions-all, .sessions-all button { pointer-events: auto; }

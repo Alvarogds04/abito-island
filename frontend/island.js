@@ -59,6 +59,7 @@
   const QUESTION_H = 224; // default; a long question grows it (abito:question-size), capped by the fixed window
   let questionH = QUESTION_H;
   let compactW = COMPACT.w; // S2/S3: the compact pill widens for the minis, the activity line and a waiting question (island-layout.js compactView)
+  let engineBandOn = false; // S11: the engine/account band under the overview (+36px island)
   let finishedH = 0; // D: the island height a long «terminó» result needs (0 = the normal overview)
   // const QUESTION_H doc: // Coucou QUESTION_PICKER_H: the fixed window already has room
   const OVERVIEW_CARD = { clay: 64, clayX: 62, cy: 113 };
@@ -237,7 +238,7 @@
 
   function render() {
     const w = lerp(compactW, lerp(OVERVIEW.w, CHAT.w, q.x), p);
-    const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : finishedH || OVERVIEW.h;
+    const overviewHeight = recapShown ? RECAP_H : questionShown ? questionH : finishedH || (engineBandOn ? OVERVIEW.h + FINISHED_BAND_H : OVERVIEW.h);
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
     const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown ? QT.shapeWithToast(shape, true) : shape);
     reportShape(withToast([lerp(compactW, lerp(OVERVIEW.w, CHAT.w, q.target), target),
@@ -648,16 +649,37 @@
   let lastConn = null, piState = null, engineRow = null;
   // Coucou's idle-card pair (status dot + label, one link) for every state in which Pi is not working; two mounts of the same
   // row: the idle card and the strip under the ticker (the ticker covers the idle card while sessions are listed).
+  const OMIT_KEY = 'abito.engineOmit';
+  const omitted = () => { try { return localStorage.getItem(OMIT_KEY); } catch { return null; } };
+  const setOmitted = v => { try { if (v) localStorage.setItem(OMIT_KEY, v); else localStorage.removeItem(OMIT_KEY); } catch { /* storage may be unavailable */ } };
   function paintEngine() {
     engineRow = O.engineRowView(lastConn, piState);
     const centreEl = $('col-centre'); if (centreEl) centreEl.dataset.engine = engineRow ? 'on' : 'off';
+    // the in-centre rows stay in the DOM (state + tests) but are never drawn: the band below is the one place this is shown
     for (const [box, label, link] of [['overview-engine', 'overview-engine-label', 'overview-engine-link'], ['overview-engine-live', 'overview-engine-live-label', 'overview-engine-live-link']]) {
       const el = $(box);
       if (!el) continue;
       el.hidden = !engineRow;
       if (engineRow) { $(label).textContent = engineRow.label; $(link).textContent = engineRow.link; $(link).setAttribute('aria-label', engineRow.aria); el.dataset.kind = engineRow.kind; }
     }
+    // S11: a resolved problem forgets its «Omitir»; a skipped one stays silent until it resolves and comes back
+    if (!engineRow && omitted()) setOmitted(null);
+    const band = $('engine-band'), on = !!engineRow && omitted() !== engineRow.kind;
+    capsule.dataset.engineBand = engineRow ? (on ? 'on' : 'omitted') : 'off';
+    if (band) {
+      band.hidden = !on;
+      if (engineRow) {
+        band.dataset.kind = engineRow.kind;
+        $('engine-band-label').textContent = engineRow.label; $('engine-band-link').textContent = engineRow.link; $('engine-band-link').setAttribute('aria-label', engineRow.aria);
+        $('engine-band-skip').setAttribute('aria-label', `Omitir aviso: ${engineRow.label}`);
+      }
+    }
+    if (on !== engineBandOn) { engineBandOn = on; render(); }
   }
+  const skipEngine = $('engine-band-skip');
+  if (skipEngine) skipEngine.addEventListener('click', event => { if (event.isTrusted === true && engineRow) { setOmitted(engineRow.kind); paintEngine(); } });
+  const linkEngine = $('engine-band-link');
+  if (linkEngine) linkEngine.addEventListener('click', event => { if (event.isTrusted === true && engineRow) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: engineRow.target })); });
   const openPiSection = event => { if (event.isTrusted === true && engineRow) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: engineRow.target })); };
   for (const id of ['overview-engine-link', 'overview-engine-live-link']) { const b = $(id); if (b) b.addEventListener('click', openPiSection); }
   document.addEventListener('abito:pi-state', event => { piState = event.detail || null; paintEngine(); });
