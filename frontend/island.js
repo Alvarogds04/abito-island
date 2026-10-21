@@ -759,7 +759,7 @@
       revealIsland();
       noticeLane = { id, view:'notices', automatic:true };
       capsule.dataset.noticeView = 'notices';
-      moveView(0); renderCard(); render();
+      moveView(0); renderCard(); paintNoticeCard(null); render();
       document.dispatchEvent(new CustomEvent('island:view', {detail:'notices'}));
     },
     end(id, expired) {
@@ -931,30 +931,31 @@
   document.addEventListener('abito:centre-new', () => { const plus = $('open-new'); if (plus && !plus.disabled) plus.click(); });
   // D: the finished result wraps (never a truncated line), so the card may need more than the 108px overview card. It asks the island
   // for the height it needs (capped like a question, then it scrolls inside); the window grows through the existing on-demand verb.
+  // S10 (10 «Pi terminó», B): the notice is a fixed 32px band UNDER the overview, so the island is 36px taller while it shows.
+  const FINISHED_BAND_H = 36;
   function fitFinished(shown) {
-    const L = window.AbitoIslandLayout, card = noticeCard, msg = $('notice-card-message');
-    const el = $('notices');
-    if (!L || !card || !el) return;
-    if (!shown) { if (finishedH) { finishedH = 0; render(); } return; }
-    el.style.height = 'auto';
-    const need = card.scrollHeight + 8;
-    el.style.height = '';
-    const layout = L.finishedLayout(need);
-    const next = layout.islandH > 184 ? layout.islandH : 0;
-    el.style.setProperty('--finished-h', layout.cardH + 'px');
-    el.dataset.scroll = layout.scroll ? 'true' : 'false';
+    const next = shown ? OVERVIEW.h + FINISHED_BAND_H : 0;
     if (next !== finishedH) { finishedH = next; render(); }
   }
+  // the band appears when an agent finished and goes away while THAT agent runs again (human note: «aparece y se oculta dependiendo si terminó, o si está corriendo»)
+  let runningNow = [];
+  document.addEventListener('abito:layout', event => {
+    const r = event.detail && Array.isArray(event.detail.running) ? event.detail.running : [];
+    const same = r.length === runningNow.length && r.every((x, i) => x.kind === runningNow[i].kind && x.cwd === runningNow[i].cwd);
+    runningNow = r;
+    if (!same && noticeLane?.view === 'notices') paintNoticeCard(null);
+  });
+  const agentRunning = n => !!n && typeof n.agent === 'string' && runningNow.some(r => r.kind === n.agent && (!n.projectName || !r.cwd || r.cwd === n.projectName));
   function paintNoticeCard(first) {
     if (!noticeCard) return;
     const selected = noticeLane?.view === 'notices' ? current?.notices?.find(n => n.id === noticeLane.id) : first;
-    const v = selected && O.finishedCardView ? O.finishedCardView(selected, NV && NV.agentLabel) : null;
+    const v = selected && !agentRunning(selected) && O.finishedCardView ? O.finishedCardView(selected, NV && NV.agentLabel) : null;
     noticeCard.hidden = !v;
     document.dispatchEvent(new CustomEvent('abito:finished-shown', { detail: { shown: !!v && noticeLane?.view === 'notices' } }));
     if (!v) { fitFinished(false); return; }
     $('notice-card-name').textContent = v.name;
     $('notice-card-verb').textContent = v.verb;
-    const msg = $('notice-card-message'); msg.textContent = v.message; msg.title = v.message;
+    const msg = $('notice-card-message'); msg.textContent = v.message; msg.setAttribute('data-tip', v.message);
     const t = $('notice-card-terminal'); t.disabled = !v.terminal.available;
     fitFinished(noticeLane?.view === 'notices');
   }
@@ -1111,6 +1112,7 @@
     capsule.dataset.noticeView = view;
     moveView(0);
     renderCard();
+    paintNoticeCard(null); // S10: the band is painted by the lane itself, not only by the next snapshot
     render();
     if (q.mode !== 'idle' && !raf) raf = requestAnimationFrame(tick);
     // The existing question controller rerenders through its public view event.

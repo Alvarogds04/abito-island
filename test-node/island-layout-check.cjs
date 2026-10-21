@@ -379,10 +379,10 @@ test('wiring D/E/I: the centre is fed by island-layout.js; CSS lets the finished
   assert.match(lay, /abito:sessions-view/, 'the centre follows the ticker\'s focus event: a blob click, the compact bar\'s mini mascot and the «principal» preference all end there');
   const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
   assert.match(pv, /abito:session-select/, 'the blob click already dispatches the selection the centre listens to');
-  assert.equal(decls('#notice-card .title.one-line')['white-space'], 'normal', 'the finished result wraps');
-  assert.equal(decls('#notice-card .title.one-line')['text-overflow'], 'clip');
+  assert.equal(decls('#notice-card #notice-card-message')['white-space'], 'nowrap', 'S10: the finished message is ONE line in the band (full text in the tooltip)');
+  assert.equal(decls('#notice-card #notice-card-message')['text-overflow'], 'ellipsis');
   const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
-  assert.match(isl, /finishedLayout\(/, 'the island grows for a long result');
+  assert.match(isl, /FINISHED_BAND_H = 36/, 'S10: the island is 36px taller while the band shows');
   assert.match(isl, /abito:centre-new/, 'the CTA opens a new conversation through the existing «+»');
 });
 

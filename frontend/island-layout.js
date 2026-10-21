@@ -260,7 +260,7 @@
     return { minis: reply ? [] : minis, more: reply ? 0 : Math.max(0, rows.length - MINIS), activity, badge, reply, width: reply ? COMPACT_ASK : rows.length ? COMPACT_WIDE : COMPACT_W };
   }
 
-  return { tipFor, tipPlacement, ROW, rowsViewport, EDGE_STRIP, edgeStripView, compactView, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
+  return { isRunning, tipFor, tipPlacement, ROW, rowsViewport, EDGE_STRIP, edgeStripView, compactView, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
 });
 
 function mount(L) {
@@ -295,7 +295,7 @@ function mount(L) {
     }
     paintCentre(rows, attributedId);
     paintCompact(rows);
-    doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId } }));
+    doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId, running: rows.filter(L.isRunning).map(r => ({ kind: String(r.kindLabel || '').toLowerCase().replace(/\s+/g, '-'), cwd: r.cwd })) } }));
   }
   // One delegated tooltip for every element of the island that carries a title: hover (after a short delay) and keyboard focus show it,
   // leave/blur/Escape hide it. It never takes the pointer, so it cannot swallow a click.
