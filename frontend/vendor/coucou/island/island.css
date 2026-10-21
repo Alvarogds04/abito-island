@@ -1102,3 +1102,9 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 /* ══ T1 · S6 (06 pregunta simple, B): option title 13px + a one-line grey description 11px ══════════════════════════════════════ */
 .q-label { font-size: 13px; }
 .q-desc { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* ══ T1 · S8 (08 cuestionario, A): progress dots + «Paso N de M» + Atrás ══════════════════════════════════════════════════════ */
+#question-dots { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; vertical-align: middle; }
+#question-dots i { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--dim-3); box-sizing: border-box; }
+#question-dots i[data-state="done"] { background: var(--dim-2); border-color: var(--dim-2); }
+#question-dots i[data-state="current"] { background: var(--ink); border-color: var(--ink); }

@@ -425,12 +425,12 @@
   function formView(n, st) {
     const total = n.form.length, max = n.freeTextMax;
     if (st.review) {
-      return { mode: 'review', step: total, total, label: 'Resumen', header: '', text: '', item: null, draft: null, canPrev: true, canNext: false,
+      return { mode: 'review', step: total, total, label: 'Resumen', header: '', text: '', item: null, draft: null, canPrev: true, canNext: false, dots: Array.from({ length: total }, () => 'done'),
         primary: { kind: 'send', label: 'Enviar', enabled: n.form.every((it, i) => draftAnswered(it, st.drafts[i], max)) },
         summary: n.form.map((it, i) => ({ header: it.header, text: it.text, answer: describeAnswer(it, st.drafts[i]) })) };
     }
     const item = n.form[st.step], draft = st.drafts[st.step], ok = draftAnswered(item, draft, max);
-    return { mode: 'step', step: st.step, total, label: `${st.step + 1} de ${total}`, header: item.header, text: item.text, item, draft,
+    return { mode: 'step', step: st.step, total, label: `${st.step + 1} de ${total}`, stepText: `Paso ${st.step + 1} de ${total}`, dots: Array.from({ length: total }, (_, i) => (i < st.step ? 'done' : i === st.step ? 'current' : 'todo')), header: item.header, text: item.text, item, draft,
       canPrev: st.step > 0, canNext: ok, primary: { kind: 'next', label: 'Siguiente', enabled: ok }, summary: null };
   }
   function formPayload(n, st) {
