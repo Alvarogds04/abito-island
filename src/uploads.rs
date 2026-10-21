@@ -31,6 +31,41 @@ pub const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
 /// Inline cap for one text file (what prompt building may read back).
 pub const MAX_TEXT_SCALARS: usize = 32_000;
 
+/// Total bytes the uploads directory may hold (R22: no unbounded growth).
+pub const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
+/// A `tmp-*` leftover older than this is a crashed write, never a live one.
+pub const STALE_TMP_SECS: u64 = 60;
+
+/// Bytes currently held by regular files directly inside `dir`.
+pub fn dir_bytes(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| fs::symlink_metadata(e.path()).ok())
+                .filter(|m| m.is_file())
+                .map(|m| m.len())
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// R22 startup sweep: remove `tmp-*` files a crash left behind once they are
+/// older than `older_than_secs`. Only regular `tmp-` files are touched.
+pub fn sweep_stale_tmp(dir: &Path, older_than_secs: u64) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.filter_map(|e| e.ok()) {
+        if !entry.file_name().to_string_lossy().starts_with("tmp-") {
+            continue;
+        }
+        let Ok(meta) = fs::symlink_metadata(entry.path()) else { continue };
+        let age = meta.modified().ok().and_then(|m| m.elapsed().ok()).map_or(0, |d| d.as_secs());
+        if meta.is_file() && age >= older_than_secs {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// A stored file name the page may reference: `<16hex>-<sanitized name>`.
 /// This is the ONLY name submit validation accepts, and it is only ever
 /// resolved INSIDE the uploads directory.
@@ -119,6 +154,11 @@ fn invalid(why: &str) -> ChatError {
 /// file is rejected: every check runs before the first write, and a failed
 /// write removes its temp file. The module keeps no state.
 pub fn attach(dir: &Path, raw_name: &str, bytes: &[u8]) -> Result<Attachment, ChatError> {
+    attach_with_cap(dir, raw_name, bytes, MAX_TOTAL_BYTES)
+}
+
+/// [`attach`] with an explicit total-bytes cap for the directory (R22).
+pub fn attach_with_cap(dir: &Path, raw_name: &str, bytes: &[u8], total_cap: u64) -> Result<Attachment, ChatError> {
     if bytes.is_empty() {
         return Err(invalid("El archivo está vacío."));
     }
@@ -130,6 +170,9 @@ pub fn attach(dir: &Path, raw_name: &str, bytes: &[u8]) -> Result<Attachment, Ch
             "Ese tipo de archivo no está permitido: se aceptan imágenes (PNG, JPEG, WebP, GIF) o texto.",
         ));
     };
+    if dir_bytes(dir).saturating_add(bytes.len() as u64) > total_cap {
+        return Err(invalid("La carpeta de archivos adjuntos está llena: se alcanzó el límite de espacio."));
+    }
     let name = sanitize_name(raw_name);
     let id = random_hex();
     let stored = format!("{id}-{name}");
@@ -198,6 +241,7 @@ pub fn attachments_dir(island_root: &Path) -> Result<PathBuf, ChatError> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
     }
+    sweep_stale_tmp(&dir, STALE_TMP_SECS);
     Ok(dir)
 }
 
