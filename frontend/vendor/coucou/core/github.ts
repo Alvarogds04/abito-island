@@ -105,6 +105,7 @@ export const GH_STRINGS = {
   prCount: (n: number) => tn("{count} PR", "{count} PRs", n),
   reviewCount: (n: number) => tn("{count} review", "{count} reviews", n),
   get noCI() { return t("no CI"); },
+  seeAll: (n: number) => t("See all ({count}) →", { count: n }),
   mainCIAria: (state: string) => t("CI: {state}", { state }),
   get noContributions() { return t("No contributions"); },
   get oneContribution() { return tn("{count} contribution", "{count} contributions", 1); },

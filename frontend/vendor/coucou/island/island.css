@@ -113,6 +113,7 @@ html[data-theme="light"] {
   position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; padding: 0 8px 0 34px; pointer-events: none;
 }
+.pill-choice[data-centre="true"] span:not(.ico)::after { content: " ◂"; color: var(--ink); }
 .pill-choice[aria-pressed="true"] { background: rgba(255, 255, 255, 0.1); box-shadow: none; border-color: rgba(255, 255, 255, 0.3); color: var(--ink); }
 .pill-choice:focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
 .pill-choice[data-color] { border-width: 1px; }
@@ -489,8 +490,11 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 .gh-ci-main { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: auto; border: 0; padding: 0; background: transparent; cursor: pointer; flex: 0 0 auto; }
 .gh-spark ~ .gh-ci-main { margin-left: 0; }
 /* Design 16, option A: rows of 36px (state icon + two lines + explicit [Abrir]); at most 4 rows high, then the list scrolls inside */
-.gh-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; max-height: 144px; overflow-y: auto; margin-top: 4px; scrollbar-width: none; }
-.gh-list::-webkit-scrollbar { display: none; }
+.gh-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; max-height: 144px; overflow-y: auto; margin-top: 4px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.28) transparent; }
+.gh-list::-webkit-scrollbar { width: 4px; }
+.gh-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.28); border-radius: 2px; }
+.gh-all { flex: 0 0 28px; min-height: 28px; margin: 2px 0 0; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--dim-2); font: 600 11px var(--font); text-align: left; cursor: pointer; }
+.gh-all:hover { background: rgba(255, 255, 255, 0.08); color: var(--ink); }
 .gh-row { display: flex; align-items: center; gap: 7px; min-height: 36px; flex: 0 0 36px; padding: 0 2px 0 0; border-radius: 6px; background: transparent; min-width: 0; box-sizing: border-box; }
 .gh-row:hover { background: rgba(255, 255, 255, 0.05); }
 .gh-row.selected { background: rgba(255, 255, 255, 0.12); }
@@ -638,7 +642,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 #chat-composer .round::after { inset: 8px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.09); }
 #chat-send { background: transparent !important; border-color: transparent !important; color: #0b0c0e !important; }
 #chat-composer #chat-send::after { background: var(--ink); border: 0; }
-#chat-send:disabled::after { opacity: 0.4; }
+#chat-send:disabled::after { opacity: 0.65; }
 #chat-composer .round .ico svg { width: 14px; height: 14px; }
 
 /* The chat is as wide as the island (640, geometry::CHAT_COLUMN_W): the header sits on the same 640 box as the overview's,
@@ -986,7 +990,8 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
 #chat-state:not([data-kind=""]):not([data-kind="busy"])::before, #chat-target-chip::before, #chat-state[data-kind="busy"]::before { content: "·"; color: var(--dim-3); margin-right: 2px; }
 #chat-header #chat-state[data-kind=""] { display: none; }
 #chat-mic[hidden] { display: none; }
-#chat-composer #chat-mic::after { background: rgba(255, 255, 255, 0.09); }
+#chat-composer #chat-mic::after { inset: 0; background: rgba(255, 255, 255, 0.09); }
+#chat-composer #chat-send::after { inset: 0; background: var(--ink); border: 0; }
 #chat-composer #chat-mic:hover::after { background: rgba(255, 255, 255, 0.16); }
 
 /* ══ An integration card (GitHub, plan, Spotify, integrations) IS the centre while it is focused ═════════════════════════════════════

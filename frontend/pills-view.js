@@ -56,12 +56,9 @@
   // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
   // A+E: the right column is ONE scrolling list. The human's declared pills (Abito, specialists, integrations) come FIRST and are
   // never pushed out; the live agent sessions follow. No cap of four: the column scrolls.
-  // The focused INTEGRATION leaves the column (it becomes the left card); the focused SESSION stays a row, marked pressed: the centre
-  // shows it, and the human needs the row to know which one it is and to pick another.
-  const gridRows = all => {
-    const rest = all.filter(r => r.id !== focused);
-    return [...rest.filter(r => !r.session), ...rest.filter(r => r.session)];
-  };
+  // Design 16 (option A, «GitHub ◂»): the focused integration STAYS a row, marked pressed, exactly like the focused session: its card is the
+  // centre, and the human needs the row to know which one it is and to pick another (screen-mcp validation: it used to vanish from the column).
+  const gridRows = all => [...all.filter(r => !r.session), ...all.filter(r => r.session)];
   const CARD_PILLS = Object.freeze({ integration_github: 'GitHub', integration_n8n: 'n8n', integration_vercel: 'Vercel', integration_stripe: 'Stripe', integration_resend: 'Resend', integration_notion: 'Notion', integration_calcom: 'Cal.com' });
   let focused = null; const badges = new Set(), connected = new Set(), seenBySource = new Map();
   const integrationRows = () => {
@@ -140,10 +137,12 @@
       paintChosenColor(item.button, row.color); paintChosenColor(item.svg, row.color);
       if (row.session) {
         item.button.setAttribute('aria-pressed', String(sessionFocus === row.id));
+        item.button.dataset.centre = sessionFocus === row.id && !focused ? 'true' : 'false';
         item.button.setAttribute('aria-label', `${row.name}: enfocar sesión ${row.kindLabel}`);
         item.button.dataset.sessionId = row.id;
       } else if (row.integration) {
         item.button.setAttribute('aria-pressed', focused === row.id ? 'true' : 'false');
+        item.button.dataset.centre = focused === row.id ? 'true' : 'false';
         item.button.setAttribute('aria-label', `${row.name}: integración${badges.has(row.id) ? ', con novedades' : ''}`);
         item.button.dataset.badge = badges.has(row.id) ? 'true' : 'false';
       } else {

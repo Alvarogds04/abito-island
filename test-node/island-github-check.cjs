@@ -100,7 +100,18 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   // the list is a bounded, internally scrolling box (max 4 rows) and never shows a row it cannot act on
   const five = { ...pulse, myPRs: Array.from({ length: 5 }, (_, i) => ({ ...pulse.myPRs[0], number: i + 1, id: 'o/r#' + (i + 1) })) };
   const big = view.githubPulseCard(five, null, act, () => {});
-  assert.equal(cls(big, 'gh-row').length, 5); assert.equal(cls(big, 'gh-list').length, 1);
+  assert.equal(cls(big, 'gh-list').length, 1);
+  assert.equal(cls(big, 'gh-row').length, 4, 'design 16 A: at most 4 PR rows, the rest behind «Ver todas»');
+  const all = cls(big, 'gh-all'); assert.equal(all.length, 1, 'a visible «Ver todas →» when there are more than 4');
+  assert.match(text(all[0]), /Ver todas \(5\) →/); assert.equal(all[0].tagName, 'button');
+  opened.length = 0; view.hooks.openUrl = u => opened.push(u); all[0].click();
+  assert.deepEqual(opened, ['https://github.com/pulls?q=is%3Apr+is%3Aopen+author%3Ame'], 'it opens the full list on github.com (login URL-encoded)');
+  assert.equal(cls(card, 'gh-all').length, 0, 'no «Ver todas» when everything is already shown');
+  // the full title is reachable on hover / for assistive tech even when the row truncates it
+  const longTitle = 'feat(telemetry): add local Pi sessions telemetry with a very long descriptive title that never fits one line';
+  const lt = view.githubPulseCard({ ...pulse, myPRs: [{ ...pulse.myPRs[0], title: longTitle }] }, null, act, () => {});
+  const titleEl = cls(lt, 'gh-title')[0]; assert.equal(titleEl.attrs.title, `r#1 ${longTitle}`, 'title attribute carries ref + full title');
+  assert.equal(cls(lt, 'gh-row')[0].attrs.title, `r#1 ${longTitle}`);
   view.hooks.openUrl = () => {}; // the page-level hook re-validates; the vendor view itself drops non-github urls
   const evil = { ...pulse, myPRs: [{ ...pulse.myPRs[0], url: 'https://evil.example/x' }] };
   const openedEvil = []; view.hooks.openUrl = u => openedEvil.push(u);

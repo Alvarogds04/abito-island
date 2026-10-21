@@ -145,7 +145,11 @@ function noOverlaps(list, why) {
         assert.ok(!st || !st.shown, `${theme}: nothing half-drawn under the card`);
         // the blobs column keeps every OTHER row (the focused integration is the card; the sessions stay)
         const after = await r.page.evaluate(() => [...document.querySelectorAll('.pill-choice')].map(b => b.dataset.pillId));
-        assert.deepEqual(after, ['abito', 's-eb4fc4bc', 's-3b48a1be'], `${theme}: the focused integration leaves the column, the sessions stay`);
+        assert.deepEqual(after, ['abito', 'integration_github', 's-eb4fc4bc', 's-3b48a1be'], `${theme}: the focused integration STAYS in the column (design 16: «GitHub ◂»), the sessions stay`);
+        const active = await r.page.evaluate(() => { const b = document.getElementById('pill-choice-integration_github'); return b && { pressed: b.getAttribute('aria-pressed'), others: [...document.querySelectorAll('.pill-choice')].filter(x => x !== b && x.dataset.centre === 'true').map(x => x.dataset.pillId) }; });
+        assert.deepEqual(active, { pressed: 'true', others: [] }, `${theme}: the GitHub row is marked active (aria-pressed) while its card is the centre, and no other row claims the centre`);
+        const mark = await r.page.evaluate(() => { const b = document.getElementById('pill-choice-integration_github'); return { centre: b.dataset.centre, arrow: getComputedStyle(b.querySelector('span:not(.ico)'), '::after').content }; });
+        assert.equal(mark.centre, 'true'); assert.match(mark.arrow, /◂/, `${theme}: «GitHub ◂» is drawn`);
         // and the way BACK exists: the sessions are still rows, and Abito's row returns to the normal centre
         const home = (await r.measure('#pill-choice-abito'))[0];
         await r.page.mouse.click(home.left + home.w / 2, home.top + home.h / 2);
@@ -255,6 +259,9 @@ function noOverlaps(list, why) {
       assert.ok(st.card, 'the GitHub card is drawn');
       assert.equal(st.centre, 'none', 'the session centre gives way (an integration selection wins over the ticker focus)');
       // the selected row reads as selected, and clicking a SESSION row returns the centre to that session
+      // GitHub now stays a row of the column («GitHub ◂»), so the fourth blob sits below the fold: the human scrolls the list to it
+      await r.page.evaluate(() => { document.getElementById('pill-choices').scrollTop = 1e4; });
+      await r.page.waitForTimeout(200);
       const sess = (await r.measure('#pill-choice-s-3b48a1be'))[0];
       await r.page.mouse.click(sess.left + sess.w / 2, sess.top + sess.h / 2);
       await r.page.waitForTimeout(900);

@@ -67,7 +67,9 @@ function githubPulseCard(pulse, stats, activity, openDetail) {
   }, svg(main.failing ? ICONS.octagonX : ICONS.seal, 11, { evenOdd: true }));
   mainBtn.style.color = main.color;
   head.append(mainBtn);
-  return h("div", { class: "int-card" }, head, listBody(pulse.myPRs.map((pr) => prRow(pr, true))));
+  const shown = pulse.myPRs.slice(0, MAX_ROWS).map((pr) => prRow(pr, true));
+  if (pulse.myPRs.length > MAX_ROWS) shown.push(allRow(pulse));
+  return h("div", { class: "int-card" }, head, listBody(shown));
 }
 function backButton(title, onBack) {
   return h(
@@ -76,6 +78,13 @@ function backButton(title, onBack) {
     svg(ICONS.chevronLeft, 9, { stroke: 2.6 }),
     h("span", { text: title })
   );
+}
+const MAX_ROWS = 4;
+function allRow(pulse) {
+  const go = () => open(`https://github.com/pulls?q=${encodeURIComponent("is:pr is:open author:" + pulse.login).replace(/%20/g, "+")}`);
+  const el = h("button", { class: "gh-all", onclick: go, text: GH_STRINGS.seeAll(pulse.myPRs.length) });
+  rowOpens.set(el, go);
+  return el;
 }
 const CI_ICON = {
   success: ICONS.check,
@@ -91,11 +100,11 @@ function ciText(ci) {
   return ciWord(ci) ?? GH_STRINGS.noCI;
 }
 const rowOpens = /* @__PURE__ */ new WeakMap();
-function row(onOpen, ref, openLabel, ci, line1, tail) {
+function row(onOpen, ref, fullTitle, ci, line1, tail) {
   const open2 = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
   const el = h(
     "div",
-    { class: "gh-row" },
+    { class: "gh-row", title: `${ref} ${fullTitle}` },
     ciIcon(ci),
     h(
       "span",
@@ -106,7 +115,6 @@ function row(onOpen, ref, openLabel, ci, line1, tail) {
     open2
   );
   rowOpens.set(el, onOpen);
-  void openLabel;
   return el;
 }
 function prRow(pr, _showCI) {
@@ -114,9 +122,9 @@ function prRow(pr, _showCI) {
   return row(
     () => open(pr.url),
     ref,
-    ref,
+    pr.title,
     pr.ci,
-    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", text: pr.title })],
+    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", title: `${ref} ${pr.title}`, text: pr.title })],
     [pr.isDraft ? h("span", { class: "gh-draft", text: `· ${GH_STRINGS.draft}` }) : null]
   );
 }
@@ -124,7 +132,7 @@ function repoRow(repo) {
   return row(
     () => open(actionsUrl(repo.url)),
     shortRepo(repo.repo),
-    shortRepo(repo.repo),
+    repo.branch,
     repo.ci,
     [h("span", { class: "gh-ref", text: shortRepo(repo.repo) }), h("span", { class: "gh-title", text: repo.branch })],
     []
