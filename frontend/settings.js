@@ -878,6 +878,8 @@
         li.append(actions); list.append(li);
       }
       if (!av.rows.length) list.append(el('li', 'sempty', 'Sin agentes'));
+      // Honest limit of asking from the island: a Claude Code run that cannot show its own prompt (`claude -p`, background subagents) treats "no answer" as DENIED.
+      list.append(el('li', 'snote', 'Claude Code en modo no interactivo (claude -p, subagentes): si no respondés a tiempo desde Abito, el permiso se niega. Abito nunca lo acepta por vos.'));
       sec.append(list);
     }
     body.append(sec);

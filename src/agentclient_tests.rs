@@ -243,6 +243,17 @@ fn the_agent_commands_are_a_closed_set_with_an_id_allowlist() {
 }
 
 #[test]
+fn copilot_cli_connects_like_the_others_and_its_row_survives_the_fold() {
+    for action in ["agent_connect", "agent_disconnect"] {
+        assert!(matches!(parse_ui_command(&json!({"action": action, "agentId": "copilot-cli"})), Ok(UiCommand::Wire(_))), "{action}");
+    }
+    assert!(parse_ui_command(&json!({"action":"agent_connect","agentId":"copilot"})).is_err(), "only the catalogue id");
+    let mut st = ClientState::connected();
+    st.apply(&json!({"type":"agents","agents":[{"id":"copilot-cli","state":"not_connected","backup":false,"detail":null,"plan_hash":"ab".repeat(32),"summary":"Adds the Abito hooks (permissionRequest, sessionEnd) to ~/.copilot/hooks/abito-island.json. A backup is made first."}]})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["agents"][0]["id"], json!("copilot-cli"));
+}
+
+#[test]
 fn an_agents_frame_is_folded_into_a_flat_closed_view() {
     let mut st = ClientState::connected();
     assert_eq!(serde_json::to_value(&st).unwrap()["agents"], json!(null), "unknown until the engine says so");

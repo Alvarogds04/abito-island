@@ -363,7 +363,7 @@ fn plan_summary_ok(s: &str) -> bool {
 /// The code agents the island can connect (the installers exist for these).
 /// `recap` (weekly-recap hooks) and `statusline` (plan-usage relay) are the two notify-only Claude Code integrations the
 /// daemon installs with the same preview / hash / backup flow (L32e).
-pub const AGENT_IDS: [&str; 5] = ["claude-code", "codex", "opencode", "recap", "statusline"];
+pub const AGENT_IDS: [&str; 6] = ["claude-code", "codex", "copilot-cli", "opencode", "recap", "statusline"];
 
 /// #436 T6.5: the six hook clients the daemon's `hooks` frame may name (its own closed
 /// list). Wider than AGENT_IDS on purpose: the page shows their state, and installs

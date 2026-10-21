@@ -247,7 +247,7 @@ const MAX_IDENTITY: usize = 32;
 /// `AGENT_IDS`, notify-view.js `KNOWN_AGENTS`). They are NOT sub-Abitos, so the store refuses
 /// to hold a colour for one: keeping a preference the panel would never apply would be a
 /// silent lie in the file.
-const PROVIDERS: [&str; 4] = ["claude-code", "codex", "opencode", "pi"];
+const PROVIDERS: [&str; 5] = ["claude-code", "codex", "copilot-cli", "opencode", "pi"];
 
 /// Keys that must never travel from a preferences file into a plain object's prototype.
 const RESERVED: [&str; 3] = ["__proto__", "prototype", "constructor"];

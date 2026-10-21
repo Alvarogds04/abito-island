@@ -739,7 +739,7 @@ test('accounts: the connected list shows only signed-in accounts, with «Salir»
 // ---- Conectores: agents (one click, no terminal) + services ----------------------------------------
 const agentsState = (list, extra = {}) => state({ agents: list, ...extra });
 test('agents: three known agents, names from OUR table, never from the engine payload', () => {
-  assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'opencode', 'recap', 'statusline']);
+  assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'copilot-cli', 'opencode', 'recap', 'statusline']);
   const v = S.agentsView(agentsState([{ id: 'claude-code', name: '<b>pwn</b>', state: 'not_connected', backup: false, detail: null }]));
   assert.equal(v.kind, 'ready');
   assert.equal(v.rows[0].name, 'Claude Code');
@@ -801,7 +801,7 @@ test('agents: all SIX clients render, in our closed order, with names derived fr
   assert.deepEqual(v.rows.map(r => r.id), ['claude-code', 'codex', 'gemini-cli', 'copilot-cli', 'opencode', 'amp', 'cursor']);
   assert.deepEqual(v.rows.map(r => r.name), ['Claude Code', 'Codex', 'Gemini CLI', 'Copilot CLI', 'OpenCode', 'Amp', 'Cursor']);
   // the connect allowlist is untouched: the three extra rows never offer a button
-  assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'opencode', 'recap', 'statusline']);
+  assert.deepEqual(S.AGENT_IDS, ['claude-code', 'codex', 'copilot-cli', 'opencode', 'recap', 'statusline']);
   const extras = v.rows.filter(r => !S.AGENT_IDS.includes(r.id));
   assert.ok(extras.every(r => r.primary === null && r.secondary === null), 'state-only rows, no dead buttons');
 });
@@ -883,7 +883,7 @@ test('no human-facing string of the settings page asks for a terminal (state JSO
   // #436 D7: the closed hook client ids and the product word are NAMES of clients the design
   // draws (Gemini CLI, Copilot CLI), not instructions to open a terminal; the guard keeps
   // watching every other fixed string.
-  const CLIENT_NAMES = new Set(['claude-code', 'codex', 'opencode', 'gemini-cli', 'copilot-cli', 'amp', 'cursor', 'CLI']);
+  const CLIENT_NAMES = new Set(['claude-code', 'codex', 'opencode', 'gemini-cli', 'copilot-cli', 'Copilot CLI', 'amp', 'cursor', 'CLI']);
   const where = [];
   for (const f of ['settings.js', 'settings-view.js']) {
     for (const lit of literals(fs.readFileSync(path.join(frontend, f), 'utf8'))) if (bad.test(lit) && !/^(agent_|abito:|settings|agents_)/.test(lit) && !CLIENT_NAMES.has(lit)) where.push(`${f}: ${lit}`);
@@ -970,6 +970,19 @@ test('plan: the closed summary is shown next to the button, and the click carrie
   assert.equal(upd.summary, 'Actualiza los hooks de Abito en ~/.claude/settings.json. Antes se hace un respaldo.');
   // a disconnect never carries a plan
   assert.deepEqual(rowOf(plan({ state: 'connected' })).secondary.command, { action: 'agent_disconnect', agentId: 'claude-code' });
+});
+
+test('Copilot CLI and OpenCode are connectable rows with their own Spanish plan sentence', () => {
+  const rows = S.agentsView(agentsState([
+    { id: 'copilot-cli', state: 'not_connected', backup: false, detail: null, plan_hash: 'c'.repeat(64), summary: 'Adds the Abito hooks (permissionRequest, sessionEnd) to ~/.copilot/hooks/abito-island.json. A backup is made first.', reviewable: true },
+    { id: 'opencode', state: 'not_connected', backup: false, detail: null, plan_hash: 'd'.repeat(64), summary: 'Adds the Abito plugin to ~/.config/opencode/plugins/abito-island.js. A backup is made first.', reviewable: true },
+  ])).rows;
+  const by = id => rows.find(r => r.id === id);
+  assert.equal(by('copilot-cli').name, 'Copilot CLI');
+  assert.deepEqual(by('copilot-cli').primary.command, { action: 'agent_connect', agentId: 'copilot-cli', plan_hash: 'c'.repeat(64) });
+  assert.equal(by('copilot-cli').summary, 'Agrega los hooks de Abito (permissionRequest, sessionEnd) a ~/.copilot/hooks/abito-island.json. Antes se hace un respaldo.');
+  assert.deepEqual(by('opencode').primary.command, { action: 'agent_connect', agentId: 'opencode', plan_hash: 'd'.repeat(64) });
+  assert.equal(by('opencode').summary, 'Agrega el plugin de Abito a ~/.config/opencode/plugins/abito-island.js. Antes se hace un respaldo.');
 });
 
 test('plan: the sentence is OURS — an English template becomes Spanish, an unknown one is never shown as engine text', () => {
