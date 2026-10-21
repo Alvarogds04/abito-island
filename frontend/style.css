@@ -9,6 +9,7 @@
   --island-ink: #fff;
   --island-muted: #a1a1aa;
   --go: #b8ff2e;
+  --focus-ring: rgba(255, 255, 255, 0.55); /* the text fields' focus edge: thin and muted, like Coucou's; the lime --go stays for controls */
   --sun: #ffe100;        /* waits for your yes */
   --red-11: #ff5c75;     /* real error */
   --island-live: #2eb4ff; /* in progress */
@@ -318,6 +319,8 @@ html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
 
 :where(button, textarea) { outline: 2px solid transparent; outline-offset: 2px; transition: outline-color var(--dur-focus) var(--ease-out); }
 :focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+/* A text field already has a visible edge: its focus is a 1px muted ring ON that edge, not a 2px lime halo floating around it. */
+#chat-input:focus-visible, #question-text:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 0; }
 
 #chat {
   position: absolute;

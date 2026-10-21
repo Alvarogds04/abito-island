@@ -96,6 +96,7 @@ test('#336 no innerHTML is reintroduced in island.js (#411) and the adapter owns
 function engagementFixture(openOnHover) {
   const vm = require('node:vm');
   let hovering = false;
+  const intervalsList = [];
   const moduleApi = require(path.join(frontend, 'island-interaction.js'));
   const invocations = [];
   const desktopCalls = [], dismissed = [];
@@ -160,7 +161,7 @@ function engagementFixture(openOnHover) {
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     performance: { now: () => clock },
     setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, {fn, ms, due:clock+ms}); return id; },
-    clearTimeout(id) { timers.delete(id); }, setInterval() { return 1; }, clearInterval() {},
+    clearTimeout(id) { timers.delete(id); }, setInterval(fn, ms) { intervalsList.push({ fn, ms }); return intervalsList.length; }, clearInterval() {},
     requestAnimationFrame() { return 1; },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     DOMParser: class { parseFromString() { return { documentElement: { nodeName: 'svg' } }; } },
@@ -212,6 +213,9 @@ function engagementFixture(openOnHover) {
     pin() { const el = byId.get('island-pin'); assert.ok(el, 'accessible manual pin control exists'); el.fire('click', {isTrusted:true,type:'click',button:0}); return el.getAttribute('aria-pressed'); },
     // the boot render mutates the observed attributes: fire them once
     mutate() { for (const o of observers) o.cb([]); },
+    capsule() { return byId.get('capsule'); },
+    intervals() { return intervalsList; },
+    tickIntervals() { for (const i of intervalsList) i.fn(); },
     seed(state) {
       snapshotState = { ...snapshotState, state };
       for (const fn of desktopHandlers) fn(snapshotState);
@@ -428,6 +432,24 @@ test('B5 the edge-hide setting is SECONDS (Ajustes -> General -> «Ocultar tras�
   assert.match(prefs, /\(minutes \* 60\)\.min\(\*ABSENCE_SECONDS\.end\(\)\)/);
   assert.match(read('island.js'), /absenceSeconds:p\.absenceSeconds \?\? 10/);
   assert.doesNotMatch(read('island.js'), /notice: !!\(current\?\.notices/, 'status notices no longer feed the edge guard');
+});
+
+// ---- live diagnosis: the controller's «why» is published on the capsule so the preview can be READ (human: «no se cumple») -------
+test('C1 syncInteraction publishes capsule.dataset.autoClose = the controller\'s why, and the hover re-read, on every sync', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  assert.match(f.capsule().dataset.autoClose, /^armado:\d+s$/);
+  f.enter(); f.mutate(); assert.equal(f.capsule().dataset.autoClose, 'puntero-dentro');
+  f.leave(); f.hover(false); f.mutate(); assert.match(f.capsule().dataset.autoClose, /^armado:/);
+  f.advance(16000);
+  assert.ok(f.desktopCalls.includes('autoClose'));
+});
+test('C2 the 1 s hover re-read is armed (setInterval) and runs only while the controller believes the pointer is inside', () => {
+  const f = engagementFixture(false); f.mutate(); f.seed('expanded');
+  assert.equal(f.intervals().length, 1, 'one interval');
+  assert.equal(f.intervals()[0].ms, 1000);
+  f.enter(); f.hover(false);
+  f.tickIntervals();
+  assert.match(f.capsule().dataset.autoClose, /^armado:/, 'the re-read cleared the stale «inside» without any other event');
 });
 
 console.log(`island-interaction-wiring-check: ${passed} passed, ${failed} failed`);

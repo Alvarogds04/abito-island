@@ -456,6 +456,14 @@
     return null;
   }
 
-  return { optionRows, singleItem, toggleOther, OTHER_LABEL, newDraft, toggleOption, setDraftText, textFits, draftAnswered, itemPayload, multiView, manyPayload, formStart, formReduce, formView, formPayload, keyIntent, windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  // ONE rule for both sizes: a question on screen (pending or expired) asks for its measured layout; every other state - answered,
+  // declined, cancelled, terminal won, expired-and-gone, an outcome word - gives the height back (island 0 = overview, window 340).
+  function sizeSync(o) {
+    const shown = !!o && (o.question === 'pending' || o.question === 'expired');
+    const islandH = shown && Number.isFinite(o.islandH) && o.islandH > 0 ? Math.ceil(o.islandH) : 0;
+    return { islandH, windowH: windowHeightFor(islandH) };
+  }
+
+  return { sizeSync, optionRows, singleItem, toggleOther, OTHER_LABEL, newDraft, toggleOption, setDraftText, textFits, draftAnswered, itemPayload, multiView, manyPayload, formStart, formReduce, formView, formPayload, keyIntent, windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

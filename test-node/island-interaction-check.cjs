@@ -256,11 +256,56 @@ function fixture(effects = {}) {
     assert.equal(f.controller.snapshot().deadline, Date.parse('2999-12-31T23:59:59Z') + 15000);
     f.controller.stop(); assert.equal(f.jobs.size, 0);
   });
-  await test('S3 failed autoClose does not loop/retry on stale snapshots', async () => {
+  await test('S3 a refused autoClose is retried on a BACKOFF (never on snapshot churn), so one transient refusal cannot disable the close forever', async () => {
     for (const effect of [() => Promise.reject(new Error('native pending refusal')), () => { throw new Error('sync refusal'); }]) {
       const f = fixture({ autoClose: effect }); f.controller.update(overview()); f.advance(15000); await flush();
-      f.controller.update(overview()); f.advance(120000); assert.deepEqual(f.calls, ['autoClose']); assert.equal(f.jobs.size, 0);
+      assert.deepEqual(f.calls, ['autoClose']);
+      // stale snapshots in between must not trigger anything: only the clock does
+      for (let i = 0; i < 20; i++) f.controller.update(overview());
+      assert.deepEqual(f.calls, ['autoClose'], 'churn never retries');
+      f.advance(14999); await flush(); assert.deepEqual(f.calls, ['autoClose'], 'not before one full period');
+      f.advance(1); await flush(); assert.deepEqual(f.calls, ['autoClose', 'autoClose'], 'one period later it asks again');
+      // exponential backoff: 15 s, 30 s, 60 s, ... capped at 120 s; never a tight loop
+      f.advance(29999); await flush(); assert.equal(f.calls.length, 2);
+      f.advance(1); await flush(); assert.equal(f.calls.length, 3);
+      f.advance(600000); await flush();
+      assert.ok(f.calls.length <= 3 + 6, `bounded attempts, got ${f.calls.length}`);
     }
+  });
+  await test('S3 a refusal that recovers: the next attempt closes and the backoff is forgotten for the next expansion', async () => {
+    let refuse = true;
+    const f = fixture({ autoClose: () => (refuse ? Promise.reject(new Error('busy')) : Promise.resolve()) });
+    f.controller.update(overview()); f.advance(15000); await flush(); assert.equal(f.calls.length, 1);
+    refuse = false; f.advance(15000); await flush(); assert.equal(f.calls.length, 2, 'accepted this time');
+    f.controller.update(overview({ state: 'compact' })); f.controller.update(overview());
+    refuse = true; f.advance(15000); await flush(); f.advance(15000); await flush();
+    assert.equal(f.calls.length, 4, 'a new expansion starts again at one period, not at the old backoff');
+  });
+  await test('S3 a user action (click/key) while a retry is pending restarts the normal period', async () => {
+    const f = fixture({ autoClose: () => Promise.reject(new Error('busy')) });
+    f.controller.update(overview()); f.advance(15000); await flush();
+    f.advance(5000); f.controller.engage(click()); f.advance(14999); await flush(); assert.equal(f.calls.length, 1);
+    f.advance(1); await flush(); assert.equal(f.calls.length, 2);
+  });
+  await test('diagnose: the controller says WHY it is not closing (blocker name, hover, armed countdown), for the live preview to show', () => {
+    const f = fixture();
+    assert.equal(f.controller.snapshot().why, 'sin-hechos', 'before any fact');
+    f.controller.update(overview({ view: 'chat' })); assert.equal(f.controller.snapshot().why, 'vista:chat');
+    f.controller.update(overview({ editing: true })); assert.equal(f.controller.snapshot().why, 'editing');
+    f.controller.update(overview({ question: true })); assert.equal(f.controller.snapshot().why, 'question');
+    f.controller.update(overview({ state: 'compact' })); assert.equal(f.controller.snapshot().why, 'estado:compact');
+    f.controller.update(overview()); assert.match(f.controller.snapshot().why, /^armado:1[45]s$/);
+    f.advance(5000); assert.match(f.controller.snapshot().why, /^armado:(9|10)s$/);
+    f.controller.enter(mouse()); assert.equal(f.controller.snapshot().why, 'puntero-dentro');
+    f.controller.leave(mouse()); f.controller.togglePin(click()); assert.equal(f.controller.snapshot().why, 'fijada');
+    f.controller.togglePin(click());
+    f.controller.setPreferences(prefs(0, false)); assert.equal(f.controller.snapshot().why, 'nunca');
+    f.controller.stop(); assert.equal(f.controller.snapshot().why, 'detenido');
+  });
+  await test('diagnose: a spent close says so (the live symptom «never closes» becomes visible)', async () => {
+    const f = fixture({ autoClose: () => Promise.reject(new Error('busy')) });
+    f.controller.update(overview()); f.advance(15000); await flush();
+    assert.match(f.controller.snapshot().why, /^rechazado:reintento \d+s$/);
   });
   await test('S3 close/reset and stop clear timers and ignore late open/close promises', async () => {
     for (const kind of ['open', 'autoClose']) {

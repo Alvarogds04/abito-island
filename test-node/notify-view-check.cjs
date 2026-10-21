@@ -666,3 +666,39 @@ test('structured wiring: the closed IPC verbs, the card controls, the textarea m
   assert.equal(toast.toastView({ available: true, pending: multiP(), queued_count: 0 }, { now: Date.now() }).title, 'Claude Code pregunta');
   assert.equal(toast.toastView({ available: true, pending: formP({ form: [formP().form[0]] }), queued_count: 0 }, { now: Date.now() }).title, 'Claude Code pregunta (1 pregunta)');
 });
+
+// ---- after a question closes the island returns to its overview height and the window to 340 (human: «más grande de lo que debería») ----
+test('sizeSync: every way a question can end gives the height back; a shown question asks for exactly its layout', () => {
+  const S = N.sizeSync;
+  // open question: the island follows its card, the window follows the island
+  assert.deepEqual(S({ question: 'pending', islandH: 252 }), { islandH: 252, windowH: 340 }, 'a card that fits the fixed window keeps it at 340');
+  assert.deepEqual(S({ question: 'pending', islandH: 600 }), { islandH: 600, windowH: 608 }, 'a taller card asks the window for island + 8');
+  assert.deepEqual(S({ question: 'expired', islandH: 252 }), { islandH: 252, windowH: 340 }, 'an expired card is still on screen');
+  // every close path: answered, declined, cancelled, terminal won, expired -> the question flag leaves 'pending'
+  for (const question of ['', 'outcome', undefined, null]) {
+    assert.deepEqual(S({ question, islandH: 252 }), { islandH: 0, windowH: 340 }, String(question));
+  }
+  assert.deepEqual(S({ question: 'pending', islandH: 0 }), { islandH: 0, windowH: 340 }, 'no measured layout yet: nothing to grow');
+  for (const bad of [NaN, -3, undefined]) assert.deepEqual(S({ question: 'pending', islandH: bad }), { islandH: 0, windowH: 340 }, String(bad));
+});
+test('shrink contract: islandH 0 always reaches the island (even when no size was ever published) and the window ask is made once per change', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  const fit = src.slice(src.indexOf('function fitCard()'), src.indexOf('function growText()'));
+  assert.match(fit, /N\.sizeSync\(/, 'one rule decides both sizes');
+  assert.doesNotMatch(fit, /if \(sizedKey\) \{ sizedKey = ''; root\.style\.height/, 'the reset no longer depends on a size having been published before');
+  assert.match(fit, /publishSize\(closed\.islandH\)/, 'closing always tells the island, even if no size was ever published');
+  assert.match(src, /function publishSize[\s\S]*abito:question-size/);
+  const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  const handler = isl.slice(isl.indexOf("addEventListener('abito:question-size'"), isl.indexOf("addEventListener('abito:question'"));
+  assert.match(handler, /questionH = next/);
+  assert.match(handler, /h >= QUESTION_H \? h : QUESTION_H/, '0 (closed) falls back to the default overview-question height');
+  // the island also drops the question height when the question flag itself goes away
+  const onQ = isl.slice(isl.indexOf("addEventListener('abito:question', event"), isl.indexOf("addEventListener('abito:question', event") + 700);
+  assert.match(onQ, /if \(!show\) questionH = QUESTION_H/, 'closing the question resets the island height regardless of the size event');
+});
+test('closing paths: notify.js re-fits on every state change, outcome timer expiry and local expiry', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /outcomeTimer = setTimeout\(\(\) => render\(\)/, 'the outcome timer re-renders (and so re-fits)');
+  assert.match(src, /setInterval\(\(\) => render\(\), 5000\)/, 'local expiry re-renders');
+  assert.match(src, /fitCard\(\);\n  \}/, 'render ends in fitCard');
+});

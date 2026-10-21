@@ -592,6 +592,9 @@
   });
   function syncInteraction() {
     if (interaction) interaction.update(interactionFacts());
+    // WHY the island is (not) auto-closing, readable from outside (the live preview is validated through the screen): the
+    // controller's one-word reason. Diagnostic only; nothing reads it back.
+    if (interaction) { const why = interaction.snapshot().why; if (capsule.dataset.autoClose !== why) capsule.dataset.autoClose = why; }
     paintPin();
     if (edgeInteraction) {
       // Native input-mask changes may swallow pointerleave. Reconcile against
@@ -1326,6 +1329,7 @@
   document.addEventListener('abito:question', event => {
     const show = !!(event.detail && event.detail.show);
     if (show) finishedCycle?.cancel(); // never cover a pending question with finished content
+    if (!show) questionH = QUESTION_H; // closing the question resets the island height regardless of the size event
     if (show !== questionShown) { questionShown = show; render(); }
     paintCompactFlag();
     if (event.detail && event.detail.reveal) {
