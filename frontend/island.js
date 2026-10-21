@@ -1364,7 +1364,15 @@
     const badge = $('compact-badge'), act = $('compact-activity');
     if (act && act.textContent !== (v.activity || '')) act.textContent = v.activity || '';
     if (badge) { badge.hidden = !v.badge; badge.dataset.kind = v.badge || ''; }
+    const reply = $('compact-reply'); if (reply) reply.hidden = !v.reply;
+    capsule.dataset.compactAsk = v.reply ? 'true' : 'false';
     if (next !== compactW) { compactW = next; render(); }
+  });
+  // S3: «Responder» on the widened pill opens the island on the question (the same verb the toast used)
+  const compactReply = $('compact-reply');
+  if (compactReply) compactReply.addEventListener('click', event => {
+    event.stopPropagation();
+    if (event.isTrusted === true) document.dispatchEvent(new CustomEvent('abito:question-open', { detail: { id: 'compact' } }));
   });
   document.addEventListener('abito:question-size', event => {
     const h = Number(event.detail && event.detail.islandH);

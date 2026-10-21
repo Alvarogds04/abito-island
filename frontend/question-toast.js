@@ -138,7 +138,9 @@ function mount(T) {
   };
 
   let snapshot = null, view = null, dismissedId = null, shownId = null, expandTimer = 0, collapseTimer = 0, hot = false;
-  const onScreen = () => capsule.dataset.phase === 'expanded' && capsule.dataset.view === 'overview' && !capsule.dataset.card;
+  // S3: the widened compact pill carries the question itself (no separate toast); the toast stays for the hidden strip and the chat view
+  const onScreen = () => (capsule.dataset.phase === 'expanded' && capsule.dataset.view === 'overview' && !capsule.dataset.card)
+    || (capsule.dataset.phase === 'compact' && capsule.dataset.compactAsk === 'true' && capsule.dataset.edgeHidden !== 'true');
   const reduced = () => doc.documentElement.dataset.motion === 'reduce' || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const clear = () => { clearTimeout(expandTimer); clearTimeout(collapseTimer); };
   const island = doc.getElementById('island');
@@ -240,6 +242,6 @@ function mount(T) {
   const apply = next => { if (next && typeof next === 'object') { snapshot = next; render(); } };
   if (listen) listen('question:state', event => apply(event && event.payload)).catch(() => {});
   if (invoke) invoke('question_action', { payload: { action: 'view' } }).then(apply, () => {});
-  new MutationObserver(render).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view', 'data-card'] });
+  new MutationObserver(render).observe(capsule, { attributes: true, attributeFilter: ['data-phase', 'data-view', 'data-card', 'data-compact-ask', 'data-edge-hidden'] });
   setInterval(() => { if (view) render(); }, 5000); // local expiry hides it without a host event
 }

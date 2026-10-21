@@ -498,7 +498,11 @@ test('S2 compactView: up to 3 coloured minis + «+N», the activity line from RE
   const none = L.compactView({ rows: [], focusId: null, pending: null });
   assert.deepEqual([none.minis, none.more, none.activity, none.badge, none.width], [[], 0, '', '', 288], 'nothing running: the plain 288 pill');
   assert.equal(L.compactView({ rows, focusId: null, pending: { kind: 'question', agent: 'pi', text: '¿Qué editor?' } }).badge, 'question');
-  assert.equal(L.compactView({ rows: [], focusId: null, pending: { kind: 'question', agent: 'pi', text: 'x' } }).width, 440, 'a question widens the pill (S3)');
+  const ask = L.compactView({ rows, focusId: null, pending: { kind: 'question', agent: 'pi', text: '¿Qué editor preferís?\nvim o emacs' } });
+  assert.deepEqual([ask.width, ask.activity, ask.reply, ask.minis.length, ask.more], [560, '¿Qué editor preferís?', true, 0, 0], 'S3: a question widens the pill, shows its first line + «Responder», drops the minis');
+  const perm = L.compactView({ rows: [], focusId: null, pending: { kind: 'question', agent: 'claude-code', text: 'Claude Code asks permission: Bash: rm -rf build/', options: [{ index: 0, label: 'Allow once' }, { index: 1, label: 'Deny' }] } });
+  assert.equal(perm.badge, 'approval'); assert.match(perm.activity, /^Ejecutar: rm -rf build/);
+  assert.equal(L.compactView({ rows, focusId: null, pending: null }).reply, false);
   assert.equal(L.compactView(null).width, 288);
 });
 test('S1/S2 wiring + CSS: the strip element, the 8px activation zone (24px hidden offset), the mini row and the activity line exist', () => {

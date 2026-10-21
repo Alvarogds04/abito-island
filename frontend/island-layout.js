@@ -236,7 +236,7 @@
   }
 
   // ---- T1 · S2 (02 compacta, A): the mascot + up to 3 coloured mini-mascots + «+N», the real activity line, a state badge -----------
-  const COMPACT_W = 288, COMPACT_WIDE = 440, MINIS = 3;
+  const COMPACT_W = 288, COMPACT_WIDE = 440, COMPACT_ASK = 560, MINIS = 3;
   function compactView(o) {
     const rows = o && Array.isArray(o.rows) ? o.rows.filter(r => r && typeof r.id === 'string') : [];
     const pending = o && o.pending && typeof o.pending === 'object' ? o.pending : null;
@@ -249,11 +249,15 @@
       activity = step ? `${name} · ${step.name}…` : name;
       if (isRunning(focus)) badge = 'working';
     }
+    // S3 (03 alerta, A): a waiting question/permission widens the pill and shows its first line + «Responder»; no separate toast
+    let reply = false;
     if (pending) {
       badge = approvalView(pending, '') ? 'approval' : (pending.kind === 'approval' ? 'approval' : 'question');
-      if (!activity) activity = bound(String(pending.text || '').split(/\r?\n/)[0], 40);
+      const first = String(pending.text || '').split(/\r?\n/).map(l => l.trim()).find(Boolean) || '';
+      const av = approvalView(pending, '');
+      activity = bound(av ? `${av.title} ${av.command}` : first, 44); reply = true;
     }
-    return { minis, more: Math.max(0, rows.length - MINIS), activity, badge, width: rows.length || pending ? COMPACT_WIDE : COMPACT_W };
+    return { minis: reply ? [] : minis, more: reply ? 0 : Math.max(0, rows.length - MINIS), activity, badge, reply, width: reply ? COMPACT_ASK : rows.length ? COMPACT_WIDE : COMPACT_W };
   }
 
   return { tipFor, tipPlacement, ROW, rowsViewport, EDGE_STRIP, edgeStripView, compactView, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
