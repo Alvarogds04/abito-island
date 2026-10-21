@@ -1342,8 +1342,19 @@
     if (shown !== toastShown) { toastShown = shown; render(); }
   });
   document.addEventListener('abito:question-open', () => {
-    if (!window.desktop || typeof window.desktop.expand !== 'function') return;
-    window.desktop.expand().then(snap => { if (snap) { current = snap; syncToggle(snap.state); } }, () => {});
+    // From the CHAT view the island is already expanded, so «expand» did nothing and the question stayed hidden behind the chat (the human
+    // had to press ⌂). Leave the chat through the same closed verb the «ir a la alerta» shortcut uses, then make sure the island is open.
+    const leaveChat = capsule.dataset.view === 'chat' && invoke
+      ? invoke('chat_action', { payload: { action: 'back' } }).then(() => {
+        noticeLane = null; delete capsule.dataset.noticeView;
+        renderCard(); render();
+        document.dispatchEvent(new CustomEvent('island:view', { detail: 'overview' }));
+      }, () => {})
+      : Promise.resolve();
+    leaveChat.then(() => {
+      if (!window.desktop || typeof window.desktop.expand !== 'function') return;
+      return window.desktop.expand().then(snap => { if (snap) { current = snap; syncToggle(snap.state); } }, () => {});
+    });
   });
   document.addEventListener('abito:question-size', event => {
     const h = Number(event.detail && event.detail.islandH);

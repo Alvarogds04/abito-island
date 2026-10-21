@@ -306,8 +306,9 @@ function noOverlaps(list, why) {
       const title = (await r.measure('#notice-title'))[0], cap = (await r.measure('#notice-pill'))[0];
       const fits = await r.page.evaluate(() => { const t = document.getElementById('notice-title'); return { sw: t.scrollWidth, cw: t.clientWidth, text: t.textContent }; });
       assert.ok(fits.sw <= fits.cw + 1, `the notice title is not truncated in the column: «${fits.text}» needs ${fits.sw}px, has ${fits.cw}px`);
-      const sub = await r.page.evaluate(() => { const s = document.getElementById('notice-sub'); const st = getComputedStyle(s); return { shown: st.display !== 'none' && s.getBoundingClientRect().width > 0, w: s.getBoundingClientRect().width }; });
-      assert.ok(!sub.shown || sub.w >= 40, `the secondary text is either dropped or readable, never a 12px stub («Hace…»): ${JSON.stringify(sub)}`);
+      const sub = await r.page.evaluate(() => { const s = document.getElementById('notice-sub'); return { disp: getComputedStyle(s).display, aria: document.getElementById('notice-open').getAttribute('aria-label') }; });
+      assert.equal(sub.disp, 'none', 'the capsule carries NO secondary text: it cannot fit the 174px column whatever the font, and the real window showed «Hace…»');
+      assert.ok(sub.aria, 'the detail stays reachable through the accessible name');
       const rows = (await r.measure('.pill-choice')).filter(b => b.shown);
       const list = (await r.measure('#pill-choices'))[0];
       const whole = rows.filter(b => b.top >= list.top - 0.5 && b.bottom <= list.bottom + 0.5);
@@ -348,11 +349,12 @@ function noOverlaps(list, why) {
       await r.page.waitForTimeout(300);
       await r.page.mouse.move(5, 5); // the pointer leaves: nothing but the selection may still mark the row
       await r.page.waitForTimeout(200);
-      const after = await r.page.evaluate(() => [...document.querySelectorAll('.q-option')].map(b => ({ checked: b.getAttribute('aria-checked'), selected: b.dataset.selected, mark: getComputedStyle(b, '::before').content, bg: getComputedStyle(b, '::after').backgroundColor, weight: getComputedStyle(b.querySelector('.q-label')).fontWeight })));
+      const after = await r.page.evaluate(() => [...document.querySelectorAll('.q-option')].map(b => { const m = b.querySelector('.q-dot, .q-box'); return { checked: b.getAttribute('aria-checked'), selected: b.dataset.selected, markBg: m ? getComputedStyle(m).backgroundImage + '|' + getComputedStyle(m).backgroundColor : '', markBorder: m ? getComputedStyle(m).borderColor : '', bg: getComputedStyle(b, '::after').backgroundColor, weight: getComputedStyle(b.querySelector('.q-label')).fontWeight }; }));
       assert.equal(after[1].selected, 'true', `the chosen row is marked selected: ${JSON.stringify(after[1])}`);
       assert.notEqual(after[1].selected, after[0].selected, 'only the chosen row');
       assert.notEqual(after[1].bg, after[0].bg, `the chosen row looks different WITHOUT hover (background ${after[1].bg} vs ${after[0].bg})`);
-      assert.ok(after[1].mark && after[1].mark !== 'none', `a visible mark (a check or a filled radio): ${after[1].mark}`);
+      assert.notEqual(after[1].markBg, after[0].markBg, `the chosen row's mark (dot/box) is filled, the others are empty: ${after[1].markBg} vs ${after[0].markBg}`);
+      assert.equal(after[1].weight, '700', 'and its label is heavier');
       passed += 1;
     } catch (e) { await r.screenshot('/tmp/geo-fail-selected-step.png').catch(() => {}); throw e; }
     finally { await r.close(); }
@@ -374,6 +376,80 @@ function noOverlaps(list, why) {
       assert.deepEqual(st, { q: '', gh: 'on', card: true }, `the outcome is gone and GitHub is the centre, well before the 3 s timer: ${JSON.stringify(st)}`);
       passed += 1;
     } catch (e) { await r.screenshot('/tmp/geo-fail-outcome-click.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
+  // v5-06 REGRESSION: choosing an option must not change its row: the label stays on ONE line (it broke letter by letter when the selection
+  // added a grid cell) and the row keeps its height; the neighbours do not move.
+  {
+    for (const kind of ['multi', 'form']) {
+      const r = await H.open({ question: kind, github: true });
+      try {
+        const snap = () => r.page.evaluate(() => [...document.querySelectorAll('.q-option')].map(b => { const l = b.querySelector('.q-label'), bb = b.getBoundingClientRect(), lb = l.getBoundingClientRect();
+          const lh = parseFloat(getComputedStyle(l).lineHeight) || 16; return { h: Math.round(bb.height * 10) / 10, top: Math.round(bb.top * 10) / 10, labelW: Math.round(lb.width), labelLines: Math.round(lb.height / lh), cols: getComputedStyle(b).gridTemplateColumns, kids: b.children.length }; }));
+        const before = await snap();
+        const rows = (await r.measure('.q-option')).filter(b => b.shown);
+        await r.page.mouse.click(rows[0].left + rows[0].w / 2, rows[0].top + rows[0].h / 2);
+        await r.page.waitForTimeout(400);
+        const during = await snap();                 // pointer still over the chosen row
+        await r.page.mouse.move(5, 5); await r.page.waitForTimeout(250);
+        const after = await snap();
+        for (const [when, list] of [['hovered', during], ['pointer away', after]]) {
+          assert.deepEqual(list.map(x => x.h), before.map(x => x.h), `${kind}, ${when}: no row changes height after choosing (${JSON.stringify(list.map(x => x.h))} vs ${JSON.stringify(before.map(x => x.h))})`);
+          assert.deepEqual(list.map(x => x.top), before.map(x => x.top), `${kind}, ${when}: no neighbour moves`);
+          assert.ok(list.every(x => x.labelLines === 1), `${kind}, ${when}: every label stays on one line (${JSON.stringify(list.map(x => x.labelLines))})`);
+          assert.ok(list.every(x => x.labelW >= 60), `${kind}, ${when}: every label keeps a real column (${JSON.stringify(list.map(x => x.labelW))})`);
+          assert.deepEqual(list.map(x => x.cols), before.map(x => x.cols), `${kind}, ${when}: the grid columns do not change with the selection`);
+          assert.deepEqual(list.map(x => x.kids), before.map(x => x.kids), `${kind}, ${when}: the row keeps the same children`);
+        }
+        passed += 1;
+      } catch (e) { await r.screenshot(`/tmp/geo-fail-chosen-${kind}.png`).catch(() => {}); throw e; }
+      finally { await r.close(); }
+    }
+  }
+  // v5-03: in the CHAT view a question arrives: the «Pi pregunta» toast shows under the island and ONE click on it must open the question
+  // (it used to only expand the already-expanded island: nothing happened and the human had to press ⌂).
+  {
+    const r = await H.open({ question: 'plain', chat: true });
+    try {
+      const view = () => r.page.evaluate(() => document.getElementById('capsule').dataset.view);
+      assert.equal(await view(), 'chat', 'the island is in the chat view when the question arrives');
+      const toast = (await r.measure('#question-toast')).find(b => b.shown);
+      assert.ok(toast, 'the toast shows under the island while the card cannot');
+      await r.page.mouse.click(toast.left + toast.w / 2, toast.top + toast.h / 2);
+      await r.page.waitForTimeout(900);
+      const st = await r.page.evaluate(() => ({ view: document.getElementById('capsule').dataset.view, q: document.getElementById('capsule').dataset.question, back: (window.__chatCalls || []).length }));
+      assert.deepEqual([st.view, st.q], ['overview', 'pending'], `one click on the toast opens the question: ${JSON.stringify(st)}`);
+      const card = (await r.measure('#question'))[0];
+      assert.ok(card.shown, 'the question card is drawn');
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-toast-chat.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
+  // v5-04: a GitHub row whose title is cut shows the FULL title in the island's own tooltip with the real pointer (and on keyboard focus),
+  // and the tooltip never steals a click or leaves the island.
+  {
+    const r = await H.open({ github: true, githubData: 'real', quick: true });
+    try {
+      const gh = (await r.measure('#pill-choice-integration_github')).find(b => b.shown);
+      await r.page.mouse.click(gh.left + gh.w / 2, gh.top + gh.h / 2);
+      await r.page.waitForTimeout(1500);
+      const row = (await r.measure('.gh-row')).find(b => b.shown);
+      assert.ok(row, 'a GitHub PR row is on screen');
+      const full = await r.page.evaluate(() => document.querySelector('.gh-row').getAttribute('title'));
+      assert.ok(full && full.length > 5, `the row carries its full title: ${full}`);
+      await r.page.mouse.move(row.left + 40, row.top + row.h / 2);
+      await r.page.waitForTimeout(700);
+      const tip = (await r.measure('#island-tip'))[0];
+      assert.ok(tip && tip.shown, 'the island\'s own tooltip appears under the pointer');
+      const text = await r.page.evaluate(() => document.getElementById('island-tip').textContent);
+      assert.ok(full.includes(text.replace(/…$/, '')) || text.includes(full.slice(0, 20)), `it shows the full title: «${text}» vs «${full}»`);
+      const island = (await r.measure('#island'))[0];
+      assert.ok(tip.left >= island.left - 0.5 && tip.right <= island.right + 0.5, `the tooltip stays inside the island: ${label(tip)}`);
+      assert.equal(await r.page.evaluate(() => getComputedStyle(document.getElementById('island-tip')).pointerEvents), 'none', 'it never takes the pointer');
+      await r.page.mouse.move(5, 5); await r.page.waitForTimeout(300);
+      assert.ok(!(await r.measure('#island-tip'))[0].shown, 'it hides when the pointer leaves');
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-tooltip.png').catch(() => {}); throw e; }
     finally { await r.close(); }
   }
   console.log(`island-geometry-check: ${passed} real-layout checks ok`);
