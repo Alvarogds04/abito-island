@@ -102,8 +102,12 @@ pub struct Question {
     expires_at: u64,
     /// Who is asking (`pi` when the frame carries no `agent`): a short validated slug.
     agent: String,
+    /// OPTIONAL display name of the asking session's project (S3); never an identity.
+    project_name: Option<String>,
 }
 impl Question {
+    /// The asking session's project name, when the producer sent a valid one.
+    pub fn project_name(&self) -> Option<&str> { self.project_name.as_deref() }
     /// The wire identity of the asking agent (`pi` by default).
     pub fn agent(&self) -> &str { &self.agent }
     /// The human-facing name: the four known agents have their proper spelling, any other
@@ -159,6 +163,8 @@ enum Wire {
         #[serde(rename = "expiresAt")] expires_at: u64,
         /// OPTIONAL (P1): absent = `pi`. A present value must be a safe slug (see `agent_slug_ok`).
         #[serde(default, deserialize_with = "present_string")] agent: Option<String>,
+        /// OPTIONAL (S3): display name of the project, same grammar as `settled` (`project_name_ok`).
+        #[serde(default, rename = "projectName", deserialize_with = "present_string")] project_name: Option<String>,
     },
     #[serde(rename = "question_cancel")]
     Cancel {
@@ -203,14 +209,17 @@ pub fn decode(body: &[u8], identity: &Identity, now: u64) -> Result<Inbound, Err
              if busy_reason { Inbound::HelloBusyReason } else { Inbound::Hello })
         }
         Wire::Question { v, question_version, project, session_id, at, id, kind, text,
-                         options, allow_free_text, expires_at, agent } => {
+                         options, allow_free_text, expires_at, agent, project_name } => {
             let base = Base { project, session_id, at };
             let agent = match agent {
                 None => DEFAULT_AGENT.to_owned(),
                 Some(a) if agent_slug_ok(&a) => a,
                 Some(_) => return Err(Error::InvalidQuestion),
             };
-            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent };
+            if project_name.as_deref().is_some_and(|n| !crate::protocol::project_name_ok(n)) {
+                return Err(Error::InvalidQuestion);
+            }
+            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent, project_name };
             validate_question(&question, now)?;
             (v, question_version, base, Inbound::Question(question))
         }
@@ -420,30 +429,46 @@ impl PreparedDelivery {
     pub fn line(&self) -> &[u8] { &self.line }
 }
 
+/// Most pending questions held at once (S1/S2). Oldest first; the human sees the
+/// head only. A question beyond the cap, or a second one from a connection that
+/// already has one pending, is answered Busy to ITS origin and never stored.
+pub const QUEUE_CAP: usize = 8;
+
 #[derive(Default)]
-pub struct QuestionSlot { active: Option<Active>, generation: u64 }
+pub struct QuestionSlot { queue: Vec<Active>, generation: u64 }
 impl QuestionSlot {
     pub fn new() -> Self { Self::default() }
-    pub fn active(&self) -> Option<&Active> { self.active.as_ref() }
+    /// The question the human currently sees: the oldest pending one.
+    pub fn active(&self) -> Option<&Active> { self.queue.first() }
+    /// Every pending question, oldest first (head included).
+    pub fn queue(&self) -> impl Iterator<Item = &Active> { self.queue.iter() }
+    pub fn len(&self) -> usize { self.queue.len() }
+    pub fn is_empty(&self) -> bool { self.queue.is_empty() }
+    /// Connections whose pending question has passed its OWN deadline (any position).
+    pub fn due(&self, now: u64) -> Vec<u64> {
+        self.queue.iter().filter(|a| now >= a.question.expires_at).map(|a| a.connection_id).collect()
+    }
 
-    /// Never replaces or queues. The busy line belongs to the incoming origin.
-    /// Caller must explicitly expire an old active question before admission.
+    /// Never replaces. Appends behind the older ones; Busy (for the incoming
+    /// origin only) when the queue is full or this connection already waits.
     pub fn admit(&mut self, connection_id: u64, identity: &Identity, question: Question, now: u64) -> Result<Admission, Error> {
         validate_base(&question.base, identity, now)?;
         validate_question(&question, now)?;
-        if self.active.is_some() {
+        if self.queue.len() >= QUEUE_CAP
+            || self.queue.iter().any(|a| a.connection_id == connection_id || a.question.id == question.id) {
             return Ok(Admission::Busy(closed(identity, &question.id, CloseReason::Busy, false, now)?));
         }
         self.generation = self.generation.checked_add(1).ok_or(Error::GenerationExhausted)?;
-        self.active = Some(Active { connection_id, identity: identity.clone(), question, generation: self.generation });
+        self.queue.push(Active { connection_id, identity: identity.clone(), question, generation: self.generation });
         Ok(Admission::Accepted)
     }
 
-    fn matching(&self, connection_id: u64, id: &str) -> Option<&Active> {
-        self.active.as_ref().filter(|a| a.connection_id == connection_id && a.question.id == id)
+    fn position(&self, connection_id: u64, id: &str) -> Option<usize> {
+        self.queue.iter().position(|a| a.connection_id == connection_id && a.question.id == id)
     }
+    /// The human may only act on what is shown: the head.
     fn for_human(&self, connection_id: u64, identity: &Identity, id: &str, now: u64) -> Result<&Active, Error> {
-        let active = self.matching(connection_id, id).ok_or(Error::NotLive)?;
+        let active = self.queue.first().filter(|a| a.connection_id == connection_id && a.question.id == id).ok_or(Error::NotLive)?;
         if &active.identity != identity { return Err(Error::ScopeMismatch); }
         validate_now(identity, now)?;
         if now < active.question.base.at { return Err(Error::InvalidTimestamp); }
@@ -481,42 +506,43 @@ impl QuestionSlot {
 
     /// Call ONLY after a complete write while holding the same lock used for
     /// preparation. No deadline recheck after writing: the bytes already left.
-    /// A generation prevents stale tickets consuming a re-admitted id.
+    /// A generation prevents stale tickets consuming a re-admitted id; only the
+    /// ticket's own entry leaves, every other pending question stays.
     pub fn commit_delivery(&mut self, prepared: PreparedDelivery) -> Result<(), Error> {
-        let active = self.active.as_ref().ok_or(Error::NotLive)?;
-        if active.connection_id != prepared.connection_id || active.generation != prepared.generation {
-            return Err(Error::NotLive);
-        }
-        self.active = None;
+        let index = self.queue.iter()
+            .position(|a| a.connection_id == prepared.connection_id && a.generation == prepared.generation)
+            .ok_or(Error::NotLive)?;
+        self.queue.remove(index);
         Ok(())
     }
 
-    /// Matching origin + id only; a system expiry always produces NO answer.
+    /// Matching origin + id only (any position); a system expiry produces NO answer.
     pub fn expire(&mut self, connection_id: u64, id: &str, now: u64) -> Result<Option<Vec<u8>>, Error> {
-        let Some(active) = self.matching(connection_id, id) else { return Ok(None); };
+        let Some(index) = self.position(connection_id, id) else { return Ok(None); };
+        let active = &self.queue[index];
         if now < active.question.expires_at { return Ok(None); }
         let line = closed(&active.identity, id, CloseReason::Expired, false, now)?;
-        self.active = None;
+        self.queue.remove(index);
         Ok(Some(line))
     }
     /// Producer withdrawal is scoped and revalidated, never a human answer.
     pub fn cancel(&mut self, connection_id: u64, identity: &Identity, cancel: &Cancel, now: u64) -> Result<Option<Vec<u8>>, Error> {
         validate_base(&cancel.base, identity, now)?;
-        let Some(active) = self.matching(connection_id, &cancel.id) else { return Ok(None); };
+        let Some(index) = self.position(connection_id, &cancel.id) else { return Ok(None); };
+        let active = &self.queue[index];
         if &active.identity != identity { return Err(Error::ScopeMismatch); }
         if now < active.question.base.at { return Err(Error::InvalidTimestamp); }
         let reason = match cancel.reason { CancelReason::Expired => CloseReason::Expired, CancelReason::Cancelled => CloseReason::Cancelled };
         let line = closed(identity, &cancel.id, reason, false, now)?;
-        self.active = None;
+        self.queue.remove(index);
         Ok(Some(line))
     }
     /// A disconnect has no wire reply; remove only that originating connection.
     /// Connection IDs must be unique per connection lifetime, never session IDs.
     pub fn disconnect(&mut self, connection_id: u64) -> bool {
-        if self.active.as_ref().is_some_and(|a| a.connection_id == connection_id) {
-            self.active = None;
-            true
-        } else { false }
+        let before = self.queue.len();
+        self.queue.retain(|a| a.connection_id != connection_id);
+        self.queue.len() != before
     }
 }
 

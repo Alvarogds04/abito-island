@@ -583,7 +583,15 @@ impl ClientState {
                     if let Some(tools) = r.get("tools").and_then(session_tools_view) { row["tools"] = tools; }
                     Some(row)
                 }).collect();
-                self.sessions = json!({"rows": rows, "truncated": truncated});
+                let mut view = json!({"rows": rows, "truncated": truncated});
+                // The real number of sessions when the list was cut: only when truncated and only a
+                // sane integer (at least the rows kept, at most the scanner's bound); else absent.
+                if truncated {
+                    if let Some(total) = frame.get("total").and_then(Value::as_u64).filter(|t| (rows.len() as u64..=4096).contains(t)) {
+                        view["total"] = json!(total);
+                    }
+                }
+                self.sessions = view;
             }
             "hooks" => {
                 // #436 T6.5: the read-only hooks preview, folded like the sessions arm: rows are

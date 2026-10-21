@@ -23,6 +23,9 @@ pub struct PendingQuestionView {
     pub options: Vec<QuestionOptionView>, pub allow_free_text: bool, pub expires_at: u64,
     /// Who asks (P1): the validated slug and its display name.
     pub agent: String, pub agent_label: String,
+    /// Project name of the asking session when the producer sent one (S3); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,7 +36,10 @@ pub struct QuestionDeliveryView { pub id: String, pub expires_at: u64, pub state
 /// option token or answer text is serializable to the frontend.
 #[derive(Clone, Serialize)]
 pub struct QuestionSnapshot {
-    pub pending: Option<PendingQuestionView>, pub deliveries: Vec<QuestionDeliveryView>,
+    pub pending: Option<PendingQuestionView>,
+    /// Questions waiting BEHIND `pending`, oldest first, and their number.
+    pub queued: Vec<PendingQuestionView>, pub queued_count: usize,
+    pub deliveries: Vec<QuestionDeliveryView>,
     pub ready_connections: usize, pub notice: Option<QuestionOutcome>,
     pub native_transition: NativeTransition,
 }

@@ -28,6 +28,21 @@
   }
   const askerName = n => agentLabel(n && AGENT_SLUG.test(n.agent) ? n.agent : 'pi');
   const askedBy = n => `${askerName(n)} pregunta`;
+  // S3: «Agente · proyecto». The project name is display text from the host: shown only when it is a
+  // well-formed name (same grammar the host enforces), else just the agent. Never trusted blindly.
+  const PROJECT_NAME = /^[A-Za-z0-9._-](?:[A-Za-z0-9._ -]{0,62}[A-Za-z0-9._-])?$/;
+  const askerLine = n => {
+    const name = n && typeof n.projectName === 'string' && PROJECT_NAME.test(n.projectName) ? n.projectName : null;
+    return name ? `${askerName(n)} · ${name}` : askerName(n);
+  };
+  // S3: «1 de N» while others wait behind the question on screen (N = shown + waiting); empty otherwise.
+  const MAX_QUEUE = 8;
+  const queueLabel = snap => {
+    if (!snap || !snap.pending) return '';
+    const waiting = snap.queued_count;
+    if (!Number.isInteger(waiting) || waiting < 1 || waiting + 1 > MAX_QUEUE) return '';
+    return `1 de ${waiting + 1}`;
+  };
   function fromPending(p) {
     if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !UUID_V4.test(p.id)) return null;
     const kind = p.kind === 'approval' ? 'approval' : p.kind === 'question' ? 'question' : null;
@@ -44,7 +59,8 @@
     if (!options.length && !allowFreeText) return null;
     if (options.some(o => !o.label)) return null;
     const agent = typeof p.agent === 'string' && AGENT_SLUG.test(p.agent) ? p.agent : 'pi';
-    return { id: p.id, kind, agent, text: p.text, options, allowFreeText,
+    const projectName = typeof p.project_name === 'string' ? p.project_name : null;
+    return { id: p.id, kind, agent, projectName, text: p.text, options, allowFreeText,
       expiresAt: Number.isFinite(p.expires_at) ? p.expires_at : 0,
       // a Pi-session answer: it authorizes nothing in the backend and never uses the approval card
       approvesProposal: false };
@@ -266,6 +282,6 @@
   // The host's byte budget is authoritative: no answer yet, or «not allowed», means no send.
   const canSendText = (budget, text) => !!budget && budget.allowed === true && typeof text === 'string' && text.trim().length > 0;
 
-  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  return { MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

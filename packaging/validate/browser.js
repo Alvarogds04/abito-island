@@ -234,12 +234,14 @@
     await click(byId(`pill-choice-${beta.id}`));
     await wait(()=>who()==='proyecto-beta','píldora enfoca segundo proyecto');
     const jump=byId('session-jump');
+    const launchesBefore=window.__validatorTerminalLaunches||0;
     await click(jump);
-    await wait(()=>!jump.disabled && byId('pill-live').textContent.includes('No se pudo abrir una terminal'),'salto por clase informa ausencia de terminal');
+    await wait(()=>!jump.disabled && (window.__validatorTerminalLaunches||0)>launchesBefore,'el salto pide abrir una terminal (lanzador falso del validador)');
+    const launchRequested=(window.__validatorTerminalLaunches||0)===launchesBefore+1 && !byId('pill-live').textContent.includes('No se pudo abrir una terminal');
     const count=byId('overview-view').querySelector('.who .count');
     const noFakeSteps=count.hidden && byId('overview-view').textContent.includes('Sin pasos de herramientas');
     const grid=[...byId('pill-choices').children].map(n=>n.dataset.pillId);
-    return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.length<=4 && !grid.includes(beta.id) && jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto por clase no coinciden'};
+    return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.length<=4 && !grid.includes(beta.id) && launchRequested && jump.getAttribute('aria-label').includes('Abrir una terminal') && !jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,launchRequested,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto a terminal no coinciden'};
   }
   async function restoreSessionFocus() {
     if(focusPrefs) await invoke('prefs_action',{action:'set_main_pill',id:focusPrefs.mainPill});
