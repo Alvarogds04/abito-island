@@ -5,6 +5,7 @@
    Spanish (rioplatense voseo), ready to render with textContent only.
    Run: node apps/desktop-tauri/test-node/sessions-ticker-view-check.cjs */
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const T = require(path.join(__dirname, '..', 'frontend', 'sessions-ticker.js'));
 
@@ -90,7 +91,7 @@ test('feed: process discovery and idle state changes never impersonate tool step
   const v1 = T.sessionsView(frame());
   let r = T.feed(m, v1);
   assert.equal(r.active, true);
-  assert.deepEqual(r.task, { steps: ['Pasos de herramientas no disponibles'], stepSeq: 0, finalLine: 'Pasos de herramientas no disponibles' });
+  assert.deepEqual(r.task, { steps: ['Sin pasos de herramientas'], stepSeq: 0, finalLine: 'Sin pasos de herramientas' });
   assert.equal(r.who.count, '', 'no invented n/m without tool events');
   r = T.feed(m, v1);
   assert.equal(r.task.steps.length, 1, 'unchanged list: no new step');
@@ -98,7 +99,7 @@ test('feed: process discovery and idle state changes never impersonate tool step
   r = T.feed(m, v2);
   assert.deepEqual([r.task.steps.length, r.task.stepSeq], [1, 0]);
   r = T.feed(m, T.sessionsView(frame({ sessions: [row({ state: 'running' })] })));
-  assert.deepEqual(r.task.steps, ['Pasos de herramientas no disponibles']);
+  assert.deepEqual(r.task.steps, ['Sin pasos de herramientas']);
   assert.equal(r.task.stepSeq, 0);
 });
 
@@ -122,7 +123,7 @@ test('feed: recovery changes the ticker index so the unavailable line cannot sti
   const unavailable = T.feed(m, { state: 'error' });
   const recovered = T.feed(m, T.sessionsView(frame()));
   assert.ok(recovered.task.stepSeq > unavailable.task.stepSeq);
-  assert.deepEqual(recovered.task.steps, ['Pasos de herramientas no disponibles']);
+  assert.deepEqual(recovered.task.steps, ['Sin pasos de herramientas']);
   const unavailableAgain = T.feed(m, { state: 'error' });
   assert.ok(unavailableAgain.task.stepSeq > recovered.task.stepSeq);
   assert.equal(unavailableAgain.who, null);
@@ -173,19 +174,32 @@ test('real tool history drives n/m; missing and malformed streams remain honest'
   assert.equal(r.who.count, '2/2');
   const external = T.focus(m, v, 's-0123abcd');
   assert.equal(external.who.count, '');
-  assert.match(external.task.steps[0], /no disponibles/);
+  assert.match(external.task.steps[0], /Sin pasos/);
   assert.equal(T.focus(m, v, 'not-a-session'), null);
   const malformed = T.sessionsView(frame({ sessions: [row({ tools: { total: 2, steps: [] } })] }));
-  assert.match(T.feed(T.newMemory(), malformed).task.steps[0], /no disponibles/);
+  assert.match(T.feed(T.newMemory(), malformed).task.steps[0], /Sin pasos/);
 });
 
 test('feed: an unavailable line is STILL (finalLine set -> no shimmer, Coucou shimmers only live work); a live tool stream keeps shimmering', () => {
   const m = T.newMemory();
-  assert.equal(T.feed(m, T.sessionsView(frame())).task.finalLine, 'Pasos de herramientas no disponibles');
+  assert.equal(T.feed(m, T.sessionsView(frame())).task.finalLine, 'Sin pasos de herramientas');
   assert.equal(T.feed(m, { state: 'error' }).task.finalLine, 'Sesiones no disponibles');
   const b = T.newMemory();
   const bounded = T.feed(b, T.sessionsView(frame({ truncated: true })));
   assert.equal(bounded.task.finalLine, bounded.task.steps.at(-1));
+});
+
+test('every ticker notice fits the 322px card in full (<= 26 chars at 13px/500 over ~190px) and is a plain Spanish sentence', () => {
+  const texts = [T.errorText(), T.boundedText({ state: 'ready', truncated: true }), T.feed(T.newMemory(), T.sessionsView(frame())).task.steps[0]];
+  for (const t of texts) assert.ok(t.length <= 26, `${t} (${t.length})`);
+  assert.equal(T.boundedText({ state: 'ready', truncated: true }), 'Hay más sesiones');
+  assert.equal(T.errorText(), 'Sesiones no disponibles');
+});
+
+test('the mounted ticker exposes the full text as a tooltip fallback (title) and the card detail uses the same short copy', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'sessions-ticker.js'), 'utf8');
+  assert.match(src, /ticker\.el\.title = /);
+  assert.doesNotMatch(src + fs.readFileSync(path.join(__dirname, '..', 'frontend', 'pills-view.js'), 'utf8'), /Pasos de herramientas no disponibles/);
 });
 
 Promise.all(async).then(() => { console.log(`sessions-ticker-view-check: ${passed} checks ok`); process.exit(0); }, (e) => { console.error(e); process.exit(1); });

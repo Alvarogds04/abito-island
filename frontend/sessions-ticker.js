@@ -83,7 +83,7 @@
   /** Copy for an over-cap frame, or null when the list was not cut. */
   function boundedText(view) {
     if (!view || view.state !== 'ready' || !view.truncated) return null;
-    return 'Hay más sesiones: la lista está acotada';
+    return 'Hay más sesiones';
   }
 
   /** Copy for an unavailable view (no daemon, old daemon, error). */
@@ -162,7 +162,7 @@
         memory.log = []; memory.seq = 0; memory.focus = null;
         return { active: false, task: null, who: null };
       }
-      memory.log = ['Pasos de herramientas no disponibles'];
+      memory.log = ['Sin pasos de herramientas'];
       if (view.truncated) memory.log.push(boundedText(view));
     }
     // Ticker.sync uses a monotonic index, not text equality, to detect updates.
@@ -273,6 +273,7 @@ function mount(V) {
     if (w) { whoName.textContent = w.name; whoTool.textContent = w.tool; whoCount.textContent = w.count; whoCount.hidden = !w.count; }
     if (active) overview.dataset.ticker = 'on'; else delete overview.dataset.ticker;
     ticker.sync(task);
+    ticker.el.title = task?.steps?.at(-1) ?? ''; // full text fallback when a long step is cut
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
     jump.hidden = !memory.focus || integrationFocused;
     jump.setAttribute('aria-label', `Abrir una terminal por clase · ${w?.name || ''}`);

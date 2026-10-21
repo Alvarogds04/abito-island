@@ -87,7 +87,7 @@
     detail.setAttribute('aria-label', `${picked.name}: destino de conversación. No se inició ninguna tarea.`);
     if (pickedSession) {
       state.textContent = pickedSession.kindLabel;
-      detail.textContent = pickedSession.tools ? 'Sesión enfocada. El destino del chat no cambió.' : 'Pasos de herramientas no disponibles.';
+      detail.textContent = pickedSession.tools ? 'Sesión enfocada. El destino del chat no cambió.' : 'Sin pasos de herramientas para esta sesión.';
       detail.setAttribute('aria-label', `${picked.name}: sesión enfocada; el destino del chat no cambió.`);
     }
     const liveRows = sessionRows();
