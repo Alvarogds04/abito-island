@@ -32,6 +32,14 @@ test('S18 General: «Atajo del sistema» is not a loose label: it is a value row
   assert.deepEqual(loose, [], `a label with nothing to show: ${JSON.stringify(loose)}`);
 });
 
+test('S19 Pills: no card of the page is an empty box (the «Colores de identidad» section drew an empty field over the Abito row)', async r => {
+  await r.go('Pestañas activas');
+  const empty = await r.page.evaluate(() => [...document.querySelectorAll('.hub-card')].filter(c => !c.children.length && !c.textContent.trim()).map(c => c.parentElement && c.parentElement.querySelector('.hub-label') ? c.parentElement.querySelector('.hub-label').textContent : c.className));
+  assert.deepEqual(empty, [], `empty cards: ${JSON.stringify(empty)}`);
+  const rows = await r.page.evaluate(() => { const sec = [...document.querySelectorAll('section')].find(s => /colores de identidad/i.test((s.querySelector('.hub-label') || {}).textContent || '')); const card = sec.querySelector('.hub-card'); return { rowInsideCard: !!card && !!card.querySelector('.hub-row'), rows: sec.querySelectorAll('.hub-row').length }; });
+  assert(rows.rows > 0 && rows.rowInsideCard, `the Abito colour row must live INSIDE the card: ${JSON.stringify(rows)}`);
+});
+
 test('S23 Integraciones: every card keeps its state in ONE column and its actions off the card border', async r => {
   await r.go('Integraciones');
   const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cs = getComputedStyle(c), cb = c.getBoundingClientRect(); const inner = cb.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
