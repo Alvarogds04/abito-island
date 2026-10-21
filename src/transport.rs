@@ -56,39 +56,43 @@ struct QuestionOrigin { stream: Arc<UnixStream>, writer: Arc<Mutex<UnixStream>> 
 struct Delivery { connection: u64, view: QuestionDeliveryView, expected: ResolutionStatus }
 #[derive(Default)]
 struct Questions {
-    slot: QuestionSlot, origin: Option<QuestionOrigin>, deliveries: Vec<Delivery>,
+    slot: QuestionSlot, origins: HashMap<u64, QuestionOrigin>, deliveries: Vec<Delivery>,
     ready: HashSet<u64>, notice: Option<QuestionOutcome>,
 }
 impl Questions {
     fn snapshot(&self) -> QuestionSnapshot {
-        let pending = self.slot.active().map(|active| {
+        let view = |active: &question::Active| {
             let q = active.question();
             PendingQuestionView { id: q.id().into(), kind: q.kind(), text: q.text().into(),
                 options: q.options().iter().enumerate().map(|(index, o)| QuestionOptionView {
                     index, label: o.label().into(), description: o.description().into(),
                 }).collect(), allow_free_text: q.allow_free_text(), expires_at: q.expires_at(),
                 agent: q.agent().into(), agent_label: q.agent_label() }
-        });
-        QuestionSnapshot { pending, deliveries: self.deliveries.iter().map(|d| d.view.clone()).collect(),
+        };
+        let pending = self.slot.active().map(view);
+        // Everyone waiting BEHIND the one shown, oldest first (the head is `pending`).
+        let queued: Vec<PendingQuestionView> = self.slot.queue().skip(1).map(view).collect();
+        QuestionSnapshot { pending, queued_count: queued.len(), queued, deliveries: self.deliveries.iter().map(|d| d.view.clone()).collect(),
             ready_connections: self.ready.len(), notice: self.notice, native_transition: NativeTransition::Idle }
     }
     /// No expiry wire reply is necessary. Frozen producer deadline only; no
     /// answer/default and no serialization failure can retain private text.
     fn prune(&mut self, now: u64) -> bool {
-        let expired = self.slot.active().filter(|a| now >= a.question().expires_at()).map(|a| a.connection_id());
+        // Every pending question keeps its OWN deadline, shown or waiting.
+        let expired = self.slot.due(now);
         let before = self.deliveries.len();
         self.deliveries.retain(|d| now < d.view.expires_at);
         let lost = before != self.deliveries.len();
         if lost { self.notice = Some(QuestionOutcome::AckLost); }
-        if let Some(connection) = expired {
-            self.slot.disconnect(connection); self.origin = None;
-            self.notice = Some(QuestionOutcome::Expired);
+        for connection in &expired {
+            self.slot.disconnect(*connection); self.origins.remove(connection);
         }
-        expired.is_some() || lost
+        if !expired.is_empty() { self.notice = Some(QuestionOutcome::Expired); }
+        !expired.is_empty() || lost
     }
     fn revoke(&mut self, connection: u64, outcome: QuestionOutcome) -> bool {
         let pending = self.slot.disconnect(connection);
-        if pending { self.origin = None; }
+        if pending { self.origins.remove(&connection); }
         let before = self.deliveries.len();
         self.deliveries.retain(|d| d.connection != connection);
         let changed = pending || before != self.deliveries.len();
@@ -109,7 +113,7 @@ impl Questions {
             Some(answer) => self.slot.prepare_answer(connection, &identity, id, answer, now),
             None => self.slot.prepare_decline(connection, &identity, id, now),
         }.map_err(HumanReplyError::Validation)?;
-        let origin = self.origin.as_ref().expect("live question origin").clone();
+        let origin = self.origins.get(&connection).expect("live question origin").clone();
         if write(&origin, prepared.line()).is_err() {
             // Delivery might already have happened: never restore or retry.
             self.revoke(connection, QuestionOutcome::OutcomeUnknown);
@@ -117,7 +121,7 @@ impl Questions {
             return Err(HumanReplyError::OutcomeUnknown);
         }
         self.slot.commit_delivery(prepared).expect("same locked generation");
-        self.origin = None;
+        self.origins.remove(&connection);
         self.deliveries.push(Delivery { connection, expected,
             view: QuestionDeliveryView { id: id.into(), expires_at: expiry, state: DeliveryState::Sent } });
         self.notice = Some(QuestionOutcome::Sent);
@@ -944,7 +948,7 @@ fn receive_question(inner: &Inner, connection: u64, identity: &protocol::Identit
                 } else { state.slot.admit(connection, identity, q, now) };
                 match admission {
                     Ok(Admission::Accepted) => {
-                        state.origin = Some(origin.clone()); state.notice = None; changed = true; true
+                        state.origins.insert(connection, origin.clone()); state.notice = None; changed = true; true
                     }
                     Ok(Admission::Busy(line)) => {
                         state.notice = Some(QuestionOutcome::Busy); changed = true;
@@ -961,11 +965,11 @@ fn receive_question(inner: &Inner, connection: u64, identity: &protocol::Identit
             }
             Inbound::Cancel(cancel) => {
                 let too_early = cancel.reason() == question::CancelReason::Expired && (
-                    state.slot.active().is_some_and(|a| a.connection_id() == connection && a.question().id() == cancel.id() && now < a.question().expires_at())
+                    state.slot.queue().any(|a| a.connection_id() == connection && a.question().id() == cancel.id() && now < a.question().expires_at())
                     || state.deliveries.iter().any(|d| d.connection == connection && d.view.id == cancel.id() && now < d.view.expires_at));
                 if !too_early {
                     let pending_cancelled = matches!(state.slot.cancel(connection, identity, &cancel, now), Ok(Some(_)));
-                    if pending_cancelled { state.origin = None; }
+                    if pending_cancelled { state.origins.remove(&connection); }
                     let before = state.deliveries.len();
                     state.deliveries.retain(|d| !(d.connection == connection && d.view.id == cancel.id()));
                     let cancelled = pending_cancelled || before != state.deliveries.len();
@@ -1151,7 +1155,7 @@ mod tests {
         let (stream, peer) = UnixStream::pair().unwrap();
         let origin = QuestionOrigin { writer: Arc::new(Mutex::new(stream.try_clone().unwrap())), stream: Arc::new(stream) };
         let mut state = Questions::default(); state.slot.admit(7, &identity, question, 100_000).unwrap();
-        state.origin = Some(origin); (state, peer)
+        state.origins.insert(7, origin); (state, peer)
     }
     #[test]
     fn question_partial_write_is_unknown_revoked_and_never_replayed() {
@@ -1162,7 +1166,7 @@ mod tests {
             Err(std::io::Error::new(ErrorKind::BrokenPipe, "injected partial write"))
         });
         assert_eq!(result, Err(HumanReplyError::OutcomeUnknown));
-        assert!(state.slot.active().is_none()); assert!(state.origin.is_none()); assert!(state.deliveries.is_empty());
+        assert!(state.slot.active().is_none()); assert!(state.origins.is_empty()); assert!(state.deliveries.is_empty());
         assert_eq!(state.notice, Some(QuestionOutcome::OutcomeUnknown));
         assert_eq!(state.human_with(id, None, 100_000, |_, _| panic!("never retry")), Err(HumanReplyError::Validation(question::Error::NotLive)));
         let mut bytes = Vec::new(); peer.read_to_end(&mut bytes).unwrap(); assert_eq!(bytes.len(), 7);

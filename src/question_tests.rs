@@ -168,20 +168,15 @@ fn question_cancel_and_rejected_exact_typed_schema() {
 }
 
 #[test]
-fn question_global_busy_retains_first_for_same_and_other_sessions() {
+fn question_same_connection_second_question_is_busy_and_keeps_the_first() {
+    // one pending question per originating connection: its own writer carries one outcome
     let mut slot = slot();
-    for (connection, bound) in [(7, identity()), (8, identity()), (9, Identity { session_id:"session-2".into(), ..identity() })] {
-        let mut value = question_value(); value["id"] = json!(OTHER_ID); value["sessionId"] = json!(bound.session_id);
-        let q = match decode(&serde_json::to_vec(&value).unwrap(), &bound, NOW).unwrap() {
-            Inbound::Question(q) => q, _ => unreachable!()
-        };
-        let Admission::Busy(line) = slot.admit(connection, &bound, q, NOW).unwrap() else { panic!("expected busy") };
-        let frame = body(&line); assert_eq!(frame["type"], "question_closed");
-        assert_eq!(frame["reason"], "busy"); assert_eq!(frame["source"], "system");
-        assert_eq!(frame["id"], OTHER_ID); assert_eq!(frame["sessionId"], bound.session_id);
-        assert_eq!(slot.active().unwrap().connection_id(), 7);
-        assert_eq!(slot.active().unwrap().question().id(), ID);
-    }
+    let mut value = question_value(); value["id"] = json!(OTHER_ID);
+    let Admission::Busy(line) = slot.admit(7, &identity(), question(value), NOW).unwrap() else { panic!("expected busy") };
+    let frame = body(&line); assert_eq!(frame["type"], "question_closed");
+    assert_eq!(frame["reason"], "busy"); assert_eq!(frame["source"], "system"); assert_eq!(frame["id"], OTHER_ID);
+    assert_eq!(slot.len(), 1);
+    assert_eq!(slot.active().unwrap().question().id(), ID);
 }
 
 #[test]
@@ -500,6 +495,105 @@ fn the_agent_identity_never_changes_who_may_answer_or_how() {
     let mut second = question_value();
     second["id"] = json!(OTHER_ID);
     second["agent"] = json!("codex");
-    assert!(matches!(slot.admit(8, &identity(), question(second), NOW).unwrap(), Admission::Busy(_)), "one live question globally, whatever the agent");
+    assert!(matches!(slot.admit(8, &identity(), question(second), NOW).unwrap(), Admission::Accepted), "queued behind the first, whatever the agent");
     assert_eq!(slot.active().unwrap().question().agent(), "claude-code");
+    assert_eq!(slot.queue().nth(1).unwrap().question().agent(), "codex");
+}
+
+// ---- queue: every question is kept, one shown at a time, oldest first ----------
+
+fn qid(n: usize) -> String { format!("12345678-1234-4abc-8abc-12345678{n:04x}") }
+fn queued(n: usize, expires_in: u64) -> Question {
+    let mut v = question_value(); v["id"] = json!(qid(n)); v["expiresAt"] = json!(NOW + expires_in);
+    question(v)
+}
+fn ids(slot: &QuestionSlot) -> Vec<String> { slot.queue().map(|a| a.question().id().to_string()).collect() }
+
+#[test]
+fn queue_keeps_overlapping_questions_oldest_first_and_shows_the_oldest() {
+    let mut slot = QuestionSlot::new();
+    for n in 1..=3 {
+        assert!(matches!(slot.admit(n as u64, &identity(), queued(n, 60_000), NOW).unwrap(), Admission::Accepted));
+    }
+    assert_eq!(ids(&slot), vec![qid(1), qid(2), qid(3)]);
+    assert_eq!(slot.active().unwrap().question().id(), qid(1));
+    assert_eq!(slot.len(), 3);
+}
+
+#[test]
+fn queue_is_bounded_and_the_overflowing_agent_gets_busy() {
+    let mut slot = QuestionSlot::new();
+    assert_eq!(QUEUE_CAP, 8);
+    for n in 1..=QUEUE_CAP { assert!(matches!(slot.admit(n as u64, &identity(), queued(n, 60_000), NOW).unwrap(), Admission::Accepted)); }
+    let Admission::Busy(line) = slot.admit(99, &identity(), queued(99, 60_000), NOW).unwrap() else { panic!("overflow must be busy") };
+    let frame = body(&line); assert_eq!(frame["reason"], "busy"); assert_eq!(frame["id"], qid(99));
+    assert_eq!(slot.len(), QUEUE_CAP);
+    assert!(!ids(&slot).contains(&qid(99)));
+}
+
+#[test]
+fn only_the_head_can_be_answered_the_next_one_waits() {
+    let mut slot = QuestionSlot::new();
+    for n in 1..=2 { slot.admit(n as u64, &identity(), queued(n, 60_000), NOW).unwrap(); }
+    assert!(slot.prepare_answer(2, &identity(), &qid(2), HumanAnswer::Option { index: 0 }, NOW).is_err(), "queued, not shown yet");
+    assert!(slot.prepare_decline(2, &identity(), &qid(2), NOW).is_err());
+    assert_eq!(slot.len(), 2);
+}
+
+#[test]
+fn answering_the_head_leaves_the_others_and_promotes_the_next() {
+    let mut slot = QuestionSlot::new();
+    for n in 1..=3 { slot.admit(n as u64, &identity(), queued(n, 60_000), NOW).unwrap(); }
+    let delivery = slot.prepare_answer(1, &identity(), &qid(1), HumanAnswer::Option { index: 1 }, NOW).unwrap();
+    assert_eq!(body(delivery.line())["id"], qid(1));
+    slot.commit_delivery(delivery).unwrap();
+    assert_eq!(ids(&slot), vec![qid(2), qid(3)]);
+    assert_eq!(slot.active().unwrap().connection_id(), 2);
+    // declining the new head also leaves the last one untouched
+    let decline = slot.prepare_decline(2, &identity(), &qid(2), NOW).unwrap();
+    assert_eq!(body(decline.line())["reason"], "cancelled");
+    slot.commit_delivery(decline).unwrap();
+    assert_eq!(ids(&slot), vec![qid(3)]);
+}
+
+#[test]
+fn each_question_keeps_its_own_expiry_even_when_queued() {
+    let mut slot = QuestionSlot::new();
+    slot.admit(1, &identity(), queued(1, 300_000), NOW).unwrap();
+    slot.admit(2, &identity(), queued(2, 30_000), NOW).unwrap();
+    slot.admit(3, &identity(), queued(3, 300_000), NOW).unwrap();
+    // the middle one expires while the head is still live
+    let later = NOW + 30_000;
+    assert_eq!(slot.expire(2, &qid(2), later - 1).unwrap(), None, "not due yet");
+    let line = slot.expire(2, &qid(2), later).unwrap().expect("expired");
+    assert_eq!(body(&line)["reason"], "expired");
+    assert_eq!(ids(&slot), vec![qid(1), qid(3)]);
+    assert_eq!(slot.due(later), Vec::<u64>::new());
+    // an expired head is skipped for the human, the next becomes current
+    assert_eq!(slot.due(NOW + 300_000), vec![1, 3]);
+}
+
+#[test]
+fn a_producer_cancel_or_disconnect_removes_only_that_question() {
+    let mut slot = QuestionSlot::new();
+    for n in 1..=3 { slot.admit(n as u64, &identity(), queued(n, 60_000), NOW).unwrap(); }
+    assert!(slot.disconnect(2));
+    assert_eq!(ids(&slot), vec![qid(1), qid(3)]);
+    let cancel = match decode(&serde_json::to_vec(&json!({"v":1,"type":"question_cancel","questionVersion":1,
+        "project":identity().project,"sessionId":"session-1","at":NOW,"id":qid(3),"reason":"cancelled"})).unwrap(), &identity(), NOW).unwrap() {
+        Inbound::Cancel(c) => c, _ => unreachable!() };
+    assert!(slot.cancel(3, &identity(), &cancel, NOW).unwrap().is_some());
+    assert_eq!(ids(&slot), vec![qid(1)]);
+    assert!(!slot.disconnect(42), "unknown connection changes nothing");
+}
+
+#[test]
+fn a_stale_ticket_never_consumes_another_queued_question() {
+    let mut slot = QuestionSlot::new();
+    slot.admit(1, &identity(), queued(1, 60_000), NOW).unwrap();
+    slot.admit(2, &identity(), queued(2, 60_000), NOW).unwrap();
+    let ticket = slot.prepare_answer(1, &identity(), &qid(1), HumanAnswer::Option { index: 0 }, NOW).unwrap();
+    assert!(slot.disconnect(1));
+    assert!(slot.commit_delivery(ticket).is_err());
+    assert_eq!(ids(&slot), vec![qid(2)]);
 }

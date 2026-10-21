@@ -33,7 +33,10 @@ pub struct QuestionDeliveryView { pub id: String, pub expires_at: u64, pub state
 /// option token or answer text is serializable to the frontend.
 #[derive(Clone, Serialize)]
 pub struct QuestionSnapshot {
-    pub pending: Option<PendingQuestionView>, pub deliveries: Vec<QuestionDeliveryView>,
+    pub pending: Option<PendingQuestionView>,
+    /// Questions waiting BEHIND `pending`, oldest first, and their number.
+    pub queued: Vec<PendingQuestionView>, pub queued_count: usize,
+    pub deliveries: Vec<QuestionDeliveryView>,
     pub ready_connections: usize, pub notice: Option<QuestionOutcome>,
     pub native_transition: NativeTransition,
 }

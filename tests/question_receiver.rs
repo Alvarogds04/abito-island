@@ -103,17 +103,20 @@ fn wait(mut f: impl FnMut() -> bool) {
 }
 
 #[test]
-fn question_level2_global_busy_stays_minimal_with_fixed_native_geometry() {
+fn question_level2_busy_stays_minimal_with_fixed_native_geometry() {
     let f = Fixture::new();
     let mut old = f.connect("same-session", true); let mut new = f.connect_level2("same-session");
     send(&mut new, &f.question("same-session", ID)); pending(&f, ID);
     assert_eq!(f.transport.question_snapshot().native_transition, abito_island::questioncmd::NativeTransition::Idle);
-    for s in [&mut old, &mut new] {
-        send(s, &f.question("same-session", OTHER)); let busy = reply(s);
-        assert_eq!(busy["reason"], "busy"); assert_eq!(busy["source"], "system");
-        assert!(busy.get("busyReason").is_none()); assert_eq!(busy.as_object().unwrap().len(), 9);
-        pending(&f, ID);
-    }
+    // the same connection asking again gets the minimal busy frame (no busyReason)
+    send(&mut new, &f.question("same-session", OTHER)); let busy = reply(&mut new);
+    assert_eq!(busy["reason"], "busy"); assert_eq!(busy["source"], "system");
+    assert!(busy.get("busyReason").is_none()); assert_eq!(busy.as_object().unwrap().len(), 9);
+    pending(&f, ID);
+    // another connection of the same session now waits instead of being refused
+    send(&mut old, &f.question("same-session", OTHER)); quiet(&mut old);
+    wait(|| f.transport.question_snapshot().queued_count == 1);
+    pending(&f, ID);
 }
 #[test]
 fn question_level2_malformed_capability_and_duplicate_negotiation_fail_closed() {
@@ -184,19 +187,29 @@ fn fragmented_exact4096_question_and_original_socket_answer_once() {
     assert_eq!(serde_json::to_value(&view.deliveries[0]).unwrap()["state"], "sent");
 }
 #[test]
-fn busy_is_global_same_connection_same_session_and_other_session() {
+fn other_connections_queue_behind_and_only_the_same_connection_or_overflow_is_busy() {
     let f = Fixture::new(); let mut a = f.connect("session-1", true);
     let mut b = f.connect("session-1", true); let mut c = f.connect("session-2", true);
     send(&mut a, &f.question("session-1", ID)); pending(&f, ID);
-    for (s, session) in [(&mut a,"session-1"), (&mut b,"session-1"), (&mut c,"session-2")] {
-        let mut q = f.question(session, OTHER); q["text"] = json!("second private content");
-        send(s, &q); let v = reply(s);
-        assert_eq!(v["reason"], "busy"); assert_eq!(v["source"], "system");
-        assert_eq!(v["id"], OTHER); assert_eq!(v["sessionId"], session);
-        assert_eq!(f.transport.question_snapshot().notice, Some(transport::QuestionOutcome::Busy));
-        assert!(!serde_json::to_string(&f.transport.question_snapshot()).unwrap().contains("second private content"));
-        pending(&f, ID);
-    }
+    // a second question on the SAME connection: busy to its origin, nothing stored, text never leaks
+    let mut q = f.question("session-1", OTHER); q["text"] = json!("second private content");
+    send(&mut a, &q); let v = reply(&mut a);
+    assert_eq!(v["reason"], "busy"); assert_eq!(v["source"], "system"); assert_eq!(v["id"], OTHER);
+    assert_eq!(f.transport.question_snapshot().notice, Some(transport::QuestionOutcome::Busy));
+    assert!(!serde_json::to_string(&f.transport.question_snapshot()).unwrap().contains("second private content"));
+    assert_eq!(f.transport.question_snapshot().queued_count, 0);
+    // other connections (same or other session) wait behind the first: no reply, shown one at a time
+    send(&mut b, &f.question("session-1", OTHER)); quiet(&mut b);
+    let third = "12345678-1234-4abc-8abc-123456789abe";
+    send(&mut c, &f.question("session-2", third)); quiet(&mut c);
+    wait(|| f.transport.question_snapshot().queued_count == 2);
+    let snap = f.transport.question_snapshot();
+    assert_eq!(snap.pending.as_ref().unwrap().id, ID);
+    assert_eq!(snap.queued.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), vec![OTHER, third]);
+    // answering the head promotes the next and leaves the last one waiting
+    f.transport.decline(ID).unwrap();
+    wait(|| f.transport.question_snapshot().pending.as_ref().is_some_and(|p| p.id == OTHER));
+    assert_eq!(f.transport.question_snapshot().queued_count, 1);
 }
 #[test]
 fn missing_opt_in_scope_uuid_extras_and_oversize_fail_closed() {
