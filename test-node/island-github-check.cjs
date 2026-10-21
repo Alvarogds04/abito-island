@@ -112,6 +112,11 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   const lt = view.githubPulseCard({ ...pulse, myPRs: [{ ...pulse.myPRs[0], title: longTitle }] }, null, act, () => {});
   const titleEl = cls(lt, 'gh-title')[0]; assert.equal(titleEl.attrs.title, `r#1 ${longTitle}`, 'title attribute carries ref + full title');
   assert.equal(cls(lt, 'gh-row')[0].attrs.title, `r#1 ${longTitle}`);
+  // validation v4: the tooltip must exist on EVERY element the pointer can land on inside a row (the text column, both lines, the ref and the
+  // CI word, and the [Abrir] button), not only on the truncated span
+  const target = `r#1 ${longTitle}`;
+  for (const c of ['gh-text', 'gh-line1', 'gh-line2', 'gh-ref', 'gh-title', 'gh-word']) assert.equal(cls(lt, c)[0].attrs.title, target, `${c} carries the full title`);
+  assert.equal(cls(lt, 'gh-open')[0].attrs.title, `Abrir r#1 en GitHub`, '[Abrir] says what it opens');
   view.hooks.openUrl = () => {}; // the page-level hook re-validates; the vendor view itself drops non-github urls
   const evil = { ...pulse, myPRs: [{ ...pulse.myPRs[0], url: 'https://evil.example/x' }] };
   const openedEvil = []; view.hooks.openUrl = u => openedEvil.push(u);

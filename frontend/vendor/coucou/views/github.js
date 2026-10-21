@@ -101,16 +101,17 @@ function ciText(ci) {
 }
 const rowOpens = /* @__PURE__ */ new WeakMap();
 function row(onOpen, ref, fullTitle, ci, line1, tail) {
-  const open2 = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
+  const full = `${ref} ${fullTitle}`;
+  const open2 = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), title: GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
   const el = h(
     "div",
-    { class: "gh-row", title: `${ref} ${fullTitle}` },
+    { class: "gh-row", title: full },
     ciIcon(ci),
     h(
       "span",
-      { class: "gh-text" },
-      h("span", { class: "gh-line1" }, ...line1),
-      h("span", { class: "gh-line2" }, h("span", { class: "gh-word", style: `color:${CI_COLORS[ci]}`, text: ciText(ci) }), ...tail)
+      { class: "gh-text", title: full },
+      h("span", { class: "gh-line1", title: full }, ...line1),
+      h("span", { class: "gh-line2", title: full }, h("span", { class: "gh-word", title: full, style: `color:${CI_COLORS[ci]}`, text: ciText(ci) }), ...tail)
     ),
     open2
   );
@@ -124,7 +125,7 @@ function prRow(pr, _showCI) {
     ref,
     pr.title,
     pr.ci,
-    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", title: `${ref} ${pr.title}`, text: pr.title })],
+    [h("span", { class: "gh-ref", title: `${ref} ${pr.title}`, text: ref }), h("span", { class: "gh-title", title: `${ref} ${pr.title}`, text: pr.title })],
     [pr.isDraft ? h("span", { class: "gh-draft", text: `· ${GH_STRINGS.draft}` }) : null]
   );
 }
