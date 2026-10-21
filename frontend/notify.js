@@ -132,7 +132,12 @@
     const b = el('button', r.kind === 'other' ? 'q-option q-other' : 'q-option');
     b.type = 'button'; b.disabled = !enabled; b.dataset.number = String(r.number); b.dataset.kind = r.kind;
     if (r.kind === 'option') b.dataset.index = String(r.index);
+    // EVERY row says whether it is chosen, without hover: a checkbox row is role=checkbox, a single-choice row of a questionnaire step is a
+    // radio (the chosen option showed only the hover highlight before; it only appeared in the final summary)
+    const inStep = r.control === 'row' && !!(snapshot && N.fromPending(snapshot.pending) && (N.fromPending(snapshot.pending).form || N.fromPending(snapshot.pending).multiSelect));
+    b.dataset.selected = r.checked ? 'true' : 'false';
     if (r.control === 'checkbox') { b.setAttribute('role', 'checkbox'); b.setAttribute('aria-checked', r.checked ? 'true' : 'false'); b.append(el('span', 'q-box')); }
+    else if (inStep && r.kind === 'option') { b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', r.checked ? 'true' : 'false'); b.append(el('span', 'q-dot')); }
     else if (r.kind === 'other') b.setAttribute('aria-expanded', r.checked ? 'true' : 'false');
     b.append(el('span', 'q-key', `${r.number}.`), el('span', 'q-label', r.label));
     if (r.description) b.append(el('span', 'q-desc', r.description));

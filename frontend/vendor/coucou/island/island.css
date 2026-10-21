@@ -1030,3 +1030,25 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
 #notices #notice-title, #notices[data-tone] #notice-title { min-width: 0; }
 #notice-open .notice-text { min-width: 0; }
 #notices:has(#notice-pill:not([hidden])) #notice-info { display: none; }
+
+/* v4-01b: in the 174px column the title «Pi terminó» needs 63px and had 60 («Pi… Hace…» in the real capture). Tighter gaps, no empty sub-text
+   box and a slimmer «Abrir» give the title its room; a longer title still ellipsizes inside its own box. */
+#notice-pill { padding-left: 5px; gap: 0; }
+#notice-open { gap: 4px; padding: 0 2px 0 4px; }
+#notice-open .notice-text { gap: 0; }
+#notices #notice-sub:empty { display: none; }
+#notice-action { padding: 0 5px; font-size: 10px; }
+/* × keeps its 44px hit box but only 8px of it may sit over «Abrir» (the old -16px margin made the × box cover half of the button) */
+#capsule #notice-dismiss { margin: -8px -14px -8px -8px; }
+
+/* v4-12-q4: the CHOSEN row is visible without hover — its own fill, a mark and a heavier label (radio dot for single choice, check for a checkbox row) */
+.q-option[data-selected="true"]::after { background: color-mix(in srgb, var(--go) 22%, var(--btn-bg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--go) 70%, transparent); }
+.q-option[data-selected="true"]::before { content: ""; }
+.q-option[data-selected="true"] .q-label { font-weight: 700; color: var(--ink); }
+.q-option[role="radio"] { grid-template-columns: 14px auto 1fr; align-items: center; }
+.q-option[role="radio"] .q-desc { grid-column: 3; }
+.q-dot { width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid var(--dim-2); border-radius: 50%; align-self: center; }
+.q-option[data-selected="true"] .q-dot { border-color: var(--go); background: radial-gradient(circle, var(--go) 0 38%, transparent 42%); }
+.q-option[data-selected="true"] .q-box { background: var(--go); border-color: var(--go); }
+/* the «Recibida» / «Enviada» outcome returns to layout A: the card keeps the left+centre width and the blobs column stays free on the right */
+#capsule[data-question="outcome"]:not([data-card]) #question, #capsule[data-question="expired"]:not([data-card]) #question { width: 438px; }
