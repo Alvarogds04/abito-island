@@ -556,11 +556,16 @@
     const prefs=await invoke('prefs_action',{action:'view'});
     if(!prefs.declaredPills.includes('integration_github')) await invoke('prefs_action',{action:'toggle_declared_pill',id:'integration_github'});
     const data=await invoke('github_action',{action:'refresh',section:'activity'});
+    // The island ignores blob clicks while it is busy (pills-view `onScreen`): right after «pi-pregunta» the answered question's outcome
+    // («Recibida») is on screen for 3-4 s and a click then is dropped silently. Wait for the calm overview before choosing the row.
+    const calm=()=>{const d=byId('capsule')?.dataset||{};return d.phase==='expanded' && d.view==='overview' && !d.card && d.settings!=='open' && !['pending','expired','outcome'].includes(d.question) && d.noticeView!=='notices';};
+    await wait(calm,'isla en calma antes de elegir GitHub',10000);
     let pill;
     try {pill=await wait(()=>{const p=byId('pill-choice-integration_github');return visible(p) && p;},'pill GitHub declarada con gh falso');}
     catch {return {ok:false,reason:'GitHub devuelve datos del gh falso pero la pill declarada no aparece en la isla',data,prefs:await invoke('prefs_action',{action:'view'})};}
     await click(pill);
-    const card=await wait(()=>{const c=document.querySelector('.gh-card');return visible(c) && c.textContent.includes('GitHub') && !c.textContent.includes('Cargando') && c;},'tarjeta GitHub desde gh falso');
+    // A click that landed in the instant the island turned busy again is repeated once the overview is calm (the row is still there then).
+    const card=await wait(async()=>{const c=document.querySelector('.gh-card');if(visible(c) && c.textContent.includes('GitHub') && !c.textContent.includes('Cargando')) return c;const p=byId('pill-choice-integration_github');if(visible(p) && calm()) await click(p);return false;},'tarjeta GitHub desde gh falso',12000);
     const text=card.textContent;
     const stats=await invoke('github_action',{action:'refresh',section:'pulse'});
     // Design 16 (option A): the card IS the PR list with CI state and an explicit [Abrir]; CI of the default branch and activity keep their detail.

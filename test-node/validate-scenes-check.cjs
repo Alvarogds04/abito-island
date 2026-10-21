@@ -31,6 +31,12 @@ console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.l
     getBoundingClientRect: () => ({ x, y: 10, width: shown() ? 20 : 0, height: shown() ? 20 : 0 }),
     closest: () => null,
   });
+  // The island ignores blob clicks while it is busy (pills-view onScreen: a question outcome is on screen for 3-4 s after an answer). The GitHub
+  // scene runs right after «pi-pregunta», so it must WAIT for the calm overview before it clicks the row (gate: the click was dropped and the
+  // card never opened). The capsule below reads «outcome» for its first reads, then calm.
+  let capsuleReads = 0;
+  const capsule = { dataset: new Proxy({}, { get: (_t, key) => { capsuleReads += 1; const calm = capsuleReads > 6; return { phase: 'expanded', view: 'overview', question: calm ? '' : 'outcome' }[key]; } }) };
+  const calmNow = () => capsuleReads > 6;
   const githubPill = element(10, () => !focused);
   const abitoPill = element(50, () => true);
   const card = element(90, () => focused);
@@ -45,7 +51,7 @@ console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.l
     event: { emit: async (event, payload) => {
       assert.equal(event, 'validate-input'); assert.equal(payload.kind, 'click');
       clicks.push(payload.x);
-      if (payload.x === 20) focused = true;
+      if (payload.x === 20) { assert.equal(calmNow(), true, 'the GitHub row was clicked while the island still showed a question outcome (the click is dropped there)'); focused = true; }
       else if (payload.x === 60) focused = false;
       else if (payload.x === 150) section='ci';
       else if (payload.x === 170) section='pulse';
@@ -55,7 +61,7 @@ console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.l
   } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../packaging/validate/browser.js'), 'utf8'), {
     window, document: {
-      getElementById: id => ({ 'pill-choice-integration_github': githubPill, 'pill-choice-abito': abitoPill })[id],
+      getElementById: id => ({ 'pill-choice-integration_github': githubPill, 'pill-choice-abito': abitoPill, capsule })[id],
       querySelector: selector => selector === '.gh-card' ? card : null,
     },
     addEventListener() {}, console: { error() {} }, performance,

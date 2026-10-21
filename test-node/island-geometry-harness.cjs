@@ -70,6 +70,13 @@ async function open(scenario = {}) {
         }
         if (cmd === 'agent_action') return a === 'sessions_list' ? { connection, accounts, sessions: { rows: sessions, truncated: false } } : { connection, accounts };
         if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
+        if (cmd === 'github_action' && scenario.githubData === 'real') {
+          // the shape src/github.rs serialises (what the validator's fake `gh` produces): PRs carry `repo`/`isDraft`/`review`, mainCI rows carry repo+branch
+          const pr = { id: 'fixture/repo#42', title: 'Fixture PR', url: 'https://github.com/fixture/repo/pull/42', repo: 'fixture/repo', number: 42, isDraft: false, ci: 'failure', review: 'pending', headSha: null };
+          return a === 'refresh' && args.payload.section === 'pulse'
+            ? { available: true, pulse: { login: 'validator', myPRs: [pr], toReview: [], mainCI: [{ repo: 'fixture/repo', url: 'https://github.com/fixture/repo', branch: 'main', ci: 'success', headSha: null }], fetchedAt: 1 }, stats: { totalStars: 18, totalRepos: 23 } }
+            : { available: true, activity: { weeks: [{ days: [{ date: '2026-01-04', count: 17, level: 3, weekday: 0 }] }], total: 17 } };
+        }
         if (cmd === 'github_action') return scenario.githubData
           ? (a === 'refresh' && args.payload.section === 'pulse'
             ? { available: true, pulse: { login: 'abito', myPRs: [{ number: 1, title: 'fix', url: 'https://github.com/o/r/pull/1', ci: 'failing' }], toReview: [], mainCI: [{ name: 'ci', state: 'success' }] }, stats: null }
