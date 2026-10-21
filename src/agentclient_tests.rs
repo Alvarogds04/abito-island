@@ -567,3 +567,23 @@ fn session_tool_history_is_closed_and_invalid_streams_are_unavailable() {
         assert!(st.sessions_view()["rows"][0].get("tools").is_none());
     }
 }
+
+#[test]
+fn a_truncated_sessions_frame_carries_the_real_total_and_only_then() {
+    let mut st = ClientState::connected();
+    let many: Vec<Value> = (0..64).map(|i| json!({"id":format!("s-{i:08x}"),"kind":"pi","cwd":"p","state":"sleeping","origin":null})).collect();
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":true,"total":70,"sessions":many})).unwrap();
+    assert_eq!(serde_json::to_value(&st).unwrap()["sessions"]["total"], json!(70));
+    // not truncated: a stray total never travels
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":false,"total":70,"sessions":[]})).unwrap();
+    assert!(serde_json::to_value(&st).unwrap()["sessions"].get("total").is_none());
+    // truncated without a total: honestly absent
+    st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":true,"sessions":[]})).unwrap();
+    assert!(serde_json::to_value(&st).unwrap()["sessions"].get("total").is_none());
+    // a total smaller than the rows, or beyond the scanner's bound, is dropped, never trusted
+    for bad in [json!(3), json!(5000), json!(-1), json!("70"), json!(70.5)] {
+        let rows: Vec<Value> = (0..5).map(|i| json!({"id":format!("s-{i:08x}"),"kind":"pi","cwd":"p","state":"sleeping","origin":null})).collect();
+        st.apply(&json!({"type":"sessions","schema":"abito-sessions/view/1","truncated":true,"total":bad,"sessions":rows})).unwrap();
+        assert!(serde_json::to_value(&st).unwrap()["sessions"].get("total").is_none(), "{bad}");
+    }
+}

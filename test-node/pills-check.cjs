@@ -170,7 +170,7 @@ test('A02b session pills focus projects without changing the conversation target
   assert.equal(b.get('pill-choices').children.length <= 4, true);
 });
 
-test('A02b trusted mini/pill focus updates the card; jump stays explicitly class-based', async () => {
+test('A02b trusted mini/pill focus updates the card; jump always opens a terminal', async () => {
   const b = boot({ extraPrefs: { mainPill: 'integration_claude', declaredPills: ['agent_codex', 'integration_n8n'] } }); await flush();
   b.backend.sessionRows = [
     { id: 's-11111111', kind: 'pi', cwd: 'alpha', origin: null, state: 'running', tools: { total: 1, steps: [{ index: 1, name: 'read', state: 'done' }] } },
@@ -191,7 +191,7 @@ test('A02b trusted mini/pill focus updates the card; jump stays explicitly class
   assert.equal(jump.hidden, false, 'mini clears service focus');
   assert.equal(b.get('pill-name').textContent, 'beta');
   b.click('pill-choice-s-11111111'); assert.equal(who(), 'alpha');
-  assert.ok(jump); assert.match(jump.getAttribute('aria-label'), /por clase/);
+  assert.ok(jump); assert.match(jump.getAttribute('aria-label'), /Abrir una terminal/); assert.doesNotMatch(jump.getAttribute('aria-label') + jump.title, /por clase/);
   assert.equal(jump.style.pointerEvents, 'auto', 'jump must override the overview display-only hit mask');
   jump.fire('click', { isTrusted: false }); await flush();
   assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, 0);
@@ -199,6 +199,31 @@ test('A02b trusted mini/pill focus updates the card; jump stays explicitly class
   assert.deepEqual(b.calls.find(c => c.cmd === 'focus_host').payload, { target: 'terminal' });
   b.emit({ mainPill: 'agent_codex' }); assert.equal(who(), 'beta');
   assert.equal(b.backend.specCalls.length, 0);
+});
+
+test('the ↗ jump button is never a dead click: a visible, enabled button always asks for a terminal, only trusted clicks', async () => {
+  const b = boot(); await flush();
+  b.backend.sessionRows = [{ id: 's-11111111', kind: 'pi', cwd: 'alpha', origin: null, state: 'running' }];
+  b.load('sessions-ticker.js'); await flush(); await flush();
+  const jump = b.leftCard.children.find(n => n.id === 'session-jump');
+  assert.equal(jump.hidden, false);
+  for (const fields of [{ phase: 'expanded', view: 'overview', card: 'approval' }, { phase: 'expanded', view: 'overview', settings: 'open' }, { phase: 'expanded', view: 'overview', question: 'pending' }]) {
+    b.get('capsule').dataset = fields;
+    const before = b.calls.filter(c => c.cmd === 'focus_host').length;
+    jump.fire('click', { isTrusted: false }); await flush();
+    assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, before, 'synthetic click stays refused');
+    jump.fire('click'); await flush();
+    assert.equal(b.calls.filter(c => c.cmd === 'focus_host').length, before + 1, JSON.stringify(fields));
+  }
+});
+
+test('a failed terminal launch shows a short message without «por clase»', async () => {
+  const b = boot(); await flush();
+  b.backend.sessionRows = [{ id: 's-11111111', kind: 'pi', cwd: 'alpha', origin: null, state: 'running' }];
+  b.load('sessions-ticker.js'); await flush(); await flush();
+  const src = fs.readFileSync(path.join(__dirname, '../frontend/sessions-ticker.js'), 'utf8');
+  assert.match(src, /No se pudo abrir una terminal\.'/);
+  assert.doesNotMatch(src.match(/jump\.addEventListener\('click'[\s\S]*?\n  \}\);/)[0], /por clase/);
 });
 
 test('#442 overview starts with Abito only; legacy defaults never become agents', async () => {
