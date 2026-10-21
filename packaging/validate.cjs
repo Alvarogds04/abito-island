@@ -11,6 +11,7 @@ const { buildReport, exitCode, spanishSummary } = require('./validate/report.cjs
 const L = require('./lib.cjs');
 const { extraScenes, classify } = require('./validate/scenes.cjs');
 const { producerFailures } = require('./validate/producer.cjs');
+const { drained } = require('./validate/drain.cjs');
 const crate = path.resolve(__dirname, '..');
 const sceneNames = ['isla-compacta', 'isla-siempre-encima', 'isla-expandir', 'isla-colapsar', 'isla-minimizar', 'isla-atajo-sobre-rival', ...extraScenes];
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -195,7 +196,7 @@ async function main(args = process.argv.slice(2)) {
       }, 420000, 'escenas T1–T5 (420 s)');
       if (app.exitCode !== 0) throw new Error(`Abito terminó con ${app.exitCode ?? app.signalCode}`);
       // exit may precede the final pipe data; close means all evidence is drained.
-      await until(() => app.stdout.readableEnded, 3000, 'JSONL final');
+      await drained(app);
       // Reopen the same private persisted configuration, not a simulated startup handler.
       for (const mode of ['manual', 'login']) {
         const args = mode === 'login' ? ['--probe', '--autostart'] : ['--probe'];
@@ -204,8 +205,8 @@ async function main(args = process.argv.slice(2)) {
         try {
           await until(() => {if(startup.launchError) throw startup.launchError; return exited(startup);}, 30000, `arranque ${mode}`);
           if(startup.exitCode !== 0) throw new Error(`arranque ${mode}: ${startup.exitCode}`);
-          await until(() => startup.stdout.readableEnded, 3000, `JSONL ${mode}`);
-        } finally {startup.stdout.off('data',onData);startup.stdout.resume();}
+          await drained(startup);
+        } finally {startup.stdout.off('data',onData);startup.stdout.resume(); stopGroup(startup, 'SIGTERM');}
       }
     } finally {
       // On timeout the app can still emit while teardown is in progress.
