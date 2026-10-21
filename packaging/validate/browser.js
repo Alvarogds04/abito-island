@@ -241,7 +241,9 @@
     await wait(()=>!jump.disabled && (window.__validatorTerminalLaunches||0)>launchesBefore,'el salto pide abrir una terminal (lanzador falso del validador)');
     const launchRequested=(window.__validatorTerminalLaunches||0)===launchesBefore+1 && !byId('pill-live').textContent.includes('No se pudo abrir una terminal');
     const count=byId('overview-view').querySelector('.who .count');
-    const noFakeSteps=count.hidden && byId('overview-view').textContent.includes('Sin pasos de herramientas');
+    // human: no placeholder at all — a session without real tool steps shows NO ticker row (and no «Sin pasos…» text)
+    const tickerEl=byId('overview-view').querySelector('.ticker');
+    const noFakeSteps=count.hidden && (!tickerEl || tickerEl.hidden) && !byId('overview-view').textContent.includes('Sin pasos de herramientas');
     const grid=[...byId('pill-choices').children].map(n=>n.dataset.pillId);
     return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.length<=4 && !grid.includes(beta.id) && launchRequested && jump.getAttribute('aria-label').includes('Abrir una terminal') && !jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,launchRequested,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto a terminal no coinciden'};
   }

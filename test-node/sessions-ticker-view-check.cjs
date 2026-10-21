@@ -90,17 +90,18 @@ test('feed: process discovery and idle state changes never impersonate tool step
   const m = T.newMemory();
   const v1 = T.sessionsView(frame());
   let r = T.feed(m, v1);
-  assert.equal(r.active, true);
-  assert.deepEqual(r.task, { steps: ['Sin pasos de herramientas'], stepSeq: 0, finalLine: 'Sin pasos de herramientas' });
-  assert.equal(r.who.count, '', 'no invented n/m without tool events');
+  assert.equal(r.active, true, 'the who-row (session name) is still shown');
+  assert.equal(r.ticker, false, 'no tool steps: NO ticker row and NO placeholder text (human: «si no es nada quitalo»)');
+  assert.equal(r.task, null);
+  assert.deepEqual(r.who, { name: 'mi-proyecto', tool: 'Pi', count: '' }, 'no invented n/m without tool events');
   r = T.feed(m, v1);
-  assert.equal(r.task.steps.length, 1, 'unchanged list: no new step');
+  assert.deepEqual([r.ticker, r.task], [false, null], 'unchanged list: still nothing to draw');
   const v2 = T.sessionsView(frame({ sessions: [row(), row({ id: 's-0123abce', kind: 'codex', cwd: 'otro', state: 'running', origin: null })] }));
   r = T.feed(m, v2);
-  assert.deepEqual([r.task.steps.length, r.task.stepSeq], [1, 0]);
+  assert.deepEqual([r.ticker, r.task], [false, null]);
   r = T.feed(m, T.sessionsView(frame({ sessions: [row({ state: 'running' })] })));
-  assert.deepEqual(r.task.steps, ['Sin pasos de herramientas']);
-  assert.equal(r.task.stepSeq, 0);
+  assert.deepEqual([r.ticker, r.task], [false, null], 'a running process without tool events is not a tool step');
+  assert.ok(!JSON.stringify(r).includes('Sin pasos'), 'the placeholder text is gone');
 });
 
 test('feed: no sessions hides the ticker and forgets the history; an error is shown once; bounded lists say so once', () => {
@@ -121,11 +122,11 @@ test('feed: no sessions hides the ticker and forgets the history; an error is sh
 test('feed: recovery changes the ticker index so the unavailable line cannot stick', () => {
   const m = T.newMemory();
   const unavailable = T.feed(m, { state: 'error' });
+  assert.deepEqual([unavailable.ticker, unavailable.task.steps], [true, ['Sesiones no disponibles']], 'a real failure keeps its line');
   const recovered = T.feed(m, T.sessionsView(frame()));
-  assert.ok(recovered.task.stepSeq > unavailable.task.stepSeq);
-  assert.deepEqual(recovered.task.steps, ['Sin pasos de herramientas']);
+  assert.deepEqual([recovered.ticker, recovered.task], [false, null], 'recovered: the line goes away, nothing replaces it');
   const unavailableAgain = T.feed(m, { state: 'error' });
-  assert.ok(unavailableAgain.task.stepSeq > recovered.task.stepSeq);
+  assert.ok(unavailableAgain.task.stepSeq > unavailable.task.stepSeq, 'the second failure advances the ticker index so it shows again');
   assert.equal(unavailableAgain.who, null);
 });
 
@@ -133,7 +134,7 @@ test('feed: repeated process metadata updates do not accumulate history', () => 
   const m = T.newMemory();
   let r;
   for (let i = 0; i < 25; i++) r = T.feed(m, T.sessionsView(frame({ sessions: [row({ cwd: `p${i}` })] })));
-  assert.equal(r.task.steps.length, 1); assert.equal(r.task.stepSeq, 0);
+  assert.deepEqual([r.ticker, r.task, m.log.length], [false, null, 0], 'no history accumulates, and nothing is drawn');
   assert.equal(r.who.name, 'p24');
   assert.equal(r.who.count, '');
 });
@@ -174,32 +175,37 @@ test('real tool history drives n/m; missing and malformed streams remain honest'
   assert.equal(r.who.count, '2/2');
   const external = T.focus(m, v, 's-0123abcd');
   assert.equal(external.who.count, '');
-  assert.match(external.task.steps[0], /Sin pasos/);
+  assert.deepEqual([external.ticker, external.task], [false, null]);
   assert.equal(T.focus(m, v, 'not-a-session'), null);
   const malformed = T.sessionsView(frame({ sessions: [row({ tools: { total: 2, steps: [] } })] }));
-  assert.match(T.feed(T.newMemory(), malformed).task.steps[0], /Sin pasos/);
+  const bad = T.feed(T.newMemory(), malformed);
+  assert.deepEqual([bad.ticker, bad.task], [false, null], 'malformed tool data is dropped, never shown as steps');
 });
 
-test('feed: an unavailable line is STILL (finalLine set -> no shimmer, Coucou shimmers only live work); a live tool stream keeps shimmering', () => {
+test('feed: a real notice (error, bounded list) is STILL (finalLine set -> no shimmer); a live tool stream keeps shimmering', () => {
   const m = T.newMemory();
-  assert.equal(T.feed(m, T.sessionsView(frame())).task.finalLine, 'Sin pasos de herramientas');
   assert.equal(T.feed(m, { state: 'error' }).task.finalLine, 'Sesiones no disponibles');
   const b = T.newMemory();
   const bounded = T.feed(b, T.sessionsView(frame({ truncated: true })));
+  assert.deepEqual([bounded.ticker, bounded.task.steps], [true, ['Hay más sesiones']], 'the bounded notice is real information');
   assert.equal(bounded.task.finalLine, bounded.task.steps.at(-1));
 });
 
 test('every ticker notice fits the 322px card in full (<= 26 chars at 13px/500 over ~190px) and is a plain Spanish sentence', () => {
-  const texts = [T.errorText(), T.boundedText({ state: 'ready', truncated: true }), T.feed(T.newMemory(), T.sessionsView(frame())).task.steps[0]];
+  const texts = [T.errorText(), T.boundedText({ state: 'ready', truncated: true })];
   for (const t of texts) assert.ok(t.length <= 26, `${t} (${t.length})`);
   assert.equal(T.boundedText({ state: 'ready', truncated: true }), 'Hay más sesiones');
   assert.equal(T.errorText(), 'Sesiones no disponibles');
 });
 
-test('the mounted ticker exposes the full text as a tooltip fallback (title) and the card detail uses the same short copy', () => {
+test('the mounted ticker hides its row when there is nothing to draw, and the card detail has no placeholder either', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'sessions-ticker.js'), 'utf8');
+  const pills = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'pills-view.js'), 'utf8');
   assert.match(src, /ticker\.el\.title = /);
-  assert.doesNotMatch(src + fs.readFileSync(path.join(__dirname, '..', 'frontend', 'pills-view.js'), 'utf8'), /Pasos de herramientas no disponibles/);
+  assert.match(src, /ticker\.el\.hidden = !\(active && showTicker\)/, 'the row is hidden unless the feed has something to draw');
+  assert.match(src, /if \(!showTicker\) ticker\.sync\(null\)/, 'and its content is cleared, never a stale step');
+  assert.doesNotMatch(src + pills, /Sin pasos de herramientas|Pasos de herramientas no disponibles/, 'no placeholder anywhere');
+  assert.match(pills, /detail\.textContent = 'Sesión enfocada\. El destino del chat no cambió\.'/, 'one honest line for a focused session, with or without tools');
 });
 
 // ---- «Ver todas» (part 1 of the human's two-part decision) --------------------------
