@@ -1094,3 +1094,7 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 #compact-reply::after { content: ""; position: absolute; inset: -4px -2px; }
 #compact-reply:focus-visible { outline: 2px solid var(--island-live); outline-offset: 2px; }
 #capsule[data-compact-ask="true"] .compact-activity { right: 90px; }
+
+/* ══ T1 · S4 (04 expandida general, A): a 15px title, steps dimmed except the current one (>= 4.5:1 on the card) ══════════════════ */
+.centre-name { font: 600 15px/20px var(--font); }
+.centre-steps li:not([data-current="true"]):not([data-state="running"]):not([data-state="error"]) { color: var(--dim-2); }
