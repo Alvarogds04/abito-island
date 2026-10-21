@@ -315,7 +315,7 @@
   function renderControls() {
     const active = V.activeTurn(view);
     cancel.hidden = !active;
-    send.disabled = !V.canSend(view, input.value, inFlight);
+    send.disabled = V.sendState(view, input.value, inFlight).disabled;
     const draftIssue = input.value ? V.draftProblem(input.value) : null;
     const historyProblem = view && view.history_problem;
     problem.textContent = localProblem || historyProblem || draftIssue || '';
@@ -623,6 +623,13 @@
     }
   }
 
+  // Design 14: the microphone (44 px) starts a hands-free dictation through the closed Flow verb; it exists only when dictation is on.
+  const mic = $('chat-mic');
+  if (mic) {
+    const say = verb => call('dictation_action', { action: verb }).catch(() => null);
+    say('status').then(s => { mic.hidden = !(s && s.prefs && s.prefs.enabled === true); });
+    mic.addEventListener('click', e => { if (e.isTrusted === true) say('hands_free'); });
+  }
   pickButton.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
     const files = Array.prototype.slice.call(fileInput.files || []);
@@ -646,7 +653,12 @@
   });
   form.addEventListener('submit', event => {
     event.preventDefault();
-    if (!V.canSend(view, input.value, inFlight)) { renderControls(); return; }
+    if (!V.canSend(view, input.value, inFlight)) {
+      // the disc is live for a non-empty draft: say why nothing was sent instead of staying silent
+      const why = V.sendState(view, input.value, inFlight).blocked || V.draftProblem(input.value);
+      if (why && !inFlight) { localProblem = why; setLive(why); }
+      renderControls(); return;
+    }
     if (pickerOpen) setPicker(false); // upstream parity: choosing ends the row's job
     const text = input.value;
     const bytes = new Uint8Array(12);

@@ -13,13 +13,11 @@ import {
   lastDays,
   lastWeeks,
   mainCISummary,
-  myPRsValue,
   profileUrl,
   safeGitHubUrl,
   sectionTitle,
   shortRepo,
-  weekColumn,
-  worstCI
+  weekColumn
 } from "../core/github.js";
 const GITHUB_RED = "#F4505E";
 const hooks = {
@@ -40,15 +38,6 @@ function miniRow(activity) {
   }
   return row2;
 }
-function statButton(icon, color, label, value, onClick) {
-  return h(
-    "button",
-    { class: "int-stat gh-stat", onclick: onClick },
-    h("i", { class: "int-stat-icon", style: `color:${color}` }, icon),
-    h("span", { class: "int-stat-label", text: label }),
-    h("span", { class: "int-stat-value", text: value })
-  );
-}
 function githubPulseCard(pulse, stats, activity, openDetail) {
   const show = (section) => {
     openSection = section;
@@ -64,39 +53,21 @@ function githubPulseCard(pulse, stats, activity, openDetail) {
   } else {
     head.append(h("span", { text: GH_STRINGS.overview }));
   }
-  const prColor = CI_COLORS[worstCI(pulse.myPRs.map((p) => p.ci))];
   const reviews = pulse.toReview.length;
   const main = mainCISummary(pulse.mainCI);
-  return h(
-    "div",
-    { class: "int-card" },
-    head,
-    h(
-      "div",
-      { class: "int-stats gh-rows" },
-      statButton(
-        svg(ICONS.pull, 10, { stroke: 2.2 }),
-        prColor,
-        GH_STRINGS.myPRs,
-        myPRsValue(pulse.myPRs),
-        () => show("myPRs")
-      ),
-      statButton(
-        svg(ICONS.eye, 10, { stroke: 2.2 }),
-        reviews > 0 ? "#8AB4F8" : "#6B7079",
-        GH_STRINGS.toReview,
-        String(reviews),
-        () => show("toReview")
-      ),
-      statButton(
-        svg(main.failing ? ICONS.octagonX : ICONS.seal, 10, { evenOdd: true }),
-        main.color,
-        GH_STRINGS.mainCI,
-        main.value,
-        () => show("mainCI")
-      )
-    )
+  head.append(
+    h("span", { class: "gh-count", text: `· ${GH_STRINGS.prCount(pulse.myPRs.length)}` }),
+    h("button", { class: "gh-review", onclick: () => show("toReview") }, `· ${GH_STRINGS.reviewCount(reviews)}`)
   );
+  const mainBtn = h("button", {
+    class: "gh-ci-main",
+    title: `${GH_STRINGS.mainCI}: ${main.value}`,
+    "aria-label": GH_STRINGS.mainCIAria(main.value),
+    onclick: () => show("mainCI")
+  }, svg(main.failing ? ICONS.octagonX : ICONS.seal, 11, { evenOdd: true }));
+  mainBtn.style.color = main.color;
+  head.append(mainBtn);
+  return h("div", { class: "int-card" }, head, listBody(pulse.myPRs.map((pr) => prRow(pr, true))));
 }
 function backButton(title, onBack) {
   return h(
@@ -106,35 +77,61 @@ function backButton(title, onBack) {
     h("span", { text: title })
   );
 }
-function ciDot(ci) {
-  const el = dot(CI_COLORS[ci], 5);
-  if (ci === "unknown") el.style.opacity = "0";
+const CI_ICON = {
+  success: ICONS.check,
+  failure: "M6.5 6.5l11 11M17.5 6.5l-11 11",
+  pending: "M12 5v7l4 2.5",
+  unknown: "M7 12h10"
+};
+function ciIcon(ci) {
+  const el = h("i", { class: "gh-ci", style: `color:${CI_COLORS[ci]}` }, svg(CI_ICON[ci], 12, { stroke: 2.4 }));
   return el;
+}
+function ciText(ci) {
+  return ciWord(ci) ?? GH_STRINGS.noCI;
 }
 const rowOpens = /* @__PURE__ */ new WeakMap();
-function row(onOpen, ...children) {
-  const el = h("button", { class: "gh-row", onclick: onOpen }, ...children);
+function row(onOpen, ref, openLabel, ci, line1, tail) {
+  const open2 = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
+  const el = h(
+    "div",
+    { class: "gh-row" },
+    ciIcon(ci),
+    h(
+      "span",
+      { class: "gh-text" },
+      h("span", { class: "gh-line1" }, ...line1),
+      h("span", { class: "gh-line2" }, h("span", { class: "gh-word", style: `color:${CI_COLORS[ci]}`, text: ciText(ci) }), ...tail)
+    ),
+    open2
+  );
   rowOpens.set(el, onOpen);
+  void openLabel;
   return el;
 }
-function prRow(pr, showCI) {
+function prRow(pr, _showCI) {
+  const ref = `${shortRepo(pr.repo)}#${pr.number}`;
   return row(
     () => open(pr.url),
-    showCI ? ciDot(pr.ci) : h("i", { class: "gh-gap" }),
-    h("span", { class: "gh-ref", text: `${shortRepo(pr.repo)}#${pr.number}` }),
-    h("span", { class: "gh-title", text: pr.title }),
-    pr.isDraft ? h("span", { class: "gh-draft", text: GH_STRINGS.draft }) : null
+    ref,
+    ref,
+    pr.ci,
+    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", text: pr.title })],
+    [pr.isDraft ? h("span", { class: "gh-draft", text: `· ${GH_STRINGS.draft}` }) : null]
   );
 }
 function repoRow(repo) {
-  const word = ciWord(repo.ci);
   return row(
     () => open(actionsUrl(repo.url)),
-    ciDot(repo.ci),
-    h("span", { class: "gh-ref", text: shortRepo(repo.repo) }),
-    h("span", { class: "gh-title", text: repo.branch }),
-    word ? h("span", { class: "gh-word", style: `color:${CI_COLORS[repo.ci]}`, text: word }) : null
+    shortRepo(repo.repo),
+    shortRepo(repo.repo),
+    repo.ci,
+    [h("span", { class: "gh-ref", text: shortRepo(repo.repo) }), h("span", { class: "gh-title", text: repo.branch })],
+    []
   );
+}
+function listBody(rows) {
+  return rows.length === 0 ? h("div", { class: "gh-empty", text: GH_STRINGS.nothingHere }) : h("div", { class: "gh-list" }, ...rows);
 }
 function listRows(root) {
   const list = root.querySelector(".gh-list");
@@ -149,7 +146,7 @@ function openRow(el) {
 }
 function listDetail(section, pulse, onBack) {
   const rows = section === "mainCI" ? pulse.mainCI.map(repoRow) : (section === "myPRs" ? pulse.myPRs : pulse.toReview).map((pr) => prRow(pr, section === "myPRs"));
-  const body = rows.length === 0 ? h("div", { class: "gh-empty", text: GH_STRINGS.nothingHere }) : h("div", { class: rows.length > 3 ? "gh-list fade" : "gh-list" }, ...rows);
+  const body = listBody(rows);
   return h(
     "div",
     { class: "int-card" },

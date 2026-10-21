@@ -17,6 +17,7 @@ class El {
   append(...n) { for (const c of n) this.children.push(typeof c === 'string' ? { text: c } : c); }
   addEventListener(k, f) { (this.listeners[k] ||= []).push(f); }
   click() { for (const f of this.listeners.click || []) f({ target: this }); }
+  querySelector(sel) { return all(this).find(x => x !== this && (x.className || '').split(' ').includes(sel.replace(/^\./, ''))) || null; }
 }
 const all = e => [e, ...(e.children || []).flatMap(all)];
 const text = e => all(e).map(x => x.textContent || x.text || '').join('|');
@@ -71,22 +72,44 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   let details = 0;
   const card = view.githubPulseCard(pulse, null, act, () => { details++; });
   const t = text(card);
-  assert.match(t, /GitHub/); assert.match(t, /Mis PRs/); assert.match(t, /2 · 1 fallando/); assert.match(t, /Por revisar/); assert.match(t, /CI de la rama/); assert.match(t, /todo en verde/);
-  const stats = cls(card, 'gh-stat'); assert.equal(stats.length, 3);
-  stats[0].click(); assert.equal(details, 1); assert.deepEqual(refreshed, ['pulse'], 'opening a list asks the host again');
-  cls(card, 'gh-spark')[0].click(); assert.deepEqual(refreshed, ['pulse', 'activity']);
-  const list = view.githubDetail(pulse, null, act, () => {});
-  // the detail shows the section the last click opened (activity): the grid
-  assert.ok(cls(list, 'gh-grid').length === 1 && cls(list, 'gh-cell').length >= 2);
-  stats[0].click();
-  const prs = view.githubDetail(pulse, null, act, () => {});
-  assert.equal(cls(prs, 'gh-row').length, 2); assert.match(text(prs), /r#1/); assert.match(text(prs), /Borrador/);
-  cls(prs, 'gh-row')[0].click(); assert.deepEqual(opened, ['https://github.com/o/r/pull/1']);
+  // Design 16, option A: «GitHub · 2 PR · 1 revisión», then ONE row per PR with the CI state as icon + word and an explicit [Abrir]
+  assert.match(t, /GitHub/); assert.match(t, /2 PR/); assert.match(t, /1 revisión/);
+  assert.doesNotMatch(t, /Mis PRs|CI de la rama|todo en verde/, 'the metric/list mix of the old card is gone');
+  const rows = cls(card, 'gh-row'); assert.equal(rows.length, 2, 'one row per own PR');
+  assert.match(text(rows[0]), /r#1/); assert.match(text(rows[0]), /fallando/); assert.match(text(rows[1]), /pasando/); assert.match(text(rows[1]), /Borrador/);
+  for (const r of rows) {
+    assert.equal(cls(r, 'gh-ci').length, 1, 'a CI icon (shape, not only colour)');
+    const open = cls(r, 'gh-open'); assert.equal(open.length, 1); assert.equal(open[0].tagName, 'button'); assert.match(text(open[0]), /^Abrir$/);
+    assert.match(open[0].attrs['aria-label'], /^Abrir .+#\d+ en GitHub$/);
+  }
+  assert.notEqual(rows[0].tagName, 'button', 'the row is not itself a button: the action is the visible [Abrir]');
+  cls(rows[0], 'gh-open')[0].click(); assert.deepEqual(opened, ['https://github.com/o/r/pull/1']);
+  const noCI = view.githubPulseCard({ ...pulse, myPRs: [{ ...pulse.myPRs[0], ci: 'unknown' }] }, null, act, () => {});
+  assert.match(text(cls(noCI, 'gh-row')[0]), /sin CI/, 'unknown CI says so in words');
+  // the review count and the default-branch CI keep their detail lists
+  cls(card, 'gh-review')[0].click(); assert.equal(details, 1); assert.deepEqual(refreshed, ['pulse'], 'opening a list asks the host again');
+  const reviews = view.githubDetail(pulse, null, act, () => {});
+  assert.equal(cls(reviews, 'gh-row').length, 1); assert.match(text(reviews), /x#9/); assert.match(text(reviews), /en curso/);
+  assert.equal(cls(card, 'gh-ci-main').length, 1); assert.match(cls(card, 'gh-ci-main')[0].attrs['aria-label'], /CI de la rama: todo en verde/);
+  cls(card, 'gh-ci-main')[0].click(); assert.equal(details, 2);
+  const main = view.githubDetail(pulse, null, act, () => {});
+  assert.equal(cls(main, 'gh-row').length, 1); assert.match(text(main), /main/); assert.match(text(main), /pasando/);
+  cls(card, 'gh-spark')[0].click(); assert.deepEqual(refreshed, ['pulse', 'pulse', 'activity']);
+  const grid = view.githubDetail(pulse, null, act, () => {});
+  assert.ok(cls(grid, 'gh-grid').length === 1 && cls(grid, 'gh-cell').length >= 2);
+  // the list is a bounded, internally scrolling box (max 4 rows) and never shows a row it cannot act on
+  const five = { ...pulse, myPRs: Array.from({ length: 5 }, (_, i) => ({ ...pulse.myPRs[0], number: i + 1, id: 'o/r#' + (i + 1) })) };
+  const big = view.githubPulseCard(five, null, act, () => {});
+  assert.equal(cls(big, 'gh-row').length, 5); assert.equal(cls(big, 'gh-list').length, 1);
   view.hooks.openUrl = () => {}; // the page-level hook re-validates; the vendor view itself drops non-github urls
   const evil = { ...pulse, myPRs: [{ ...pulse.myPRs[0], url: 'https://evil.example/x' }] };
   const openedEvil = []; view.hooks.openUrl = u => openedEvil.push(u);
-  cls(view.githubDetail(evil, null, act, () => {}), 'gh-row')[0].click(); assert.deepEqual(openedEvil, [], 'a non-GitHub link never reaches the host');
-  assert.match(text(view.githubDetail({ ...pulse, myPRs: [] }, null, act, () => {})), /Nada por aquí/);
+  cls(view.githubPulseCard(evil, null, act, () => {}), 'gh-open')[0].click(); assert.deepEqual(openedEvil, [], 'a non-GitHub link never reaches the host');
+  assert.match(text(view.githubPulseCard({ ...pulse, myPRs: [] }, null, act, () => {})), /Nada por aquí/);
+  // keyboard: rows are the children of .gh-list and Enter does what [Abrir] does
+  const kb = view.githubPulseCard(pulse, null, act, () => {});
+  assert.equal(view.listRows(kb).length, 2);
+  opened.length = 0; view.hooks.openUrl = u => opened.push(u); view.openRow(view.listRows(kb)[1]); assert.deepEqual(opened, ['https://github.com/o/r/pull/2']);
 
   // ---- wiring (source level; the browser mount cannot run here) --------------------------------------------
   const src = fs.readFileSync(path.join(frontend, 'island-github.js'), 'utf8');
@@ -96,6 +119,8 @@ const cls = (e, c) => all(e).filter(x => (x.className || '').split(' ').includes
   const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
   assert.equal((html.match(/src="island-github\.js"/g) || []).length, 1);
   const css = fs.readFileSync(path.join(vendor, 'island/island.css'), 'utf8');
-  assert.match(css, /\.gh-row \{ display: flex; align-items: center; gap: 5px; height: 20px;/); assert.match(css, /\.gh-stat::after[^}]*inset: -5px -4px/, 'hit area around the 14px rows');
+  assert.match(css, /\.gh-row \{[^}]*min-height: 36px/, 'design 16 A: 36px rows');
+  assert.match(css, /\.gh-list \{[^}]*max-height: 144px[^}]*overflow-y: auto/, 'at most 4 rows, then the list scrolls inside');
+  assert.match(css, /\.gh-open \{[^}]*min-height: 28px/);
   console.log('PASS island-github');
 })().catch(e => { console.error('FAIL', e.stack); process.exit(1); });

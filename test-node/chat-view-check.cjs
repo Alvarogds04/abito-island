@@ -44,6 +44,25 @@ test('send is enabled only with an available model, no active turn and a valid d
   assert.equal(V.canSend(null, 'hola', false), false);
 });
 
+test('S14 send rule (design 14, option A): the disc is disabled only for an empty draft, an active turn or a submit in flight; a model that is not ready answers WHEN pressed', () => {
+  const ready = { availability: { state: 'ready' }, active_turn: null };
+  assert.deepEqual(V.sendState(ready, 'hola', false), { disabled: false, blocked: null });
+  assert.equal(V.sendState(ready, '', false).disabled, true);
+  assert.equal(V.sendState(ready, '   \n', false).disabled, true);
+  assert.equal(V.sendState(ready, 'hola', true).disabled, true, 'a submit in flight');
+  assert.equal(V.sendState({ ...ready, active_turn: 't-1' }, 'hola', false).disabled, true, 'a turn is running: cancel is the control');
+  for (const state of ['unavailable', 'blocked', 'unchecked']) {
+    const s = V.sendState({ ...ready, availability: { state } }, 'hola', false);
+    assert.equal(s.disabled, false, state + ': the human may press it');
+    assert.equal(typeof s.blocked, 'string'); assert.ok(s.blocked.length > 0, state + ' says why instead of being silently grey');
+  }
+  assert.equal(V.sendState(null, 'hola', false).disabled, false);
+  assert.ok(V.sendState(null, 'hola', false).blocked);
+  assert.equal(V.sendState(ready, 'a\u0000b', false).disabled, false, 'a control character is refused with its own message, not a grey disc');
+  // the old gate still decides what is actually sent
+  assert.equal(V.canSend({ ...ready, availability: { state: 'unavailable' } }, 'hola', false), false);
+});
+
 test('status line: active turn first, then availability, never a guess', () => {
   const view = {
     active_turn: 't-2', queue_note: 'en su cola',
@@ -336,10 +355,12 @@ test('column: the chat padding is symmetric (the 60px R6 gutter of the horizonta
   assert.ok(left <= 20, `a narrow column cannot spend ${left}px per side`);
 });
 
-test('column: the agent state is its own full-width strip above the history, not a header chip', () => {
-  assert.match(html, /<[a-z]+[^>]*id="chat-status-strip"/, 'the strip exists');
-  assert.ok(html.indexOf('id="chat-status-strip"') < html.indexOf('id="chat-log"'), 'it sits above the history');
-  assert.ok(html.indexOf('id="chat-state"') > html.indexOf('id="chat-status-strip"') && html.indexOf('id="chat-state"') < html.indexOf('id="chat-log"'), 'the state chip lives in the strip');
+test('S14 header: the agent state chip lives in the header next to the name and target («● Abito · local · Conectado»); no separate strip', () => {
+  const header = html.slice(html.indexOf('id="chat-header"'), html.indexOf('</header>', html.indexOf('id="chat-header"')));
+  assert.ok(header.indexOf('id="chat-title"') < header.indexOf('id="chat-target-chip"') && header.indexOf('id="chat-target-chip"') < header.indexOf('id="chat-state"'), 'name, then target, then state');
+  assert.ok(header.indexOf('id="chat-state"') < header.indexOf('id="open-screen-settings"'), 'state before the right-hand controls');
+  assert.doesNotMatch(html, /id="chat-status-strip"/, 'the strip is gone');
+  assert.ok(html.indexOf('id="chat-state"') < html.indexOf('id="chat-log"'));
 });
 
 test('column: a message uses the column, not percentages of the old 640 width', () => {
@@ -382,17 +403,25 @@ test('chat island: Coucou starts at 240 high inside the fixed window, at the ove
   assert.match(island, /window\.__islandSetView = \(view, vw, vh\)/, 'the size still comes from Rust');
 });
 
-test('column: the status strip never changes height (a strip that appears and disappears pushed the whole history: the flash on send)', () => {
-  const strip = rule('#chat-status-strip');
-  assert.match(strip, /height:\s*24px|min-height:\s*24px/, 'it always keeps its row (design §2: status strip 24)');
-  assert.doesNotMatch(css, /#chat-status-strip:has\([^)]*\)\s*\{[^}]*display:\s*none/, 'no rule may collapse it');
-  assert.doesNotMatch(css, /#chat-status-strip:has\(#chat-state\[data-kind="ready"\]\)/, 'T7.3: ready shows the «Conectado» chip (was invisible)');
-  assert.match(css, /#chat-status-strip:has\(#chat-state\[data-kind=""\]\)\s*\{[^}]*visibility:\s*hidden/, 'an undrawn state is invisible, but the space stays');
+test('S14 composer: a 44px microphone sits before the send disc, hidden until dictation is on, and only ever sends the closed hands_free verb', () => {
+  const form = html.slice(html.indexOf('id="chat-composer"'), html.indexOf('</form>', html.indexOf('id="chat-composer"')));
+  assert.match(form, /<button id="chat-mic" class="round" type="button" hidden aria-label="Dictar con el micrófono">/);
+  assert.ok(form.indexOf('id="chat-mic"') < form.indexOf('id="chat-send"'), 'mic, then send');
+  assert.match(rule('#chat-composer .round'), /width:\s*44px/); assert.match(rule('#chat-composer .round'), /height:\s*44px/);
+  const chat = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  assert.match(chat, /say\('hands_free'\)/); assert.match(chat, /say\('status'\)/);
+  assert.match(chat, /e\.isTrusted === true/, 'a synthetic click never opens the microphone');
+  assert.ok(require(path.join(__dirname, '..', 'frontend', 'icons.js')).NAMES.includes('mic'));
+});
+test('S14 focus: the chat field\'s focus is a 1px accent edge (never the lime halo)', () => {
+  assert.match(rule('#chat-input:focus-visible'), /outline:\s*1px solid var\(--island-live\)/);
+});
+
+test('S14 header: an undrawn state is not drawn at all (no empty dot-separator), and the header keeps its height', () => {
+  assert.match(css + fs.readFileSync(path.join(__dirname, '..', 'frontend', 'vendor', 'coucou', 'island', 'island.css'), 'utf8'), /#chat-header #chat-state\[data-kind=""\]\s*\{[^}]*display:\s*none/);
 });
 
 // ---- #309 verifier: Settings and Models were designed for 640 and broke in the 400 column ---------
-// A small box model: every control of the two panels is laid out from the CSS+markup rules below and
-// must fit INSIDE the visible island width. Not a browser; it measures the arithmetic that failed.
 const COLUMN_W = 400;
 const px = (text, re, d) => { const m = text.match(re); return m ? Number(m[1]) : d; };
 const panelBox = id => {
@@ -419,7 +448,7 @@ test('column: a settings screen is ONE row — title, connection chip and a clos
 });
 
 test('column: #408 — the header keeps only Ajustes and Volver, so it fits the 400 header', () => {
-  const header = html.slice(html.indexOf('id="chat-header"'), html.indexOf('id="chat-status-strip"'));
+  const header = html.slice(html.indexOf('id="chat-header"'), html.indexOf('</header>', html.indexOf('id="chat-header"')));
   const buttons = (header.match(/<button /g) || []).length;
   assert.equal(buttons, 2, 'settings, back');
   const gap = px(rule('#chat-header'), /gap:\s*(\d+)px/, 0);
@@ -458,14 +487,6 @@ test('column: with a screen open the chat header STAYS visible (gentle-dot): the
   assert.match(setCss, /right:\s*12px/);
   assert.match(setCss, /top:\s*5\d px|top:\s*(5\d|6\d)px/, 'the panel starts BELOW the header');
   assert.match(html, /id="open-screen-settings"[^>]*aria-expanded="false"/);
-});
-
-test('column: an open panel (Modelos, Ajustes) hides the chat status strip, so «Bloqueado» never overlaps the panel', () => {
-  const hides = sel => new RegExp('#capsule\\[data-' + sel + '="open"\\][^{]*#chat-status-strip').test(css);
-  assert.ok(hides('models'), 'Modelos hides the strip');
-  assert.ok(hides('settings'), 'Ajustes hides the strip');
-  const rules = [...css.matchAll(/(^|\n)([^{}\n][^{}]*#chat-status-strip[^{}]*)\{([^}]*)\}/g)].map(m => m[3]);
-  assert.ok(rules.some(b => /visibility:\s*hidden/.test(b)));
 });
 
 test('column: the account-name field never truncates its own placeholder', () => {

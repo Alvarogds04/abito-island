@@ -123,5 +123,52 @@ const test = async (_n, fn) => { await fn(); passed += 1; };
     assert.match(src, /pagehide/);
   });
 
+  // ---- design 17, option A: cover on the left, 44x44 controls, progress underneath -----------------------------------------------
+  const css = fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = sel => { const m = [...css.matchAll(/(^|\n)([^{}\n][^{}]*)\{([^}]*)\}/g)].filter(x => x[2].split(',').map(v => v.trim()).includes(sel)); return m.map(x => x[3]).join(';'); };
+  const px = (text, name) => { const m = new RegExp('(?:^|[;\\s])' + name + ':\\s*(-?\\d+(?:\\.\\d+)?)px').exec(text); return m ? Number(m[1]) : null; };
+  const src = fs.readFileSync(path.join(frontend, 'spotify-view.js'), 'utf8');
+
+  await test('A: the transport controls are real 44x44 boxes (previous, play/pause, next), not 16x18 glyphs with a borrowed hit area', () => {
+    const icon = rule('.np-buttons .np-icon'), play = rule('.np-buttons .np-play');
+    for (const [name, r] of [['icon', icon], ['play', play]]) { assert.equal(px(r, 'width'), 44, name + ' width'); assert.equal(px(r, 'height'), 44, name + ' height'); }
+    assert.doesNotMatch(rule('.np-icon::after, .np-play::after'), /inset:\s*-10px/, 'no oversized borrowed hit area on top of a 44px box');
+    assert.equal((src.match(/glyph\('play', 9\)/g) || []).length + (src.match(/glyph\(v\.playing \? 'pause' : 'play', \d+\)/g) || []).length > 0, true);
+  });
+
+  await test('A: the cover is a bigger tile on the LEFT of title, artist and the controls; the progress row sits under them', () => {
+    assert.equal(px(rule('.np-art'), 'width'), 56); assert.equal(px(rule('.np-art'), 'height'), 56);
+    assert.match(src, /head\.append\(art, text\)/, 'cover first, then the text column');
+    assert.match(src, /text\.append\(row, artist, bar\)/, 'title, artist, then the transport controls INSIDE the text column');
+    assert.match(src, /card\.append\(head, progressRow\)/, 'progress under the head');
+    assert.ok(src.indexOf('card.append(head, progressRow)') > src.indexOf('text.append(row, artist, bar)'));
+    assert.match(src, /progressRow\.append\(elapsed, progress\.el, remaining\)/, '1:12 ━━○── 3:40');
+    assert.match(rule('.np-progress'), /font-variant-numeric:\s*tabular-nums/);
+    assert.match(rule('.np-time.elapsed'), /text-align:\s*right/);
+  });
+
+  await test('A: everything fits the 108px left card and its 202px column (the card clips what does not)', () => {
+    const top = px(rule('.spotify-card'), 'top'), cardW = 620 - px(rule('.spotify-card'), 'left') - px(rule('.spotify-card'), 'right');
+    const text = 14 + 14 + 44;                                  // title row, artist row, controls row
+    const head = Math.max(px(rule('.np-art'), 'height'), text);
+    const progress = px(rule('.np-progress'), 'height') ?? 16;
+    const total = top + head + (px(rule('.np-progress'), 'padding-top') ?? 0) + progress;
+    assert.ok(total <= 108, `the card needs ${total}px of 108`);
+    const column = cardW - px(rule('.np-art'), 'width') - px(rule('.np-head'), 'gap');
+    assert.ok(3 * 44 <= column, `three 44px controls need 132px of the ${column}px text column`);
+  });
+
+  await test('A: the volume bar left the card (Option A has none); shuffle and repeat stay, the closed host verbs are untouched', () => {
+    assert.doesNotMatch(src, /barOf\('Volumen'/); assert.doesNotMatch(src, /np-volume/);
+    assert.match(src, /flagBtn\('shuffle', 'Mezclar'\)/); assert.match(src, /flagBtn\('repeat', 'Repetir'\)/);
+    assert.deepEqual(S.valuedPayload('volume', 50), { action: 'volume', value: 50 }, 'the host verb still exists');
+  });
+
+  await test('A: every control keeps an accessible name and trusted-click gating', () => {
+    for (const label of ['Anterior', 'Reproducir o pausar', 'Siguiente']) assert.ok(Object.values(S.CONTROLS).includes(label));
+    assert.match(src, /e\.isTrusted === true\) ctl\.control\(action\)/);
+    assert.match(src, /setAttribute\('aria-label', name\)/);
+  });
+
   console.log(`spotify-view-check: ${passed} passed`);
 })().catch(e => { console.error(e); process.exit(1); });

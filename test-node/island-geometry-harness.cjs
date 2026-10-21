@@ -59,10 +59,27 @@ async function open(scenario = {}) {
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         const a = args && args.payload && args.payload.action;
-        if (cmd === 'desktop_action') return snap;
+        if (cmd === 'desktop_action') {
+          // the host's own dismissals: one id removes exactly that notice, no id removes the first (M2/#437), then the new snapshot is pushed
+          if (a === 'dismiss') {
+            const id = args.payload.id; const at = id ? snap.notices.findIndex(n => n.id === id) : 0;
+            if (at >= 0) snap.notices.splice(at, 1);
+            snap.revision += 1; queueMicrotask(() => window.__emit('desktop:state', JSON.parse(JSON.stringify(snap))));
+          }
+          return JSON.parse(JSON.stringify(snap));
+        }
         if (cmd === 'agent_action') return a === 'sessions_list' ? { connection, accounts, sessions: { rows: sessions, truncated: false } } : { connection, accounts };
         if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
-        if (cmd === 'question_action') return { available: true, pending, queued: [], queued_count: 0, deliveries: [], notice: null };
+        if (cmd === 'github_action') return scenario.githubData
+          ? (a === 'refresh' && args.payload.section === 'pulse'
+            ? { available: true, pulse: { login: 'abito', myPRs: [{ number: 1, title: 'fix', url: 'https://github.com/o/r/pull/1', ci: 'failing' }], toReview: [], mainCI: [{ name: 'ci', state: 'success' }] }, stats: null }
+            : { available: true, activity: { weeks: [], total: 18 } })
+          : { available: false, reason: 'gh_missing' };
+        if (cmd === 'question_action') {
+          // answering consumes the pending question and the host reports «answered» (the producer's ack), like the real receiver
+          if (a === 'answer' || a === 'decline' || a === 'text') { window.__answered = true; const v = { available: true, pending: null, queued: [], queued_count: 0, deliveries: [], notice: 'sent' }; setTimeout(() => window.__emit('question:state', { ...v, notice: 'answered' }), 20); return v; }
+          return { available: true, pending: window.__answered ? null : pending, queued: [], queued_count: 0, deliveries: [], notice: window.__answered ? 'answered' : null };
+        }
         if (cmd === 'island_window_height') return { h: (args.payload && args.payload.h) || 340 };
         return {};
       } },
@@ -74,7 +91,8 @@ async function open(scenario = {}) {
   if (scenario.theme) await page.evaluate(t => { document.documentElement.dataset.theme = t; }, scenario.theme);
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__islandSetState('overview'));
-  if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'integrations' } })));
+  if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
+  if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(4200); // spring + the ticker's first poll
   if (scenario.question) await page.waitForTimeout(600);
   return {

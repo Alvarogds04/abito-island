@@ -16,6 +16,7 @@
   const EYE = '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.5"/>';
   const PATHS = Object.freeze({
     'bubble': '<path d="M4 4h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>',
+    'mic': '<path d="M10 2.5a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0V5A2.5 2.5 0 0 0 10 2.5zM4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5"/>',
     'arrow-up': '<path d="M10 16V4M5 9l5-5 5 5"/>',
     'square': '<rect x="4" y="4" width="12" height="12" rx="2"/>',
     'arrow-left': '<path d="M16 10H4M9 5l-5 5 5 5"/>',

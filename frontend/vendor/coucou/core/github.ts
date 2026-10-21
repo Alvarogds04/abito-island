@@ -88,7 +88,24 @@ export const GH_STRINGS = {
   get passing() { return t("passing"); },
   get allGreen() { return t("all green"); },
   get noRepos() { return t("no repos"); },
+  get open() {
+    return t("Open");
+  },
+  openRef: (ref: string) => t("Open {ref} on GitHub", { ref }),
+  prCount: (n: number) => tn("{count} PR", "{count} PRs", n),
+  reviewCount: (n: number) => tn("{count} review", "{count} reviews", n),
+  get noCI() {
+    return t("no CI");
+  },
+  mainCIAria: (state: string) => t("CI: {state}", { state }),
   get unknown() { return t("unknown"); },
+  // Design 16 (option A)
+  get open() { return t("Open"); },
+  openRef: (ref: string) => t("Open {ref} on GitHub", { ref }),
+  prCount: (n: number) => tn("{count} PR", "{count} PRs", n),
+  reviewCount: (n: number) => tn("{count} review", "{count} reviews", n),
+  get noCI() { return t("no CI"); },
+  mainCIAria: (state: string) => t("CI: {state}", { state }),
   get noContributions() { return t("No contributions"); },
   get oneContribution() { return tn("{count} contribution", "{count} contributions", 1); },
   contributions: (n: number) => tn("{count} contribution", "{count} contributions", n),

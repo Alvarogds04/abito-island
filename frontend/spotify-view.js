@@ -127,7 +127,6 @@ function mount(api) {
     next: 'M2.5 6.2c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2zm10 0c0-.7.8-1.1 1.4-.7l7.6 5.8c.5.4.5 1 0 1.4l-7.6 5.8c-.6.4-1.4 0-1.4-.7V6.2z',
     play: 'M7 4.6c0-.8.9-1.3 1.6-.9l11 6.9c.6.4.6 1.4 0 1.8l-11 6.9c-.7.4-1.6-.1-1.6-.9V4.6z',
     pause: 'M6 4.5h4v15H6zM14 4.5h4v15h-4z',
-    volume: 'M11 4.5 6.5 8.2H3.4v7.6h3.1L11 19.5v-15zm3.2 3a5.3 5.3 0 0 1 0 9 .9.9 0 0 0 .9 1.55 7.1 7.1 0 0 0 0-12.1.9.9 0 0 0-.9 1.55z',
   };
   const NS = 'http://www.w3.org/2000/svg';
   const glyph = (name, size) => {
@@ -138,7 +137,7 @@ function mount(api) {
   };
   const title = mk('span', 'np-title'), artist = mk('div', 'np-sub');
   const row = mk('div', 'np-title-row'); row.append(mk('span', 'np-dot'), title);
-  const text = mk('div', 'np-text'); text.append(row, artist);
+  const text = mk('div', 'np-text');  // title, artist and (below) the transport controls: filled once `bar` exists
   const art = mk('div', 'np-art'); art.setAttribute('aria-hidden', 'true');
   const noteSvg = doc.createElementNS(NS, 'svg'); noteSvg.setAttribute('viewBox', '0 0 24 24'); noteSvg.setAttribute('width', '15'); noteSvg.setAttribute('height', '15');
   const notePath = doc.createElementNS(NS, 'path'); notePath.setAttribute('d', 'M12.2 3.6h1.7c.3 2.3 1.8 3.5 4.2 4.6l-.6 1.6c-1.4-.5-2.7-1.2-3.6-2.1v9.5a3.3 3.3 0 1 1-1.7-2.88V3.6z'); notePath.setAttribute('fill', 'currentColor');
@@ -162,7 +161,7 @@ function mount(api) {
     } catch (_) { /* invalid raster: keep the musical-note fallback */ }
     finally { bitmap?.close(); }
   }
-  const head = mk('div', 'np-head'); head.append(art, text);
+  const head = mk('div', 'np-head');
   const buttons = {};
   const bar = mk('div', 'np-buttons');
   for (const [action, name] of Object.entries(api.CONTROLS)) {
@@ -211,14 +210,12 @@ function mount(api) {
     return b;
   };
   const shuffle = flagBtn('shuffle', 'Mezclar'), repeat = flagBtn('repeat', 'Repetir');
-  bar.prepend(shuffle); bar.append(repeat);
-  const volume = barOf('Volumen', f => ctl.control('volume', Math.round(f * 100)));
-  volume.el.classList.add('np-volume-bar');
-  const volIcon = mk('span', 'np-vol-icon'); volIcon.setAttribute('aria-hidden', 'true'); volIcon.append(glyph('volume', 10));
-  const volBox = mk('div', 'np-volume'); volBox.append(volIcon, volume.el);
-  const spacer = mk('div', 'grow');
-  const controls = mk('div', 'np-controls'); controls.append(bar, spacer, volBox);
-  const card = mk('div', 'np-card'); card.append(head, progressRow, controls);
+  // Design 17 (option A): cover on the left; title, artist and the 44x44 transport controls beside it; the progress row under both.
+  // Shuffle and repeat ride in the title row (secondary toggles); the volume bar left the card (Option A has none; the host verb stays).
+  row.append(shuffle, repeat);
+  text.append(row, artist, bar);
+  head.append(art, text);
+  const card = mk('div', 'np-card'); card.append(head, progressRow);
   host.append(card);
   function tickProgress() {
     const p = api.progressView(last, Date.now());
@@ -240,8 +237,6 @@ function mount(api) {
     const ok = v.controls && v.kind === 'track';
     shuffle.setAttribute('aria-pressed', ok && last.shuffle === true ? 'true' : 'false');
     repeat.setAttribute('aria-pressed', ok && last.repeat === true ? 'true' : 'false');
-    volume.enabled = v.controls; if (!volume.dragging) volume.paint(api.volumeOf(last) / 100);
-    volume.el.setAttribute('aria-valuenow', String(api.volumeOf(last)));
     tickProgress(); runClock(v.kind === 'track' && v.playing);
     for (const b of Object.values(buttons)) b.disabled = !v.controls;
     buttons.play_pause.replaceChildren(glyph(v.playing ? 'pause' : 'play', 9));

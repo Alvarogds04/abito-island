@@ -41,4 +41,22 @@ test('the answer scene still finds the vertical rows: <button class="q-option"> 
   assert.match(notify, /el\('button', r\.kind === 'other' \? 'q-option q-other' : 'q-option'\)/, 'rows keep the q-option class');
   assert.match(notify, /el\('span', 'q-label', r\.label\)/, 'and carry the label text the scene matches');
 });
+test('terminal shortcut scenes accept the value the product writes: «focused-session» when a session is focused (fc7f679), «focused-class» only with none', () => {
+  const isl = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
+  assert.match(isl, /focusedSessionKey \? 'focused-session' : 'focused-class'/, 'the product distinguishes the two');
+  const a = between('async function shortcutDispatch()', 'async function shortcutTerminalAbsent()');
+  assert.doesNotMatch(a, /shortcutTerminal==='focused-class'/, 'the dispatch scene runs with the overview sessions focused: it must not wait for the class-only value');
+  assert.match(a, /\['focused-session','focused-class'\]\.includes\(byId\('capsule'\)\.dataset\.shortcutTerminal\)/, 'either confirmation is a success; «unavailable»/«pending» is not');
+  const b = between('async function shortcutTerminalAbsent()', 'async function shortcutAlert()');
+  assert.match(b, /\['focused-session','focused-class'\]\.includes\(byId\('capsule'\)\.dataset\.shortcutTerminal\)/);
+});
+test('the focus scene encodes the A+E rules: every session is a blob row (no 2x2 cap, the focused one stays), the centre names the SAME session the jump targets', () => {
+  const f = between('async function sessionsFocus()', 'async function restoreSessionFocus()');
+  assert.doesNotMatch(f, /grid\.length<=4/, 'no 2x2 cap of four');
+  assert.doesNotMatch(f, /!grid\.includes\(beta\.id\)/, 'the focused session stays a row');
+  assert.match(f, /grid\.includes\(beta\.id\)/);
+  assert.match(f, /centreName\(\)===/, 'the centre column is read, not the old who-row');
+  assert.match(f, /\.centre-name/);
+  assert.doesNotMatch(f, /querySelector\('\.who \.name'\)/, 'the who-row text is gone: the centre column says the session name');
+});
 console.log(`validate-edge-scenes: ${passed} checks ok`);

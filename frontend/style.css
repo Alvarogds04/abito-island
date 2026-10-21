@@ -320,7 +320,9 @@ html[data-motion="reduce"] [data-kind="busy"] .ico svg { animation: none; }
 :where(button, textarea) { outline: 2px solid transparent; outline-offset: 2px; transition: outline-color var(--dur-focus) var(--ease-out); }
 :focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 /* A text field already has a visible edge: its focus is a 1px muted ring ON that edge, not a 2px lime halo floating around it. */
-#chat-input:focus-visible, #question-text:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 0; }
+#question-text:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 0; }
+/* Design 14 (option A): the chat field's focus is a 1px ACCENT edge on its own border (not the lime halo, not a muted white). */
+#chat-input:focus-visible { outline: 1px solid var(--island-live); outline-offset: 0; }
 
 #chat {
   position: absolute;

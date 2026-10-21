@@ -11,8 +11,8 @@ import { h, svg, dot } from "./dom.js";
 import { ICONS } from "./icons.js";
 import {
   CI_COLORS, GH_STRINGS, GRID_WEEKS, activityHeader, actionsUrl, ciWord, contributionColor,
-  formatCount, lastDays, lastWeeks, mainCISummary, myPRsValue, profileUrl, safeGitHubUrl,
-  sectionTitle, shortRepo, weekColumn, worstCI,
+  formatCount, lastDays, lastWeeks, mainCISummary, profileUrl, safeGitHubUrl,
+  sectionTitle, shortRepo, weekColumn,
   type ContributionDay, type GitHubActivity, type GitHubPR, type GitHubPulse, type GitHubRepoCI,
   type GitHubSection, type GitHubStats,
 } from "../core/github.js";
@@ -45,16 +45,6 @@ function miniRow(activity: GitHubActivity): HTMLElement {
   return row;
 }
 
-function statButton(icon: SVGSVGElement, color: string, label: string, value: string, onClick: () => void): HTMLElement {
-  return h(
-    "button",
-    { class: "int-stat gh-stat", onclick: onClick },
-    h("i", { class: "int-stat-icon", style: `color:${color}` }, icon),
-    h("span", { class: "int-stat-label", text: label }),
-    h("span", { class: "int-stat-value", text: value }),
-  );
-}
-
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 export function githubPulseCard(
@@ -79,25 +69,23 @@ export function githubPulseCard(
     head.append(h("span", { text: GH_STRINGS.overview }));
   }
 
-  const prColor = CI_COLORS[worstCI(pulse.myPRs.map((p) => p.ci))];
+  // Design 16 (option A): «GitHub · 2 PR · 1 revisión», then one row per own PR with its CI state (icon + word) and a visible [Abrir].
   const reviews = pulse.toReview.length;
   const main = mainCISummary(pulse.mainCI);
-
-  return h(
-    "div",
-    { class: "int-card" },
-    head,
-    h(
-      "div",
-      { class: "int-stats gh-rows" },
-      statButton(svg(ICONS.pull, 10, { stroke: 2.2 }), prColor, GH_STRINGS.myPRs, myPRsValue(pulse.myPRs),
-        () => show("myPRs")),
-      statButton(svg(ICONS.eye, 10, { stroke: 2.2 }), reviews > 0 ? "#8AB4F8" : "#6B7079", GH_STRINGS.toReview,
-        String(reviews), () => show("toReview")),
-      statButton(svg(main.failing ? ICONS.octagonX : ICONS.seal, 10, { evenOdd: true }), main.color,
-        GH_STRINGS.mainCI, main.value, () => show("mainCI")),
-    ),
+  head.append(
+    h("span", { class: "gh-count", text: `· ${GH_STRINGS.prCount(pulse.myPRs.length)}` }),
+    h("button", { class: "gh-review", onclick: () => show("toReview") }, `· ${GH_STRINGS.reviewCount(reviews)}`),
   );
+  const mainBtn = h("button", {
+    class: "gh-ci-main",
+    title: `${GH_STRINGS.mainCI}: ${main.value}`,
+    "aria-label": GH_STRINGS.mainCIAria(main.value),
+    onclick: () => show("mainCI"),
+  }, svg(main.failing ? ICONS.octagonX : ICONS.seal, 11, { evenOdd: true }));
+  mainBtn.style.color = main.color;
+  head.append(mainBtn);
+
+  return h("div", { class: "int-card" }, head, listBody(pulse.myPRs.map((pr) => prRow(pr, true))));
 }
 
 // ── Detail: lists ─────────────────────────────────────────────────────────────
@@ -111,40 +99,64 @@ function backButton(title: string, onBack: () => void): HTMLElement {
   );
 }
 
-function ciDot(ci: GitHubPR["ci"]): HTMLElement {
-  const el = dot(CI_COLORS[ci], 5);
-  if (ci === "unknown") el.style.opacity = "0";
+const CI_ICON: Record<GitHubPR["ci"], string> = {
+  success: ICONS.check,
+  failure: "M6.5 6.5l11 11M17.5 6.5l-11 11",
+  pending: "M12 5v7l4 2.5",
+  unknown: "M7 12h10",
+};
+
+/** CI state as an icon (shape) + a word, never colour alone. */
+function ciIcon(ci: GitHubPR["ci"]): HTMLElement {
+  const el = h("i", { class: "gh-ci", style: `color:${CI_COLORS[ci]}` }, svg(CI_ICON[ci], 12, { stroke: 2.4 }));
   return el;
 }
+function ciText(ci: GitHubPR["ci"]): string {
+  return ciWord(ci) ?? GH_STRINGS.noCI;
+}
 
-/** What each list row opens: its click, and Ctrl+O when it is highlighted. */
+/** What each list row opens: its [Abrir], and Enter when it is highlighted. */
 const rowOpens = new WeakMap<Element, () => void>();
 
-function row(onOpen: () => void, ...children: (HTMLElement | null)[]): HTMLElement {
-  const el = h("button", { class: "gh-row", onclick: onOpen }, ...children);
+/** A 36px row: state icon, two lines of text, and an explicit [Abrir] — the row itself is not a button. */
+function row(onOpen: () => void, ref: string, openLabel: string, ci: GitHubPR["ci"], line1: HTMLElement[], tail: (HTMLElement | null)[]): HTMLElement {
+  const open = h("button", { class: "gh-open", "aria-label": GH_STRINGS.openRef(ref), onclick: onOpen, text: GH_STRINGS.open });
+  const el = h(
+    "div",
+    { class: "gh-row" },
+    ciIcon(ci),
+    h("span", { class: "gh-text" },
+      h("span", { class: "gh-line1" }, ...line1),
+      h("span", { class: "gh-line2" }, h("span", { class: "gh-word", style: `color:${CI_COLORS[ci]}`, text: ciText(ci) }), ...tail)),
+    open,
+  );
   rowOpens.set(el, onOpen);
+  void openLabel;
   return el;
 }
 
-function prRow(pr: GitHubPR, showCI: boolean): HTMLElement {
+function prRow(pr: GitHubPR, _showCI: boolean): HTMLElement {
+  const ref = `${shortRepo(pr.repo)}#${pr.number}`;
   return row(
-    () => open(pr.url),
-    showCI ? ciDot(pr.ci) : h("i", { class: "gh-gap" }),
-    h("span", { class: "gh-ref", text: `${shortRepo(pr.repo)}#${pr.number}` }),
-    h("span", { class: "gh-title", text: pr.title }),
-    pr.isDraft ? h("span", { class: "gh-draft", text: GH_STRINGS.draft }) : null,
+    () => open(pr.url), ref, ref, pr.ci,
+    [h("span", { class: "gh-ref", text: ref }), h("span", { class: "gh-title", text: pr.title })],
+    [pr.isDraft ? h("span", { class: "gh-draft", text: `· ${GH_STRINGS.draft}` }) : null],
   );
 }
 
 function repoRow(repo: GitHubRepoCI): HTMLElement {
-  const word = ciWord(repo.ci);
   return row(
-    () => open(actionsUrl(repo.url)),
-    ciDot(repo.ci),
-    h("span", { class: "gh-ref", text: shortRepo(repo.repo) }),
-    h("span", { class: "gh-title", text: repo.branch }),
-    word ? h("span", { class: "gh-word", style: `color:${CI_COLORS[repo.ci]}`, text: word }) : null,
+    () => open(actionsUrl(repo.url)), shortRepo(repo.repo), shortRepo(repo.repo), repo.ci,
+    [h("span", { class: "gh-ref", text: shortRepo(repo.repo) }), h("span", { class: "gh-title", text: repo.branch })],
+    [],
   );
+}
+
+/** The bounded, internally scrolling list (max 4 rows high); «nothing here» without rows. */
+function listBody(rows: HTMLElement[]): HTMLElement {
+  return rows.length === 0
+    ? h("div", { class: "gh-empty", text: GH_STRINGS.nothingHere })
+    : h("div", { class: "gh-list" }, ...rows);
 }
 
 // ── Keyboard: Ctrl+↓ Ctrl+↑ Ctrl+O (the Mac's cardSelection) ──────────────────
@@ -175,10 +187,7 @@ function listDetail(section: Exclude<GitHubSection, "activity">, pulse: GitHubPu
     section === "mainCI"
       ? pulse.mainCI.map(repoRow)
       : (section === "myPRs" ? pulse.myPRs : pulse.toReview).map((pr) => prRow(pr, section === "myPRs"));
-  const body =
-    rows.length === 0
-      ? h("div", { class: "gh-empty", text: GH_STRINGS.nothingHere })
-      : h("div", { class: rows.length > 3 ? "gh-list fade" : "gh-list" }, ...rows);
+  const body = listBody(rows);
 
   return h(
     "div",
