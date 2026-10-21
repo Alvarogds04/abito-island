@@ -209,7 +209,13 @@
           <p id="question-body"></p>
           <button id="question-skip" type="button"><span class="ico" data-icon="cross"></span><span class="btn-word">Omitir</span></button>
         </div>
+        <div id="question-step" hidden><span id="question-step-header" class="chip"></span></div>
+        <div id="question-summary" role="list" aria-label="Resumen de tus respuestas" hidden></div>
         <div id="question-options" role="group" aria-label="Opciones de respuesta"></div>
+        <div id="question-nav" hidden>
+          <button id="question-prev" type="button">Anterior</button>
+          <button id="question-primary" type="button" disabled>Siguiente</button>
+        </div>
         <button id="question-fold" class="icon-btn" type="button" aria-label="Plegar la pregunta y dejarla esperando"><span class="ico" data-cc-icon="chevronUp"></span></button>
         <form id="question-freeform" hidden novalidate>
           <label for="question-text" class="sr-only">Tu respuesta</label>

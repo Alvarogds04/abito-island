@@ -227,7 +227,8 @@ function harness(dataset) {
     return n;
   };
   const ids = ['question', 'capsule', 'question-body', 'question-options', 'question-freeform', 'question-text', 'question-word', 'question-send',
-    'question-skip', 'question-live', 'question-expiry', 'question-state', 'question-expiry-word', 'question-state-icon', 'question-state-word'];
+    'question-skip', 'question-live', 'question-expiry', 'question-state', 'question-expiry-word', 'question-state-icon', 'question-state-word',
+    'question-step', 'question-step-header', 'question-summary', 'question-nav', 'question-prev', 'question-primary', 'question-queue'];
   const nodes = Object.fromEntries(ids.map(id => [id, node(id)]));
   Object.assign(nodes.capsule.dataset, dataset);
   const doc = { getElementById: id => nodes[id] || null, createElement: tag => node(tag), addEventListener(t, f) { (listeners[t] = listeners[t] || []).push(f); },
@@ -237,7 +238,7 @@ function harness(dataset) {
   const ctx = vm.createContext({ window: win, document: doc, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: f => f(), MutationObserver: class { observe() {} },
     CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, Date });
   vm.runInContext(fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8'), ctx);
-  return { calls, nodes, key: (k, extra) => { for (const f of listeners.keydown || []) f({ key: k, isTrusted: true, ctrlKey: false, altKey: false, metaKey: false, isComposing: false, repeat: false, preventDefault() {}, ...extra }); } };
+  return { calls, nodes, key: (k, extra) => { for (const f of listeners.keydown || []) f({ key: k, isTrusted: true, ctrlKey: false, altKey: false, metaKey: false, isComposing: false, repeat: false, preventDefault() {}, stopPropagation() {}, ...extra }); } };
 }
 const settle = () => new Promise(r => setImmediate(r));
 
@@ -414,4 +415,254 @@ test('windowHeightFor: the native window needs the island plus a margin; a close
   assert.equal(N.windowHeightFor(600), 608);
   assert.equal(N.windowHeightFor(0), 340, 'closed: the fixed window (Rust clamps up to it anyway)');
   for (const bad of [NaN, undefined, -3, Infinity]) assert.equal(N.windowHeightFor(bad), 340, String(bad));
+});
+
+// ---- structured questions: multiSelect, questionnaire, free_text_max (contract fix/seguridad-app 5a57a4d) -----------------------
+const opt = (i, label, description = '') => ({ index: i, label, description });
+const pend = (over = {}) => ({ id: '0b3a5c9e-8f27-4d11-9a0e-1c2d3e4f5a6b', kind: 'question', text: 'Configurar el proyecto', agent: 'claude-code', agent_label: 'Claude Code',
+  options: [], allow_free_text: false, expires_at: Date.now() + 120000, free_text_max: 4000, ...over });
+const multiP = (over = {}) => pend({ text: '¿Qué extras?', multi_select: true, options: [opt(0, 'ESLint'), opt(1, 'Tailwind'), opt(2, 'Vitest')], ...over });
+const formP = (over = {}) => pend({ form: [
+  { header: 'Framework', text: '¿Cuál framework?', options: [opt(0, 'React'), opt(1, 'Vue')], multi_select: false, allow_free_text: false },
+  { header: 'Extras', text: '¿Qué extras?', options: [opt(0, 'ESLint'), opt(1, 'Tailwind'), opt(2, 'Vitest')], multi_select: true, allow_free_text: true },
+  { header: 'Nombre', text: '¿Cómo se llama?', options: [opt(0, 'app'), opt(1, 'web')], multi_select: false, allow_free_text: true },
+], ...over });
+
+test('structured fromPending: multi_select and free_text_max are read, a nonsense max falls back to 2000', () => {
+  const m = N.fromPending(multiP());
+  assert.deepEqual([m.multiSelect, m.freeTextMax, m.form], [true, 4000, null]);
+  assert.equal(N.fromPending(multiP({ free_text_max: undefined })).freeTextMax, 2000);
+  for (const bad of [0, -1, 5000, '4000', 1.5, null, NaN]) assert.equal(N.fromPending(multiP({ free_text_max: bad })).freeTextMax, 2000, String(bad));
+  assert.equal(N.fromPending(multiP({ multi_select: undefined })).multiSelect, false);
+  assert.equal(N.fromPending(multiP({ multi_select: 'true' })).multiSelect, false, 'only a real true');
+  assert.equal(N.fromPending(multiP({ kind: 'approval' })), null, 'an approval is never multi-select');
+});
+test('structured fromPending: a questionnaire has 1..4 items of 2..4 options, empty top-level options, header <= 32', () => {
+  const f = N.fromPending(formP());
+  assert.equal(f.form.length, 3);
+  assert.deepEqual(f.options, []);
+  assert.deepEqual(f.form[1], { header: 'Extras', text: '¿Qué extras?', multiSelect: true, allowFreeText: true,
+    options: [{ index: 0, key: '1', label: 'ESLint', description: '' }, { index: 1, key: '2', label: 'Tailwind', description: '' }, { index: 2, key: '3', label: 'Vitest', description: '' }] });
+  const item = formP().form[0];
+  assert.equal(N.fromPending(formP({ form: [] })), null, 'empty form');
+  assert.equal(N.fromPending(formP({ form: [item, item, item, item, item] })), null, 'more than 4');
+  assert.equal(N.fromPending(formP({ form: [{ ...item, options: [opt(0, 'solo')] }] })), null, 'needs 2..4 options');
+  assert.equal(N.fromPending(formP({ form: [{ ...item, header: 'x'.repeat(33) }] })), null, 'header > 32');
+  assert.equal(N.fromPending(formP({ form: [{ ...item, text: '' }] })), null, 'empty question text');
+  assert.equal(N.fromPending(formP({ options: [opt(0, 'a'), opt(1, 'b')] })), null, 'top-level options must be empty with a form');
+  assert.equal(N.fromPending(formP({ kind: 'approval' })), null);
+  assert.equal(N.fromPending(formP({ form: 'x' })), null);
+  assert.equal(N.fromPending(formP({ form: [{ ...item, options: [opt(0, ''), opt(1, 'b')] }] })), null, 'empty label');
+});
+
+const itemMulti = { multiSelect: true, allowFreeText: true, options: [{ index: 0, label: 'a' }, { index: 1, label: 'b' }, { index: 2, label: 'c' }] };
+const itemSingle = { multiSelect: false, allowFreeText: true, options: [{ index: 0, label: 'a' }, { index: 1, label: 'b' }] };
+const D = (picked = [], text = '', other = false) => ({ picked, text, other });
+test('drafts: multi toggles a sorted set; single replaces (and un-picks); «Otra cosa» and single picks exclude each other', () => {
+  assert.deepEqual(N.newDraft(), D());
+  let d = N.newDraft();
+  d = N.toggleOption(itemMulti, d, 2); d = N.toggleOption(itemMulti, d, 0);
+  assert.deepEqual(d.picked, [0, 2]);
+  d = N.toggleOption(itemMulti, d, 2);
+  assert.deepEqual(d.picked, [0]);
+  assert.deepEqual(N.toggleOption(itemMulti, N.newDraft(), 9).picked, [], 'an index the question does not have is ignored');
+  let s = N.toggleOption(itemSingle, N.newDraft(), 1); s = N.toggleOption(itemSingle, s, 0);
+  assert.deepEqual(s.picked, [0], 'single select replaces');
+  assert.deepEqual(N.toggleOption(itemSingle, s, 0).picked, [], 'clicking the pick again clears it');
+  const typed = N.setDraftText(itemSingle, s, 'otra cosa');
+  assert.deepEqual(typed, D([], 'otra cosa', true), 'typing a free answer opens «Otra cosa» and clears the single pick');
+  assert.deepEqual(N.toggleOption(itemSingle, typed, 1), D([1]), 'picking an option closes «Otra cosa» and drops the typed answer');
+  const keep = N.setDraftText(itemMulti, N.toggleOption(itemMulti, N.newDraft(), 1), 'nota');
+  assert.deepEqual(keep, D([1], 'nota', true), 'multi keeps picks AND text');
+  assert.deepEqual(N.toggleOption(itemMulti, keep, 0), D([0, 1], 'nota', true), 'toggling an option keeps «Otra cosa» open');
+  assert.deepEqual(N.toggleOption(itemMulti, N.newDraft(), 1), D([1]), 'immutable: the old draft is untouched');
+});
+test('«Otra cosa…»: opening reveals the field, closing (Esc / un-ticking) discards what was typed; single select drops its pick when opened', () => {
+  const open = N.toggleOther(itemSingle, D([1]));
+  assert.deepEqual(open, D([], '', true), 'single: «Otra cosa» replaces the pick');
+  assert.deepEqual(N.toggleOther(itemMulti, D([1], 'x', true)), D([1]), 'closing clears the text but keeps the multi picks');
+  assert.deepEqual(N.toggleOther(itemMulti, D([1])), D([1], '', true), 'multi: opening keeps the picks');
+  assert.deepEqual(N.toggleOther({ ...itemSingle, allowFreeText: false }, D()), D(), 'a question without free text has no «Otra cosa»');
+  assert.deepEqual(N.setDraftText({ ...itemSingle, allowFreeText: false }, D(), 'x'), D(), 'and refuses text');
+});
+test('optionRows: a vertical numbered list, label with its description, and «N. Otra cosa…» LAST only when free text is allowed', () => {
+  const item = { multiSelect: false, allowFreeText: true, options: [{ index: 0, key: '1', label: 'Café', description: 'con leche' }, { index: 1, key: '2', label: 'Té', description: '' }] };
+  const v = N.optionRows(item, D([1]));
+  assert.deepEqual(v.rows.map(r => [r.kind, r.number, r.label, r.description, r.checked]), [
+    ['option', 1, 'Café', 'con leche', false], ['option', 2, 'Té', '', true], ['other', 3, 'Otra cosa…', '', false]]);
+  assert.equal(v.showText, false);
+  assert.equal(N.optionRows(item, D([], 'hola', true)).showText, true, 'selecting «Otra cosa» reveals the growing textarea');
+  assert.equal(N.optionRows(item, D([], 'hola', true)).rows[2].checked, true);
+  const none = N.optionRows({ ...item, allowFreeText: false }, D());
+  assert.deepEqual(none.rows.map(r => r.kind), ['option', 'option'], 'no «Otra cosa» without free text');
+  assert.equal(none.showText, false);
+  const multi = N.optionRows({ ...item, multiSelect: true }, D([0]));
+  assert.ok(multi.rows.every(r => r.control === 'checkbox'), 'multi-select rows carry a checkbox at the left');
+  assert.ok(v.rows.every(r => r.control === 'row'), 'single-select rows are plain rows');
+  assert.equal(N.optionRows({ ...item, allowFreeText: false, options: [] }, D()).rows.length, 0);
+});
+test('textFits: characters (not bytes) up to the granted max, no control characters, blank is not an answer', () => {
+  assert.equal(N.textFits('hola', 2000), true);
+  assert.equal(N.textFits('🙂'.repeat(2000), 2000), true, '2000 characters even if 8000 bytes');
+  assert.equal(N.textFits('a'.repeat(2001), 2000), false);
+  assert.equal(N.textFits('a'.repeat(4000), 4000), true);
+  assert.equal(N.textFits('a\u0000b', 2000), false);
+  assert.equal(N.textFits('línea\nsegunda\tcon tab', 2000), true, 'newline and tab are fine');
+  assert.equal(N.textFits('   ', 2000), false);
+  assert.equal(N.textFits('', 2000), false);
+  assert.equal(N.textFits(5, 2000), false);
+});
+test('draftAnswered / itemPayload: the exact shapes the closed IPC takes; text counts only while «Otra cosa» is open', () => {
+  assert.equal(N.draftAnswered(itemMulti, N.newDraft(), 2000), false);
+  assert.deepEqual(N.itemPayload(itemMulti, D([2, 0]), 2000), { indexes: [0, 2] });
+  assert.deepEqual(N.itemPayload(itemMulti, D([1], 'nota', true), 2000), { indexes: [1], text: 'nota' });
+  assert.deepEqual(N.itemPayload(itemMulti, D([], 'solo texto', true), 2000), { indexes: [], text: 'solo texto' });
+  assert.equal(N.itemPayload(itemMulti, D([], 'huérfano', false), 2000), null, 'text while «Otra cosa» is closed is not an answer');
+  assert.equal(N.itemPayload(itemMulti, D([], '  ', true), 2000), null);
+  assert.deepEqual(N.itemPayload(itemSingle, D([1]), 2000), { index: 1 });
+  assert.deepEqual(N.itemPayload(itemSingle, D([], 'otra', true), 2000), { text: 'otra' });
+  assert.equal(N.itemPayload({ ...itemSingle, allowFreeText: false }, D([], 'otra', true), 2000), null, 'text where the question does not take text');
+  assert.equal(N.itemPayload({ ...itemMulti, allowFreeText: false }, D([1], 'nota', true), 2000), null);
+  assert.equal(N.itemPayload(itemMulti, D([1], 'a'.repeat(2001), true), 2000), null, 'over free_text_max');
+});
+test('multi-select: «Hecho» needs >= 1 option or text; the payload is answer_many {id, indexes, text?}', () => {
+  const n = N.fromPending(multiP({ allow_free_text: true }));
+  assert.deepEqual(N.multiView(n, N.newDraft()), { label: 'Hecho', canDone: false });
+  assert.equal(N.multiView(n, D([1])).canDone, true);
+  assert.equal(N.multiView(n, D([], 'algo', true)).canDone, true);
+  assert.equal(N.multiView(n, D([], '  ', true)).canDone, false);
+  assert.deepEqual(N.manyPayload(n, D([2, 1])), { action: 'answer_many', id: n.id, indexes: [1, 2] });
+  assert.deepEqual(N.manyPayload(n, D([1], 'nota', true)), { action: 'answer_many', id: n.id, indexes: [1], text: 'nota' });
+  assert.equal(N.manyPayload(n, N.newDraft()), null);
+  const noText = N.fromPending(multiP());
+  assert.equal(N.manyPayload(noText, D([1], 'nota', true)), null, 'a question without free text refuses text');
+  assert.equal(N.manyPayload(N.fromPending(formP()), D([0])), null, 'not for a form');
+});
+test('plain single question: the rows come from the question itself; a row answers at once, «Otra cosa…» only opens the field', () => {
+  const n = N.fromPending(pend({ options: [opt(0, 'Café'), opt(1, 'Té')], allow_free_text: true }));
+  const v = N.optionRows(N.singleItem(n), D());
+  assert.deepEqual(v.rows.map(r => r.label), ['Café', 'Té', 'Otra cosa…']);
+  const closed = N.fromPending(pend({ options: [opt(0, 'Café'), opt(1, 'Té')] }));
+  assert.deepEqual(N.optionRows(N.singleItem(closed), D()).rows.map(r => r.label), ['Café', 'Té']);
+  assert.deepEqual(N.singleItem(n), { header: '', text: n.text, options: n.options, multiSelect: false, allowFreeText: true });
+});
+
+test('questionnaire: one question per step, «i de N», Siguiente gated by the current answer, summary, Enviar', () => {
+  const n = N.fromPending(formP());
+  let st = N.formStart(n);
+  let v = N.formView(n, st);
+  assert.deepEqual([v.mode, v.step, v.total, v.label, v.header, v.text], ['step', 0, 3, '1 de 3', 'Framework', '¿Cuál framework?']);
+  assert.deepEqual([v.canPrev, v.canNext, v.primary], [false, false, { kind: 'next', label: 'Siguiente', enabled: false }]);
+  assert.deepEqual(N.formReduce(n, st, { type: 'next' }), st, 'cannot advance an unanswered step');
+  st = N.formReduce(n, st, { type: 'toggle', index: 1 });
+  v = N.formView(n, st);
+  assert.equal(v.primary.enabled, true);
+  st = N.formReduce(n, st, { type: 'next' });
+  v = N.formView(n, st);
+  assert.deepEqual([v.step, v.label, v.header, v.canPrev], [1, '2 de 3', 'Extras', true]);
+  st = N.formReduce(n, st, { type: 'toggle', index: 0 }); st = N.formReduce(n, st, { type: 'toggle', index: 2 });
+  st = N.formReduce(n, st, { type: 'other' });
+  st = N.formReduce(n, st, { type: 'text', text: 'y prettier' });
+  // each step keeps its draft: go back and forth
+  st = N.formReduce(n, st, { type: 'prev' });
+  assert.deepEqual(N.formView(n, st).draft, D([1]), 'step 1 kept its pick');
+  st = N.formReduce(n, st, { type: 'next' });
+  assert.deepEqual(N.formView(n, st).draft, D([0, 2], 'y prettier', true), 'step 2 kept its draft');
+  st = N.formReduce(n, st, { type: 'next' });
+  st = N.formReduce(n, st, { type: 'other' });
+  st = N.formReduce(n, st, { type: 'text', text: 'mi-app' });
+  v = N.formView(n, st);
+  assert.deepEqual([v.step, v.primary.label], [2, 'Siguiente'], 'the last question still says Siguiente: the summary comes next');
+  st = N.formReduce(n, st, { type: 'next' });
+  v = N.formView(n, st);
+  assert.deepEqual([v.mode, v.label, v.primary, v.canPrev], ['review', 'Resumen', { kind: 'send', label: 'Enviar', enabled: true }, true]);
+  assert.deepEqual(v.summary, [
+    { header: 'Framework', text: '¿Cuál framework?', answer: 'Vue' },
+    { header: 'Extras', text: '¿Qué extras?', answer: 'ESLint, Vitest · «y prettier»' },
+    { header: 'Nombre', text: '¿Cómo se llama?', answer: '«mi-app»' },
+  ]);
+  assert.deepEqual(N.formPayload(n, st), { action: 'answer_form', id: n.id, answers: [{ index: 1 }, { indexes: [0, 2], text: 'y prettier' }, { text: 'mi-app' }] });
+});
+test('questionnaire: Esc / back steps back (summary -> last step -> ... -> first, where it does nothing); nothing is sent until Enviar', () => {
+  const n = N.fromPending(formP());
+  let st = N.formStart(n);
+  assert.deepEqual(N.formReduce(n, st, { type: 'back' }), st, 'at the first step Esc leaves the state alone');
+  st = N.formReduce(n, st, { type: 'toggle', index: 0 }); st = N.formReduce(n, st, { type: 'next' });
+  st = N.formReduce(n, st, { type: 'toggle', index: 1 }); st = N.formReduce(n, st, { type: 'next' });
+  st = N.formReduce(n, st, { type: 'toggle', index: 0 }); st = N.formReduce(n, st, { type: 'next' });
+  assert.equal(N.formView(n, st).mode, 'review');
+  st = N.formReduce(n, st, { type: 'back' });
+  assert.deepEqual([N.formView(n, st).mode, N.formView(n, st).step], ['step', 2]);
+  st = N.formReduce(n, st, { type: 'back' });
+  assert.equal(N.formView(n, st).step, 1);
+  assert.equal(N.formReduce(n, st, { type: 'next' }) !== st, true);
+  assert.equal(N.formPayload(n, N.formStart(n)), null, 'an unfinished questionnaire has no payload (all-or-nothing)');
+  const partial = N.formReduce(n, N.formReduce(n, N.formStart(n), { type: 'toggle', index: 0 }), { type: 'next' });
+  assert.equal(N.formPayload(n, partial), null);
+});
+test('questionnaire: events that do not apply are ignored; the state is immutable; one-item forms work', () => {
+  const n = N.fromPending(formP());
+  const st = N.formStart(n);
+  const frozen = JSON.stringify(st);
+  N.formReduce(n, st, { type: 'toggle', index: 0 });
+  assert.equal(JSON.stringify(st), frozen);
+  assert.deepEqual(N.formReduce(n, st, { type: 'bogus' }), st);
+  assert.deepEqual(N.formReduce(n, st, null), st);
+  assert.deepEqual(N.formReduce(n, st, { type: 'prev' }), st);
+  const one = N.fromPending(formP({ form: [formP().form[0]] }));
+  let o = N.formReduce(one, N.formStart(one), { type: 'toggle', index: 0 });
+  o = N.formReduce(one, o, { type: 'next' });
+  assert.deepEqual(N.formPayload(one, o), { action: 'answer_form', id: one.id, answers: [{ index: 0 }] });
+  assert.equal(N.formView(n, { ...st, review: true }).mode, 'review', 'a review state renders as the summary');
+});
+
+test('keyboard: digits pick (the LAST digit is «Otra cosa…»), arrows move, Enter goes next/sends, Esc goes back; never while composing, repeating or synthetic', () => {
+  const key = (k, extra = {}) => ({ key: k, isTrusted: true, ctrlKey: false, altKey: false, metaKey: false, isComposing: false, repeat: false, shiftKey: false, ...extra });
+  const ctx = (over = {}) => ({ typing: false, optionCount: 3, hasOther: true, review: false, canPrev: true, otherOpen: false, primary: { kind: 'next', enabled: true }, ...over });
+  assert.deepEqual(N.keyIntent(key('2'), ctx()), { type: 'toggle', index: 1 });
+  assert.deepEqual(N.keyIntent(key('4'), ctx()), { type: 'other' }, 'the digit after the options is «Otra cosa…»');
+  assert.equal(N.keyIntent(key('4'), ctx({ hasOther: false })), null, 'no «Otra cosa…» row: no such digit');
+  assert.equal(N.keyIntent(key('5'), ctx()), null, 'beyond the rows');
+  assert.equal(N.keyIntent(key('2'), ctx({ typing: true })), null, 'digits are text while typing');
+  assert.equal(N.keyIntent(key('2'), ctx({ review: true })), null, 'no options on the summary');
+  assert.deepEqual(N.keyIntent(key('ArrowDown'), ctx()), { type: 'move', delta: 1 });
+  assert.deepEqual(N.keyIntent(key('ArrowUp'), ctx()), { type: 'move', delta: -1 });
+  assert.equal(N.keyIntent(key('ArrowDown'), ctx({ typing: true })), null, 'arrows move the caret while typing');
+  assert.deepEqual(N.keyIntent(key('Enter'), ctx()), { type: 'next' });
+  assert.deepEqual(N.keyIntent(key('Enter'), ctx({ review: true, primary: { kind: 'send', enabled: true } })), { type: 'send' });
+  assert.deepEqual(N.keyIntent(key('Enter'), ctx({ primary: { kind: 'done', enabled: true } })), { type: 'done' });
+  assert.equal(N.keyIntent(key('Enter'), ctx({ primary: { kind: 'next', enabled: false } })), null, 'a disabled primary does nothing');
+  assert.equal(N.keyIntent(key('Enter', { shiftKey: true }), ctx({ typing: true })), null, 'Shift+Enter is a newline');
+  assert.deepEqual(N.keyIntent(key('Enter'), ctx({ typing: true })), { type: 'next' }, 'Enter in the textarea advances');
+  assert.deepEqual(N.keyIntent(key('Escape'), ctx({ typing: true, otherOpen: true })), { type: 'other' }, 'Esc in the field closes «Otra cosa…» first');
+  assert.deepEqual(N.keyIntent(key('Escape'), ctx()), { type: 'back' });
+  assert.equal(N.keyIntent(key('Escape'), ctx({ canPrev: false })), null, 'nothing to go back to');
+  assert.equal(N.keyIntent(key('Enter', { isTrusted: false }), ctx()), null);
+  assert.equal(N.keyIntent(key('Enter', { isComposing: true }), ctx()), null);
+  assert.equal(N.keyIntent(key('Enter', { repeat: true }), ctx()), null);
+  assert.equal(N.keyIntent(key('Enter', { ctrlKey: true }), ctx()), null);
+  assert.equal(N.keyIntent(key(' '), ctx()), null, 'Space belongs to the focused row/checkbox');
+});
+
+test('structured wiring: the closed IPC verbs, the card controls, the textarea max and the toast count', () => {
+  const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
+  for (const id of ['question-step', 'question-step-header', 'question-summary', 'question-nav', 'question-prev', 'question-primary']) assert.match(html, new RegExp(`id="${id}"`), id);
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /N\.manyPayload\(/); assert.match(src, /N\.formPayload\(/);
+  assert.match(src, /N\.formReduce\(/); assert.match(src, /N\.keyIntent\(/);
+  assert.match(src, /textEl\.maxLength = /);
+  assert.match(src, /N\.optionRows\(/); assert.match(src, /role', 'checkbox'|role = 'checkbox'/);
+  assert.match(src, /q-other/); assert.match(src, /ArrowDown|'move'/);
+  assert.match(src, /N\.replyIsCurrent\(sent, pushSeq\)/, 'the structured sends use the same stale-reply guard');
+  assert.doesNotMatch(src, /innerHTML[^\n]*(label|description|header|\.text)/, 'plain text only');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8') + fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
+  assert.match(css, /#question-nav \{/); assert.match(css, /\.q-box/); assert.match(css, /#question-nav button:focus-visible/);
+  assert.match(css, /#question-options \{[^}]*flex-direction: column/, 'the options are a vertical list');
+  assert.match(css, /\.q-option \{[^}]*width: 100%/, 'each row is full width');
+  assert.doesNotMatch(css, /#question-options \{[^}]*flex-wrap: wrap/, 'no horizontal chips');
+  const toast = require(path.join(frontend, 'question-toast.js'));
+  const v = toast.toastView({ available: true, pending: formP(), queued_count: 0 }, { now: Date.now() });
+  assert.equal(v.title, 'Claude Code pregunta (3 preguntas)');
+  assert.equal(toast.toastView({ available: true, pending: multiP(), queued_count: 0 }, { now: Date.now() }).title, 'Claude Code pregunta');
+  assert.equal(toast.toastView({ available: true, pending: formP({ form: [formP().form[0]] }), queued_count: 0 }, { now: Date.now() }).title, 'Claude Code pregunta (1 pregunta)');
 });

@@ -599,7 +599,7 @@ html[data-motion="reduce"] #models-list .choose::before, html[data-motion="reduc
 #question-body { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; text-overflow: ellipsis; }
 #question-asker, #question-expiry, #question-state { flex: none; }
 #question-asker:empty { display: none; } /* only a pending notification shows an asker */
-#question-options { display: flex; }
+#question-options { display: flex; flex-direction: column; }
 .q-option { display: inline-flex; flex-wrap: wrap; align-items: center; height: auto; min-width: 44px; max-width: 100%; border: 1px solid var(--line-mid); background: transparent; color: var(--island-ink); cursor: pointer; text-align: left; }
 .q-option:hover:not(:disabled) { background: var(--fill-hover); }
 .q-option:disabled { opacity: .45; cursor: default; }
@@ -945,8 +945,8 @@ html[data-motion="reduce"] #island-header, html[data-motion="reduce"] #island-he
 #question-expiry, #question-state { justify-self: start; font-size: var(--fs-label); }
 #question-body { align-self: start; }
 #question-skip { grid-area: skip; align-self: start; }
-#question-options { display: flex; }
-.q-option { flex: 0 1 auto; min-width: 0; }
+#question-options { display: flex; flex-direction: column; }
+.q-option { flex: 0 1 auto; min-width: 0; width: 100%; }
 
 .q-label { min-width: 0; }
 /* the outcome keeps the question card's box (no layout to animate): same frame, centred content */

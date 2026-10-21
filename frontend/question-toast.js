@@ -33,7 +33,8 @@
     if (!body) return null;
     const approval = n.kind === 'approval';
     const name = N.askerName(n);
-    const title = approval ? `${name} pide permiso` : `${name} pregunta`;
+    const steps = Array.isArray(n.form) ? n.form.length : 0;
+    const title = approval ? `${name} pide permiso` : `${name} pregunta${steps ? ` (${steps} ${steps === 1 ? 'pregunta' : 'preguntas'})` : ''}`;
     const queued = Number.isInteger(s.queued_count) && s.queued_count > 0 ? s.queued_count : 0;
     const queue = queued ? `1 de ${queued + 1}` : null;
     return { id: n.id, kind: n.kind, tone: approval ? 'warning' : 'action', icon: approval ? 'lock' : 'bubble', title, body, queue,

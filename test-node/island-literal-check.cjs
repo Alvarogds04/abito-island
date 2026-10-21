@@ -91,10 +91,12 @@ test('approval/question: one 620x108 card at y=42, padding 4px 16px 4px 116px, g
 });
 
 test('buttons: Coucou .btn 500 12.5px pill, 30px visual inside the 44px hit; code well and title as in the reference', () => {
-  const b = decls('#allow, #deny, .q-option');
+  const b = decls('#allow, #deny');
   assert.equal(b['min-height'], '44px'); assert.equal(b.font, '500 12.5px var(--font)'); assert.equal(b.padding, '0 13px');
-  assert.equal(decls('#allow::after, #deny::after, .q-option::after').inset, '7px 0', '44 - 2*7 = 30 visual');
-  assert.equal(decls('#allow::after, #deny::after, .q-option::after')['border-radius'], '999px');
+  assert.equal(decls('#allow::after, #deny::after').inset, '7px 0', '44 - 2*7 = 30 visual');
+  assert.equal(decls('#allow::after, #deny::after')['border-radius'], '999px');
+  // the question options are no longer pills: a vertical list of rows (see island-controls-check)
+  assert.equal(decls('.q-option')['min-height'], '44px');
   const code = decls('#permission #operation');
   assert.equal(code.font, '400 12px var(--mono)'); assert.equal(code['border-radius'], '10px'); assert.equal(code.padding, '5px 10px');
   assert.equal(decls('#question-body').font, '600 15px/1.25 var(--font)');

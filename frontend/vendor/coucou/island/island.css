@@ -174,11 +174,10 @@ html[data-theme="light"] {
 /* .btn: 500 12.5px, padding 7px 13px, pill. 30px visual inside the 44px hit (the margin gives the
    14px back to the layout, so the stack keeps Coucou's height). */
 #card-actions { gap: 8px; margin: 0; align-items: center; }
-#allow, #deny, .q-option { min-height: 44px; margin: -7px 0; padding: 0 13px; gap: 7px; font: 500 12.5px var(--font); border-radius: 0; }
-#allow::after, #deny::after, .q-option::after { inset: 7px 0; border-radius: 999px; }
+#allow, #deny { min-height: 44px; margin: -7px 0; padding: 0 13px; gap: 7px; font: 500 12.5px var(--font); border-radius: 0; }
+#allow::after, #deny::after { inset: 7px 0; border-radius: 999px; }
 #allow .ico, #deny .ico { display: none; }
 #allow:disabled, #deny:disabled { opacity: 0.4; }
-#question-options { flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; }
 .q-key { width: auto; height: auto; padding: 0 4px; font: 400 10.5px var(--font); border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 4px; background: transparent; opacity: 0.55; color: inherit; }
 #card-wait { font: 400 11px var(--font); color: var(--dim-2); }
 /* .link-btn 11px #8e939c: «Omitir» is the question's quiet exit */
@@ -305,7 +304,6 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #question-asker { grid-column: 1 / -1; grid-row: 1; display: inline-flex; align-items: center; }
 #question-state { grid-column: 1 / -1; grid-row: 1; }
 #question-body { grid-column: 1 / -1; grid-row: 2; }
-#question-options { grid-column: 1; grid-row: 3; display: flex; flex-wrap: wrap; gap: 6px; }
 #question-skip { grid-column: 2; grid-row: 3; justify-self: start; align-self: center; position: relative; top: auto; right: auto; margin: 0; padding: 0 8px; font: 500 11px var(--font); color: var(--dim-2); min-height: 44px; }
 #question-freeform { grid-column: 1 / -1; grid-row: 4; }
 .q-key { display: none; }
@@ -778,3 +776,36 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .sessions-all-pick[aria-current="true"] .sa-cwd { font-weight: 600; }
 .sessions-all-pick .sa-cwd { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessions-all-pick .sa-agent, .sessions-all-pick .sa-state { flex: 0 0 auto; color: var(--dim-2); }
+
+/* ── the options: ONE vertical numbered list (1. respuesta / 2. respuesta / N. Otra cosa…) ─────────────────────── */
+#question-options { grid-column: 1 / -1; grid-row: 3; display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 2px; margin: 0; }
+/* 44px hit area, 32px visual (inset 6px): rows overlap their hit areas by 12px so a list of 4 + «Otra cosa…» stays compact */
+.q-option { width: 100%; max-width: 100%; box-sizing: border-box; display: grid; grid-template-columns: auto auto 1fr; column-gap: 8px; row-gap: 1px; align-items: baseline; justify-content: start; min-height: 44px; margin: -6px 0; padding: 10px 12px; border-radius: 0; text-align: left; }
+.q-option::after { inset: 6px 0; border-radius: 10px; }
+.q-option[role="checkbox"] { grid-template-columns: 14px auto 1fr; align-items: center; }
+.q-option:not([role="checkbox"]) { grid-template-columns: auto 1fr; }
+.q-key { display: inline; grid-column: auto; padding: 0; border: 0; opacity: .6; font: 500 12px var(--font); min-width: 1.4em; }
+.q-label { grid-column: auto; font: 500 12.5px/1.3 var(--font); overflow-wrap: anywhere; white-space: normal; text-align: left; }
+.q-desc { grid-column: 2 / -1; display: block; font: 400 11px/1.3 var(--font); color: var(--dim-2); overflow-wrap: anywhere; white-space: normal; text-align: left; }
+.q-option[role="checkbox"] .q-desc { grid-column: 3; }
+.q-box { width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid var(--dim-2); border-radius: 4px; align-self: center; }
+.q-option[aria-checked="true"] .q-box { background: var(--go); border-color: var(--go); box-shadow: inset 0 0 0 2px #0b0c0e; }
+.q-option:not([role="checkbox"])[aria-expanded="true"], .q-option[aria-checked="true"]:not([role="checkbox"]) { background: rgba(255, 255, 255, 0.08); }
+.q-option:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; }
+.q-other .q-label { font-style: italic; }
+#question-freeform { grid-column: 1 / -1; }
+/* ── structured questions: «Hecho» / questionnaire steps / summary ─────────────────────────────────────────────── */
+#question-step { grid-column: 1 / -1; grid-row: 1; }
+#question-step[hidden], #question-summary[hidden], #question-nav[hidden] { display: none; }
+#question-step-header { font: 500 11px var(--font); color: var(--dim-2); }
+#question-nav { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+#question-nav button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 999px; font: 500 12.5px var(--font); cursor: pointer; background: var(--btn-bg); color: var(--ink-2); }
+#question-nav button[hidden] { display: none; }
+#question-nav #question-primary { background: var(--go); color: #000; }
+#question-nav button:disabled { opacity: .4; cursor: default; }
+#question-nav button:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 2px; }
+#question-summary { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+.q-sum-row { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
+.q-sum-head { font: 600 12px var(--font); color: var(--ink); }
+.q-sum-text { font: 400 11px var(--font); color: var(--dim-2); overflow-wrap: anywhere; }
+.q-sum-answer { font: 500 12.5px var(--font); color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }

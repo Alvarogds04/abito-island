@@ -40,6 +40,10 @@
   const stateEl = $('question-state');
   const askerName = $('question-asker-name');
   const queueEl = $('question-queue');
+  const stepEl = $('question-step'), stepHeader = $('question-step-header'), summaryEl = $('question-summary');
+  const navEl = $('question-nav'), prevEl = $('question-prev'), primaryEl = $('question-primary');
+  // structured answers: the wizard state for a questionnaire, the draft for a multi-select (both die with the question)
+  let wizard = null, multiDraft = N.newDraft(), structuredId = null;
 
   let expiryTimer = null;
   function syncExpiryTimer() {
@@ -88,21 +92,150 @@
   // visible: expanded + overview + no covering card. Hidden never answers.
   const onScreen = () => N.onScreen({ phase: capsule.dataset.phase, view: capsule.dataset.view, card: capsule.dataset.card });
 
+  // ---- the options: ONE vertical numbered list for every question (human: «Pregunta / 1. respuesta / 2. respuesta / N. otra cosa») ----
+  // plain question: a row answers at once; multi-select: rows are checkboxes + «Hecho»; questionnaire: one question per step with
+  // Anterior / Siguiente and a final summary. The LAST row is «N. Otra cosa…» when the question takes free text: selecting it
+  // reveals the growing textarea inline; Enter sends, Esc closes it.
+  const isStructured = n => !!(n && (n.form || n.multiSelect));
+  const stepItem = n => (n.form ? (wizard && !wizard.review ? n.form[wizard.step] : null) : (n.multiSelect ? multiItemOf(n) : N.singleItem(n)));
+  const multiItemOf = n => ({ header: '', text: n.text, options: n.options, multiSelect: true, allowFreeText: n.allowFreeText });
+  const stepDraft = n => (n.form ? (wizard && !wizard.review ? wizard.drafts[wizard.step] : null) : multiDraft);
+  const setStepDraft = (n, draft) => { if (n.form) wizard = { ...wizard, drafts: wizard.drafts.map((d, i) => (i === wizard.step ? draft : d)) }; else multiDraft = draft; };
+  let rowsKey = '';
+  function rowNode(r, enabled) {
+    const b = el('button', r.kind === 'other' ? 'q-option q-other' : 'q-option');
+    b.type = 'button'; b.disabled = !enabled; b.dataset.number = String(r.number); b.dataset.kind = r.kind;
+    if (r.kind === 'option') b.dataset.index = String(r.index);
+    if (r.control === 'checkbox') { b.setAttribute('role', 'checkbox'); b.setAttribute('aria-checked', r.checked ? 'true' : 'false'); b.append(el('span', 'q-box')); }
+    else if (r.kind === 'other') b.setAttribute('aria-expanded', r.checked ? 'true' : 'false');
+    b.append(el('span', 'q-key', `${r.number}.`), el('span', 'q-label', r.label));
+    if (r.description) b.append(el('span', 'q-desc', r.description));
+    b.setAttribute('aria-label', r.description ? `${r.number}. ${r.label}. ${r.description}` : `${r.number}. ${r.label}`);
+    b.setAttribute('aria-keyshortcuts', String(r.number));
+    b.title = r.label;
+    b.addEventListener('click', event => activateRow(event, r));
+    return b;
+  }
   function renderOptions(n, enabled) {
+    const item = stepItem(n), draft = stepDraft(n);
+    if (!item) { rowsKey = ''; optionsEl.textContent = ''; if (n.form && wizard && wizard.review) renderSummary(n); return; }
+    const model = N.optionRows(item, draft);
+    // rebuilt only when what it shows changes: a rebuild between mouse-down and mouse-up would swallow the click
+    const key = [n.id, n.form ? wizard.step : 0, enabled, model.rows.map(r => `${r.checked ? 1 : 0}${r.label}`).join('|')].join(':');
+    if (key === rowsKey) return;
+    rowsKey = key;
+    const focused = optionsEl.contains && optionsEl.contains(document.activeElement) ? document.activeElement.dataset && document.activeElement.dataset.number : null;
     optionsEl.textContent = '';
-    for (const o of n.options) {
-      const b = el('button', 'q-option');
-      b.type = 'button';
-      b.dataset.index = String(o.index);
-      b.disabled = !enabled;
-      b.append(el('span', 'q-key', o.key), el('span', 'q-label', o.label));
-      if (o.description) b.append(el('span', 'q-desc', o.description));
-      b.setAttribute('aria-label', o.description ? `${o.label}. ${o.description}` : o.label);
-      b.setAttribute('aria-keyshortcuts', o.key);
-      b.title = o.label; // the full label stays reachable when a narrow row cuts it
-      b.addEventListener('click', event => choose(event, o.index));
-      optionsEl.append(b);
+    for (const r of model.rows) optionsEl.append(rowNode(r, enabled));
+    if (focused && optionsEl.querySelectorAll) { const back = [...optionsEl.querySelectorAll('button')].find(b => b.dataset.number === focused); if (back) back.focus(); }
+  }
+  function renderSummary(n) {
+    const v = N.formView(n, wizard);
+    summaryEl.textContent = '';
+    for (const row of v.summary) {
+      const r = el('div', 'q-sum-row'); r.setAttribute('role', 'listitem');
+      r.append(el('strong', 'q-sum-head', row.header || row.text), el('span', 'q-sum-text', row.header ? row.text : ''), el('span', 'q-sum-answer', row.answer));
+      summaryEl.append(r);
     }
+  }
+  // one row was activated (trusted click, or the digit that names it)
+  function activateRow(event, r) {
+    const n = snapshot && N.fromPending(snapshot.pending);
+    if (!n || !N.trusted(event) || !onScreen()) return;
+    const item = stepItem(n);
+    if (!item) return;
+    if (r.kind === 'other') { toggleOtherRow(n); return; }
+    if (!isStructured(n)) { choose(event, r.index); return; } // plain question: a row IS the answer
+    pick(r.index);
+  }
+  function pick(index) {
+    const n = snapshot && N.fromPending(snapshot.pending);
+    if (!n || !onScreen()) return;
+    if (n.form) wizard = N.formReduce(n, wizard, { type: 'toggle', index });
+    else multiDraft = N.toggleOption(stepItem(n), multiDraft, index);
+    render();
+  }
+  function toggleOtherRow(n) {
+    const item = stepItem(n);
+    if (!item || !item.allowFreeText) return;
+    const draft = stepDraft(n), next = N.toggleOther(item, draft);
+    setStepDraft(n, next);
+    if (!next.other) textEl.value = '';
+    render();
+    if (next.other) textEl.focus(); else { const row = optionsEl.querySelectorAll ? [...optionsEl.querySelectorAll('button')].find(b => b.dataset.kind === 'other') : null; if (row) row.focus(); }
+  }
+  function paintCard(n, view) {
+    const structured = isStructured(n);
+    stepEl.hidden = !(structured && n.form); summaryEl.hidden = !(structured && n.form && wizard && wizard.review);
+    navEl.hidden = !structured;
+    textEl.maxLength = n ? n.freeTextMax : 2000;
+    const item = n ? stepItem(n) : null, draft = n ? stepDraft(n) : null;
+    const showText = !!(item && N.optionRows(item, draft).showText);
+    freeform.hidden = !showText;
+    if (n && n.form) {
+      const v = N.formView(n, wizard);
+      stepHeader.textContent = v.mode === 'review' ? v.label : `${v.label}${v.header ? ` · ${v.header}` : ''}`;
+      body.textContent = v.mode === 'review' ? 'Revisá tus respuestas antes de enviarlas.' : v.text;
+      body.title = body.textContent;
+      prevEl.hidden = !v.canPrev; prevEl.disabled = !view.controlsEnabled || !v.canPrev;
+      primaryEl.textContent = v.primary.label; primaryEl.dataset.kind = v.primary.kind;
+      primaryEl.disabled = !view.controlsEnabled || !v.primary.enabled;
+    } else if (n && n.multiSelect) {
+      const v = N.multiView(n, multiDraft);
+      prevEl.hidden = true;
+      primaryEl.textContent = v.label; primaryEl.dataset.kind = 'done'; primaryEl.disabled = !view.controlsEnabled || !v.canDone;
+    }
+    if (item && showText && textEl.value !== draft.text && document.activeElement !== textEl) { textEl.value = draft.text; growText(); } // each step keeps its own draft
+  }
+  // The keyboard context for whatever question is on screen.
+  function keyContext(n) {
+    const item = stepItem(n), draft = stepDraft(n);
+    const structured = isStructured(n);
+    let primary, canPrev = false, review = false;
+    if (n.form) { const v = N.formView(n, wizard); primary = v.primary; canPrev = v.canPrev; review = v.mode === 'review'; }
+    else if (n.multiSelect) primary = { kind: 'done', enabled: N.multiView(n, multiDraft).canDone };
+    else primary = { kind: 'text', enabled: !sendEl.disabled && !freeform.hidden };
+    return { typing: document.activeElement === textEl, optionCount: item ? item.options.length : 0, hasOther: !!(item && item.allowFreeText),
+      review, canPrev, otherOpen: !!(draft && draft.other), primary, structured };
+  }
+  function cardKey(event) {
+    const n = snapshot && N.fromPending(snapshot.pending);
+    const view = current();
+    if (!n || !view.controlsEnabled || root.inert || !onScreen()) return false;
+    const ctx = keyContext(n);
+    const intent = N.keyIntent(event, ctx);
+    if (!intent) return false;
+    event.preventDefault(); event.stopPropagation();
+    runIntent(event, n, intent);
+    return true;
+  }
+  function moveFocus(delta) {
+    const rows = optionsEl.querySelectorAll ? [...optionsEl.querySelectorAll('button')] : [];
+    if (!rows.length) return;
+    const at = rows.indexOf(document.activeElement);
+    rows[(at < 0 ? (delta > 0 ? 0 : rows.length - 1) : (at + delta + rows.length) % rows.length)].focus();
+  }
+  function runIntent(event, n, intent) {
+    const item = stepItem(n);
+    if (intent.type === 'toggle') {
+      const o = item && item.options[intent.index];
+      if (o) activateRow(event, { kind: 'option', index: o.index });
+      return;
+    }
+    if (intent.type === 'other') { toggleOtherRow(n); return; }
+    if (intent.type === 'move') { moveFocus(intent.delta); return; }
+    if (intent.type === 'next' || intent.type === 'back' || intent.type === 'prev') { wizard = N.formReduce(n, wizard, { type: intent.type }); render(); return; }
+    if (intent.type === 'text') { if (!sendEl.disabled) freeform.requestSubmit(); return; }
+    if (intent.type === 'done') sendStructured(event, N.manyPayload(n, multiDraft));
+    if (intent.type === 'send') sendStructured(event, N.formPayload(n, wizard));
+  }
+  function sendStructured(event, payload) {
+    if (!N.trusted(event) || !onScreen() || !payload) return;
+    const view = current();
+    if (!view.notification || !view.controlsEnabled) return;
+    const sent = pushSeq;
+    inFlight = true; render();
+    action(payload).then(next => finish(next, sent), error => { finish(null, sent); say((error && error.message) || 'No se pudo enviar.'); });
   }
 
   // Flash fix V2: the auto-return is a CROSS-fade. The overview layers normally enter after a 160ms delay
@@ -126,23 +259,27 @@
     root.inert = !(showing || (outcome && capsule.dataset.view === 'overview'));
     capsule.dataset.question = n ? (view.kind === 'expired' ? 'expired' : 'pending') : (outcome ? 'outcome' : '');
     if (n) {
-      if (renderedId !== n.id) { renderedId = n.id; textEl.value = ''; budget = null; renderOptions(n, view.controlsEnabled); say(`${N.askedBy(n)}: ${n.text}`); }
+      if (renderedId !== n.id) {
+        renderedId = n.id; textEl.value = ''; budget = null; multiDraft = N.newDraft(); wizard = n.form ? N.formStart(n) : null; rowsKey = '';
+        say(`${N.askedBy(n)}: ${n.text}`);
+      }
       body.textContent = n.text;
+      renderOptions(n, view.controlsEnabled); // keyed: rebuilt only when what it shows changes
       // #266 S2: the visible asker, slug-derived via textContent only; display-only,
       // so a page without the chip must still answer (same guard style as island.js).
       if (askerName) askerName.textContent = N.askerLine(n); // Coucou's who-row: bold name + «pregunta» (askedBy stays the announcement text)
       if (queueEl) { queueEl.textContent = N.queueLabel(snapshot); queueEl.hidden = !queueEl.textContent; }
       body.title = n.text; // the full text stays reachable when the view cuts it to two lines
       for (const b of optionsEl.querySelectorAll('button')) b.disabled = !view.controlsEnabled;
-      freeform.hidden = !n.allowFreeText;
       skipEl.disabled = !view.controlsEnabled;
       expiryEl.hidden = false;
       $('question-expiry-word').textContent = N.expiryWord(n.expiresAt, Date.now());
       expiryEl.setAttribute('aria-label', `Vence en ${N.expiryWord(n.expiresAt, Date.now())}`);
       expiryEl.dataset.tone = view.kind === 'expired' ? 'faint' : 'sun';
     } else {
-      renderedId = null; body.textContent = ''; if (askerName) askerName.textContent = ''; if (queueEl) { queueEl.textContent = ''; queueEl.hidden = true; } optionsEl.textContent = ''; freeform.hidden = true; expiryEl.hidden = true; skipEl.disabled = true;
+      renderedId = null; rowsKey = ''; body.textContent = ''; if (askerName) askerName.textContent = ''; if (queueEl) { queueEl.textContent = ''; queueEl.hidden = true; } optionsEl.textContent = ''; freeform.hidden = true; expiryEl.hidden = true; skipEl.disabled = true;
     }
+    paintCard(n, view);
     skipEl.hidden = !n; // no pending notification: nothing to skip (outcome states show only icon + word)
     paintState(view);
     paintText(view);
@@ -203,7 +340,9 @@
     const word = N.textWord(budget, text);
     wordEl.hidden = !word; wordEl.textContent = word;
     textEl.dataset.invalid = word ? 'true' : 'false';
-    sendEl.disabled = !(view.controlsEnabled && N.canSendText(budget, text));
+    const sn = snapshot && N.fromPending(snapshot.pending);
+    sendEl.hidden = !!(sn && (sn.form || sn.multiSelect));
+    sendEl.disabled = sendEl.hidden || !(view.controlsEnabled && N.canSendText(budget, text));
   }
 
   // ---- answering: trusted gestures only -------------------------------------
@@ -243,11 +382,24 @@
       error => { finish(null, sent); say((error && error.message) || 'No se pudo enviar.'); });
   }
   skipEl.addEventListener('click', decline);
+  prevEl.addEventListener('click', event => { const n = structuredNow(); if (n && N.trusted(event) && onScreen()) runIntent(event, n, { type: 'prev' }); });
+  primaryEl.addEventListener('click', event => {
+    const n = structuredNow();
+    if (n && N.trusted(event) && onScreen() && !primaryEl.disabled) runIntent(event, n, { type: primaryEl.dataset.kind || 'next' });
+  });
   freeform.addEventListener('submit', submitText);
+  const structuredNow = () => { const n = snapshot && N.fromPending(snapshot.pending); return isStructured(n) ? n : null; };
   textEl.addEventListener('input', () => {
     growText(); fitCard();
     const view = current();
     if (!view.notification) return;
+    const sn = snapshot && N.fromPending(snapshot.pending);
+    if (sn) { // the draft lives in the page; a structured answer is validated again by the host on send (all-or-nothing)
+      if (sn.form) wizard = N.formReduce(sn, wizard, { type: 'text', text: textEl.value });
+      else multiDraft = N.setDraftText(stepItem(sn), multiDraft, textEl.value);
+      paintCard(sn, view);
+      if (isStructured(sn)) return;
+    }
     const seq = ++budgetSeq;
     const value = textEl.value;
     if (!value) { budget = null; paintText(view); return; }
@@ -257,15 +409,16 @@
   });
   textEl.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); textEl.blur(); return; } // leaves the field, never declines
-    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!sendEl.disabled) freeform.requestSubmit(); }
+    // Esc closes «Otra cosa…» (never declines); Enter = Enviar / Siguiente / Hecho; Shift+Enter is a newline
+    if (cardKey(event)) return;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); textEl.blur(); }
   });
   // Digits 1..N pick an option (never while typing, never with modifiers).
   document.addEventListener('keydown', event => {
     const view = current();
     if (!view.notification || !view.controlsEnabled || root.inert || !onScreen()) return;
-    const index = N.optionForKey(view.notification, event, { typing: document.activeElement === textEl || /^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '') });
-    if (index >= 0) { event.preventDefault(); choose(event, index); }
+    if (/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '') && document.activeElement !== textEl) return;
+    cardKey(event);
   });
 
   // ---- state stream ------------------------------------------------------------------

@@ -43,24 +43,46 @@
     if (!Number.isInteger(waiting) || waiting < 1 || waiting + 1 > MAX_QUEUE) return '';
     return `1 de ${waiting + 1}`;
   };
+  // Structured questions (contract fix/seguridad-app 5a57a4d): multi_select, a questionnaire `form`, free_text_max (2000 | 4000).
+  const FORM_MAX_ITEMS = 4, HEADER_MAX = 32;
+  const optionsOf = raw => (Array.isArray(raw) ? raw.slice(0, MAX_OPTIONS) : []).map((o, i) => ({
+    index: Number.isInteger(o && o.index) ? o.index : i,
+    key: String(i + 1),
+    label: String((o && o.label) || ''),
+    description: String((o && o.description) || ''),
+  }));
+  function formOf(raw) {
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > FORM_MAX_ITEMS) return null;
+    const items = [];
+    for (const it of raw) {
+      if (!it || typeof it !== 'object' || typeof it.text !== 'string' || !it.text) return null;
+      const header = typeof it.header === 'string' ? it.header : '';
+      if (Array.from(header).length > HEADER_MAX) return null;
+      const options = optionsOf(it.options);
+      if (options.length < 2 || options.length > MAX_OPTIONS || options.some(o => !o.label)) return null;
+      items.push({ header, text: it.text, options, multiSelect: it.multi_select === true, allowFreeText: it.allow_free_text === true });
+    }
+    return items;
+  }
   function fromPending(p) {
     if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !UUID_V4.test(p.id)) return null;
     const kind = p.kind === 'approval' ? 'approval' : p.kind === 'question' ? 'question' : null;
     if (!kind || typeof p.text !== 'string' || !p.text) return null;
-    const raw = Array.isArray(p.options) ? p.options.slice(0, MAX_OPTIONS) : [];
-    const options = raw.map((o, i) => ({
-      index: Number.isInteger(o && o.index) ? o.index : i,
-      key: String(i + 1),
-      label: String((o && o.label) || ''),
-      description: String((o && o.description) || ''),
-    }));
+    const options = optionsOf(p.options);
     const allowFreeText = p.allow_free_text === true;
-    if (kind === 'approval' && (options.length !== 2 || allowFreeText)) return null;
-    if (!options.length && !allowFreeText) return null;
+    const multiSelect = p.multi_select === true;
+    const hasForm = p.form !== undefined && p.form !== null;
+    if (kind === 'approval' && (options.length !== 2 || allowFreeText || multiSelect || hasForm)) return null;
+    let form = null;
+    if (hasForm) {
+      form = formOf(p.form);
+      if (!form || options.length || allowFreeText || multiSelect) return null; // every question lives in its item
+    } else if (!options.length && !allowFreeText) return null;
     if (options.some(o => !o.label)) return null;
     const agent = typeof p.agent === 'string' && AGENT_SLUG.test(p.agent) ? p.agent : 'pi';
     const projectName = typeof p.project_name === 'string' ? p.project_name : null;
-    return { id: p.id, kind, agent, projectName, text: p.text, options, allowFreeText,
+    const freeTextMax = p.free_text_max === 4000 ? 4000 : 2000;
+    return { id: p.id, kind, agent, projectName, text: p.text, options, allowFreeText, multiSelect, form, freeTextMax,
       expiresAt: Number.isFinite(p.expires_at) ? p.expires_at : 0,
       // a Pi-session answer: it authorizes nothing in the backend and never uses the approval card
       approvesProposal: false };
@@ -316,6 +338,124 @@
     return { height: Math.min(TEXTAREA_MAX_H, Math.max(TEXTAREA_MIN_H, h)), scroll: h > TEXTAREA_MAX_H };
   }
 
-  return { windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  // ---- structured answers: drafts, multi-select, questionnaire wizard ----------------------------------------------
+  // Pure and immutable. The wizard keeps one draft per question so Anterior/Siguiente never loses what was typed or picked;
+  // nothing leaves the page until the human presses «Hecho» / «Enviar» (a trusted click or key), all-or-nothing.
+  const newDraft = () => ({ picked: [], text: '', other: false });
+  function toggleOption(item, draft, index) {
+    if (!item || !Array.isArray(item.options) || !item.options.some(o => o.index === index)) return draft;
+    const has = draft.picked.includes(index);
+    if (item.multiSelect) return { picked: (has ? draft.picked.filter(i => i !== index) : [...draft.picked, index]).sort((a, b) => a - b), text: draft.text, other: draft.other };
+    return { picked: has ? [] : [index], text: '', other: false }; // single: replace; a pick closes «Otra cosa…» and drops what was typed
+  }
+  // «N. Otra cosa…»: the last row, only when the question takes free text. Opening it reveals the growing textarea; closing it
+  // (Esc / un-ticking) discards what was typed. In a single-select question it replaces the pick; in multi-select it adds to them.
+  function toggleOther(item, draft) {
+    if (!item || !item.allowFreeText) return draft;
+    if (draft.other) return { picked: draft.picked, text: '', other: false };
+    return { picked: item.multiSelect ? draft.picked : [], text: draft.text, other: true };
+  }
+  // Typing opens «Otra cosa…» by itself. A typed answer to a SINGLE-select question replaces its pick; multi keeps both.
+  function setDraftText(item, draft, text) {
+    if (!item || !item.allowFreeText) return draft;
+    const t = typeof text === 'string' ? text : '';
+    return { picked: !item.multiSelect && t.trim() ? [] : draft.picked, text: t, other: draft.other || t.trim().length > 0 };
+  }
+  const OTHER_LABEL = 'Otra cosa…';
+  // The vertical list the card draws: «1. label» (description below, smaller), then «N. Otra cosa…» last when free text is allowed.
+  function optionRows(item, draft) {
+    const control = item.multiSelect ? 'checkbox' : 'row';
+    const rows = item.options.map((o, i) => ({ kind: 'option', index: o.index, number: i + 1, label: o.label, description: o.description || '',
+      checked: draft.picked.includes(o.index), control }));
+    if (item.allowFreeText) rows.push({ kind: 'other', index: -1, number: rows.length + 1, label: OTHER_LABEL, description: '', checked: draft.other, control });
+    return { rows, showText: !!item.allowFreeText && draft.other };
+  }
+  const singleItem = n => ({ header: '', text: n.text, options: n.options, multiSelect: false, allowFreeText: n.allowFreeText });
+  const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+  const textFits = (text, max) => typeof text === 'string' && text.trim().length > 0 && !CONTROL.test(text) && Array.from(text).length <= max;
+  const draftAnswered = (item, draft, max) => draft.picked.length > 0 || (!!item.allowFreeText && draft.other && textFits(draft.text, max));
+  function itemPayload(item, draft, max) {
+    const hasText = draft.other && draft.text.trim().length > 0;
+    if (draft.text.trim() && !draft.other) return null; // text with «Otra cosa…» closed is not an answer
+    if (hasText && (!item.allowFreeText || !textFits(draft.text, max))) return null; // over-long or malformed: refused, never trimmed
+    const typed = hasText ? draft.text : null;
+    if (item.multiSelect) {
+      if (!draft.picked.length && !typed) return null;
+      return { indexes: [...draft.picked].sort((a, b) => a - b), ...(typed ? { text: typed } : {}) };
+    }
+    if (draft.picked.length) return { index: draft.picked[0] };
+    return typed ? { text: typed } : null;
+  }
+  const multiItem = n => ({ header: '', text: n.text, options: n.options, multiSelect: true, allowFreeText: n.allowFreeText });
+  const multiView = (n, draft) => ({ label: 'Hecho', canDone: draftAnswered(multiItem(n), draft, n.freeTextMax) });
+  function manyPayload(n, draft) {
+    if (!n || !n.multiSelect || n.form) return null;
+    const p = itemPayload(multiItem(n), draft, n.freeTextMax);
+    return p ? { action: 'answer_many', id: n.id, ...p } : null;
+  }
+  const formStart = n => ({ step: 0, review: false, drafts: n.form.map(newDraft) });
+  function formReduce(n, st, ev) {
+    if (!n || !n.form || !st || !ev || typeof ev !== 'object') return st;
+    const last = n.form.length - 1, item = n.form[st.step];
+    const setDraft = d => ({ ...st, drafts: st.drafts.map((x, i) => (i === st.step ? d : x)) });
+    switch (ev.type) {
+      case 'toggle': return st.review ? st : setDraft(toggleOption(item, st.drafts[st.step], ev.index));
+      case 'other': return st.review ? st : setDraft(toggleOther(item, st.drafts[st.step]));
+      case 'text': return st.review ? st : setDraft(setDraftText(item, st.drafts[st.step], ev.text));
+      case 'next':
+        if (st.review || !draftAnswered(item, st.drafts[st.step], n.freeTextMax)) return st;
+        return st.step === last ? { ...st, review: true } : { ...st, step: st.step + 1 };
+      case 'prev':
+      case 'back':
+        if (st.review) return { ...st, review: false };
+        return st.step > 0 ? { ...st, step: st.step - 1 } : st;
+      default: return st;
+    }
+  }
+  const describeAnswer = (item, draft) => {
+    const labels = draft.picked.map(i => (item.options.find(o => o.index === i) || {}).label).filter(Boolean);
+    const typed = draft.other && draft.text.trim() ? `«${draft.text.trim()}»` : '';
+    return [labels.join(', '), typed].filter(Boolean).join(' · ');
+  };
+  function formView(n, st) {
+    const total = n.form.length, max = n.freeTextMax;
+    if (st.review) {
+      return { mode: 'review', step: total, total, label: 'Resumen', header: '', text: '', item: null, draft: null, canPrev: true, canNext: false,
+        primary: { kind: 'send', label: 'Enviar', enabled: n.form.every((it, i) => draftAnswered(it, st.drafts[i], max)) },
+        summary: n.form.map((it, i) => ({ header: it.header, text: it.text, answer: describeAnswer(it, st.drafts[i]) })) };
+    }
+    const item = n.form[st.step], draft = st.drafts[st.step], ok = draftAnswered(item, draft, max);
+    return { mode: 'step', step: st.step, total, label: `${st.step + 1} de ${total}`, header: item.header, text: item.text, item, draft,
+      canPrev: st.step > 0, canNext: ok, primary: { kind: 'next', label: 'Siguiente', enabled: ok }, summary: null };
+  }
+  function formPayload(n, st) {
+    if (!n || !n.form || !st) return null;
+    const answers = n.form.map((it, i) => itemPayload(it, st.drafts[i], n.freeTextMax));
+    return answers.every(Boolean) ? { action: 'answer_form', id: n.id, answers } : null;
+  }
+  // Space/Enter on a focused row use the native button/checkbox behaviour. Digits pick (the digit after the options is «Otra cosa…»),
+  // arrows move between rows, Enter goes next / sends, Esc closes «Otra cosa…» or goes back. Never while composing, repeating, with
+  // a modifier, or from a synthetic event.
+  function keyIntent(event, ctx) {
+    const c = ctx || {};
+    if (!event || event.isTrusted !== true || event.isComposing || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return null;
+    if (event.key === 'Escape') {
+      if (c.typing && c.otherOpen) return { type: 'other' };
+      return c.canPrev ? { type: 'back' } : null;
+    }
+    if (event.key === 'Enter') {
+      if (event.shiftKey && c.typing) return null;
+      return c.primary && c.primary.enabled ? { type: c.primary.kind } : null;
+    }
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !c.typing && !c.review) return { type: 'move', delta: event.key === 'ArrowDown' ? 1 : -1 };
+    if (/^[1-9]$/.test(String(event.key)) && !c.typing && !c.review) {
+      const at = Number(event.key) - 1, count = c.optionCount || 0;
+      if (at < count) return { type: 'toggle', index: at };
+      return c.hasOther && at === count ? { type: 'other' } : null;
+    }
+    return null;
+  }
+
+  return { optionRows, singleItem, toggleOther, OTHER_LABEL, newDraft, toggleOption, setDraftText, textFits, draftAnswered, itemPayload, multiView, manyPayload, formStart, formReduce, formView, formPayload, keyIntent, windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

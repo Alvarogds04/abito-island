@@ -32,11 +32,12 @@ test('header tabs keep the 44px hit area and draw Coucou\'s 30x22 r11 visual on 
   assert.equal(decls('#island-header .tab[aria-pressed="true"]::after').background, 'var(--tab-on)');
 });
 
-test('question options: Coucou .btn pill, 30px visual inside the 44px hit area', () => {
+test('question options: a vertical full-width list, 32px visual row inside the 44px hit area (no pill chips)', () => {
   assert.equal(decls('.q-option')['min-height'], '44px');
+  assert.equal(decls('.q-option').width, '100%');
   const a = decls('.q-option::after');
-  assert.equal(a.inset, '7px 0', '44 hit - 2x7 inset = 30 visual');
-  assert.equal(a['border-radius'], '999px');
+  assert.equal(a.inset, '6px 0', '44 hit - 2x6 inset = 32 visual');
+  assert.equal(a['border-radius'], '10px', 'a multi-line row is a rounded rectangle, not a pill');
   assert.equal(a['background'], 'var(--btn-bg)');
   assert.equal(decls('.q-option').background, 'transparent', 'the visible fill moves to ::after');
 });
