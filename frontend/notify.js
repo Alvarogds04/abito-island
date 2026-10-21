@@ -39,6 +39,7 @@
   const expiryEl = $('question-expiry');
   const stateEl = $('question-state');
   const askerName = $('question-asker-name');
+  const queueEl = $('question-queue');
 
   let expiryTimer = null;
   function syncExpiryTimer() {
@@ -129,7 +130,8 @@
       body.textContent = n.text;
       // #266 S2: the visible asker, slug-derived via textContent only; display-only,
       // so a page without the chip must still answer (same guard style as island.js).
-      if (askerName) askerName.textContent = N.askerName(n); // Coucou's who-row: bold name + «pregunta» (askedBy stays the announcement text)
+      if (askerName) askerName.textContent = N.askerLine(n); // Coucou's who-row: bold name + «pregunta» (askedBy stays the announcement text)
+      if (queueEl) { queueEl.textContent = N.queueLabel(snapshot); queueEl.hidden = !queueEl.textContent; }
       body.title = n.text; // the full text stays reachable when the view cuts it to two lines
       for (const b of optionsEl.querySelectorAll('button')) b.disabled = !view.controlsEnabled;
       freeform.hidden = !n.allowFreeText;
@@ -139,7 +141,7 @@
       expiryEl.setAttribute('aria-label', `Vence en ${N.expiryWord(n.expiresAt, Date.now())}`);
       expiryEl.dataset.tone = view.kind === 'expired' ? 'faint' : 'sun';
     } else {
-      renderedId = null; body.textContent = ''; if (askerName) askerName.textContent = ''; optionsEl.textContent = ''; freeform.hidden = true; expiryEl.hidden = true; skipEl.disabled = true;
+      renderedId = null; body.textContent = ''; if (askerName) askerName.textContent = ''; if (queueEl) { queueEl.textContent = ''; queueEl.hidden = true; } optionsEl.textContent = ''; freeform.hidden = true; expiryEl.hidden = true; skipEl.disabled = true;
     }
     skipEl.hidden = !n; // no pending notification: nothing to skip (outcome states show only icon + word)
     paintState(view);

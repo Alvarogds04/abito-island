@@ -307,3 +307,28 @@ test('agent: the screen reader and title use the asker, written with textContent
 });
 
 Promise.all(pendingTests).then(() => console.log(`notify-view-check: ${passed} passed`), e => { console.error(e); process.exit(1); });
+
+// ---- S3: «Agente · proyecto» and «1 de N» ---------------------------------
+test('S3 askerLine: agent and project name, the project only when it is a well-formed name', () => {
+  assert.equal(N.askerLine(N.fromPending(pending({ agent: 'codex', project_name: 'proyecto-beta' }))), 'Codex · proyecto-beta');
+  assert.equal(N.askerLine(N.fromPending(pending({ agent: 'claude-code', project_name: 'workspace' }))), 'Claude Code · workspace');
+  assert.equal(N.askerLine(N.fromPending(pending({ agent: 'codex' }))), 'Codex', 'no project name: just the agent');
+  for (const bad of ['', ' x', 'x ', 'a/b', '<img src=x>', 'x'.repeat(65), 7, null, {}, 'x\ny']) {
+    assert.equal(N.askerLine(N.fromPending(pending({ agent: 'codex', project_name: bad }))), 'Codex', `bad project: ${JSON.stringify(bad)}`);
+  }
+});
+test('S3 queueLabel: «1 de N» only while others wait behind the shown question', () => {
+  const snap = (queued_count, extra = {}) => ({ pending: pending(), queued_count, ...extra });
+  assert.equal(N.queueLabel(snap(0)), '');
+  assert.equal(N.queueLabel(snap(1)), '1 de 2');
+  assert.equal(N.queueLabel(snap(7)), '1 de 8');
+  for (const bad of [undefined, null, -1, 1.5, '3', NaN, 99]) assert.equal(N.queueLabel(snap(bad)), '', JSON.stringify(bad));
+  assert.equal(N.queueLabel(null), '');
+  assert.equal(N.queueLabel({ pending: null, queued_count: 3 }), '', 'nothing shown, nothing to count');
+});
+test('S3 wiring: the island paints the asker line and the queue label with textContent', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /askerName\.textContent = N\.askerLine\(n\)/);
+  assert.match(src, /queueEl\.textContent = N\.queueLabel\(snapshot\)/);
+  assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), /id="question-queue"/);
+});
