@@ -115,6 +115,11 @@ section.abito-card > h2 { gap: 8px; }
 
 /* #503 S27 (Dictado, Opción B): the «Probar» area above the settings: instruction, the last dictation, and what is ready. */
 .dictation-try { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 14px; background: var(--hub-card); }
+.mic-meter { display: flex; align-items: center; gap: 10px; font: 500 12px var(--font); color: var(--muted, #9a9a9a); }
+.mic-segs { display: inline-flex; gap: 3px; }
+.mic-seg { width: 14px; height: 10px; border-radius: 3px; background: rgba(255,255,255,.12); }
+.mic-seg.on { background: var(--accent, #6fd36f); }
+.mic-meter[data-state=none] .mic-meter-word { color: var(--warn, #e0a030); }
 .dictation-try-title { font: 700 14px var(--font); }
 .dictation-try textarea { width: 100%; min-height: 64px; resize: none; }
 .dictation-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }

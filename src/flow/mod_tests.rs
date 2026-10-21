@@ -9,6 +9,9 @@ impl Recording for FakeRec {
     fn levels(&self) -> [f32; audio::BAND_COUNT] {
         [0.0; audio::BAND_COUNT]
     }
+    fn level(&self) -> Option<f32> {
+        Some(0.5)
+    }
 }
 
 struct Fake {
@@ -211,4 +214,27 @@ fn x11_class_uses_class_not_instance_and_skips_own_window() {
     assert_eq!(app_class(b"instance\0AbItO\0"), None);
     assert_eq!(app_class(b"\0\0"), None);
     assert_eq!(app_class(b"instance\0customApp\0"), Some(("customapp".into(), "CustomApp".into())));
+}
+
+fn levels_in(r: &Rig) -> usize {
+    r.log.lock().unwrap().iter().filter(|u| matches!(u, Update::Level(_))).count()
+}
+
+#[test]
+fn the_level_is_published_only_while_listening_and_at_most_20_times_a_second() {
+    let r = rig(true, true, "x", paste::Outcome::Copied);
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(levels_in(&r), 0, "idle: no level, nothing is measured");
+    r.d.send(KeyEvent::HandsFree);
+    assert!(wait_for(|| has(&r, Update::Phase(Phase::Locked))));
+    std::thread::sleep(Duration::from_millis(1000));
+    let during = levels_in(&r);
+    assert!(during >= 5, "while listening the level arrives ({during})");
+    assert!(during <= 21, "at most 20 a second ({during} in about a second)");
+    assert!(has(&r, Update::Level(0.5)), "the value is the recording's own level");
+    r.d.send(KeyEvent::Cancel);
+    assert!(wait_for(|| has(&r, Update::Phase(Phase::Idle))));
+    let at_stop = levels_in(&r);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(levels_in(&r), at_stop, "once it stops listening, no more levels");
 }

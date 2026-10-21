@@ -1,8 +1,8 @@
 'use strict';
 // #503 T3 · S27 · 27 Dictado (Flow) → Opción B: a «Probar» area on top of the settings: «mantené Ctrl+Alt+V y hablá» and a
 // field where the last dictation shows up, plus the microphone and the recognition engine. Honest by construction: the host
-// delivers dictation to the CLIPBOARD (never into a field) and emits no microphone level, so the field shows the last
-// dictation read from the local history when a new one lands, and no level meter is drawn.
+// delivers dictation to the CLIPBOARD (never into a field), so the field shows the last dictation read from the local history
+// when a new one lands. The microphone meter (human L5) is read-only: it listens to `dictation:level` and sends nothing.
 const assert = require('node:assert/strict');
 const { test, all, text, dom, load } = require('./settings-designs-check.cjs');
 
@@ -63,13 +63,14 @@ test('S27 Dictado: a new dictation shows its text in the field (read from the lo
   const status = byId(page, 'dictation-try-status'); assert(status); assert.equal(status.attrs.role, 'status');
 });
 
-test('S27 Dictado: the area confirms microphone and key from the REAL status; no level meter is drawn', async () => {
+test('S27 Dictado: the area confirms microphone and key from the REAL status and carries the read-only microphone meter', async () => {
   const ok = await mount(); const s = words(byId(ok.page, 'dictation-try-checks'));
   assert(s.includes('✓ Micrófono: Micrófono USB') || s.includes('✓ Micrófono: predeterminado del sistema'), s); assert(s.includes('✓ Tecla: Ctrl+Alt+V')); assert(s.includes('✓ Reconocimiento: Parakeet'));
   const none = await mount({ mics: [], parakeet: 'missing', keys: 'unsupported' }); const w = words(byId(none.page, 'dictation-try-checks'));
   assert(w.includes('✗ Reconocimiento: falta descargar Parakeet')); assert(w.includes('✗ Tecla: no disponible aquí'), w);
-  const meterish = all(byId(ok.page, 'dictation-try')).filter(e => /\b(meter|level|vu-?meter)\b/i.test(e.className || '') || e.tagName === 'canvas' || e.tagName === 'meter' || (e.tagName === 'progress' && e.attrs['aria-label'] === 'Nivel'));
-  assert.deepEqual(meterish.map(e => e.className || e.tagName), [], 'no microphone meter in the Probar area: the host emits no level (the hero\'s decorative backdrop canvas is not one)');
+  const meter = byId(ok.page, 'dictation-mic-meter'); assert(meter, 'the meter is in the Probar area');
+  assert.equal(meter.attrs.role, 'meter'); assert.equal(meter.attrs['data-state'], 'none', 'no level yet: «sin señal»'); assert(words(meter).includes('sin señal'), words(meter));
+  assert.equal(all(ok.page).filter(e => e.tagName === 'canvas' && e.className.includes('level')).length, 0, 'it is drawn with segments, not a canvas');
   assert(all(byId(ok.page, 'dictation-try-checks')).every(e => e.attrs['aria-hidden'] !== 'true' || e.className === 'state-ico'), 'icons are decorative, the words carry the state');
 });
 

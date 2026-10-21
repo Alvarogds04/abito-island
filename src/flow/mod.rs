@@ -72,6 +72,8 @@ pub enum Note {
 pub enum Update {
     Phase(Phase),
     Bands([f32; audio::BAND_COUNT]),
+    /// The input level, 0..1 (see `audio::LevelMeter`): what the Dictado page's meter shows.
+    Level(f32),
     Note(Note),
 }
 
@@ -82,6 +84,10 @@ pub trait Recording: Send {
     /// Stops and returns (16 kHz samples, loudest sample).
     fn finish(self: Box<Self>) -> (Vec<f32>, f32);
     fn levels(&self) -> [f32; audio::BAND_COUNT];
+    /// The level of the input since the last call, None when no frames arrived.
+    fn level(&self) -> Option<f32> {
+        None
+    }
 }
 
 /// Everything the thread needs from the machine; fakes in the tests.
@@ -114,6 +120,9 @@ impl Recording for MicTake {
     fn levels(&self) -> [f32; audio::BAND_COUNT] {
         self.take.lock().unwrap_or_else(|e| e.into_inner()).meter.levels
     }
+    fn level(&self) -> Option<f32> {
+        self.take.lock().unwrap_or_else(|e| e.into_inner()).level.take()
+    }
 }
 
 /// Ten minutes at most: a dictation left open by mistake stops growing.
@@ -134,6 +143,7 @@ impl Backend for System {
             }
             t.peak = samples.iter().fold(t.peak, |m, &s| m.max(s.abs()));
             t.meter.feed(samples);
+            t.level.feed(samples);
         })?;
         Ok(Box::new(MicTake { capture, take }))
     }
@@ -255,6 +265,9 @@ impl Drop for Dictation {
     }
 }
 
+/// 20 level events a second at most.
+const LEVEL_EVERY: Duration = Duration::from_millis(50);
+
 struct Listening {
     rec: Box<dyn Recording>,
     started: Instant,
@@ -267,6 +280,7 @@ fn run<B: Backend>(store: Arc<Mutex<Store>>, backend: B, notify: Notify, rx: mps
     let secs = |at: Instant| at.saturating_duration_since(epoch).as_secs_f64();
     let mut logic = KeyLogic::default();
     let mut listening: Option<Listening> = None;
+    let mut last_level: Option<Instant> = None;
     let begin = |listening: &mut Option<Listening>, logic: &mut KeyLogic| {
         *listening = begin(&*backend, &store, &notify);
         if listening.is_none() {
@@ -338,6 +352,16 @@ fn run<B: Backend>(store: Arc<Mutex<Store>>, backend: B, notify: Notify, rx: mps
         }
         if let Some(l) = &listening {
             notify(Update::Bands(l.rec.levels()));
+            // The level meter: only while listening, and at most 20 a second (the loop itself turns every 33 ms).
+            let now = Instant::now();
+            if last_level.is_none_or(|at| now.duration_since(at) >= LEVEL_EVERY) {
+                if let Some(level) = l.rec.level() {
+                    notify(Update::Level(level));
+                }
+                last_level = Some(now);
+            }
+        } else {
+            last_level = None;
         }
     }
     drop(listening);

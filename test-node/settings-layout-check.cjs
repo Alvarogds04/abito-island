@@ -155,6 +155,22 @@ test('S25 Atajos: after a capture that SAW the host\'s pause pushes, the rows ar
   assert(calls.lastIndexOf('view') > calls.lastIndexOf('resume'), 'the state was read AGAIN after resume (the pushes during the pause were not trusted)');
 });
 
+test('S27 Ajustes (dictado): the microphone meter moves with the host\'s levels and reads «sin señal» when none arrive', async r => {
+  await r.go('Ajustes'); await r.page.waitForTimeout(300);
+  const read = () => r.page.evaluate(() => { const m = document.querySelector('#dictation-mic-meter'); return m && { state: m.dataset.state, now: m.getAttribute('aria-valuenow'), lit: m.querySelectorAll('.mic-seg.on').length, text: m.textContent.replace(/\s+/g, ' ').trim(), box: m.getBoundingClientRect().width };});
+  const idle = await read(); assert(idle, 'the meter exists on the page'); assert(idle.box > 60, 'it is drawn');
+  assert.equal(idle.state, 'none'); assert.equal(idle.lit, 0); assert.match(idle.text, /sin señal/, 'no event yet: «sin señal»');
+  const emit = v => r.page.evaluate(v => window.__emit('dictation:level', { level: v }), v);
+  await emit(0.2); const low = await read(); await emit(1); const high = await read();
+  assert.equal(low.state, 'live'); assert(low.lit >= 1 && low.lit < high.lit, `louder lights more segments (${low.lit} → ${high.lit})`);
+  assert.equal(high.lit, 5); assert.doesNotMatch(high.text, /sin señal/);
+  await emit(0); assert.equal((await read()).lit, 0, 'level 0 lights nothing');
+  await emit(7); assert.equal((await read()).lit, 5, 'an out-of-range level is clamped'); await emit('loud'); assert.equal((await read()).lit, 5, 'garbage is ignored, not drawn');
+  await r.page.waitForTimeout(1500);
+  const quiet = await read(); assert.equal(quiet.state, 'none'); assert.equal(quiet.lit, 0); assert.match(quiet.text, /sin señal/, 'events stop: back to «sin señal»');
+  const calls = (await r.calls()).map(([c]) => c); assert(!calls.some(c => /mic|record|level/i.test(c)), 'the page only listens: no command was sent for the meter');
+});
+
 test('S26 Conexiones: the sidebar has a «Conexiones» entry that opens a page with the engine state first and one card per account', async r => {
   const titles = await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item')].map(e => e.textContent.trim()));
   assert(titles.includes('Conexiones'), `no «Conexiones» entry in ${JSON.stringify(titles)}`);
