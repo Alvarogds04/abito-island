@@ -32,6 +32,14 @@
     return d.phase === 'expanded' && d.view === 'overview' && !d.card && d.settings !== 'open' &&
       !['pending', 'expired', 'outcome'].includes(d.question) && d.noticeView !== 'notices';
   };
+  // L5: the blobs also work WHILE «Recibida» shows: the click ends the outcome (notify.js) and the selection applies at once, exactly as if it
+  // had been clicked after the 3 s timer. Pending/expired questions still block (they own the screen).
+  const outcomeShowing = () => !!root.AbitoNotify && root.AbitoNotify.outcomeDismissible({ question: capsule.dataset.question });
+  const clickable = () => {
+    if (onScreen()) return true;
+    const d = capsule.dataset;
+    return outcomeShowing() && d.phase === 'expanded' && d.view === 'overview' && !d.card && d.settings !== 'open' && d.noticeView !== 'notices';
+  };
   const say = text => { if (live) live.textContent = text; };
   function syncClay(item) {
     // Per-instance lifecycle: never change the shared engine's global policy (Abito owns it).
@@ -124,7 +132,8 @@
         const label = doc.createElement('span'); button.append(svg, label);
         item = { button, label, svg, clay: null, mode: null }; mounted.set(row.id, item);
         button.addEventListener('click', event => {
-          if (event.isTrusted !== true || !onScreen()) return;
+          if (event.isTrusted !== true || !clickable()) return;
+          if (outcomeShowing()) doc.dispatchEvent(new CustomEvent('abito:outcome-dismiss'));
           if (item.row.session) selectSession(item.row.id);
           else if (row.integration) focusIntegration(row.id); else choose(row.id);
         });

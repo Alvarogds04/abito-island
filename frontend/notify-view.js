@@ -464,6 +464,9 @@
     return { islandH, windowH: windowHeightFor(islandH) };
   }
 
-  return { sizeSync, optionRows, singleItem, toggleOther, OTHER_LABEL, newDraft, toggleOption, setDraftText, textFits, draftAnswered, itemPayload, multiView, manyPayload, formStart, formReduce, formView, formPayload, keyIntent, windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  // L5: a click on the blobs column while «Recibida» (the question outcome) shows ends the outcome early; nothing else is dismissible this way.
+  const outcomeDismissible = d => !!d && d.question === 'outcome';
+
+  return { outcomeDismissible, sizeSync, optionRows, singleItem, toggleOther, OTHER_LABEL, newDraft, toggleOption, setDraftText, textFits, draftAnswered, itemPayload, multiView, manyPayload, formStart, formReduce, formView, formPayload, keyIntent, windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

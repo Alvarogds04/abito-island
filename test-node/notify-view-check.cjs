@@ -712,3 +712,22 @@ test('closing paths: notify.js re-fits on every state change, outcome timer expi
   assert.match(src, /setInterval\(\(\) => render\(\), 5000\)/, 'local expiry re-renders');
   assert.match(src, /fitCard\(\);\n  \}/, 'render ends in fitCard');
 });
+
+// ---- L5 (human): a click on the blobs column during «Recibida» dismisses the outcome early and applies the selection ----------------------
+test('outcomeDismissible: only a SHOWING outcome (a word on screen, no pending question) can be dismissed by a blob click; nothing else is touched', () => {
+  const D = N.outcomeDismissible;
+  assert.equal(D({ question: 'outcome' }), true);
+  for (const q of ['pending', 'expired', '', undefined, null]) assert.equal(D({ question: q }), false, `a ${String(q)} question is never dismissed by a blob click`);
+  assert.equal(D(null), false);
+  assert.equal(D({}), false);
+});
+test('L5 wiring: notify.js dismisses the outcome on the island\'s request, pills-view asks for it and then applies the selection', () => {
+  const nv = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(nv, /abito:outcome-dismiss/, 'notify.js listens for the dismissal request');
+  assert.match(nv, /outcomeUntil = 0;[\s\S]{0,200}render\(\)/, 'it ends the outcome now (the same state the timer reaches) and repaints');
+  const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
+  assert.match(pv, /N\.outcomeDismissible|AbitoNotify\.outcomeDismissible/, 'pills-view decides with the shared rule');
+  assert.match(pv, /abito:outcome-dismiss/);
+  assert.match(pv, /const clickable = \(\) =>/, 'the click gate is one function: on screen OR a dismissible outcome');
+});
+

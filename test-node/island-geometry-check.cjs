@@ -357,5 +357,24 @@ function noOverlaps(list, why) {
     } catch (e) { await r.screenshot('/tmp/geo-fail-selected-step.png').catch(() => {}); throw e; }
     finally { await r.close(); }
   }
+  // L5 (human): answer a question, and WHILE «Recibida» shows click the GitHub blob: the outcome goes at once and GitHub is the centre.
+  {
+    const r = await H.open({ question: 'plain', github: true, githubData: true });
+    try {
+      const opt = (await r.measure('.q-option')).find(b => b.shown);
+      await r.page.mouse.click(opt.left + opt.w / 2, opt.top + opt.h / 2);
+      await r.page.waitForTimeout(700); // the host reported «answered»; «Recibida» is on screen (it lasts ~3 s)
+      const during = await r.page.evaluate(() => document.getElementById('capsule').dataset.question);
+      assert.equal(during, 'outcome', `«Recibida» is showing: ${during}`);
+      const gh = (await r.measure('#pill-choice-integration_github')).find(b => b.shown);
+      assert.ok(gh, 'the GitHub blob is visible while «Recibida» shows');
+      await r.page.mouse.click(gh.left + gh.w / 2, gh.top + gh.h / 2);
+      await r.page.waitForTimeout(1200);
+      const st = await r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question || '', gh: document.getElementById('overview-view').dataset.github || null, card: !!document.querySelector('.gh-card:not([hidden])') }));
+      assert.deepEqual(st, { q: '', gh: 'on', card: true }, `the outcome is gone and GitHub is the centre, well before the 3 s timer: ${JSON.stringify(st)}`);
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-outcome-click.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
   console.log(`island-geometry-check: ${passed} real-layout checks ok`);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -494,6 +494,12 @@
     const reveal = revealGate ? revealGate.question(snapshot, Date.now()) : false;
     document.dispatchEvent(new CustomEvent('abito:question', { detail: { pending: !!(N.fromPending(snapshot.pending)), show: !!capsule.dataset.question, reveal } }));
   }
+  // L5 (human): a click on a blob during «Recibida» dismisses the outcome at once (the state the 3 s timer reaches) so the selection applies now.
+  document.addEventListener('abito:outcome-dismiss', () => {
+    if (!N.outcomeDismissible({ question: capsule.dataset.question })) return;
+    outcomeUntil = 0; clearTimeout(outcomeTimer);
+    render();
+  });
   document.addEventListener('island:view', render);
   new MutationObserver(render).observe(capsule, { attributes: true, attributeFilter: ['data-card', 'data-view', 'data-phase'] });
   if (listen) listen('question:state', event => { pushSeq += 1; apply(event && event.payload); }).catch(() => {});
