@@ -135,7 +135,8 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert.equal(ui.firstChild.tagName, 'section', 'General is made of settings sections (#503 S18: three task cards)');
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' Apariencia', ' Isla', ' Sonido']);
   assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Idioma','Tema','Nombre visible','Abrir al iniciar sesión','Abrir al pasar el cursor','Cierre automático','Ocultar tras','La isla vive en','Atajo global','Resumen semanal','','','Sonido']);
-  assert(!all(ui).some(e => e.className === 'hub-segmented'));
+  // #503 S18: the theme IS a segmented control now (the MD's «Oscuro / Claro / Sistema»); it must be the only one
+  assert.equal(all(ui).filter(e => e.className === 'hub-segmented').length, 1);
   for (const id of ['hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);
     el.fire(el.tagName === 'select' ? 'change' : 'click'); await ui.settled(); assert.deepEqual(calls, []);
@@ -206,9 +207,10 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const value of ['4', '121', '2.5', '']) { const n = number(); n.value = value; n.fire('change'); await ui.settled(); assert.deepEqual(calls, []); }
   number().value = '0'; number().fire('change'); await ui.settled();
   assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_island_interaction', auto_close_seconds: 0, open_on_hover: true }]);
-  const select = () => all(ui).find(e => e.attrs['aria-label'] === 'Tema');
-  select().value = 'dark'; select().fire('change', false); await ui.settled(); assert.deepEqual(calls, []);
-  select().fire('change'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_theme', theme: 'dark' }]);
+  // #503 S18 (screen validation): the theme is three segmented pills, not a dropdown
+  const dark = () => all(all(ui).find(e => e.attrs.id === 'hub-theme')).find(e => e.tagName === 'button' && e.textContent === 'Oscuro');
+  dark().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
+  dark().fire('click'); await ui.settled(); assert.deepEqual(calls.pop(), ['prefs_action', { action: 'set_theme', theme: 'dark' }]);
   const name = () => all(ui).find(e => e.attrs['aria-label'] === 'Nombre visible');
   const saveName = () => all(ui).find(e => e.textContent === 'Guardar nombre');
   name().value = 'Ana'; name().fire('input'); saveName().fire('click', false); await ui.settled(); assert.deepEqual(calls, []);
