@@ -350,9 +350,9 @@ test('centreView: steps are bounded to what fits (last 2) and a long name is cut
 });
 
 // ---- I: the empty state in the centre, with a CTA ------------------------------------------------------------------------------
-test('emptyView: nothing running -> «Todo tranquilo» + «Nueva conversación»; failures and unknown states are NOT empty', () => {
+test('emptyView: nothing running -> «Todo tranquilo» + «Preguntar a Abito»; failures and unknown states are NOT empty', () => {
   const e = L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [] }), pending: null, finished: false });
-  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } });
+  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Arrastrá un archivo o preguntá.', cta: { label: 'Preguntar a Abito', action: 'new-chat' } });
   assert.deepEqual(L.emptyView({ view: null, pending: null, finished: false }).cta.action, 'new-chat', 'no list yet and nothing pending: still a calm empty centre');
   assert.equal(L.emptyView({ view: { state: 'error' }, pending: null, finished: false }), null, 'a failed list is not "everything is calm": the engine row owns that');
   assert.equal(L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [{ id: 's-0000000a', kind: 'pi', cwd: 'x', state: 'sleeping', origin: null }] }), pending: null, finished: false }), null, 'a session exists: the centre shows it');

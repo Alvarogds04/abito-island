@@ -137,6 +137,7 @@
     // Keep the legacy resolver unchanged; the controller layers real human requests above it.
     character.chat(next);
   }
+  document.addEventListener('abito:empty-shown', event => { character.rest(!!(event.detail && event.detail.shown)); });
   document.addEventListener('abito:pose', event => {
     const state = event.detail;
     chatPose = POSES.has(state) ? state : null;

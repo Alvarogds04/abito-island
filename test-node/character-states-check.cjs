@@ -242,3 +242,10 @@ test('honored reduced motion: no greeting at launch or on hover', () => {
     validCard: () => false, notification: () => null, choosePose: () => 'idle' });
   c.snapshot({ notices: [] }); time.advance(7000); c.hover(true); assert.equal(clay.sample().reaction, null); c.destroy();
 });
+test('S5 rest(true): the empty island puts the calm character to sleep at once; any real producer, reduced motion or rest(false) wakes it', () => {
+  const { c, clay, block } = setup(); c.snapshot({ notices: [] });
+  assert.equal(clay.state, 'idle'); c.rest(true); assert.equal(clay.state, 'sleeping');
+  c.chat('think'); assert.equal(clay.state, 'think'); c.chat(null); assert.equal(clay.state, 'sleeping');
+  block(true); assert.equal(clay.state, 'idle', 'reduced/hidden motion: no sleeping pose animation'); block(false); assert.equal(clay.state, 'sleeping');
+  c.rest(false); assert.equal(clay.state, 'idle'); c.destroy();
+});

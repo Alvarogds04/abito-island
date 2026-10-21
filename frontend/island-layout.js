@@ -180,7 +180,7 @@
     const v = o.view;
     if (v && v.state === 'error') return null;
     if (v && v.state === 'ready' && Array.isArray(v.rows) && v.rows.length) return null;
-    return { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } };
+    return { title: 'Todo tranquilo', sub: 'Arrastrá un archivo o preguntá.', cta: { label: 'Preguntar a Abito', action: 'new-chat' } };
   }
 
   // ---- D: «Pi terminó» in the centre, the result untruncated ----------------------------------------------------------------------
@@ -357,6 +357,7 @@ function mount(L) {
         const li = doc.createElement('li'); li.textContent = step.name; li.dataset.state = step.state; li.dataset.current = String(step.current); return li;
       }));
     }
+    doc.dispatchEvent(new CustomEvent('abito:empty-shown', { detail: { shown: !!empty } }));
     if (empty) {
       cEmpty.querySelector('.centre-empty-title').textContent = empty.title;
       cEmpty.querySelector('.centre-empty-sub').textContent = empty.sub;
