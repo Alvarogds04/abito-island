@@ -186,6 +186,99 @@ where
     }
 }
 
+/// Public reason when even the launch fails: short, user-facing.
+pub const TERMINAL_LAUNCH_REASON: &str = "No se pudo abrir una terminal.";
+
+/// Terminal emulators tried in order: the user's default launcher first,
+/// then the common ones. Fixed names, resolved on PATH, never page-supplied.
+pub const LAUNCH_TERMINALS: &[&str] = &[
+    "xdg-terminal-exec",
+    "gnome-terminal",
+    "ptyxis",
+    "kgx",
+    "x-terminal-emulator",
+];
+
+/// `terminal` always ends with a terminal: focus the running one; when none
+/// can be focused, launch a new one. Other targets never launch anything.
+pub fn focus_or_launch<F, L>(target: Target, focus: F, launch: L) -> Result<(), String>
+where
+    F: FnOnce(Target) -> Result<(), String>,
+    L: FnOnce() -> Result<(), String>,
+{
+    match focus(target) {
+        Ok(()) => Ok(()),
+        Err(_) if target == Target::Terminal => launch(),
+        Err(reason) => Err(reason),
+    }
+}
+
+/// Working directory of a launched terminal: the session's directory when
+/// Rust itself knows an absolute existing one, else `$HOME` when it is a
+/// directory, else `/`. Never derived from the page.
+pub fn resolve_launch_dir(session_dir: Option<std::path::PathBuf>, home: Option<std::path::PathBuf>) -> std::path::PathBuf {
+    let usable = |p: &std::path::PathBuf| p.is_absolute() && p.is_dir();
+    session_dir
+        .filter(usable)
+        .or_else(|| home.filter(usable))
+        .unwrap_or_else(|| std::path::PathBuf::from("/"))
+}
+
+/// Pure launch core: first terminal of [`LAUNCH_TERMINALS`] found in the
+/// `path_var` directories whose spawn succeeds. `spawn` receives the
+/// resolved executable and the directory; argv is empty by construction.
+pub fn launch_terminal_with<S>(
+    path_var: &str,
+    session_dir: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+    mut spawn: S,
+) -> Result<(), String>
+where
+    S: FnMut(&std::path::Path, &std::path::Path) -> bool,
+{
+    let dir = resolve_launch_dir(session_dir, home);
+    for name in LAUNCH_TERMINALS {
+        let found = std::env::split_paths(path_var)
+            .map(|d| d.join(name))
+            .find(|p| p.is_file());
+        if let Some(exe) = found {
+            if spawn(&exe, &dir) {
+                return Ok(());
+            }
+        }
+    }
+    Err(TERMINAL_LAUNCH_REASON.to_string())
+}
+
+/// Real launch: detached child, fixed (empty) argv, no shell, cwd chosen by
+/// Rust. The child is reaped on a thread so no zombie is left behind.
+pub fn launch_terminal(session_dir: Option<std::path::PathBuf>) -> Result<(), String> {
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    launch_terminal_with(&path_var, session_dir, home, |exe, dir| {
+        match std::process::Command::new(exe)
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                std::thread::spawn(move || { let _ = child.wait(); });
+                true
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+/// The platform entry the command calls: focus, else launch (terminal only).
+pub fn focus_or_launch_running(target: Target) -> Result<(), String> {
+    // The daemon's session rows carry only a directory BASENAME (never a full
+    // path), so there is no trusted full cwd to pass: `$HOME` is used.
+    focus_or_launch(target, focus_running_window, || launch_terminal(None))
+}
+
 fn validated_target(payload: &Value) -> Result<Target, BridgeError> {
     let map = payload
         .as_object()

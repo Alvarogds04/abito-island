@@ -198,3 +198,105 @@ fn focus_from_windows_is_honest_when_no_window_matches() {
     assert_eq!(e, PLATFORM_FOCUS_REASON);
     assert!(focus_from_windows(Target::Terminal, &windows, |_| true).is_ok());
 }
+
+// ---- the ↗ button always opens a terminal ----------------------------------
+
+use std::path::{Path, PathBuf};
+
+fn tmp_dir(tag: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("abito-focus-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn fake_bin(dir: &Path, name: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let p = dir.join(name);
+    std::fs::write(&p, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn terminal_focus_failure_launches_a_terminal_instead_of_failing() {
+    for failure in [no_window_reason(Target::Terminal), PLATFORM_FOCUS_REASON.to_string()] {
+        let mut launched = 0;
+        let r = focus_or_launch(Target::Terminal, |_| Err(failure.clone()), || { launched += 1; Ok(()) });
+        assert_eq!(r, Ok(()));
+        assert_eq!(launched, 1);
+    }
+}
+
+#[test]
+fn an_existing_terminal_is_focused_and_nothing_is_launched() {
+    let r = focus_or_launch(Target::Terminal, |_| Ok(()), || panic!("must not launch"));
+    assert_eq!(r, Ok(()));
+}
+
+#[test]
+fn session_and_editor_targets_never_launch_anything() {
+    for t in [Target::Session, Target::Editor] {
+        let r = focus_or_launch(t, |_| Err("nada".to_string()), || panic!("must not launch"));
+        assert_eq!(r, Err("nada".to_string()));
+    }
+}
+
+#[test]
+fn a_failed_launch_is_a_short_user_facing_reason() {
+    let r = focus_or_launch(Target::Terminal, |_| Err("x".to_string()), || Err(TERMINAL_LAUNCH_REASON.to_string()));
+    let msg = r.unwrap_err();
+    assert_eq!(msg, "No se pudo abrir una terminal.");
+    assert!(!msg.contains("clase"));
+}
+
+#[test]
+fn launch_picks_the_first_available_terminal_in_priority_order_with_fixed_argv() {
+    let bin = tmp_dir("bins");
+    fake_bin(&bin, "kgx");
+    fake_bin(&bin, "x-terminal-emulator");
+    fake_bin(&bin, "gnome-terminal");
+    let home = tmp_dir("home");
+    let mut seen: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let r = launch_terminal_with(bin.to_str().unwrap(), None, Some(home.clone()), |exe, dir| {
+        seen.push((exe.to_path_buf(), dir.to_path_buf()));
+        true
+    });
+    assert_eq!(r, Ok(()));
+    assert_eq!(seen, vec![(bin.join("gnome-terminal"), home)]);
+    let _ = std::fs::remove_dir_all(&bin);
+}
+
+#[test]
+fn xdg_terminal_exec_wins_and_a_failing_spawn_falls_through_to_the_next() {
+    let bin = tmp_dir("bins2");
+    fake_bin(&bin, "xdg-terminal-exec");
+    fake_bin(&bin, "kgx");
+    let home = tmp_dir("home2");
+    let mut tried: Vec<String> = Vec::new();
+    let r = launch_terminal_with(bin.to_str().unwrap(), None, Some(home), |exe, _| {
+        tried.push(exe.file_name().unwrap().to_string_lossy().into_owned());
+        exe.ends_with("kgx")
+    });
+    assert_eq!(r, Ok(()));
+    assert_eq!(tried, vec!["xdg-terminal-exec", "kgx"]);
+}
+
+#[test]
+fn no_terminal_on_path_is_the_short_reason_and_spawns_nothing() {
+    let empty = tmp_dir("empty");
+    let r = launch_terminal_with(empty.to_str().unwrap(), None, None, |_, _| panic!("nothing to spawn"));
+    assert_eq!(r, Err(TERMINAL_LAUNCH_REASON.to_string()));
+}
+
+#[test]
+fn launch_dir_is_the_known_session_dir_else_home_else_root() {
+    let session = tmp_dir("sess");
+    let home = tmp_dir("hm");
+    let missing = home.join("nope");
+    assert_eq!(resolve_launch_dir(Some(session.clone()), Some(home.clone())), session);
+    assert_eq!(resolve_launch_dir(Some(missing.clone()), Some(home.clone())), home);
+    assert_eq!(resolve_launch_dir(None, Some(home.clone())), home);
+    assert_eq!(resolve_launch_dir(Some(PathBuf::from("relative")), Some(home.clone())), home);
+    assert_eq!(resolve_launch_dir(None, Some(missing)), PathBuf::from("/"));
+    assert_eq!(resolve_launch_dir(None, None), PathBuf::from("/"));
+}

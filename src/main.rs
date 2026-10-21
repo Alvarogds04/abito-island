@@ -1012,7 +1012,7 @@ async fn focus_host(
         &payload,
         &mut rate,
         now_ms(),
-        abito_island::focushost::focus_running_window,
+        abito_island::focushost::focus_or_launch_running,
     )
 }
 

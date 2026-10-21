@@ -218,10 +218,10 @@ function mount(V) {
     show(lastView);
   };
   jump.addEventListener('click', async event => {
-    if (event.isTrusted !== true || !canFocus() || !memory.focus || jump.hidden || jump.disabled) return;
+    if (event.isTrusted !== true || !memory.focus || jump.hidden || jump.disabled) return;
     jump.disabled = true;
     try { await invoke('focus_host', { payload: { target: 'terminal' } }); }
-    catch { const live = document.getElementById('pill-live'); if (live) live.textContent = 'No se pudo abrir una terminal. La selección es por clase, no por sesión.'; }
+    catch { const live = document.getElementById('pill-live'); if (live) live.textContent = 'No se pudo abrir una terminal.'; }
     finally { jump.disabled = false; }
   });
   const memory = V.newMemory();
@@ -276,8 +276,8 @@ function mount(V) {
     ticker.el.title = task?.steps?.at(-1) ?? ''; // full text fallback when a long step is cut
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
     jump.hidden = !memory.focus || integrationFocused;
-    jump.setAttribute('aria-label', `Abrir una terminal por clase · ${w?.name || ''}`);
-    jump.title = 'Terminal por clase; no identifica la ventana de esta sesión';
+    jump.setAttribute('aria-label', `Abrir una terminal · ${w?.name || ''}`);
+    jump.title = 'Abrir una terminal';
     document.dispatchEvent(new CustomEvent('abito:sessions-view', { detail: { view, focusId: memory.focus?.id || null } }));
   }
 
