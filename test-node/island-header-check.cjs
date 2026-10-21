@@ -24,6 +24,10 @@ test('markup: home / chat / + on the left, gear / mute on the right, each with a
   assert.match(header, /<div class="tabs"[\s\S]*id="home-tab"[\s\S]*id="open-chat"[\s\S]*id="open-new"[\s\S]*<\/div>\s*<div class="header-actions">[\s\S]*id="open-settings"[\s\S]*id="toggle-sound"/);
   for (const id of ['home-tab', 'open-chat', 'open-new', 'open-settings', 'toggle-sound']) assert.match(header, new RegExp(`id="${id}"[^>]*aria-label="[^"]+"`), id);
   for (const n of [...header.matchAll(/data-cc-icon="(\w+)"/g)].map(m => m[1])) assert.ok(H.ICON_NAMES.includes(n), n);
+  // Human (21/10): the chat button did the same as «+» and did not work by itself; only «+» is shown.
+  // #open-chat stays in the DOM (hidden) because «+», the chat shortcut and the ask button drive it.
+  assert.match(header, /<button id="open-chat"[^>]*\shidden[\s>]/, 'the chat tab is hidden');
+  assert.doesNotMatch(header, /<button id="open-new"[^>]*\shidden[\s>]/, '«+» stays visible');
   assert.equal((html.match(/src="island-header\.js"/g) || []).length, 1);
   assert.ok(html.indexOf('src="island.js"') < html.indexOf('src="island-header.js"'));
 });
