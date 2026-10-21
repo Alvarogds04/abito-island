@@ -39,6 +39,7 @@ async function open(scenario = {}) {
     const prefs = { sound: true, gain: .12, autoCloseSeconds: 15, absenceSeconds: 10, openOnHover: false, declaredPills: ['agent_codex', 'ai_google', 'integration_github', 'integration_vercel'], pillColors: {}, avatarColors: {}, mainPill: 'integration_claude', theme: 'system', displayName: 'Alvaro', monitor: null, chosenModels: {}, windowContext: false, windowContextAvailable: true, abitoInstructions: '', islandAgents: [], showPlanInNotch: false, showCodexPlanInNotch: false, openSettingsAtLaunch: false };
     const dictation = { prefs: { enabled: true, key: 'right_ctrl', edge: 'bottom', mic: '', keepDays: 30, cleanup: false, defaultStyle: 'natural' }, models: { parakeet: { state: 'ready' }, downloadMb: 612 }, keys: 'ok', hasClaudeKey: false, mics: [{ name: 'Micrófono USB', default: true }], platform: 'linux', autostarted: false };
     const agentIds = ['claude-code', 'codex', 'copilot-cli', 'opencode', 'recap', 'statusline'];
+    const noAccounts = scenario.noAccounts === true; // a fresh install: the account store answers but holds nothing
     const agents = agentIds.map(id => ({ id, state: scenario.agentsOk ? 'not_connected' : 'error', ...(scenario.agentsOk ? { plan_hash: 'a'.repeat(64), summary: 'Add managed hooks', reviewable: true } : {}) })); // the real daemon in the validation run answered `error` for every agent
     const failInstall = scenario.failInstall === true;
     const binding = id => ({ combo: id === 'toggleIsland' ? 'Ctrl+Alt+A' : 'Ctrl+Alt+T', effective: 'Pulse <Shift><Control>n', enabled: true, status: 'active' });
@@ -58,7 +59,7 @@ async function open(scenario = {}) {
         if (cmd === 'voice_action') return { prefs: { enabled: false, output: 'system', gender: 'female', sensitivity: 50 }, vad: { state: 'ready' }, parakeet: { state: 'ready' }, listening: false, error: null };
         if (cmd === 'agent_action') {
           if (failInstall && a === 'agent_connect') throw new Error('host refused');
-          const base = { connection: 'connected', providers: [{ id: 'pi', name: 'Pi', configured: false, methods: ['api_key'] }, { id: 'claude', name: 'Claude', configured: true, methods: ['oauth'] }], accounts: [{ accountId: 'acc-claude', provider: 'claude', configured: true, label: 'alvaro@x' }], ownedAccounts: { accounts: [] }, auth: {}, connectors: { items: [] }, sessions: { rows: [], truncated: false } };
+          const base = { connection: 'connected', providers: [{ id: 'pi', name: 'Pi', configured: false, methods: ['api_key'] }, { id: 'claude', name: 'Claude', configured: true, methods: ['oauth'] }], accounts: [{ accountId: 'acc-claude', provider: 'claude', configured: true, label: 'alvaro@x' }], ownedAccounts: noAccounts ? { accounts: [] } : { accounts: [] }, auth: {}, connectors: { items: [] }, sessions: { rows: [], truncated: false } };
           return a === 'agents_list' || a === 'hooks_preview' ? { ...base, agents } : base;
         }
         if (cmd === 'daemon_action') return { ok: true };

@@ -169,6 +169,29 @@ test('S26 deep link: an unknown or hostile page name falls back to the default p
   }
 });
 
+// Every Ajustes page, as the sidebar lists them. A card or input-looking box with nothing in it is a defect wherever it appears: the
+// human found it three times (Pills, Integraciones, Conexiones), each time by eye, each time the same pattern (a card created before
+// its children exist, then left empty by the state).
+const PAGES = ['Dictado', 'Notetaker', 'Estadísticas', 'Diccionario', 'Fragmentos', 'Estilos', 'Ajustes', 'General', 'Pestañas activas', 'Agentes', 'Chat', 'Conexiones', 'OK Abito', 'Integraciones', 'Teléfono Android', 'Atajos'];
+const EMPTY_BOXES = () => [...document.querySelectorAll('.hub-page .hub-card, .hub-page section, .hub-page .abito-card, .hub-page .hub-row, .hub-page .row')].filter(el => {
+  const b = el.getBoundingClientRect(); if (b.width < 40 || b.height < 8) return false;               // not drawn
+  if (el.querySelector('input, select, textarea, button, a, svg, canvas, img, .switch, .keycap, .swatch, .hub-segmented')) return false;
+  const text = (el.textContent || '').replace(/\s+/g, '');                                            // text OR a control OR a graphic: otherwise it is just a box
+  return text.length === 0;
+}).map(el => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} in «${(el.closest('section') && el.closest('section').querySelector('.hub-label, h2') || { textContent: '(page)' }).textContent.trim().slice(0, 30)}» ${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}`);
+
+for (const [label, scenario] of [['a normal host', {}], ['a fresh install (no accounts, no agents reported, nothing connected)', { noAccounts: true, agentsOk: false }]]) {
+  test(`no empty card or input-looking box anywhere in Ajustes (${label})`, async r => {
+    await r.close();
+    const f = await H.open({ width: 960, height: 680, ...scenario });
+    try {
+      const bad = [];
+      for (const title of PAGES) { await f.go(title); await f.page.waitForTimeout(250); const found = await f.page.evaluate(EMPTY_BOXES); for (const x of found) bad.push(`[${title}] ${x}`); }
+      assert.deepEqual(bad, [], `empty boxes: ${JSON.stringify(bad, null, 1)}`);
+    } finally { await f.close(); }
+  });
+}
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

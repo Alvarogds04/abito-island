@@ -12,7 +12,10 @@ export function action(text: string, fn: () => void, disabled = false): HTMLButt
 }
 export const field = (id: string, title: string, type = 'text', value = '') => h('input', { id, class: 'hub-input', type, value, 'aria-label': title, autocomplete: type === 'password' ? 'new-password' : 'off' }) as HTMLInputElement;
 export const note = (text: string) => h('p', { class: 'hub-note', role: 'status', text });
-export const section = (title: string, ...children: HTMLElement[]) => h('section', {}, label(title), card(...children));
+// A section with no children yet must not draw an empty card: several pages create the section first and append their own cards or
+// rows afterwards (outside it), and the empty box above them was found by eye on Pills, Integraciones, Chat and Conexiones (#503).
+export const section = (title: string, ...children: HTMLElement[]) =>
+  children.some(Boolean) ? h('section', {}, label(title), card(...children)) : h('section', {}, label(title));
 export const status = (v: any) => row(v?.word || v?.say || 'Leyendo…', v?.note || null);
 // Keep the legacy editor/search caret when a changed backend frame really needs a paint.
 export function preserveFocus(root: HTMLElement): () => void {

@@ -20,7 +20,7 @@ function action(text, fn, disabled = false) {
 }
 const field = (id, title, type = "text", value = "") => h("input", { id, class: "hub-input", type, value, "aria-label": title, autocomplete: type === "password" ? "new-password" : "off" });
 const note = (text) => h("p", { class: "hub-note", role: "status", text });
-const section = (title, ...children) => h("section", {}, label(title), card(...children));
+const section = (title, ...children) => children.some(Boolean) ? h("section", {}, label(title), card(...children)) : h("section", {}, label(title));
 const status = (v) => row(v?.word || v?.say || "Leyendo…", v?.note || null);
 function preserveFocus(root) {
   const active = document.activeElement;
