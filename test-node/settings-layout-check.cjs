@@ -60,6 +60,14 @@ test('S20 Agentes: a refused install shows ONE sentence in the status line, and 
   } finally { await f.close(); }
 });
 
+test('S21 Chat: «Probar» is VISIBLE on a card without a key, disabled, and its reason is on screen as text', async r => {
+  await r.go('Chat');
+  const probes = await r.page.evaluate(() => [...document.querySelectorAll('.abito-card')].filter(c => c.querySelector('input[id^="chat-key-"]')).map(c => { const b = [...c.querySelectorAll('button')].find(x => x.textContent === 'Probar'); if (!b) return null; const rc = b.getBoundingClientRect(); const reason = c.querySelector('.test-reason');
+    return { card: c.querySelector('h2').textContent.trim().slice(0, 12), visible: rc.width > 0 && rc.height > 0, disabled: b.disabled, reason: reason ? reason.textContent : null, reasonVisible: reason ? reason.getBoundingClientRect().height > 0 : false }; }));
+  assert(probes.length >= 4 && probes.every(Boolean), `every provider card shows Probar: ${JSON.stringify(probes)}`);
+  for (const p of probes) { assert(p.visible, `${p.card}: Probar not visible`); assert(p.disabled, `${p.card}: Probar must be disabled without a key`); assert.equal(p.reason, 'Guarda una clave para poder probarla.'); assert(p.reasonVisible, `${p.card}: the reason must be on screen`); }
+});
+
 test('S23 Integraciones: every card keeps its state in ONE column and its actions off the card border', async r => {
   await r.go('Integraciones');
   const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cs = getComputedStyle(c), cb = c.getBoundingClientRect(); const inner = cb.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
