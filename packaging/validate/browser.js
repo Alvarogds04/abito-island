@@ -111,7 +111,7 @@
     await emit('validate-input',{kind:'move',x:20,y:500});
     await invoke('desktop_action',{action:'close'});
     const began=performance.now();
-    await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=4.1,'ausencia de 5 s deja franja',15000);
+    await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=8.1,'ausencia de 5 s deja franja',15000);
     const native=await invoke('desktop_action',{action:'snapshot'});
     const elapsed=performance.now()-began;
     return {ok:native.state==='compact' && elapsed>=4000 && elapsed<=15000,elapsed,native:native.state,bottom:byId('island').getBoundingClientRect().bottom};
@@ -169,11 +169,11 @@
       await wait(()=>phase()==='compact','cierre tras desfijar',7000);
       const closed=await invoke('desktop_action',{action:'snapshot'});
       await invoke('prefs_action',{action:'sound_off'});
-      await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=4.1,'mute oculta hacia borde');
+      await wait(()=>byId('capsule').dataset.edgeHidden==='true' && byId('island').getBoundingClientRect().bottom<=8.1,'mute oculta hacia borde');
       const mutedStrip=byId('island').getBoundingClientRect().bottom;
       await inside(); await wait(()=>byId('capsule').dataset.edgeHidden==='false','mouse despierta isla silenciada');
       return {mutedStrip,ok:hoverOff.state==='compact' && entered.state==='expanded' && grace.state==='expanded' && held.state==='expanded' && noCountdown && closed.state==='compact',hoverOff:hoverOff.state,entered:entered.state,grace:grace.state,held:held.state,noCountdown,closed:closed.state,
-        coverage:'XTest immediate hover-on/off, leave grace, pin/countdown, mute slides to 4px strip and pointer wakes it; absence/mask covered in edgeIdle/edgeWake'};
+        coverage:'XTest immediate hover-on/off, leave grace, pin/countdown, mute slides up leaving the 8px zone (24px hidden offset) and pointer wakes it; absence/mask covered in edgeIdle/edgeWake'};
     } finally {
       await outside();
       await invoke('prefs_action',{action:original.sound ? 'sound_on':'sound_off'});
