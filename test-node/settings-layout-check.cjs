@@ -68,12 +68,19 @@ test('S21 Chat: «Probar» is VISIBLE on a card without a key, disabled, and its
   for (const p of probes) { assert(p.visible, `${p.card}: Probar not visible`); assert(p.disabled, `${p.card}: Probar must be disabled without a key`); assert.equal(p.reason, 'Guarda una clave para poder probarla.'); assert(p.reasonVisible, `${p.card}: the reason must be on screen`); }
 });
 
-test('S23 Integraciones: every card keeps its state in ONE column and its actions off the card border', async r => {
+test('S23 Integraciones: state and actions form COLUMNS shared by every card (a row without «¿Dónde?» no longer shifts «Conectar»), off the card border', async r => {
   await r.go('Integraciones');
-  const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cs = getComputedStyle(c), cb = c.getBoundingClientRect(); const inner = cb.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
-    const act = [...c.querySelectorAll('.int-actions button')].filter(b => b.offsetParent); const last = act.at(-1); return { id: c.id, gap: last ? Math.round(inner - last.getBoundingClientRect().right) : null, badge: Math.round(c.querySelector('.card-state').getBoundingClientRect().left) }; }));
-  const tight = rows.filter(x => x.gap !== null && x.gap < 8); assert.deepEqual(tight, [], `actions touching the card border: ${JSON.stringify(tight)}`);
-  assert.equal(new Set(rows.filter(x => x.gap !== null).map(x => x.badge)).size, 1, `state badges are not aligned: ${JSON.stringify(rows.map(x => [x.id, x.badge]))}`);
+  const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cb = c.getBoundingClientRect();
+    const vis = sel => [...c.querySelectorAll(sel)].filter(b => b.offsetParent);
+    const connect = vis('.int-actions button').find(b => b.textContent === 'Conectar'), help = vis('.int-actions button').find(b => b.textContent.startsWith('¿Dónde'));
+    const last = vis('.int-actions button').at(-1);
+    return { id: c.id, badge: Math.round(c.querySelector('.card-state').getBoundingClientRect().left), connect: connect ? Math.round(connect.getBoundingClientRect().left) : null,
+      help: help ? Math.round(help.getBoundingClientRect().left) : null, borderGap: last ? Math.round(cb.right - last.getBoundingClientRect().right) : null }; }));
+  const tight = rows.filter(x => x.borderGap !== null && x.borderGap < 8); assert.deepEqual(tight, [], `actions touching the card border: ${JSON.stringify(tight)}`);
+  const col = key => [...new Set(rows.filter(x => x[key] !== null).map(x => x[key]))];
+  assert.equal(col('badge').length, 1, `state badges are not in one column: ${JSON.stringify(rows.map(x => [x.id, x.badge]))}`);
+  assert.equal(col('connect').length, 1, `«Conectar» is not in one column: ${JSON.stringify(rows.filter(x => x.connect !== null).map(x => [x.id, x.connect]))}`);
+  assert.equal(col('help').length, 1, `«¿Dónde?» is not in one column: ${JSON.stringify(rows.filter(x => x.help !== null).map(x => [x.id, x.help]))}`);
 });
 
 test('S24 Teléfono: no line of the hero ends in a hyphen that splits a word («Wi-/Fi.»)', async r => {
