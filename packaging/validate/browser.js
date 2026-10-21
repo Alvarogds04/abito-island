@@ -237,7 +237,7 @@
     await click(jump);
     await wait(()=>!jump.disabled && byId('pill-live').textContent.includes('No se pudo abrir una terminal'),'salto por clase informa ausencia de terminal');
     const count=byId('overview-view').querySelector('.who .count');
-    const noFakeSteps=count.hidden && byId('overview-view').textContent.includes('Pasos de herramientas no disponibles');
+    const noFakeSteps=count.hidden && byId('overview-view').textContent.includes('Sin pasos de herramientas');
     const grid=[...byId('pill-choices').children].map(n=>n.dataset.pillId);
     return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.length<=4 && !grid.includes(beta.id) && jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto por clase no coinciden'};
   }
