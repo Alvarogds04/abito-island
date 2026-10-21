@@ -809,6 +809,12 @@
     connectionEl.setAttribute('aria-label', conn.action ? conn.actionAria : conn.aria);
     connectionEl.disabled = !conn.action;
     lastConn = conn;
+    connectionEl.dataset.kind = conn.kind;
+    const engine = O.engineRowView(conn), engineEl = $('overview-engine');
+    if (engineEl) {
+      engineEl.hidden = !engine;
+      if (engine) { $('overview-engine-label').textContent = engine.label; const link = $('overview-engine-link'); link.textContent = engine.link; link.setAttribute('aria-label', engine.aria); }
+    }
     putIcon($('connection-icon'), iconNode(icon(conn.icon)));
     $('connection-word').textContent = conn.word;
     const bridge = O.bridgeView(snapshot);
@@ -918,6 +924,7 @@
       renderNotices(current); renderCard();
     }, () => {});
   });
+  $('overview-engine-link').addEventListener('click', event => { if (event.isTrusted === true && lastConn && lastConn.action) document.dispatchEvent(new CustomEvent('abito:settings-select', { detail: lastConn.action.target })); });
   // «Preguntar» is the chat tab (Coucou: Ask Claude → prompt view).
   const askButton = $('overview-ask');
   if (askButton) askButton.addEventListener('click', event => { if (event.isTrusted === true) { const t = $('open-chat'); if (t) t.click(); } });

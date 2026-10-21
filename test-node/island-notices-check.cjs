@@ -119,4 +119,17 @@ test('«Sin motor» is a real button (keyboard + mouse), enabled only when the c
   assert.match(css, /#notice-row button\.chip:focus-visible/);
 });
 
+test('the left idle card carries Coucou\'s status row: 5px dot + «Sin motor» + a plain link button (trusted click -> abito:settings-select), keyboard-focusable; the strip chip is not duplicated while that card shows', () => {
+  const html = read('index.html');
+  assert.match(html, /<div id="overview-engine" class="engine-row" hidden><span class="engine-dot"[^>]*><\/span><span id="overview-engine-label"[^>]*><\/span><button id="overview-engine-link" class="engine-link" type="button"><\/button><\/div>/);
+  const src = read('island.js');
+  assert.match(src, /O\.engineRowView\(conn\)/);
+  assert.match(src, /\$\('overview-engine-link'\)\.addEventListener\('click', event => \{ if \(event\.isTrusted === true && lastConn && lastConn\.action\)/);
+  const css = read('style.css') + read('vendor/coucou/island/island.css');
+  assert.match(css, /\.engine-dot \{[^}]*width: 5px/);
+  assert.match(css, /\.engine-link \{[^}]*font: 500 11px/);
+  assert.match(css, /\.engine-link:focus-visible/);
+  assert.match(css, /#overview-view:not\(\[data-ticker="on"\]\):not\(\[data-spotify="on"\]\) ~ #notices #connection\[data-kind="down"\]/);
+});
+
 if (failed) process.exit(1);

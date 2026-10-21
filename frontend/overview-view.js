@@ -315,6 +315,9 @@
   // §3: while a card is on screen the notices strip steps aside, so a missing
   // Pi / downed channel stays visible next to the card (icon + word). A
   // healthy connection needs nothing there.
+  // Coucou's idle card (IslandViewContent.swift not-connected): status dot + label, then a plain link button.
+  const engineRowView = conn => (conn && conn.kind === 'down' && conn.action
+    ? { label: conn.word, link: 'Conectar Pi…', target: conn.action.target, aria: 'Conectar Pi: abrir Ajustes → Conexiones' } : null);
   const cardConnection = conn => (conn && conn.word ? conn : null);
 
   // S10 (L22): Coucou's finished card (views.ts buildFinished): who-row «<name> <verb>», the final message in bold,
@@ -356,5 +359,5 @@
     }
     return { p, v };
   }
-  return { springStep, springSubsteps, SPRING_MAX_DT, SPRING_SUBSTEP, finishedCardView, expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
+  return { springStep, springSubsteps, SPRING_MAX_DT, SPRING_SUBSTEP, finishedCardView, expiryLabel, expiryAria, cardView, connectionView, noticeView, noticeOpenView, noticeAge, noticeAgeDetail, noticeBandView, noticeListView, infoLabel, cardConnection, engineRowView, gestureFor, snapshotPose, motionState, viewPhase, honorSystemMotion, bridgeView, hostPoseView, choosePose, hotkeyView, HOST_ERROR_MS, hoverScale, HOVER_SCALE };
 });

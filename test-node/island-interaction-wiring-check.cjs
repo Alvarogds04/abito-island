@@ -165,7 +165,7 @@ function engagementFixture(openOnHover) {
       bridgeView: () => null, noticeView: () => null, hotkeyView: () => null,
       noticeBandView: OV.noticeBandView, finishedCardView: OV.finishedCardView,
       noticeListView: OV.noticeListView,
-      cardConnection: () => null, expiryLabel: () => '', expiryAria: () => '',
+      cardConnection: () => null, engineRowView: () => null, expiryLabel: () => '', expiryAria: () => '',
       cardView: () => ({ kind: 'inert', tone: '', icon: null, word: '', aria: '' }),
       infoLabel: a => a, hoverScale: () => 1,
     },

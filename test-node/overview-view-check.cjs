@@ -956,6 +956,14 @@ test('Sin motor is actionable: the down view carries a real action (open Conexio
   assert.equal(O.connectionView({ unavailable: true, connections: 0 }).action, undefined);
 });
 
+test('Sin motor card row (Coucou idle card): dot + label + short link; engineRowView only exists for the down state', () => {
+  const row = O.engineRowView(O.connectionView({ connections: 0 }));
+  assert.deepEqual(row, { label: 'Sin motor', link: 'Conectar Pi…', target: 'accounts', aria: 'Conectar Pi: abrir Ajustes → Conexiones' });
+  assert.equal(O.engineRowView(O.connectionView({ connections: 1 })), null);
+  assert.equal(O.engineRowView(O.connectionView({ unavailable: true, connections: 0 })), null);
+  assert.equal(O.engineRowView(null), null);
+});
+
 console.log(`overview-view-check: ${passed} passed`);
 
 test('T7.3 approval card markup: «Espera tu respuesta» caption, fold inside the action row, command strip', () => {
