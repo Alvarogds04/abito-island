@@ -40,13 +40,18 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
   const s=session(invoke,listen,timers),{root,call,work}=s;
   root.style.setProperty('display','contents');
   const views:Record<string,any>=Object.fromEntries(SHORTCUTS.filter(d=>d.ported).map(d=>[d.id,null]));
-  let recording:string|null=null,busy=false;
-  const resume=()=>call('hotkey_action',{action:'resume'});
+  let recording:string|null=null,busy=false,capturing=false,missed=false;
+  // While a key is being captured the host RELEASES every grab (suspend) and pushes «unsupported / no key» for ALL actions. Those
+  // pushes describe the pause, not the bindings: storing them made every row read «No disponible» and the first one its raw combo
+  // (#503). They are ignored while capturing; if any arrived, the real state is read again once the capture ends (and ONLY then,
+  // so a capture that saw no push costs no extra reads).
+  const refreshAll=()=>{for(const id of Object.keys(views))work(()=>call('hotkey_action',payloadFor(id,{action:'view'})),next=>{views[id]=next;if(!capturing)draw();});};
+  const resume=()=>call('hotkey_action',{action:'resume'}).finally(()=>{capturing=false;if(missed){missed=false;if(s.alive())refreshAll();}});
   function stopRecording(){recording=null;work(resume).finally(()=>{if(s.alive())draw();});draw();}
   function startRecording(id:string){
     if(recording===id){stopRecording();return;}
-    busy=true;draw();
-    work(()=>call('hotkey_action',{action:'suspend'}),()=>{recording=id;},()=>{recording=null;})
+    busy=true;capturing=true;draw();
+    work(()=>call('hotkey_action',{action:'suspend'}),()=>{recording=id;},()=>{recording=null;capturing=false;})
       .finally(()=>{busy=false;if(s.alive()){draw();list.querySelector<HTMLButtonElement>('.recording')?.focus();}else invoke('hotkey_action',{payload:{action:'resume'}}).catch(()=>{});});
   }
   const payloadFor=(id:string,payload:any)=>id==='toggleIsland'?payload:{...payload,id};
@@ -138,7 +143,7 @@ export async function renderShortcuts({invoke,V,listen,timers}:any) {
   draw();
   for(const id of Object.keys(views)){
     work(()=>call('hotkey_action',payloadFor(id,{action:'view'})),next=>{views[id]=next;draw();});
-    s.watch(id==='toggleIsland'?'hotkey:state':id==='desktopToggle'?'hotkey-desktop:state':`hotkey-${id}:state`,next=>{views[id]=next;if(!recording)draw();});
+    s.watch(id==='toggleIsland'?'hotkey:state':id==='desktopToggle'?'hotkey-desktop:state':`hotkey-${id}:state`,next=>{if(capturing||recording){missed=true;return;}views[id]=next;draw();});
   }
   const mounted=s.finish(),dispose=mounted.dispose,settled=mounted.settled;
   mounted.dispose=()=>{if(recording)invoke('hotkey_action',{payload:{action:'resume'}}).catch(()=>{});recording=null;recap.dispose();dispose();};

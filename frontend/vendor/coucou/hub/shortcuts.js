@@ -35,8 +35,20 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
   const s = session(invoke, listen, timers), { root, call, work } = s;
   root.style.setProperty("display", "contents");
   const views = Object.fromEntries(SHORTCUTS.filter((d) => d.ported).map((d) => [d.id, null]));
-  let recording = null, busy = false;
-  const resume = () => call("hotkey_action", { action: "resume" });
+  let recording = null, busy = false, capturing = false, missed = false;
+  const refreshAll = () => {
+    for (const id of Object.keys(views)) work(() => call("hotkey_action", payloadFor(id, { action: "view" })), (next) => {
+      views[id] = next;
+      if (!capturing) draw();
+    });
+  };
+  const resume = () => call("hotkey_action", { action: "resume" }).finally(() => {
+    capturing = false;
+    if (missed) {
+      missed = false;
+      if (s.alive()) refreshAll();
+    }
+  });
   function stopRecording() {
     recording = null;
     work(resume).finally(() => {
@@ -50,11 +62,13 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
       return;
     }
     busy = true;
+    capturing = true;
     draw();
     work(() => call("hotkey_action", { action: "suspend" }), () => {
       recording = id;
     }, () => {
       recording = null;
+      capturing = false;
     }).finally(() => {
       busy = false;
       if (s.alive()) {
@@ -190,8 +204,12 @@ async function renderShortcuts({ invoke, V, listen, timers }) {
       draw();
     });
     s.watch(id === "toggleIsland" ? "hotkey:state" : id === "desktopToggle" ? "hotkey-desktop:state" : `hotkey-${id}:state`, (next) => {
+      if (capturing || recording) {
+        missed = true;
+        return;
+      }
       views[id] = next;
-      if (!recording) draw();
+      draw();
     });
   }
   const mounted = s.finish(), dispose = mounted.dispose, settled = mounted.settled;

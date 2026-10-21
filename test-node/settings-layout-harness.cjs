@@ -42,13 +42,20 @@ async function open(scenario = {}) {
     const noAccounts = scenario.noAccounts === true; // a fresh install: the account store answers but holds nothing
     const agents = agentIds.map(id => ({ id, state: scenario.agentsOk ? 'not_connected' : 'error', ...(scenario.agentsOk ? { plan_hash: 'a'.repeat(64), summary: 'Add managed hooks', reviewable: true } : {}) })); // the real daemon in the validation run answered `error` for every agent
     const failInstall = scenario.failInstall === true;
-    const binding = id => ({ combo: id === 'toggleIsland' ? 'Ctrl+Alt+A' : 'Ctrl+Alt+T', effective: 'Pulse <Shift><Control>n', enabled: true, status: 'active' });
+    // The shortcuts host: `suspend` (a key is being captured) RELEASES every grab, so each action then reports what the real host reports
+    // with nothing held: status `unsupported`, no `effective` key (hotkeyhost.rs view_of + idle_status). `resume` restores them.
+    let suspended = false;
+    // one DISTINCT combination per action (the real host never hands two actions the same key), and the portal's own sentence for each
+    const COMBOS = { toggleIsland: ['Ctrl+Alt+A', '<Shift><Control>n'], openChat: ['Ctrl+Alt+Space', '<Control><Alt>space'], goToAlert: ['Ctrl+Alt+Shift+A', '<Shift><Control><Alt>a'], jumpToTerminal: ['Ctrl+Alt+T', '<Control><Alt>t'],
+      nextPill: ['Ctrl+Alt+Right', '<Control><Alt>Right'], prevPill: ['Ctrl+Alt+Left', '<Control><Alt>Left'], muteToggle: ['Ctrl+Alt+M', '<Control><Alt>m'], desktopToggle: ['Ctrl+Alt+D', '<Control><Alt>d'], wardrobeToggle: ['Ctrl+Alt+W', '<Control><Alt>w'] };
+    const binding = id => { const [combo, portal] = COMBOS[id] || ['Ctrl+Alt+F9', '<Control><Alt>F9'];
+      return suspended ? { combo, effective: null, enabled: true, status: 'unsupported' } : { combo, effective: `Pulse ${portal}`, enabled: true, status: 'active' }; };
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         const p = (args && args.payload) || {}; const a = p.action; calls.push([cmd, a]);
         if (cmd === 'dictation_action') { if (a === 'status') { await delay(scenario.statusDelayMs || 0); return structuredClone(dictation); } return a === 'history' ? [] : a === 'stats' ? { all: { words: 0, wordsPerMinute: 0 }, streak: 0 } : { ok: true }; }
         if (cmd === 'prefs_action') return a === 'autostart_view' ? { enabled: false } : structuredClone(prefs);
-        if (cmd === 'hotkey_action') return binding(p.id || 'toggleIsland');
+        if (cmd === 'hotkey_action') { if (a === 'suspend') { suspended = true; for (const id of Object.keys(COMBOS)) window.__emit(id === 'toggleIsland' ? 'hotkey:state' : id === 'desktopToggle' ? 'hotkey-desktop:state' : `hotkey-${id}:state`, binding(id)); } if (a === 'resume') suspended = false; return binding(p.id || 'toggleIsland'); }
         if (cmd === 'recap_action') return a === 'prefs' ? { enabled: true } : { ok: true };
         if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1' }] };
         if (cmd === 'sound_action') return a === 'list' ? { names: [] } : { ok: true };

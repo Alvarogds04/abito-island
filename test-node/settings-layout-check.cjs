@@ -110,6 +110,7 @@ test('S25 Atajos: an assigned key reads «Ctrl+Shift+N» (the page\'s canonical 
   const keys = await r.page.evaluate(() => [...document.querySelectorAll('#global-shortcuts .keycap')].map(k => k.textContent.trim()));
   assert(keys.length > 0); for (const k of keys) { assert(!/Pulse|<|>/.test(k), `raw instruction in a key cell: ${k}`); assert(/\+|[A-Z]/.test(k), `not a key name: ${k}`); }
   assert(keys.includes('Ctrl+Shift+N'), `expected «Ctrl+Shift+N» in ${JSON.stringify(keys)}`);
+  assert.equal(new Set(keys).size, keys.length, 'every action shows its OWN key');
   // same modifier order as every other row of the page (Ctrl, Alt, Shift): one convention, not two
   for (const k of keys) { const mods = k.split('+').slice(0, -1); const order = ['Ctrl', 'Alt', 'Shift', 'Win']; assert.deepEqual(mods, [...mods].sort((a, b) => order.indexOf(a) - order.indexOf(b)), `modifier order in ${k}`); }
   await r.page.locator('#global-shortcuts .keycap').first().click(); await r.page.waitForTimeout(300);
@@ -126,6 +127,32 @@ test('Ajustes opens without waiting for the dictation status: the sidebar is the
     await slow.page.waitForTimeout(3300);
     assert.match(await slow.text('.hub-status'), /Listo|Dictado|modelo|micr/i, 'the status line is filled in once the real answer lands');
   } finally { await slow.close(); }
+});
+
+test('S25 Atajos: while ONE row is capturing, the other rows keep their key and their state; only the capturing row changes', async r => {
+  await r.go('Atajos');
+  const read = () => r.page.evaluate(() => [...document.querySelectorAll('#global-shortcuts .shortcut')].map(row => [row.id, row.querySelector('.keycap').textContent.trim(), row.querySelector('.shortcut-state').textContent.replace(/\s+/g, ' ').trim()]));
+  const before = await read(); assert(before.length >= 3, 'several rows');
+  for (const [, , state] of before) assert.match(state, /activo/, 'idle rows are active');
+  await r.page.locator('#global-shortcuts .shortcut').nth(1).locator('.keycap').click(); await r.page.waitForTimeout(500);
+  const during = await read();
+  assert.match(during[1][1], /Pulsa/, 'the capturing row asks for the keys');
+  for (let i = 0; i < during.length; i++) { if (i === 1) continue; assert.deepEqual(during[i], before[i], `row ${during[i][0]} changed while another row was capturing: ${JSON.stringify([before[i], during[i]])}`); }
+  assert.match(during[1][2], /activo|apagado|grabando/i, 'the capturing row keeps a truthful state');
+  await r.page.keyboard.press('Escape'); await r.page.waitForTimeout(500);
+  assert.deepEqual(await read(), before, 'Esc restores every row exactly');
+});
+
+test('S25 Atajos: after a capture that SAW the host\'s pause pushes, the rows are read again and show the real state (no stale «No disponible»)', async r => {
+  await r.go('Atajos');
+  const read = () => r.page.evaluate(() => [...document.querySelectorAll('#global-shortcuts .shortcut')].map(row => [row.querySelector('.keycap').textContent.trim(), row.querySelector('.shortcut-state').textContent.replace(/\s+/g, ' ').trim()]));
+  const before = await read();
+  await r.page.locator('#global-shortcuts .shortcut').nth(2).locator('.keycap').click(); await r.page.waitForTimeout(400);
+  await r.page.keyboard.press('Escape'); await r.page.waitForTimeout(700);
+  assert.deepEqual(await read(), before, 'every row reads exactly as before the capture');
+  const calls = (await r.calls()).filter(([c]) => c === 'hotkey_action').map(([, a]) => a);
+  assert(calls.includes('suspend') && calls.includes('resume'), 'the capture really suspended and resumed the host');
+  assert(calls.lastIndexOf('view') > calls.lastIndexOf('resume'), 'the state was read AGAIN after resume (the pushes during the pause were not trusted)');
 });
 
 test('S26 Conexiones: the sidebar has a «Conexiones» entry that opens a page with the engine state first and one card per account', async r => {
