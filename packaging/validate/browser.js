@@ -551,22 +551,17 @@
     const card=await wait(()=>{const c=document.querySelector('.gh-card');return visible(c) && c.textContent.includes('GitHub') && !c.textContent.includes('Cargando') && c;},'tarjeta GitHub desde gh falso');
     const text=card.textContent;
     const stats=await invoke('github_action',{action:'refresh',section:'pulse'});
-    await wait(()=>card.textContent.includes('18') && card.querySelectorAll('.gh-stat').length===3,'stats y PRs de GitHub');
-    await click(card.querySelectorAll('.gh-stat')[0]);
-    await wait(()=>card.textContent.includes('Fixture PR') && card.querySelector('.gh-row'),'detalle PR');
-    await click(card.querySelector('.gh-back'));
-    await wait(()=>card.querySelectorAll('.gh-stat').length===3,'volver al pulso');
-    await click(card.querySelectorAll('.gh-stat')[2]);
+    // Design 16 (option A): the card IS the PR list with CI state and an explicit [Abrir]; CI of the default branch and activity keep their detail.
+    await wait(()=>card.textContent.includes('18') && card.textContent.includes('Fixture PR') && card.querySelector('.gh-row') && card.querySelector('.gh-open'),'lista de PR con estado y Abrir');
+    await click(card.querySelector('.gh-ci-main'));
     await wait(()=>card.textContent.includes('main') && card.querySelector('.gh-row'),'detalle CI');
     await click(card.querySelector('.gh-back'));
     await wait(()=>card.querySelector('.gh-spark'),'volver al pulso CI');
     await click(card.querySelector('.gh-spark'));
     await wait(()=>card.textContent.includes('23 repos'),'actividad y repositorios');
     await click(card.querySelector('.gh-back'));
-    await wait(()=>card.querySelectorAll('.gh-stat').length===3,'pulso tras actividad');
-    await click(card.querySelectorAll('.gh-stat')[0]);
-    await wait(()=>card.textContent.includes('Fixture PR') && card.querySelector('.gh-row'),'PR visible para captura');
-    // Keep the actual PR detail visible for its native PNG; Spotify releases focus.
+    await wait(()=>card.textContent.includes('Fixture PR') && card.querySelector('.gh-open'),'lista de PR visible para captura');
+    // Keep the PR list visible for its native PNG; Spotify releases focus.
     return {ok:data.available===true && data.activity.total===17 && stats.stats.totalStars===18 && stats.stats.totalRepos===23,text,data,stats,details:['PR','CI','activity']};
   }
   async function mail() {

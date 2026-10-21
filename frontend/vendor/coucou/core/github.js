@@ -47,9 +47,30 @@ const GH_STRINGS = {
   get noRepos() {
     return t("no repos");
   },
+  get open() {
+    return t("Open");
+  },
+  openRef: (ref) => t("Open {ref} on GitHub", { ref }),
+  prCount: (n) => tn("{count} PR", "{count} PRs", n),
+  reviewCount: (n) => tn("{count} review", "{count} reviews", n),
+  get noCI() {
+    return t("no CI");
+  },
+  mainCIAria: (state) => t("CI: {state}", { state }),
   get unknown() {
     return t("unknown");
   },
+  // Design 16 (option A)
+  get open() {
+    return t("Open");
+  },
+  openRef: (ref) => t("Open {ref} on GitHub", { ref }),
+  prCount: (n) => tn("{count} PR", "{count} PRs", n),
+  reviewCount: (n) => tn("{count} review", "{count} reviews", n),
+  get noCI() {
+    return t("no CI");
+  },
+  mainCIAria: (state) => t("CI: {state}", { state }),
   get noContributions() {
     return t("No contributions");
   },
