@@ -1666,7 +1666,11 @@ test('#455 S8 replaces island settings with the standalone window and preserves 
   assert.doesNotMatch(main, /fn open_settings_in_island\(/);
   assert.match(native, /bridge::sender_ok\(webview.label\(\), &url\)\?/);
   assert.match(native, /chat_rate[\s\S]*?\.check\(crate::now_ms\(\)\)\?/);
-  assert.match(native, /parse_settings_window_action\(&payload\)/);
+  // #503 S26: the command validates its payload with the closed request parser (action + optionally ONE page of Rust's own list);
+  // the original action-only parser stays as the narrower contract
+  assert.match(native, /parse_settings_window_request\(&payload\)/);
+  assert.match(native, /pub\(crate\) fn parse_settings_window_action\(/);
+  assert.match(native, /PAGES\.iter\(\)\.copied\(\)\.find\(\|p\| \*p == wanted\)/, 'the page must be matched against the closed list, never interpolated from the payload');
 });
 
 // ---- #366 F094: the quick panel inside the island -------------------------------------------------
