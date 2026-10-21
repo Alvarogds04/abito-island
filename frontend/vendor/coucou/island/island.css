@@ -1136,3 +1136,17 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 #engine-band-link { background: var(--ink); color: var(--primary-ink); }
 #engine-band-skip { background: transparent; color: var(--dim-2); }
 #engine-band button:focus-visible { outline: 2px solid var(--island-live); outline-offset: 2px; }
+
+/* ══ T1 · S12 (12 «Ver todas», B): the full session list is a grid of mascots; every cell >= 44x44 ═════════════════════════════════ */
+.sessions-all-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); grid-auto-rows: 44px; gap: 4px 6px; align-content: start; overflow-y: auto; }
+.sessions-all-row { min-width: 0; }
+.sessions-all-pick { height: 44px; padding: 0 8px; gap: 6px; border-radius: 12px; font: 500 12px var(--font); color: var(--ink); background: rgba(255, 255, 255, 0.04); }
+.sessions-all-pick:focus-visible { outline: 2px solid var(--island-live); outline-offset: -2px; }
+.sessions-all-pick[aria-current="true"] { background: rgba(255, 255, 255, 0.12); }
+.sessions-all-pick .sa-mascot { flex: 0 0 28px; width: 28px; height: 28px; display: grid; place-items: center; }
+.sessions-all-pick .sa-mascot svg { width: 30px; height: 30px; overflow: visible; }
+.sessions-all-pick .sa-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--dim-3); }
+.sessions-all-pick .sa-dot[data-state="working"] { background: var(--go); border-color: var(--go); }
+.card-left > .sessions-all { padding: 4px 12px 4px 108px; }
+.sessions-all-list { margin-top: 2px; gap: 4px 6px; }
+.card-left > .sessions-all, .sessions-all button { pointer-events: auto; }
