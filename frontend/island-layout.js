@@ -142,9 +142,13 @@
   // ---- E: the centre shows the focused session -----------------------------------------------------------------------------------
   /** The session the centre shows: the human's selection if it still exists, else the attributed pending question's session, else
    *  the first one that is working (a running tool counts), else the first the daemon lists (it sorts most recent first). */
-  function pickFocus(rows, selectedId, attributedId) {
+  function pickFocus(rows, selectedId, attributedId, tickerId) {
     if (!Array.isArray(rows) || !rows.length) return null;
     const has = id => typeof id === 'string' && rows.some(r => r && r.id === id);
+    // ONE source of truth: the ticker's own focus (sessions-ticker.js memory.focus). It also drives the ↗ jump and the terminal
+    // shortcut, and it moves for every cause (a blob click, the compact bar's mini mascot, the «principal» preference), so the centre
+    // can never name a different session than the one the jump opens (screen gate: focused «proyecto-beta», centre «workspace»).
+    if (has(tickerId)) return tickerId;
     if (has(selectedId)) return selectedId;
     if (has(attributedId)) return attributedId;
     const working = rows.find(isRunning);
@@ -220,7 +224,7 @@ function mount(L) {
   // E + I: the centre column. Real state, real tool steps only; nothing waiting and nothing running -> the calm state with a CTA.
   function paintCentre(rows, attributedId) {
     if (!centre) return;
-    const id = L.pickFocus(rows, selectedId, attributedId);
+    const id = L.pickFocus(rows, selectedId, attributedId, focusId);
     const row = id ? rows.find(r => r.id === id) : null;
     const v = row ? L.centreView(row, { attributedId }) : null;
     const empty = v ? null : L.emptyView({ view, pending, finished });
@@ -240,7 +244,6 @@ function mount(L) {
       cta.firstElementChild.textContent = empty.cta.label; cta.setAttribute('aria-label', empty.cta.label);
     }
   }
-  doc.addEventListener('abito:session-select', e => { selectedId = e.detail && typeof e.detail.id === 'string' ? e.detail.id : null; publish(); });
   doc.addEventListener('abito:finished-shown', e => { finished = !!(e.detail && e.detail.shown); publish(); });
   // the CTA is the header's own «+» (a new conversation): no new host verb
   if (cta) cta.addEventListener('click', event => { if (event.isTrusted === true) doc.dispatchEvent(new CustomEvent('abito:centre-new')); });

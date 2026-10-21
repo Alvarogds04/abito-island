@@ -376,7 +376,7 @@ test('wiring D/E/I: the centre is fed by island-layout.js; CSS lets the finished
   const lay = fs.readFileSync(path.join(frontend, 'island-layout.js'), 'utf8');
   for (const id of ['col-centre', 'centre-state', 'centre-steps', 'centre-empty']) assert.match(fs.readFileSync(path.join(frontend, 'index.html'), 'utf8'), new RegExp(`id="${id}"`), id);
   assert.match(lay, /pickFocus\(/); assert.match(lay, /centreView\(/); assert.match(lay, /emptyView\(/);
-  assert.match(lay, /abito:session-select/, 'selecting a blob sets the centre');
+  assert.match(lay, /abito:sessions-view/, 'the centre follows the ticker\'s focus event: a blob click, the compact bar\'s mini mascot and the «principal» preference all end there');
   const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
   assert.match(pv, /abito:session-select/, 'the blob click already dispatches the selection the centre listens to');
   assert.equal(decls('#notice-card .title.one-line')['white-space'], 'normal', 'the finished result wraps');
@@ -393,6 +393,23 @@ test('no duplicates: the centre column replaces the old who-row text and the Cou
   assert.equal(who.bottom, '6px', 'the link sits at the bottom of the centre, away from the state line');
   assert.equal(who.top, 'auto');
   assert.ok(decls('.who .see-all'), 'the link keeps its own rule');
+});
+
+// ---- ONE source of truth for «which session is focused»: the ticker's focus (it also drives the ↗ jump and the terminal shortcut) -------
+test('pickFocus: the ticker\'s focus wins over a stale selection; the centre can never name a different session than the ↗ jump targets', () => {
+  const a = row({ id: 's-0000000a', cwd: 'workspace' }), b = row({ id: 's-0000000b', cwd: 'proyecto-beta', state: 'running' });
+  // the human clicked the mini mascot (compact bar) or changed «principal»: the TICKER now focuses `a`, while the layout remembers an older click on `b`
+  assert.equal(L.pickFocus([a, b], 's-0000000b', null, 's-0000000a'), 's-0000000a', 'the ticker\'s focusId decides');
+  assert.equal(L.pickFocus([a, b], null, null, 's-0000000b'), 's-0000000b');
+  assert.equal(L.pickFocus([a, b], null, null, 's-9999999z'), 's-0000000b', 'a focus the list no longer has is dropped: default rules');
+  assert.equal(L.pickFocus([a, b], 's-0000000a', null, null), 's-0000000a', 'without a ticker focus the layout selection still applies (unit use)');
+});
+test('wiring: the centre is painted from the ticker\'s focusId (sessions-view event), and a blob click only asks the ticker to focus — it never keeps a private selection', () => {
+  const lay = fs.readFileSync(path.join(frontend, 'island-layout.js'), 'utf8');
+  assert.match(lay, /L\.pickFocus\(rows, selectedId, attributedId, focusId\)/);
+  assert.doesNotMatch(lay, /abito:session-select', e => \{ selectedId = e\.detail/, 'no private selection set from the click: the ticker answers with abito:sessions-view');
+  const tk = fs.readFileSync(path.join(frontend, 'sessions-ticker.js'), 'utf8');
+  assert.match(tk, /abito:session-select', event => \{ if \(canFocus\(\)\) selectSession/, 'the blob click reaches the ticker\'s own focus');
 });
 
 console.log(`island-layout-check: ${passed} checks ok`);

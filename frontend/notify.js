@@ -275,6 +275,13 @@
     clearTimeout(crossfadeTimer);
     crossfadeTimer = setTimeout(() => { delete capsule.dataset.crossfade; }, (Number.isFinite(raw) ? raw : 400) + 100);
   }
+  let shownSent = null;
+  function announceShown() {
+    const show = !!capsule.dataset.question;
+    if (show === shownSent) return;
+    shownSent = show;
+    document.dispatchEvent(new CustomEvent('abito:question', { detail: { pending: !!(snapshot && N.fromPending(snapshot.pending)), show, reveal: false } }));
+  }
   function render() {
     syncExpiryTimer();
     const view = current();
@@ -285,6 +292,10 @@
     const outcome = view.outcome || null;
     root.inert = !(showing || (outcome && capsule.dataset.view === 'overview'));
     capsule.dataset.question = n ? (view.kind === 'expired' ? 'expired' : 'pending') : (outcome ? 'outcome' : '');
+    // The island's «a question is shown» flag (height, mascot position, «?» badge) used to be told only when a snapshot ARRIVED. The
+    // «Recibida» timer and the local expiry clear data-question from render() alone, so the flag stayed true: the island kept its
+    // 200px height with the mascot 26px lower and the «?» badge (screen gate). Every change of data-question now tells it.
+    announceShown();
     if (n) {
       if (renderedId !== n.id) {
         renderedId = n.id; textEl.value = ''; budget = null; multiDraft = N.newDraft(); wizard = n.form ? N.formStart(n) : null; rowsKey = '';

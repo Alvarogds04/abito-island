@@ -223,9 +223,11 @@
     const own=s.sessions.rows.find(r=>r.tools?.total===2);
     const beta=s.sessions.rows.find(r=>r.kind==='codex' && r.cwd==='proyecto-beta');
     if(!own || !beta) return {ok:false,reason:'faltan los dos proyectos privados',rows:s.sessions.rows};
-    const who=()=>byId('overview-view').querySelector('.who .name').textContent;
+    // A+E: the centre column names the focused session (the old who-row text is hidden); the SAME focus drives the ↗ jump
+    const centreName=()=>byId('overview-view').querySelector('.centre-name')?.textContent||'';
+    const who=centreName;
     await invoke('prefs_action',{action:'set_main_pill',id:'agent_codex'});
-    await wait(()=>who()==='proyecto-beta' && byId('pill-name').textContent==='proyecto-beta','principal Codex cambia tarjeta');
+    await wait(()=>centreName()==='proyecto-beta' && byId('pill-name').textContent==='proyecto-beta','principal Codex cambia el centro');
     const mainReadback=await invoke('prefs_action',{action:'view'});
     await invoke('desktop_action',{action:'close'});
     await wait(()=>byId('capsule').dataset.phase==='compact','barra compacta');
@@ -245,7 +247,9 @@
     const tickerEl=byId('overview-view').querySelector('.ticker');
     const noFakeSteps=count.hidden && (!tickerEl || tickerEl.hidden) && !byId('overview-view').textContent.includes('Sin pasos de herramientas');
     const grid=[...byId('pill-choices').children].map(n=>n.dataset.pillId);
-    return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.length<=4 && !grid.includes(beta.id) && launchRequested && jump.getAttribute('aria-label').includes('Abrir una terminal') && !jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,launchRequested,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto a terminal no coinciden'};
+    // A+E: every session is a row of the scrolling blobs column (no 2x2 cap) and the focused one stays, marked pressed
+    const focusedRowPressed=byId(`pill-choice-${beta.id}`)?.getAttribute('aria-pressed')==='true';
+    return {ok:mainReadback.mainPill==='agent_codex' && miniFocused===own.cwd && noFakeSteps && grid.includes(own.id) && grid.includes(beta.id) && focusedRowPressed && launchRequested && jump.getAttribute('aria-label').includes('Abrir una terminal') && !jump.getAttribute('aria-label').includes('por clase'),mainReadback:mainReadback.mainPill,miniFocused,focused:who(),grid,noFakeSteps,launchRequested,jump:jump.getAttribute('aria-label'),reason:'foco, principal, cuadrícula o salto a terminal no coinciden'};
   }
   async function restoreSessionFocus() {
     if(focusPrefs) await invoke('prefs_action',{action:'set_main_pill',id:focusPrefs.mainPill});
@@ -343,7 +347,8 @@
     await key('Ctrl+Alt+Shift+a');
     await wait(()=>byId('notice-live').textContent==='No hay permisos ni preguntas pendientes.','alerta vacía explica que no hay solicitud');
     await key('Ctrl+Alt+t');
-    await wait(()=>byId('capsule').dataset.shortcutTerminal==='focused-class','terminal confirmó foco por clase');
+    // fc7f679: with a session focused the shortcut opens THAT session's terminal («focused-session»); «focused-class» is the plain verb with none
+    await wait(()=>['focused-session','focused-class'].includes(byId('capsule').dataset.shortcutTerminal),'terminal confirmó foco (de la sesión enfocada o, sin ella, por clase)');
     return {ok:true,chat_view:chat.view,sound_before:before.sound,sound_after:muted.sound,terminal:'class-based focus_host; native X11 readback follows'};
   }
   // Human (21/10): with no terminal open, «ir a la terminal» opens a new one (55b69b9). The validation
@@ -351,7 +356,7 @@
   async function shortcutTerminalAbsent() {
     const before=window.__validatorTerminalLaunches||0;
     await key('Ctrl+Alt+t');
-    await wait(()=>byId('capsule').dataset.shortcutTerminal==='focused-class' && (window.__validatorTerminalLaunches||0)>before,'sin terminal abierta, el atajo pide abrir una (lanzador falso)');
+    await wait(()=>['focused-session','focused-class'].includes(byId('capsule').dataset.shortcutTerminal) && (window.__validatorTerminalLaunches||0)>before,'sin terminal abierta, el atajo pide abrir una (lanzador falso)');
     const launched=(window.__validatorTerminalLaunches||0)===before+1;
     return {ok:launched,launches:(window.__validatorTerminalLaunches||0)-before,reason:launched?'':'el atajo no pidió exactamente una terminal'};
   }
