@@ -218,7 +218,7 @@ function harness(dataset) {
   const calls = [];
   const listeners = {};
   const node = (id) => {
-    const n = { id, dataset: {}, hidden: false, inert: true, disabled: false, value: '', textContent: '', title: '', children: [],
+    const n = { id, dataset: {}, style: {}, offsetHeight: 148, scrollHeight: 20, hidden: false, inert: true, disabled: false, value: '', textContent: '', title: '', children: [],
       listeners: {}, classList: { add() {}, remove() {}, toggle() {} },
       setAttribute() {}, getAttribute() { return null; }, append(...k) { this.children.push(...k); }, appendChild(k) { this.children.push(k); },
       addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
@@ -364,4 +364,39 @@ test('race wiring: notify.js counts pushed states, ignores stale replies and nev
     const body = src.slice(src.indexOf(`function ${fn}(`));
     assert.match(body.slice(0, 900), /const sent = pushSeq;/, fn);
   }
+});
+
+// ---- auto-size: the question card grows with its content, the island with it (human: «abito se ajusta al tamaño») -----------
+test('questionLayout: min 148, grows with the content, capped so the island fits the fixed window, then scrolls inside the card', () => {
+  const L = N.questionLayout;
+  assert.deepEqual(L(60), { cardH: 148, islandH: 200, scroll: false }, 'short: the Coucou question card, unchanged');
+  assert.deepEqual(L(148), { cardH: 148, islandH: 200, scroll: false });
+  assert.deepEqual(L(200.2), { cardH: 201, islandH: 253, scroll: false }, 'rounds up, never clips by a fraction');
+  assert.deepEqual(L(280), { cardH: 280, islandH: 332, scroll: false }, 'exactly the cap');
+  assert.deepEqual(L(900), { cardH: 280, islandH: 332, scroll: true }, 'beyond the cap: capped and scrolling');
+  assert.equal(N.QUESTION_MAX_ISLAND_H, 332);
+  assert.ok(N.QUESTION_MAX_ISLAND_H <= 340, 'never taller than the native window (geometry::ISLAND_WINDOW)');
+  for (const bad of [NaN, -5, undefined, null, Infinity, '200']) assert.deepEqual(L(bad), { cardH: 148, islandH: 200, scroll: false }, String(bad));
+});
+test('textareaHeight: the free-text field grows with its text up to a cap, then scrolls', () => {
+  const H = N.textareaHeight;
+  assert.deepEqual(H(20), { height: 44, scroll: false }, 'one line: the 44px field');
+  assert.deepEqual(H(90), { height: 90, scroll: false });
+  assert.deepEqual(H(120), { height: 120, scroll: false });
+  assert.deepEqual(H(400), { height: 120, scroll: true });
+  for (const bad of [NaN, -1, undefined, null]) assert.deepEqual(H(bad), { height: 44, scroll: false }, String(bad));
+});
+test('auto-size wiring: notify.js measures, sets the card height and tells the island; the island follows; the CSS never clips', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /N\.questionLayout\(/);
+  assert.match(src, /N\.textareaHeight\(/);
+  assert.match(src, /CustomEvent\('abito:question-size'/);
+  const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
+  assert.match(isl, /addEventListener\('abito:question-size'/);
+  assert.match(isl, /questionH/);
+  assert.doesNotMatch(isl, /\? QUESTION_H : OVERVIEW\.h/, 'the fixed 200 is only the default now');
+  const css = fs.readFileSync(path.join(frontend, 'style.css'), 'utf8') + fs.readFileSync(path.join(frontend, 'vendor/coucou/island/island.css'), 'utf8');
+  assert.match(css, /#question-body \{[^}]*max-height: none/);
+  assert.match(css, /\.q-label \{[^}]*white-space: normal/);
+  assert.match(css, /#question-text \{[^}]*overflow-y: hidden/);
 });

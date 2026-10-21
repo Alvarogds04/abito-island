@@ -165,7 +165,7 @@ html[data-theme="light"] {
 #question-head { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "asker expiry" "body body"; column-gap: 7px; row-gap: 5px; }
 #question-asker { grid-area: asker; } #question-expiry, #question-state { grid-area: expiry; }
 /* .title 600 15px, two lines; .code 12px mono in a rounded well */
-#question-body { grid-area: body; font: 600 15px/1.25 var(--font); color: var(--ink); max-height: 38px; -webkit-line-clamp: 2; }
+#question-body { grid-area: body; font: 600 15px/1.25 var(--font); color: var(--ink); max-height: none; -webkit-line-clamp: unset; overflow: visible; overflow-wrap: anywhere; white-space: pre-wrap; }
 #permission #operation {
   align-self: stretch; max-width: 100%; margin: 0; padding: 5px 10px; border-radius: 10px;
   font: 400 12px var(--mono); color: #e8e9ec; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.06);
@@ -414,7 +414,7 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 #chat-history-label { font: 400 11px var(--font); color: var(--dim-2); }
 
 /* the question card is taller in Coucou (window 640x200): 148 high under the header */
-#question { height: 148px; }
+#question { height: 148px; box-sizing: border-box; }
 
 /* ── Plan usage: the pills in the header and the card behind them (style.css "Plan usage" @434d6a2b) ──
    Nothing applies until a pill is turned on in Ajustes. */

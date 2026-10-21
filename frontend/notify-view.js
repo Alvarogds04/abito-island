@@ -293,6 +293,23 @@
     return !previous.pending && TERMINAL.has(previous.notice);
   }
 
-  return { replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  // ---- auto-size (human: «cuando son largas, abito se ajusta al tamaño») ---------------------------------------------
+  // The native window is fixed at 340 high (geometry::ISLAND_WINDOW); the island is drawn inside it. The question card is 148 at
+  // minimum (Coucou) and sits 52px below the top of the island (42 offset + 10 breathing room), so the island grows with the
+  // card up to the window minus a margin, and a longer card scrolls inside itself instead of pushing the buttons out.
+  const QUESTION_MIN_CARD_H = 148, QUESTION_CARD_OFFSET = 52, QUESTION_MAX_ISLAND_H = 332;
+  function questionLayout(contentH) {
+    const h = Number.isFinite(contentH) && contentH > 0 ? Math.ceil(contentH) : 0;
+    const max = QUESTION_MAX_ISLAND_H - QUESTION_CARD_OFFSET;
+    const cardH = Math.min(max, Math.max(QUESTION_MIN_CARD_H, h));
+    return { cardH, islandH: cardH + QUESTION_CARD_OFFSET, scroll: h > max };
+  }
+  const TEXTAREA_MIN_H = 44, TEXTAREA_MAX_H = 120;
+  function textareaHeight(scrollH) {
+    const h = Number.isFinite(scrollH) && scrollH > 0 ? Math.ceil(scrollH) : 0;
+    return { height: Math.min(TEXTAREA_MAX_H, Math.max(TEXTAREA_MIN_H, h)), scroll: h > TEXTAREA_MAX_H };
+  }
+
+  return { questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

@@ -146,6 +146,8 @@
     skipEl.hidden = !n; // no pending notification: nothing to skip (outcome states show only icon + word)
     paintState(view);
     paintText(view);
+    growText();
+    fitCard();
   }
 
   function paintState(view) {
@@ -157,6 +159,26 @@
     stateEl.setAttribute('aria-label', o.aria);
     $('question-state-icon').innerHTML = icon(o.icon);
     $('question-state-word').textContent = o.word;
+  }
+
+  // Auto-size: the card is as tall as its content (min 148), the island follows through `abito:question-size`; past the cap the card
+  // scrolls inside itself. Measured with height:auto, so nothing is ever clipped and the buttons stay inside the card.
+  let sizedKey = '';
+  function fitCard() {
+    if (capsule.dataset.question !== 'pending' && capsule.dataset.question !== 'expired') {
+      if (sizedKey) { sizedKey = ''; root.style.height = ''; root.style.overflowY = ''; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: 0 } })); }
+      return;
+    }
+    root.style.height = 'auto'; root.style.overflowY = 'hidden';
+    const layout = N.questionLayout(root.offsetHeight);
+    root.style.height = `${layout.cardH}px`; root.style.overflowY = layout.scroll ? 'auto' : 'hidden';
+    const key = `${layout.cardH}:${layout.scroll}`;
+    if (key !== sizedKey) { sizedKey = key; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: layout.islandH } })); }
+  }
+  function growText() {
+    textEl.style.height = 'auto';
+    const fit = N.textareaHeight(textEl.scrollHeight);
+    textEl.style.height = `${fit.height}px`; textEl.style.overflowY = fit.scroll ? 'auto' : 'hidden';
   }
 
   function paintText(view) {
@@ -206,6 +228,7 @@
   skipEl.addEventListener('click', decline);
   freeform.addEventListener('submit', submitText);
   textEl.addEventListener('input', () => {
+    growText(); fitCard();
     const view = current();
     if (!view.notification) return;
     const seq = ++budgetSeq;
