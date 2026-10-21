@@ -75,6 +75,7 @@ async function open(scenario = {}) {
             if (at >= 0) snap.notices.splice(at, 1);
             snap.revision += 1; queueMicrotask(() => window.__emit('desktop:state', structuredClone(snap)));
           }
+          if (a === 'expand') { snap.state = 'expanded'; snap.revision += 1; queueMicrotask(() => window.__islandSetState && window.__islandSetState('overview')); }
           return structuredClone(snap);
         }
         if (cmd === 'agent_action') return a === 'sessions_list' ? { connection, accounts, sessions: { rows: sessions, truncated: false } } : { connection, accounts };
