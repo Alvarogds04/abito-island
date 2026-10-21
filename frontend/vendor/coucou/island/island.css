@@ -301,11 +301,6 @@ html[data-motion="reduce"] .shimmer { animation: none; }
 /* question: grid [who][title][options + quiet link] */
 #question { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto; align-content: center; row-gap: 5px; column-gap: 8px; }
 #question-head { display: contents; }
-#question-asker { grid-column: 1 / -1; grid-row: 1; display: inline-flex; align-items: center; }
-#question-state { grid-column: 1 / -1; grid-row: 1; }
-#question-body { grid-column: 1 / -1; grid-row: 2; }
-#question-skip { grid-column: 2; grid-row: 3; justify-self: start; align-self: center; position: relative; top: auto; right: auto; margin: 0; padding: 0 8px; font: 500 11px var(--font); color: var(--dim-2); min-height: 44px; }
-#question-freeform { grid-column: 1 / -1; grid-row: 4; }
 .q-key { display: none; }
 .q-option { color: var(--ink-2); }
 /* the fold chevron is positioned against the card, so the action row must not be a containing block */
@@ -778,7 +773,7 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .sessions-all-pick .sa-agent, .sessions-all-pick .sa-state { flex: 0 0 auto; color: var(--dim-2); }
 
 /* ── the options: ONE vertical numbered list (1. respuesta / 2. respuesta / N. Otra cosa…) ─────────────────────── */
-#question-options { grid-column: 1 / -1; grid-row: 3; display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 2px; margin: 0; }
+#question-options { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 2px; margin: 0; }
 /* 44px hit area, 32px visual (inset 6px): rows overlap their hit areas by 12px so a list of 4 + «Otra cosa…» stays compact */
 .q-option { width: 100%; max-width: 100%; box-sizing: border-box; display: grid; grid-template-columns: auto auto 1fr; column-gap: 8px; row-gap: 1px; align-items: baseline; justify-content: start; min-height: 44px; margin: -6px 0; padding: 10px 12px; border-radius: 0; text-align: left; }
 .q-option::after { inset: 6px 0; border-radius: 10px; }
@@ -793,19 +788,30 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .q-option:not([role="checkbox"])[aria-expanded="true"], .q-option[aria-checked="true"]:not([role="checkbox"]) { background: rgba(255, 255, 255, 0.08); }
 .q-option:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; }
 .q-other .q-label { font-style: italic; }
-#question-freeform { grid-column: 1 / -1; }
 /* ── structured questions: «Hecho» / questionnaire steps / summary ─────────────────────────────────────────────── */
-#question-step { grid-column: 1 / -1; grid-row: 1; }
 #question-step[hidden], #question-summary[hidden], #question-nav[hidden] { display: none; }
 #question-step-header { font: 500 11px var(--font); color: var(--dim-2); }
-#question-nav { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+#question-nav { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 #question-nav button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 999px; font: 500 12.5px var(--font); cursor: pointer; background: var(--btn-bg); color: var(--ink-2); }
 #question-nav button[hidden] { display: none; }
 #question-nav #question-primary { background: var(--go); color: #000; }
 #question-nav button:disabled { opacity: .4; cursor: default; }
 #question-nav button:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 2px; }
-#question-summary { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+#question-summary { display: flex; flex-direction: column; gap: 6px; }
 .q-sum-row { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
 .q-sum-head { font: 600 12px var(--font); color: var(--ink); }
 .q-sum-text { font: 400 11px var(--font); color: var(--dim-2); overflow-wrap: anywhere; }
 .q-sum-answer { font: 500 12.5px var(--font); color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* ── the question card grid: every child owns its cell (Omitir was painted ON TOP of option 2) ──────────────────────────────────
+   col 1 = content, col 2 = «Omitir» (header line only).  row 1 asker + Omitir, 2 step chip, 3 text, 4 options/summary, 5 free text, 6 nav */
+#question { grid-template-columns: 1fr auto; grid-template-rows: auto auto auto auto auto auto; padding-bottom: 14px; row-gap: 6px; }
+#question-asker { grid-column: 1; grid-row: 1; display: inline-flex; align-items: center; }
+#question-state { grid-column: 1; grid-row: 1; }
+#question-skip { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; position: relative; top: auto; right: auto; margin: -6px 0; padding: 0 8px; min-height: 44px; font: 500 11px var(--font); color: var(--dim-2); }
+#question-step { grid-column: 1 / -1; grid-row: 2; }
+#question-body { grid-column: 1 / -1; grid-row: 3; }
+#question-options { grid-column: 1 / -1; grid-row: 4; }
+#question-summary { grid-column: 1 / -1; grid-row: 4; }
+#question-freeform { grid-column: 1 / -1; grid-row: 5; }
+#question-nav { grid-column: 1 / -1; grid-row: 6; }
