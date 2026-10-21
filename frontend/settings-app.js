@@ -97,7 +97,7 @@ startHub(root, {
           const chat = await renderChatSettings(options); mounted.push(chat);
           const models = await renderModels(options);
           // Preserve Abito's verified model controls inside Coucou's Local models section.
-          chat.children[2]?.append(models);
+          chat.querySelector?.('#chat-local-models')?.append(models);
           const disposeChat = chat.dispose;
           chat.dispose = () => { models.dispose(); disposeChat(); };
         }

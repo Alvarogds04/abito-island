@@ -43,3 +43,14 @@ body.hub-window section.abito-card .switch::before { content: ""; position: abso
 .agent-menu { display: flex; gap: 8px; justify-content: flex-end; padding: 6px 0; }
 .agent-menu:empty { display: none; }
 .agent-entry > .agent-row:last-child { border-bottom: 0; }
+
+/* #503 S21 (Chat, Opción A): provider cards. The state badge sits on the card title row, the key field has its show/hide
+   and its inline error right under it, and the controls keep a 44px target. */
+section.abito-card > h2 { gap: 8px; }
+.card-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font: 500 12px var(--font); }
+.card-state .state-ico { font-weight: 700; width: 1em; text-align: center; }
+.card-state.ok { color: var(--green); } .card-state.missing { color: var(--amber); } .card-state.unknown { color: var(--dim); }
+.field-error { color: var(--red, #f4505e); min-height: 0; }
+.field-error:empty { display: none; }
+.key-eye { min-width: 44px; min-height: 36px; background: transparent; border: 0; color: var(--dim); }
+.key-eye[aria-pressed="true"] { color: var(--ink); }

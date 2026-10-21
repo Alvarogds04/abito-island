@@ -3,11 +3,11 @@
 import { h, clear } from '../views/dom.js';
 import { statusDot } from '../settings/parts.js';
 import { providerDef, urlExposure } from '../core/providers.js';
-import { notchSection as section, notchRow as row, notchHint as hint } from './notch.js';
+import { notchSection as section, notchCard, notchRow as row, notchHint as hint } from './notch.js';
 import { toggle } from './ui.js';
 import { session, trusted } from './runtime.js';
 import { t } from './i18n-es.js';
-import { keyAccountCommand } from './keyaccounts.js';
+import { keyAccountCommand, keyAccountId } from './keyaccounts.js';
 const UNAVAILABLE = 'No disponible todavía';
 const STORE = 'Secret Service (GNOME Keyring, KWallet)';
 const CLOUD = [
@@ -26,22 +26,50 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
   const present: Record<string,boolean | undefined> = {};
   let state: any = null, prefs: any = {}, modelBusy = false;
   const keyRefresh: Record<string,() => void> = {};
+  // #503 S21 (Opción A): each provider is a card: name + state badge (icon + word), Clave with show/hide, Guardar,
+  // Probar and Quitar, and the validation message right under the field. Same closed commands as before.
   function keyRow(id: string, title: string, placeholder: string, primary = false) {
     const field = input('password', placeholder, `chat-key-${id}`); field.maxLength = 2048;
     const dot = statusDot(false), feedback = h('div', {}), stateLabel = hint('');
+    const stateBadge = h('span', { class: 'card-state' });
+    const errorId = `chat-key-error-${id}`;
+    const fieldError = h('div', { class: 'field-error hint', id: errorId, role: 'alert', 'aria-live': 'polite', text: '' });
+    field.setAttribute('aria-invalid', 'false'); field.setAttribute('aria-describedby', errorId);
+    const invalid = (message: string) => { fieldError.textContent = message; field.setAttribute('aria-invalid', String(!!message)); };
+    field.addEventListener('input', e => { if (e.isTrusted) invalid(''); });
+    // show/hide only changes how THIS draft is drawn; it never reads a stored key (secret_action never returns values).
+    const eye = trusted(h('button', { class: 'key-eye', type: 'button', 'aria-label': 'Mostrar clave', 'aria-pressed': 'false', title: 'Mostrar clave', text: '👁' })) as HTMLButtonElement;
+    const hide = () => { field.type = 'password'; eye.setAttribute('aria-pressed', 'false'); eye.setAttribute('aria-label', 'Mostrar clave'); eye.title = 'Mostrar clave'; };
+    eye.addEventListener('click', e => {
+      if (!e.isTrusted) return;
+      const show = field.type === 'password'; field.type = show ? 'text' : 'password';
+      eye.setAttribute('aria-pressed', String(show)); eye.setAttribute('aria-label', show ? 'Ocultar clave' : 'Mostrar clave'); eye.title = show ? 'Ocultar clave' : 'Mostrar clave';
+    });
     let busy = false;
+    const paintBadge = () => {
+      const known = typeof present[id] === 'boolean';
+      const [icon, word, kind] = !known ? ['·', UNAVAILABLE, 'unknown'] : present[id] ? ['✓', 'lista', 'ok'] : ['✗', 'sin clave', 'missing'];
+      clear(stateBadge); stateBadge.className = `card-state ${kind}`;
+      stateBadge.append(h('span', { class: 'state-ico', 'aria-hidden': 'true', text: icon }), h('span', { class: 'state-word', text: word }));
+    };
     const refresh = () => {
       const known = typeof present[id] === 'boolean';
       dot.style.setProperty('background', !known ? '#6b7079' : present[id] ? '#22c55e' : '#f4505e');
       stateLabel.textContent = !known ? UNAVAILABLE : t(present[id] ? 'Key saved in the {store}.' : 'No key yet — the chat needs one.', { store: STORE });
       field.placeholder = present[id] ? `••••••••  ${t('(stored)')}` : placeholder;
-      remove.style.setProperty('display', present[id] ? '' : 'none');
+      remove.hidden = test.hidden = !present[id];
+      paintBadge();
     };
     const change = (action: string) => {
       if (busy) return;
-      const value = field.value.trim(); field.value = ''; // BEFORE IPC, including failures; no secret draft/log/storage.
+      const value = field.value.trim(); field.value = ''; hide(); // BEFORE IPC, including failures; no secret draft/log/storage.
+      if (action === 'set') {
+        if (!value) { invalid('Pega la clave antes de guardar.'); return; }
+        if (value.includes('\0')) { invalid('La clave tiene caracteres no válidos.'); return; }
+      }
+      invalid('');
       const payload = V.keyPayload(action, id, value); if (!payload) return;
-      busy = true; save.disabled = remove.disabled = true; clear(feedback);
+      busy = true; save.disabled = remove.disabled = test.disabled = true; clear(feedback);
       work(() => call('secret_action', payload), result => {
         if (result?.present !== (action === 'set')) { feedback.append(h('div', { class: 'notice err', text: 'No se confirmó el cambio de la clave.' })); return; }
         present[id] = result.present;
@@ -55,19 +83,35 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
       }, error => {
         dot.style.setProperty('background', '#f5a524');
         feedback.append(h('div', { class: 'notice err', text: V.keyError(error) }));
-      }).finally(() => { busy = false; save.disabled = remove.disabled = false; });
+      }).finally(() => { busy = false; save.disabled = remove.disabled = test.disabled = false; });
+    };
+    // «Probar» is local on purpose: it re-reads the keychain's presence flag and the chat accounts through the same closed
+    // READ commands, and says plainly that the provider was not contacted (a real call would need a per-provider endpoint).
+    const probe = () => {
+      if (busy) return;
+      busy = true; save.disabled = remove.disabled = test.disabled = true; clear(feedback);
+      work(async () => {
+        const stored = await call('secret_action', V.keyPayload('present', id));
+        const next = await call('agent_action', { action: 'view' });
+        return { stored, next };
+      }, ({ stored, next }) => {
+        state = { ...state, ...next }; present[id] = stored?.present === true; refresh();
+        const accountId = keyAccountId(id), has = !accountId || V.ownedAccounts(state?.ownedAccounts).some((a: any) => a.accountId === accountId);
+        feedback.append(h('div', { class: present[id] && has ? 'notice ok' : 'notice err', text: !present[id] ? 'No hay clave guardada.'
+          : has ? 'Clave guardada y cuenta del chat lista. No se contactó al proveedor.' : 'El chat aún no tiene cuenta para este proveedor. Vuelve a guardar la clave.' }));
+      }, () => feedback.append(h('div', { class: 'notice err', text: 'No se pudo comprobar la clave.' }))).finally(() => { busy = false; save.disabled = remove.disabled = test.disabled = false; });
     };
     const save = button(primary ? 'Save key' : 'Save', () => change('set'), primary ? 'primary' : '');
+    const test = button('Probar', probe); test.setAttribute('aria-label', 'Probar'); test.type = 'button';
     const remove = button('Remove', () => change('clear'), 'danger');
-    const r = row(title, field, save, remove);
+    const r = row(title, field, eye, save, test, remove);
     if (!primary) {
       const p = providerDef(id.replace('-api-key',''));
       clear(r.children[0] as HTMLElement);
       r.children[0].append(h('i', { class: 'dot', style: `background:${p.accent};margin-right:8px` }), h('span', { text: title }));
-      r.append(dot);
     }
     keyRefresh[id] = refresh; refresh();
-    return { r, dot, stateLabel, feedback };
+    return { r, dot, stateLabel, feedback, stateBadge, fieldError };
   }
   const api = keyRow('anthropic-api-key', t('API key'), 'sk-ant-...', true);
   const model = trusted(h('select', { id: 'chat-anthropic-model', 'aria-label': t('Model') })) as HTMLSelectElement;
@@ -92,12 +136,13 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     if (!payload) return; modelBusy = true; model.disabled = true;
     work(() => call('prefs_action', payload), next => { prefs = next; }).finally(() => { modelBusy = false; if (s.alive()) drawModels(); });
   });
-  const apiSection = section('Claude', api.stateLabel, api.r, row(t('Model'), model), api.feedback);
+  const apiSection = notchCard('Claude', api.stateBadge, api.stateLabel, api.r, api.fieldError, row(t('Model'), model), api.feedback);
   apiSection.children[0].prepend(api.dot);
-  const providers = h('div', { style:'display:flex;flex-direction:column;gap:8px' });
-  for (const [id,name,placeholder,site] of CLOUD) {
+  const providerCards: HTMLElement[] = [];
+  for (const [id, name, placeholder, site] of CLOUD) {
     const k = keyRow(providerDef(id).key!, name, placeholder);
-    providers.append(k.r, h('div', { class: 'hint', style: 'margin:-4px 0 0 144px', text: t('Key from {site}', {site}) }), k.feedback);
+    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, h('div', { class: 'hint', text: t('Key from {site}', {site}) }), k.feedback);
+    c.children[0].prepend(k.dot); providerCards.push(c);
   }
   const locals = h('div', { style:'display:flex;flex-direction:column;gap:14px' });
   for (const [id,name,usual] of [['ollama','Ollama','http://127.0.0.1:11434'],['lmstudio','LM Studio','http://127.0.0.1:1234'],['custom','OpenAI-compatible','']]) {
@@ -143,9 +188,11 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     }
   };
   paintContext();
+  const localCard = section(t('Local models'), hint(t('Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.')), locals);
+  localCard.setAttribute('id', 'chat-local-models');
   root.append(apiSection,
-    section(t('Chat providers'), hint(t('Chat with Google AI, OpenAI or OpenRouter instead of Claude: add a key here, then click the model name above the chat box to switch provider and model. Keys stay in the system keychain. These providers get no web search and no tools: they can answer, never act on this computer.')), providers),
-    section(t('Local models'), hint(t('Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.')), locals),
+    hint(t('Chat with Google AI, OpenAI or OpenRouter instead of Claude: add a key here, then click the model name above the chat box to switch provider and model. Keys stay in the system keychain. These providers get no web search and no tools: they can answer, never act on this computer.')),
+    ...providerCards, localCard,
     section(t('Active window context'), hint(t('When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.')), ctxBody), s.message);
   drawModels();
   watch('agent:state', next => { state = { ...state, ...next }; drawModels(); });

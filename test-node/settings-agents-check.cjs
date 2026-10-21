@@ -113,7 +113,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   assert(!text(ui.children[0]).includes('No disponible todavía No disponible todavía'));
   ui.dispose();
   ui=await renderChatSettings(opts);await ui.settled();
-  assert.deepEqual(heads(),['Claude','Proveedores de chat','Modelos locales','Contexto de la ventana activa']);
+  assert.deepEqual(heads().map(h=>h.replace(/ [✓✗·].*$/,'')),['Claude','Google AI','OpenAI','OpenRouter','Modelos locales','Contexto de la ventana activa']); // #503 S21: one card per provider
   assert.deepEqual(calls.filter(([c,p])=>c==='secret_action'&&p.action==='present').map(([,p])=>p.key),['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key']);
   for(const id of ['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key']) {
     const input=all(ui).find(e=>e.attrs.id===`chat-key-${id}`);assert.equal(input.type,'password');
@@ -170,7 +170,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   events['prefs:state']({payload:{chosenModels:{anthropic:['m1']}}});
   assert.equal(pick.tagName,'select');assert.equal(pick.disabled,false);calls.length=0;pick.value='m2';pick.fire('change',false);await ui.settled();assert.deepEqual(calls,[]);
   pick.fire('change');await ui.settled();assert.deepEqual(calls,[['prefs_action',{action:'set_chosen_models',provider:'anthropic',models:['m1','m2']}]]);
-  const local=ui.children[2];
+  const local=all(ui).find(e=>e.attrs.id==='chat-local-models');
   assert(text(local).includes('Ollama'));assert(text(local).includes('LM Studio'));assert(text(local).includes('Compatible con OpenAI'));
   for(const b of all(local).filter(e=>e.textContent==='Conectar')) assert.equal(b.disabled,true,'arbitrary endpoint connection has no host command');
   const urls=all(local).filter(e=>e.tagName==='input'&&e.type==='text');assert.equal(urls.length,3);
