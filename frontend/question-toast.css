@@ -9,23 +9,23 @@
   --sileo-state-warning: oklch(0.795 0.184 86.047);
 }
 .q-toast {
-  position: absolute; z-index: 40; left: 50%; top: 48px; width: var(--sileo-width); height: var(--sileo-height);
+  position: absolute; z-index: 40; left: 50%; top: 0; width: var(--sileo-width); height: var(--sileo-height);
   margin: 0 0 0 calc(var(--sileo-width) / -2); padding: 0; border: 0; background: transparent; color: #fff; text-align: left; cursor: pointer;
-  opacity: 0; transform: translateY(-6px) scale(0.95); transform-origin: center top; overflow: visible; contain: layout style;
+  opacity: 0; transform-origin: center top; overflow: visible;
   font: 500 13px/16px var(--font, system-ui, sans-serif);
 }
 .q-toast[hidden] { display: none; }
-.q-toast[data-ready="true"] {
-  opacity: 1; transform: translateY(0) scale(1);
-  transition: transform calc(var(--sileo-duration) * 0.66) var(--sileo-spring-easing), opacity calc(var(--sileo-duration) * 0.66) var(--sileo-spring-easing), height var(--sileo-duration) var(--sileo-spring-easing);
-}
+.q-toast[data-ready="true"] { opacity: 1; }
+/* the SHAPE travels (gooey morph out of the island, driven by the spring in JS); the box only has to be there */
 .q-toast[data-ready="true"][data-expanded="true"] { height: 96px; }
-.q-toast[data-exiting="true"] { opacity: 0; transform: translateY(-6px) scale(0.95); pointer-events: none; }
+.q-toast[data-exiting="true"] { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .q-toast[data-ready="true"] { transition: opacity 0.01ms; } }
+html[data-motion="reduce"] .q-toast[data-ready="true"] { transition: opacity 120ms linear; }
 .q-toast:focus-visible { outline: 2px solid var(--dim-2, #9aa0a8); outline-offset: 3px; border-radius: 18px; }
 .q-toast-canvas { position: absolute; left: 0; top: 0; right: 0; pointer-events: none; overflow: visible; }
 .q-toast-svg { overflow: visible; }
-.q-toast-pill, .q-toast-bodyrect { fill: #0b0c0e; }
-.q-toast-bodyrect { transition: height var(--sileo-duration) var(--sileo-spring-easing); }
+.q-toast-neck, .q-toast-pill, .q-toast-bodyrect { fill: var(--island, #000); }
+.q-toast-canvas { top: 0; }
 .q-toast-header { position: absolute; z-index: 20; left: 0; top: 0; display: flex; align-items: center; gap: 8px; height: var(--sileo-height); padding: 8px; max-width: 100%; box-sizing: border-box; overflow: hidden; animation: q-toast-header-in var(--sileo-duration) var(--sileo-spring-easing) both; }
 .q-toast-badge { display: flex; width: 24px; height: 24px; flex: none; align-items: center; justify-content: center; padding: 2px; box-sizing: border-box; border-radius: 9999px; color: var(--q-tone); background: color-mix(in oklch, var(--q-tone) 20%, transparent); }
 .q-toast-badge svg { width: 16px; height: 16px; }
