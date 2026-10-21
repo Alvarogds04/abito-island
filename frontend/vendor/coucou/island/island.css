@@ -988,3 +988,21 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
 #chat-mic[hidden] { display: none; }
 #chat-composer #chat-mic::after { background: rgba(255, 255, 255, 0.09); }
 #chat-composer #chat-mic:hover::after { background: rgba(255, 255, 255, 0.16); }
+
+/* ══ An integration card (GitHub, plan, Spotify, integrations) IS the centre while it is focused ═════════════════════════════════════
+   The old card-left children were hidden one by one (who, ticker, empty, minibots); the A+E centre column, its footer row and the
+   status column were added afterwards and kept drawing UNDER the card (screen gate: «proyecto-beta · Codex» over «GitHub», the stats rows
+   over «Pi sin cuenta · Ver todas», «En reposo» clipped). One rule per owner: the card takes the whole left card. */
+#overview-view[data-github="on"] .col-centre, #overview-view[data-github="on"] .col-status, #overview-view[data-github="on"] .centre-foot,
+#overview-view[data-plan="on"] .col-centre, #overview-view[data-plan="on"] .col-status, #overview-view[data-plan="on"] .centre-foot,
+#overview-view[data-spotify="on"] .col-centre, #overview-view[data-spotify="on"] .col-status, #overview-view[data-spotify="on"] .centre-foot,
+#overview-view[data-integration="on"] .col-centre, #overview-view[data-integration="on"] .col-status, #overview-view[data-integration="on"] .centre-foot,
+#capsule[data-integration="on"] .col-centre, #capsule[data-integration="on"] .col-status, #capsule[data-integration="on"] .centre-foot { display: none; }
+
+
+/* The OPEN grouped list takes the whole 620x108 card again: the 174x28 band rule above is more specific than the plain list rule and
+   squashed it (screen gate: «descarta exactamente una fila» timed out — the rows were clipped inside a 28px strip). */
+#capsule[data-view="overview"] #notices[data-list="open"], #capsule[data-view="overview"] #notices[data-grouped="true"][data-list="open"] {
+  left: calc(50% - 310px); width: 620px; top: 42px; height: 108px; padding: 8px; gap: 8px; box-shadow: none; z-index: 4;
+}
+#capsule[data-view="overview"] #notices[data-list="open"] ~ #blobs, #capsule[data-notice-list="open"] #blobs { opacity: 0; visibility: hidden; pointer-events: none; }

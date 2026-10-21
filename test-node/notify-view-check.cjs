@@ -403,6 +403,15 @@ test('auto-size wiring: notify.js measures, sets the card height and tells the i
   assert.match(css, /#question-text \{[^}]*overflow-y: hidden/);
 });
 
+// ---- the island is told EVERY time the card appears or disappears (a stale «question shown» kept it tall with the badge) ----------------
+test('render announces every change of data-question (outcome timer and local expiry included), once per change', () => {
+  const src = fs.readFileSync(path.join(frontend, 'notify.js'), 'utf8');
+  assert.match(src, /function announceShown\(\)/);
+  assert.match(src, /if \(show === shownSent\) return;/, 'no event storm: one per change');
+  assert.match(src, /capsule\.dataset\.question = [^\n]*\n[\s\S]{0,700}announceShown\(\);/, 'announced right where data-question is written');
+  assert.match(src, /reveal: false/, 'a state change is never a reveal event');
+});
+
 // ---- the window grows on demand (cap decided by Rust: 70% of the work area) ---------------------------------------------
 test('questionLayout takes the island cap the host granted; the default stays the fixed window', () => {
   assert.deepEqual(N.questionLayout(900, 600), { cardH: 548, islandH: 600, scroll: true }, 'capped at the granted height, scrolls inside');

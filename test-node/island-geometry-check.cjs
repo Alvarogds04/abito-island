@@ -115,5 +115,97 @@ function noOverlaps(list, why) {
       passed += 1;
     } finally { await r.close(); }
   }
+  // the state the screen validator builds: GitHub declared WITH data, two sessions (one Codex «proyecto-beta»), 4 notices, Pi without an
+  // account. The GitHub blob is clicked: its card IS the centre, so the session header / footer rows must not coexist with it.
+  {
+    const sessions = [{ id: 's-eb4fc4bc', kind: 'pi', cwd: 'workspace', state: 'sleeping', origin: null }, { id: 's-3b48a1be', kind: 'codex', cwd: 'proyecto-beta', state: 'sleeping', origin: null }];
+    for (const theme of ['light', 'dark']) {
+      const r = await H.open({ sessions, github: true, githubData: true, notices: 4, engine: 'account', theme });
+      try {
+        const before = await r.page.evaluate(() => [...document.querySelectorAll('.pill-choice')].map(b => b.dataset.pillId));
+        assert.deepEqual(before, ['abito', 'integration_github', 's-eb4fc4bc', 's-3b48a1be'], `${theme}: the evidence grid of the validator`);
+        const gh = (await r.measure('#pill-choice-integration_github'))[0], list = (await r.measure('#pill-choices'))[0];
+        assert.ok(gh.top >= list.top - 0.5 && gh.bottom <= list.bottom + 0.5, `${theme}: the GitHub blob is a visible row`);
+        const at = [gh.left + gh.w / 2, gh.top + gh.h / 2];
+        await r.page.mouse.click(at[0], at[1]);
+        await r.page.waitForTimeout(1500);
+        const shown = await r.page.evaluate(() => document.getElementById('overview-view').dataset.github || null);
+        assert.equal(shown, 'on', `${theme}: the GitHub card opened`);
+        // the focused integration is the centre: the session centre column and its footer are gone, not drawn underneath
+        for (const sel of ['.col-centre', '.centre-foot', '.card-left > .who', '.col-status']) for (const b of await r.measure(sel)) assert.ok(!b.shown, `${theme}: ${sel} is still drawn under the GitHub card`);
+        // the card's own rows must not overlap each other or the card's edges
+        const rows = [];
+        for (const sel of ['.gh-card .int-head', '.gh-card .int-stat', '.gh-card .int-status']) for (const b of await r.measure(sel)) if (b.shown) rows.push({ ...b, sel });
+        noOverlaps(rows, `${theme}: GitHub card rows`);
+        const card = (await r.measure('.gh-card'))[0];
+        for (const b of rows) assert.ok(b.left >= card.left - 0.5 && b.right <= card.right + 0.5 && b.top >= card.top - 0.5 && b.bottom <= card.bottom + 0.5, `${theme}: ${label(b)} leaves the GitHub card ${label(card)}`);
+        // the mascot's status line («En reposo») is complete, not clipped
+        const st = (await r.measure('.col-status'))[0];
+        // GitHub focused hides the status column too: it must not be drawn half-clipped either way
+        assert.ok(!st || !st.shown, `${theme}: nothing half-drawn under the card`);
+        // the blobs column keeps every OTHER row (the focused integration is the card; the sessions stay)
+        const after = await r.page.evaluate(() => [...document.querySelectorAll('.pill-choice')].map(b => b.dataset.pillId));
+        assert.deepEqual(after, ['abito', 's-eb4fc4bc', 's-3b48a1be'], `${theme}: the focused integration leaves the column, the sessions stay`);
+        // and the way BACK exists: the sessions are still rows, and Abito's row returns to the normal centre
+        const home = (await r.measure('#pill-choice-abito'))[0];
+        await r.page.mouse.click(home.left + home.w / 2, home.top + home.h / 2);
+        await r.page.waitForTimeout(800);
+        const back = await r.page.evaluate(() => document.getElementById('overview-view').dataset.github || null);
+        assert.equal(back, null, `${theme}: choosing another blob closes the GitHub card`);
+        passed += 1;
+      } catch (e) { await r.screenshot(`/tmp/geo-fail-github-${theme}.png`).catch(() => {}); throw e; }
+      finally { await r.close(); }
+    }
+  }
+  // the grouped notices list (validator scene «historial agrupado»): «Ver» opens a LIST over the whole 620x108 card; its rows are
+  // reachable, one dismisses exactly one row, and «Descartar todos» is clickable
+  {
+    const r = await H.open({ notices: 4, engine: 'account', github: true });
+    try {
+      await r.page.waitForTimeout(500);
+      const open = (await r.hit('#notice-action'))[0];
+      assert.ok(open && open.ok, `the «Ver» button receives its click: ${JSON.stringify(open)}`);
+      const btn = (await r.measure('#notice-action'))[0];
+      await r.page.mouse.click(btn.left + btn.w / 2, btn.top + btn.h / 2);
+      await r.page.waitForTimeout(800);
+      const list = (await r.measure('#notice-list'))[0];
+      assert.ok(list && list.shown, 'the grouped list is visible');
+      assert.ok(list.w >= 560 && list.h >= 90, `the list takes the whole card, not the 174x28 band: ${label(list)}`);
+      const rows = (await r.measure('.notice-list-row')).filter(b => b.shown);
+      assert.ok(rows.length >= 2, `at least two list rows are visible and reachable, got ${rows.length}`);
+      const hits = [...await r.hit('.notice-list-dismiss'), ...await r.hit('#notice-clear'), ...await r.hit('.notice-list-row')];
+      const bad = hits.filter(h => !h.ok).map(h => `${h.id}@${h.at} got ${h.got}`);
+      assert.deepEqual(bad, [], `list controls whose click lands elsewhere: ${bad.join(' | ')}`);
+      const before = (await r.measure('.notice-list-row')).length;
+      const d = (await r.measure('.notice-list-dismiss'))[0];
+      await r.page.mouse.click(d.left + d.w / 2, d.top + d.h / 2);
+      await r.page.waitForTimeout(600);
+      const after = (await r.measure('.notice-list-row')).length;
+      assert.equal(after, before - 1, 'dismissing a row removes exactly one');
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-notice-list.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
+  // after a question is answered (or declined) and its «Recibida» word expires, the island gives its height back and the mascot returns:
+  // a stale «question shown» kept the island 200px tall with the mascot 26px lower, and «En reposo» was drawn over it (screen gate)
+  {
+    const r = await H.open({ question: 'plain', sessions: [] });
+    try {
+      const islandH = async () => (await r.measure('#island'))[0].h;
+      const clayTop = async () => (await r.measure('#clay'))[0].top;
+      assert.ok(await islandH() > 170, `with the question open the island is tall (${await islandH()})`);
+      const opt = (await r.measure('.q-option')).find(b => b.shown);
+      await r.page.mouse.click(opt.left + opt.w / 2, opt.top + opt.h / 2);
+      await r.page.waitForTimeout(6500); // «Recibida» (3 s) + the spring back
+      const mode = await r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question || '', badge: !document.getElementById('clay-badge').hidden, layout: document.getElementById('capsule').dataset.layout }));
+      assert.deepEqual(mode, { q: '', badge: false, layout: 'normal' }, `nothing of the question is left over: ${JSON.stringify(mode)}`);
+      assert.ok(Math.abs(await islandH() - 160) < 2, `the island is back to the 160px overview, got ${await islandH()}`);
+      assert.ok(Math.abs(await clayTop() - 63) < 2, `the mascot is back at the overview position (63), got ${await clayTop()}`);
+      const list = await boxes(r);
+      noOverlaps(list, 'after answering: overlapping boxes');
+      passed += 1;
+    } catch (e) { await r.screenshot('/tmp/geo-fail-after-answer.png').catch(() => {}); throw e; }
+    finally { await r.close(); }
+  }
   console.log(`island-geometry-check: ${passed} real-layout checks ok`);
 })().catch(e => { console.error(e); process.exit(1); });
