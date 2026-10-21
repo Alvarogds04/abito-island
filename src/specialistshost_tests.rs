@@ -204,6 +204,7 @@ fn principal_test_state(instructions: &str) -> AppState {
     AppState {
         core: Mutex::new(Core::new()),
         work_area: Mutex::new(Rect { x: 0, y: 0, w: 0, h: 0 }),
+        window_h: std::sync::atomic::AtomicI32::new(crate::geometry::ISLAND_WINDOW.1),
         requested: Mutex::new(Requested::default()),
         evidence: Mutex::new(None),
         initial_pin: AtomicBool::new(false),
