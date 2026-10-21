@@ -14,6 +14,13 @@ pub(crate) fn parse(payload: &Value) -> Option<Report> {
     })
 }
 
+/// `{"h": <integer>}` and nothing else: the page asks for a height, Rust decides the size (geometry::clamp_window_height).
+pub(crate) fn parse_window_height(payload: &Value) -> Option<i32> {
+    let object = payload.as_object()?;
+    if object.len() != 1 { return None; }
+    i32::try_from(object.get("h")?.as_i64()?).ok()
+}
+
 // Only the compact strip may be shorter than the normal compact bar.
 fn input_rect(report: Report, window: (i32, i32), protected: bool) -> (i32,i32,i32,i32) {
     if !protected && report.w == 288 && (4..32).contains(&report.h) && report.settled {
@@ -68,6 +75,15 @@ pub(crate) fn apply(_app: &tauri::AppHandle, _report: Option<Report>) {}
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn window_height_payload_is_exactly_one_integer_named_h() {
+        assert_eq!(parse_window_height(&json!({"h":600})), Some(600));
+        assert_eq!(parse_window_height(&json!({"h":-5})), Some(-5), "Rust clamps; the parser only checks the shape");
+        for bad in [json!(null), json!({}), json!(600), json!({"h":600.5}), json!({"h":"600"}), json!({"h":null}),
+            json!({"h":600,"w":672}), json!({"height":600}), json!({"h":2147483648_i64}), json!([600])] {
+            assert_eq!(parse_window_height(&bad), None, "{bad}");
+        }
+    }
     #[test]
     fn reports_are_exactly_two_integers_and_a_boolean() {
         assert_eq!(parse(&json!({"w":640,"h":160,"settled":false})), Some(Report { w:640,h:160,settled:false }));

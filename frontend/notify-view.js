@@ -298,18 +298,24 @@
   // minimum (Coucou) and sits 52px below the top of the island (42 offset + 10 breathing room), so the island grows with the
   // card up to the window minus a margin, and a longer card scrolls inside itself instead of pushing the buttons out.
   const QUESTION_MIN_CARD_H = 148, QUESTION_CARD_OFFSET = 52, QUESTION_MAX_ISLAND_H = 332;
-  function questionLayout(contentH) {
+  // `maxIslandH` is what the host granted (Rust: the window grows on demand up to 70% of the work area); the default is the
+  // fixed window. A nonsense cap falls back to the default, and never below the minimum card.
+  function questionLayout(contentH, maxIslandH) {
     const h = Number.isFinite(contentH) && contentH > 0 ? Math.ceil(contentH) : 0;
-    const max = QUESTION_MAX_ISLAND_H - QUESTION_CARD_OFFSET;
+    const cap = Number.isFinite(maxIslandH) && maxIslandH > 0 ? Math.floor(maxIslandH) : QUESTION_MAX_ISLAND_H;
+    const max = Math.max(QUESTION_MIN_CARD_H, cap - QUESTION_CARD_OFFSET);
     const cardH = Math.min(max, Math.max(QUESTION_MIN_CARD_H, h));
     return { cardH, islandH: cardH + QUESTION_CARD_OFFSET, scroll: h > max };
   }
+  // The native window is the island plus 8px of air; a closed question (0) gives the fixed 340 back (Rust clamps up to it).
+  const WINDOW_AIR = 8, WINDOW_FIXED_H = 340;
+  const windowHeightFor = islandH => (Number.isFinite(islandH) && islandH > 0 ? Math.max(WINDOW_FIXED_H, Math.ceil(islandH) + WINDOW_AIR) : WINDOW_FIXED_H);
   const TEXTAREA_MIN_H = 44, TEXTAREA_MAX_H = 120;
   function textareaHeight(scrollH) {
     const h = Number.isFinite(scrollH) && scrollH > 0 ? Math.ceil(scrollH) : 0;
     return { height: Math.min(TEXTAREA_MAX_H, Math.max(TEXTAREA_MIN_H, h)), scroll: h > TEXTAREA_MAX_H };
   }
 
-  return { questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
+  return { windowHeightFor, questionLayout, textareaHeight, QUESTION_MAX_ISLAND_H, QUESTION_MIN_CARD_H, replyIsCurrent, regressesToSent, MAX_OPTIONS, SOUND_ENABLED_DEFAULT, fromPending, askedBy, askerName, askerLine, queueLabel, agentLabel, trusted, openPayload, onScreen, optionForKey, expired, expiryWord, fraction,
     outcomeView, phase, soundFor, createCueLimiter, createRevealGate, createFinishedCycle, FINISHED_MS, revealAction, NOTICE_SEEN_MAX, utf8Bytes, textWord, canSendText };
 });

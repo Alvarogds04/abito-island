@@ -163,17 +163,34 @@
 
   // Auto-size: the card is as tall as its content (min 148), the island follows through `abito:question-size`; past the cap the card
   // scrolls inside itself. Measured with height:auto, so nothing is ever clipped and the buttons stay inside the card.
-  let sizedKey = '';
+  let sizedKey = '', maxIslandH = N.QUESTION_MAX_ISLAND_H, askedWindowH = 0;
+  // The page only ASKS for a window height; Rust clamps it (never below 340, never above 70% of the work area) and answers with
+  // the height it granted. The card then fits inside what was granted and scrolls beyond it.
+  function askWindow(islandH) {
+    const want = N.windowHeightFor(islandH);
+    if (!invoke || want === askedWindowH) return Promise.resolve(false);
+    askedWindowH = want;
+    return invoke('island_window_height', { payload: { h: want } }).then(res => {
+      const granted = res && Number.isFinite(res.h) ? res.h : N.windowHeightFor(0);
+      maxIslandH = Math.max(N.QUESTION_MAX_ISLAND_H, granted - 8);
+      return true;
+    }, () => false);
+  }
   function fitCard() {
     if (capsule.dataset.question !== 'pending' && capsule.dataset.question !== 'expired') {
       if (sizedKey) { sizedKey = ''; root.style.height = ''; root.style.overflowY = ''; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: 0 } })); }
+      askWindow(0); maxIslandH = N.QUESTION_MAX_ISLAND_H; // closed: the fixed window again
       return;
     }
     root.style.height = 'auto'; root.style.overflowY = 'hidden';
-    const layout = N.questionLayout(root.offsetHeight);
+    const content = root.offsetHeight;
+    const layout = N.questionLayout(content, maxIslandH);
     root.style.height = `${layout.cardH}px`; root.style.overflowY = layout.scroll ? 'auto' : 'hidden';
     const key = `${layout.cardH}:${layout.scroll}`;
     if (key !== sizedKey) { sizedKey = key; document.dispatchEvent(new CustomEvent('abito:question-size', { detail: { islandH: layout.islandH } })); }
+    // does the content want more than the window granted so far? ask once for the uncapped size, then refit inside the grant
+    const wanted = N.questionLayout(content, 10000);
+    if (wanted.islandH > maxIslandH) askWindow(wanted.islandH).then(changed => { if (changed) { sizedKey = ''; fitCard(); } });
   }
   function growText() {
     textEl.style.height = 'auto';

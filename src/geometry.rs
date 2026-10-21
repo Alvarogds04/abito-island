@@ -78,8 +78,21 @@ pub fn initial_position(area: Rect, w: i32, h: i32) -> Rect {
     Rect { x: clamp_x(area.x + (area.w - w) / 2, w, area), y: area.y, w, h }
 }
 pub fn island_window_rect(area: Rect, scale: f64) -> Rect {
-    let (w, h) = scaled_size(ISLAND_WINDOW, scale);
+    island_window_rect_h(area, scale, ISLAND_WINDOW.1)
+}
+/// The same top-centred window, `height` logical pixels tall (grown on demand for a long question). Width and the top anchor
+/// never change; a work area shorter than the request wins (clamp_rect keeps the window on screen).
+pub fn island_window_rect_h(area: Rect, scale: f64, height: i32) -> Rect {
+    let (w, h) = scaled_size((ISLAND_WINDOW.0, height), scale);
     clamp_rect(initial_position(area, w, h), area)
+}
+/// A long question may grow the native window up to this share of the work-area height (human: «abito se ajusta al tamaño»).
+pub const WINDOW_GROWTH_PERCENT: i32 = 70;
+/// The page asks for a logical height; Rust decides: never below the fixed window, never above 70% of the work area.
+pub fn clamp_window_height(desired: i32, area_h_phys: i32, scale: f64) -> i32 {
+    let area_h = (f64::from(area_h_phys.max(0)) / valid_scale(scale)).floor() as i32;
+    let cap = (i64::from(area_h) * i64::from(WINDOW_GROWTH_PERCENT) / 100) as i32;
+    desired.max(ISLAND_WINDOW.1).min(cap.max(ISLAND_WINDOW.1))
 }
 /// Page-reported logical dimensions are bounded by the bar and the actual window.
 pub fn clamp_island_shape(w: i32, h: i32, window: (i32, i32)) -> (i32, i32) {
@@ -280,5 +293,35 @@ mod tests {
         assert_eq!(island_shape_rect((640, 160), ISLAND_WINDOW), (16, 0, 640, 160));
         assert_eq!(island_shape_rect((288, 32), ISLAND_WINDOW), (192, 0, 288, 32));
         assert_eq!(island_shape_rect((672, 340), ISLAND_WINDOW), (0, 0, 672, 340));
+    }
+
+    #[test]
+    fn window_height_grows_on_demand_up_to_70_percent_of_the_work_area_and_never_below_the_fixed_window() {
+        // 1048 logical px of work area at scale 1 -> cap floor(1048 * 0.70) = 733
+        assert_eq!(clamp_window_height(300, 1048, 1.0), ISLAND_WINDOW.1, "never shorter than the fixed window");
+        assert_eq!(clamp_window_height(340, 1048, 1.0), 340);
+        assert_eq!(clamp_window_height(500, 1048, 1.0), 500);
+        assert_eq!(clamp_window_height(733, 1048, 1.0), 733);
+        assert_eq!(clamp_window_height(900, 1048, 1.0), 733, "capped at 70% of the work area");
+        assert_eq!(clamp_window_height(i32::MAX, 1048, 1.0), 733);
+        assert_eq!(clamp_window_height(i32::MIN, 1048, 1.0), ISLAND_WINDOW.1);
+        // physical work area is divided by the scale: 2096 phys at 2.0 is the same 1048 logical px
+        assert_eq!(clamp_window_height(900, 2096, 2.0), 733);
+        // a short screen never pushes the window below its fixed size (clamp_rect keeps it on screen)
+        assert_eq!(clamp_window_height(900, 400, 1.0), ISLAND_WINDOW.1);
+        // junk scale falls back to 1
+        for bad in [0.0, -2.0, f64::NAN, f64::INFINITY] { assert_eq!(clamp_window_height(900, 1048, bad), 733, "{bad}"); }
+    }
+    #[test]
+    fn a_taller_window_keeps_the_top_anchor_the_width_and_the_screen() {
+        let area = area();
+        let base = island_window_rect(area, 1.0);
+        assert_eq!(island_window_rect_h(area, 1.0, ISLAND_WINDOW.1), base, "the default height is the fixed window");
+        let tall = island_window_rect_h(area, 1.0, 600);
+        assert_eq!((tall.x, tall.y, tall.w, tall.h), (base.x, base.y, base.w, 600));
+        // too tall for the area: clamp_rect keeps it on screen
+        let huge = island_window_rect_h(area, 1.0, 5000);
+        assert_eq!((huge.y, huge.h), (area.y, area.h));
+        assert_eq!(island_window_rect_h(area, 2.0, 500).h, 1000, "the height is logical, scaled to physical");
     }
 }

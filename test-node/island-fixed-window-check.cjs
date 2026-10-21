@@ -61,3 +61,28 @@ test('a press on #clay picks up and carries the desktop character without sendin
   assert.deepEqual(picked, [[200, 16]]); assert.deepEqual(carried, [[240, 80]]); assert.deepEqual(ended, [[240, 80]]);
   assert.deepEqual(commands, []);
 });
+
+test('island_window_height is registered and gated like island_shape: main window only, sender, closed payload, rate limit, THEN Rust clamps and resizes', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../src/main.rs'), 'utf8');
+  const command = main.slice(main.indexOf('fn island_window_height('), main.indexOf('fn drag_press('));
+  assert.ok(command.length > 20, 'the command exists');
+  const order = ['settingswindow::main_window_only(', 'bridge::sender_ok(', 'islandshape::parse_window_height(', '.check(now_ms())', 'geometry::clamp_window_height(', 'ensure_island_window('].map(s => command.indexOf(s));
+  assert.ok(order.every(i => i >= 0), JSON.stringify(order));
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  assert.match(main, /island_shape,\s+island_window_height,/);
+  assert.match(main, /geometry::island_window_rect_h\(area, io\.scale\(\), state\.window_h\.load\(Ordering::SeqCst\)\)/, 'the single native size funnel honours the requested height');
+  assert.match(main, /window_h: AtomicI32::new\(geometry::ISLAND_WINDOW\.1\)/);
+  const capabilities = JSON.parse(fs.readFileSync(path.join(__dirname, '../capabilities/main.json'), 'utf8'));
+  assert.deepEqual(capabilities.permissions, ['core:event:allow-listen', 'core:event:allow-unlisten'], 'no new capability is granted to the webview');
+});
+
+test('the page asks for a window height from the measured question layout and shrinks it back when the question closes', () => {
+  const view = fs.readFileSync(path.join(__dirname, '../frontend/notify-view.js'), 'utf8');
+  assert.match(view, /windowHeightFor/);
+  const notify = fs.readFileSync(path.join(__dirname, '../frontend/notify.js'), 'utf8');
+  assert.match(notify, /invoke\('island_window_height', \{ payload: \{ h: /);
+  assert.match(notify, /N\.windowHeightFor\(/);
+  assert.match(notify, /maxIslandH/);
+  const isl = source;
+  assert.doesNotMatch(isl, /Math\.min\(h, 332\)/, 'the island trusts the layout; the cap now comes from Rust');
+});

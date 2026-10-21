@@ -1308,7 +1308,7 @@
   });
   document.addEventListener('abito:question-size', event => {
     const h = Number(event.detail && event.detail.islandH);
-    const next = Number.isFinite(h) && h >= QUESTION_H ? Math.min(h, 332) : QUESTION_H;
+    const next = Number.isFinite(h) && h >= QUESTION_H ? h : QUESTION_H;
     if (next !== questionH) { questionH = next; render(); }
   });
   document.addEventListener('abito:question', event => {
