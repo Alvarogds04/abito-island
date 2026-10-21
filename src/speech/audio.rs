@@ -132,6 +132,41 @@ impl BandMeter {
     }
 }
 
+/// The microphone level the Dictado page shows. «Level» is the RMS of the input frames that arrived since it was last read,
+/// in dBFS between -60 (floor) and 0 (full scale), mapped linearly to 0..1. It keeps two numbers, never the samples: nothing
+/// is recorded for it and nothing leaves the machine.
+#[derive(Default)]
+pub struct LevelMeter {
+    sum_squares: f64,
+    frames: u64,
+}
+
+const LEVEL_FLOOR_DB: f64 = -60.0;
+
+impl LevelMeter {
+    pub fn feed(&mut self, samples: &[f32]) {
+        for &s in samples {
+            // a broken driver frame (NaN / infinity) is skipped, never allowed to poison the average
+            if s.is_finite() {
+                self.sum_squares += (s as f64) * (s as f64);
+                self.frames += 1;
+            }
+        }
+    }
+
+    /// The level of what arrived since the last call (consuming it), or None when nothing did.
+    pub fn take(&mut self) -> Option<f32> {
+        if self.frames == 0 {
+            return None;
+        }
+        let rms = (self.sum_squares / self.frames as f64).sqrt();
+        self.sum_squares = 0.0;
+        self.frames = 0;
+        let db = 20.0 * rms.max(1e-9).log10();
+        Some(((db - LEVEL_FLOOR_DB) / -LEVEL_FLOOR_DB).clamp(0.0, 1.0) as f32)
+    }
+}
+
 /// In-place radix-2 FFT (the length is a power of two).
 pub fn fft(re: &mut [f64], im: &mut [f64]) {
     let n = re.len();
@@ -350,6 +385,7 @@ fn build_stream(source: &Source, mut sink: impl FnMut(&[f32]) + Send + 'static) 
 pub struct Take {
     pub samples: Vec<f32>,
     pub meter: BandMeter,
+    pub level: LevelMeter,
     pub peak: f32,
 }
 
@@ -394,6 +430,28 @@ mod tests {
         (0..(rate as f64 * seconds) as usize)
             .map(|i| (2.0 * std::f64::consts::PI * freq * i as f64 / rate as f64).sin() as f32 * 0.5)
             .collect()
+    }
+
+    #[test]
+    fn the_input_level_is_the_normalized_rms_of_the_frames_and_never_keeps_them() {
+        let mut m = LevelMeter::default();
+        assert_eq!(m.take(), None, "no frames yet: no level, not a zero");
+        m.feed(&[]);
+        assert_eq!(m.take(), None, "an empty callback is not a level either");
+        m.feed(&vec![0.0; 800]);
+        assert_eq!(m.take(), Some(0.0), "digital silence is level 0");
+        m.feed(&vec![1.0; 800]);
+        assert!((m.take().unwrap() - 1.0).abs() < 1e-6, "full scale is level 1");
+        // a 0.5-amplitude sine has RMS 0.3535 = -9 dBFS; the scale is dBFS -60..0 mapped to 0..1
+        let sine = tone(440.0, 16_000, 0.1);
+        m.feed(&sine);
+        let v = m.take().unwrap();
+        assert!((v - (1.0 - 9.03 / 60.0)).abs() < 0.01, "RMS 0.3535 → {v}");
+        assert_eq!(m.take(), None, "reading the level consumes the frames: it measures only what arrived since the last read");
+        m.feed(&vec![0.0005; 800]);
+        assert_eq!(m.take(), Some(0.0), "below -60 dBFS is the floor, never negative");
+        m.feed(&[f32::NAN, 0.5, f32::INFINITY]);
+        assert!(m.take().unwrap().is_finite(), "a broken driver frame cannot poison the meter");
     }
 
     #[test]
