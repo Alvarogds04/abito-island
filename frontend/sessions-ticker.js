@@ -147,6 +147,36 @@
     }
   }
 
+  // ---- «Ver todas»: the full list of the sessions received (part 1) -----------------
+  // The frame carries only a boolean `truncated`, never a total, so the link says «Ver todas» without a number.
+  // The single pending question cannot be tied to a session row (its snapshot has the agent class, not the session id):
+  // it is shown ONCE at the top by agent class, never on a guessed row.
+  const SLUG = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+  const SLUG_LABELS = Object.freeze({ pi: 'Pi', 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini' });
+  function pendingAsker(pending) {
+    if (!isObject(pending) || typeof pending.id !== 'string' || typeof pending.text !== 'string') return null;
+    const slug = typeof pending.agent === 'string' && SLUG.test(pending.agent) ? pending.agent : 'pi';
+    const label = SLUG_LABELS[slug] || (typeof pending.agent_label === 'string' && cleanCell(pending.agent_label) && pending.agent_label.length <= 40 ? pending.agent_label : slug);
+    return label;
+  }
+  function moreView(view) {
+    if (!view || view.state !== 'ready' || !(view.truncated || view.rows.length > 1) || !view.rows.length) return null;
+    return { label: 'Ver todas', aria: 'Ver todas las sesiones' };
+  }
+  function listView(view, pending, focusId) {
+    if (!view || view.state !== 'ready' || !view.rows.length) return null;
+    const asker = pendingAsker(pending);
+    return {
+      title: 'Sesiones',
+      note: view.truncated ? 'La lista está acotada: puede haber más sesiones.' : null,
+      pending: asker ? { text: `Pregunta pendiente de ${asker}` } : null,
+      rows: view.rows.map(r => ({
+        id: r.id, agent: r.kindLabel, cwd: r.cwd ?? '—', state: r.stateLabel, origin: r.origin, focused: r.id === focusId,
+        aria: `Enfocar ${r.cwd ?? '—'}: ${r.kindLabel}, ${r.stateLabel}`,
+      })),
+    };
+  }
+
   // ---- the feed of Coucou's Ticker (S10) --------------------------------------------
   // Only the daemon's internal Pi has a tool stream. Other discovered agents
   // remain useful identities, but process metadata must never invent steps.
@@ -188,7 +218,7 @@
     return { active: true, task: { steps, stepSeq: memory.seq - 1, finalLine: steps.at(-1) ?? null }, who };
   }
 
-  return { piStateOf, SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
+  return { moreView, listView, pendingAsker, piStateOf, SCHEMA, MAX_ROWS, sessionsView, boundedText, errorText, render, newMemory, feed, focus, sessionRows, requestSessions };
 });
 
 // ---- browser-only wiring: self-mounting poll through agent_action --------------
@@ -213,6 +243,55 @@ function mount(V) {
   let ticker = null, raf = 0, shownSession = null, lastView = null, prefs = {}, integrationFocused = false;
   const jump = mkEl('button', 'icon-btn jump', '↗'); jump.id = 'session-jump'; jump.type = 'button'; jump.hidden = true;
   leftCard.append(jump);
+  const listen = window.__TAURI__?.event?.listen;
+  // «Ver todas»: the link sits in the who-row; the full list is a dialog over the card (Esc / Volver return to the link).
+  let pendingQuestion = null;
+  const seeAll = mkEl('button', 'see-all'); seeAll.type = 'button'; seeAll.hidden = true;
+  who.append(seeAll);
+  const overlay = mkEl('div', 'sessions-all'); overlay.hidden = true;
+  overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', 'Todas las sesiones');
+  const overlayHead = mkEl('div', 'sessions-all-head');
+  const overlayBack = mkEl('button', 'sessions-all-back', 'Volver'); overlayBack.type = 'button';
+  overlayHead.append(mkEl('strong', 'sessions-all-title', 'Sesiones'), overlayBack);
+  const overlayNote = mkEl('p', 'sessions-all-note'); overlayNote.hidden = true;
+  const overlayAsk = mkEl('p', 'sessions-all-ask'); overlayAsk.hidden = true;
+  const overlayList = mkEl('ul', 'sessions-all-list'); overlayList.setAttribute('aria-label', 'Sesiones');
+  overlay.append(overlayHead, overlayAsk, overlayNote, overlayList);
+  leftCard.append(overlay);
+  const overlayButtons = () => [...overlayList.querySelectorAll('button')];
+  function paintOverlay() {
+    const model = V.listView(lastView, pendingQuestion, memory.focus?.id ?? null);
+    if (!model) { closeOverlay(false); return; }
+    overlayNote.hidden = !model.note; overlayNote.textContent = model.note || '';
+    overlayAsk.hidden = !model.pending; overlayAsk.textContent = model.pending ? model.pending.text : '';
+    const had = doc_active_id();
+    overlayList.replaceChildren(...model.rows.map(r => {
+      const li = mkEl('li', 'sessions-all-row');
+      const b = mkEl('button', 'sessions-all-pick'); b.type = 'button'; b.dataset.sessionId = r.id;
+      b.setAttribute('aria-label', r.aria); if (r.focused) b.setAttribute('aria-current', 'true');
+      b.append(mkEl('span', 'sa-cwd', r.cwd), mkEl('span', 'sa-agent', r.agent), mkEl('span', 'sa-state', r.state));
+      b.addEventListener('click', event => { if (event.isTrusted === true && canFocus()) { selectSession(r.id); closeOverlay(true); } });
+      li.append(b); return li;
+    }));
+    if (had) overlayButtons().find(b => b.dataset.sessionId === had)?.focus();
+  }
+  const doc_active_id = () => (overlay.contains(document.activeElement) ? document.activeElement?.dataset?.sessionId ?? null : null);
+  function openOverlay() { overlay.hidden = false; paintOverlay(); (overlayButtons().find(b => b.getAttribute('aria-current')) || overlayButtons()[0] || overlayBack).focus(); }
+  function closeOverlay(refocus) { if (overlay.hidden) return; overlay.hidden = true; if (refocus && !seeAll.hidden) seeAll.focus(); }
+  seeAll.addEventListener('click', event => { if (event.isTrusted === true && canFocus()) openOverlay(); });
+  overlayBack.addEventListener('click', event => { if (event.isTrusted === true) closeOverlay(true); });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeOverlay(true); return; }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const items = overlayButtons(); const at = items.indexOf(document.activeElement);
+    if (!items.length) return;
+    event.preventDefault();
+    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  });
+  if (listen) {
+    listen('question:state', event => { pendingQuestion = event?.payload?.pending ?? null; if (!overlay.hidden) paintOverlay(); }).catch(() => {});
+    invoke('question_action', { payload: { action: 'view' } }).then(snap => { if (pendingQuestion === null) pendingQuestion = snap?.pending ?? null; }, () => {});
+  }
   who.style.paddingRight = '22px';
   Object.assign(jump.style, { position: 'absolute', top: '0px', right: '0px', width: '44px', height: '44px', minWidth: '44px', minHeight: '44px', border: '0', background: 'transparent', color: 'var(--muted)', fontSize: '10px', padding: '14px', cursor: 'pointer', pointerEvents: 'auto' });
   const canFocus = () => {
@@ -283,6 +362,9 @@ function mount(V) {
     ticker.sync(task);
     ticker.el.title = task?.steps?.at(-1) ?? ''; // full text fallback when a long step is cut
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
+    const more = V.moreView(view);
+    seeAll.hidden = !more || !w; if (more) { seeAll.textContent = more.label; seeAll.setAttribute('aria-label', more.aria); }
+    if (!overlay.hidden) paintOverlay();
     jump.hidden = !memory.focus || integrationFocused;
     jump.setAttribute('aria-label', `Abrir una terminal por clase · ${w?.name || ''}`);
     jump.title = 'Terminal por clase; no identifica la ventana de esta sesión';
@@ -298,7 +380,6 @@ function mount(V) {
     if (lastView) show(lastView);
   };
   let prefsVersion = 0;
-  const listen = window.__TAURI__?.event?.listen;
   if (listen) listen('prefs:state', event => { prefsVersion++; applyPrefs(event?.payload); }).catch(() => {});
   const observed = prefsVersion;
   invoke('prefs_action', { payload: { action: 'view' } }).then(raw => { if (observed === prefsVersion) applyPrefs(raw); }, () => {});

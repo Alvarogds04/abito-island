@@ -202,4 +202,52 @@ test('the mounted ticker exposes the full text as a tooltip fallback (title) and
   assert.doesNotMatch(src + fs.readFileSync(path.join(__dirname, '..', 'frontend', 'pills-view.js'), 'utf8'), /Pasos de herramientas no disponibles/);
 });
 
+// ---- «Ver todas» (part 1 of the human's two-part decision) --------------------------
+const two = () => T.sessionsView(frame({ sessions: [row(), row({ id: 's-0123abce', kind: 'claude-code', cwd: 'otro', state: 'running', origin: null })] }));
+test('moreView: «Ver todas» (no number: the frame has no total) only when there is more than the card shows', () => {
+  assert.deepEqual(T.moreView(two()), { label: 'Ver todas', aria: 'Ver todas las sesiones' });
+  assert.deepEqual(T.moreView(T.sessionsView(frame({ truncated: true }))), { label: 'Ver todas', aria: 'Ver todas las sesiones' });
+  assert.equal(T.moreView(T.sessionsView(frame())), null, 'one session: nothing more to see');
+  assert.equal(T.moreView(T.sessionsView(frame({ sessions: [] }))), null);
+  assert.equal(T.moreView({ state: 'error' }), null);
+  assert.equal(T.moreView(null), null);
+  assert.doesNotMatch(T.moreView(two()).label, /\d/);
+});
+
+test('listView: one row per received session (agent, cwd, state), the focused one marked, truncation said plainly, no invented count', () => {
+  const v = T.listView(two(), null, 's-0123abcd');
+  assert.equal(v.title, 'Sesiones');
+  assert.equal(v.rows.length, 2);
+  const [a, b] = v.rows;
+  assert.deepEqual([a.id, a.agent, a.cwd, a.state, a.focused], ['s-0123abcd', 'Pi', 'mi-proyecto', 'inactiva', true]);
+  assert.deepEqual([b.agent, b.cwd, b.state, b.focused], ['Claude Code', 'otro', 'ejecutando', false]);
+  assert.match(a.aria, /Enfocar mi-proyecto: Pi, inactiva/);
+  assert.equal(v.note, null);
+  assert.equal(T.listView(T.sessionsView(frame({ truncated: true })), null, null).note, 'La lista está acotada: puede haber más sesiones.');
+  assert.equal(T.listView({ state: 'error' }, null, null), null);
+  assert.equal(T.listView(T.sessionsView(frame({ sessions: [] })), null, null), null);
+});
+
+test('listView: the single pending question is shown ONCE at the top by agent class, never pinned to a guessed row', () => {
+  const pending = { id: '0b3a5c9e-8f27-4d11-9a0e-1c2d3e4f5a6b', kind: 'question', text: 'x', agent: 'claude-code', agent_label: 'Claude Code' };
+  const v = T.listView(two(), pending, null);
+  assert.deepEqual(v.pending, { text: 'Pregunta pendiente de Claude Code' });
+  assert.ok(v.rows.every(r => !('question' in r) && !/pregunta/i.test(r.aria)), 'no per-row badge');
+  assert.equal(T.listView(two(), null, null).pending, null);
+  assert.equal(T.listView(two(), { id: 'nope' }, null).pending, null, 'malformed pending is ignored');
+  assert.equal(T.listView(two(), { ...pending, agent: '../x', agent_label: 'evil\u0000' }, null).pending.text, 'Pregunta pendiente de Pi', 'unsafe asker falls back to the safe default');
+});
+
+test('the Ver todas overlay is wired: link in the who-row, dialog with Volver, Esc/arrows handled, Enfocar through selectSession, no jump handler change', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'sessions-ticker.js'), 'utf8');
+  assert.match(src, /V\.moreView\(view\)/);
+  assert.match(src, /V\.listView\(lastView, pendingQuestion, memory\.focus\?\.id/);
+  assert.match(src, /role', 'dialog'/);
+  assert.match(src, /event\.key === 'Escape'/);
+  assert.match(src, /ArrowDown/);
+  assert.match(src, /selectSession\(/);
+  assert.match(src, /listen\('question:state'/);
+  assert.match(src, /event\.isTrusted === true/);
+});
+
 Promise.all(async).then(() => { console.log(`sessions-ticker-view-check: ${passed} checks ok`); process.exit(0); }, (e) => { console.error(e); process.exit(1); });

@@ -760,3 +760,21 @@ html[data-motion="reduce"] .dcapsule, html[data-motion="reduce"] .dcontent, html
 .engine-row-live { position: absolute; top: 78px; left: 108px; right: 12px; margin: 0; flex-wrap: nowrap; }
 #overview-view:not([data-ticker="on"]) .engine-row-live { display: none; }
 .engine-row[data-kind="engine"] .engine-dot, .engine-row[data-kind="account"] .engine-dot, .engine-row[data-kind="sessions"] .engine-dot { background: var(--sun, #e0b23a); }
+
+/* «Ver todas»: link in the who-row + the full sessions list over the left card (scrollable, keyboard navigable) */
+.who .see-all { appearance: none; background: transparent; border: 0; padding: 2px 4px; margin-left: 6px; font: 500 11px var(--font); color: var(--ink); opacity: 0.85; cursor: pointer; border-radius: 4px; white-space: nowrap; }
+.who .see-all:hover { opacity: 1; text-decoration: underline; }
+.who .see-all:focus-visible, .sessions-all button:focus-visible { outline: 2px solid var(--dim-2); outline-offset: 1px; }
+.who .see-all[hidden] { display: none; }
+.card-left > .sessions-all { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: 8px 12px 8px 108px; background: inherit; min-height: 0; }
+.card-left > .sessions-all[hidden] { display: none; }
+.sessions-all-head { display: flex; align-items: center; justify-content: space-between; font: 600 12px var(--font); color: var(--ink); }
+.sessions-all-back { appearance: none; background: transparent; border: 0; font: 500 11px var(--font); color: var(--dim-2); cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.sessions-all-note, .sessions-all-ask { margin: 2px 0 0; font: 400 11px var(--font); color: var(--dim-2); }
+.sessions-all-ask { color: var(--ink); }
+.sessions-all-list { list-style: none; margin: 4px 0 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; min-height: 0; flex: 1 1 auto; }
+.sessions-all-pick { appearance: none; width: 100%; display: flex; gap: 8px; align-items: center; background: transparent; border: 0; border-radius: 4px; padding: 3px 4px; font: 400 11px var(--font); color: var(--ink); text-align: left; cursor: pointer; }
+.sessions-all-pick:hover { background: rgba(255, 255, 255, 0.05); }
+.sessions-all-pick[aria-current="true"] .sa-cwd { font-weight: 600; }
+.sessions-all-pick .sa-cwd { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sessions-all-pick .sa-agent, .sessions-all-pick .sa-state { flex: 0 0 auto; color: var(--dim-2); }
