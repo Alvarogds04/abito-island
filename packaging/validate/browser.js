@@ -342,10 +342,14 @@
     await wait(()=>byId('capsule').dataset.shortcutTerminal==='focused-class','terminal confirmó foco por clase');
     return {ok:true,chat_view:chat.view,sound_before:before.sound,sound_after:muted.sound,terminal:'class-based focus_host; native X11 readback follows'};
   }
+  // Human (21/10): with no terminal open, «ir a la terminal» opens a new one (55b69b9). The validation
+  // build swaps the real spawn for a fake launcher that only counts, so nothing opens on the desktop.
   async function shortcutTerminalAbsent() {
+    const before=window.__validatorTerminalLaunches||0;
     await key('Ctrl+Alt+t');
-    await wait(()=>byId('capsule').dataset.shortcutTerminal==='unavailable','terminal ausente no anuncia éxito');
-    return {ok:!!byId('notice-live').textContent,reason:byId('notice-live').textContent};
+    await wait(()=>byId('capsule').dataset.shortcutTerminal==='focused-class' && (window.__validatorTerminalLaunches||0)>before,'sin terminal abierta, el atajo pide abrir una (lanzador falso)');
+    const launched=(window.__validatorTerminalLaunches||0)===before+1;
+    return {ok:launched,launches:(window.__validatorTerminalLaunches||0)-before,reason:launched?'':'el atajo no pidió exactamente una terminal'};
   }
   async function shortcutAlert() {
     const before=await wait(async()=>{const v=await invoke('question_action',{action:'view'});return v.pending && v;},'request pendiente');
