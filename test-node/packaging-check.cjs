@@ -259,7 +259,7 @@ test('gates: missing frontend file, extra plugin dependency, missing capability 
   assert.throws(() => L.checkConfig(d)); fs.rmSync(d, { recursive: true });
 });
 test('verify: the shipped binary must not carry the probe or the fake backend strings', () => {
-  for (const marker of ['ABITO_PROBE', 'Prueba M3: propuesta servida por el backend falso']) {
+  for (const marker of ['ABITO_PROBE', 'Prueba M3: propuesta servida por el backend falso', 'abito-validator-fake-terminal-launcher']) {
     const d = fakeStage();
     fs.writeFileSync(path.join(d, 'abito-island'), `#!/bin/true\n${marker}\n`, { mode: 0o755 });
     const r = readJson(path.join(d, 'receipt.json')); r.files['abito-island'] = L.sha256File(path.join(d, 'abito-island'));

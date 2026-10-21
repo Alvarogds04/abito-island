@@ -2697,6 +2697,14 @@ fn feature_validation(app: &AppHandle) {
     app.add_capability(tauri::ipc::CapabilityBuilder::new("validator-only")
         .windows(["main","settings"]).permission("core:event:allow-emit"))
         .expect("probe-only event evidence");
+    // The validator never opens a real terminal on the shared desktop: the ↗
+    // button's launch is replaced by a counter the page can read back.
+    {
+        let page = win.clone();
+        abito_island::focushost::validation_launcher::install(move || {
+            let _ = page.eval("window.__validatorTerminalLaunches=(window.__validatorTerminalLaunches||0)+1;");
+        });
+    }
     let result = Arc::new(Mutex::new(None::<serde_json::Value>));
     let sink = result.clone();
     let result_listener = app.listen("validate-result", move |event| {

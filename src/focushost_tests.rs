@@ -300,3 +300,20 @@ fn launch_dir_is_the_known_session_dir_else_home_else_root() {
     assert_eq!(resolve_launch_dir(None, Some(missing)), PathBuf::from("/"));
     assert_eq!(resolve_launch_dir(None, None), PathBuf::from("/"));
 }
+
+#[test]
+fn validation_launcher_replaces_the_real_spawn_and_counts_requests() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let h = hits.clone();
+    let marker = validation_launcher::install(move || { h.fetch_add(1, Ordering::SeqCst); });
+    assert_eq!(marker, "abito-validator-fake-terminal-launcher");
+    // a PATH with a real-looking terminal that would be spawned: it must NOT be
+    let bin = tmp_dir("fakehook");
+    fake_bin(&bin, "xdg-terminal-exec");
+    assert_eq!(launch_terminal(None), Ok(()));
+    assert_eq!(launch_terminal(None), Ok(()));
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    validation_launcher::uninstall();
+}

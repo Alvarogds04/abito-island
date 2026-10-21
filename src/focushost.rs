@@ -250,9 +250,40 @@ where
     Err(TERMINAL_LAUNCH_REASON.to_string())
 }
 
+/// Validation-only seam: the validator/probe build installs a hook that
+/// REPLACES the real spawn, so a scene can click the ↗ button without opening
+/// a terminal on a shared desktop. Compiled out of the shipped binary
+/// (`MARKER` is on the packaging gate's forbidden list).
+#[cfg(any(debug_assertions, feature = "probe"))]
+pub mod validation_launcher {
+    use std::sync::Mutex;
+    pub const MARKER: &str = "abito-validator-fake-terminal-launcher";
+    type Hook = Box<dyn Fn() + Send + Sync>;
+    static HOOK: Mutex<Option<Hook>> = Mutex::new(None);
+    /// Install the fake launcher (replaces any previous one). Returns the marker.
+    pub fn install(hook: impl Fn() + Send + Sync + 'static) -> &'static str {
+        *HOOK.lock().expect("validation launcher") = Some(Box::new(hook));
+        MARKER
+    }
+    pub fn uninstall() {
+        *HOOK.lock().expect("validation launcher") = None;
+    }
+    /// `true` when the fake handled the request (nothing real is spawned).
+    pub(super) fn intercept() -> bool {
+        match HOOK.lock().expect("validation launcher").as_ref() {
+            Some(hook) => { hook(); true }
+            None => false,
+        }
+    }
+}
+
 /// Real launch: detached child, fixed (empty) argv, no shell, cwd chosen by
 /// Rust. The child is reaped on a thread so no zombie is left behind.
 pub fn launch_terminal(session_dir: Option<std::path::PathBuf>) -> Result<(), String> {
+    #[cfg(any(debug_assertions, feature = "probe"))]
+    if validation_launcher::intercept() {
+        return Ok(());
+    }
     let path_var = std::env::var("PATH").unwrap_or_default();
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     launch_terminal_with(&path_var, session_dir, home, |exe, dir| {
