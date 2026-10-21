@@ -110,6 +110,8 @@ pub async fn question_action(
                 }
                 Command::Answer { id, index } => t.answer(&id, index),
                 Command::Text { id, text } => t.answer_text(&id, text),
+                Command::AnswerMany { id, indexes, text } => t.answer_many(&id, indexes, text),
+                Command::AnswerForm { id, answers } => t.answer_form(&id, answers),
                 Command::Decline { id } => t.decline(&id),
                 Command::View => unreachable!(),
             }

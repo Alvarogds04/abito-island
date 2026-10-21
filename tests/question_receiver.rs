@@ -398,3 +398,52 @@ fn the_view_names_who_asks_agent_and_project_and_old_producers_stay_unlabelled()
     send(&mut c, &bad); closed(&mut c);
     assert_eq!(f.transport.question_snapshot().queued_count, 1);
 }
+
+// ---- structured: negotiated multiSelect / questionnaire over the real socket ---------------------
+fn opts_json(n: usize) -> Value {
+    Value::Array((0..n).map(|i| json!({"value":format!("v{}", i + 1),"label":format!("Opción {}", i + 1),"description":""})).collect())
+}
+fn structured_connect(f: &Fixture, session: &str) -> UnixStream {
+    let mut s = f.connect(session, false);
+    let mut hello = f.qp("questions_hello", session, ID); hello["structured"] = json!(1);
+    send(&mut s, &hello);
+    let ready = reply(&mut s);
+    assert_eq!(ready["type"], "questions_ready"); assert_eq!(ready["structured"], json!(1));
+    s
+}
+#[test]
+fn structured_multi_select_and_questionnaire_roundtrip_and_old_clients_are_refused() {
+    let f = Fixture::new();
+    // multiSelect: answered with a list, delivered whole to the origin
+    let mut a = structured_connect(&f, "session-1");
+    let mut q = f.question("session-1", ID); q["multiSelect"] = json!(true); q["options"] = opts_json(3); q["allowFreeText"] = json!(false);
+    send(&mut a, &q); pending(&f, ID);
+    let v = serde_json::to_value(f.transport.question_snapshot()).unwrap();
+    assert_eq!(v["pending"]["multi_select"], json!(true)); assert_eq!(v["pending"]["free_text_max"], json!(4000));
+    assert!(f.transport.answer_many(ID, vec![0, 0], None).is_err(), "duplicates are refused");
+    pending(&f, ID);
+    f.transport.answer_many(ID, vec![2, 0], None).unwrap();
+    let got = reply(&mut a);
+    assert_eq!(got["answer"], json!({"type":"options","values":["v1","v3"]}));
+    // questionnaire: one queue slot, all-or-nothing
+    let form = json!([{"header":"Ruta","text":"¿Ruta?","options":opts_json(2)},{"header":"Extras","text":"¿Extras?","options":opts_json(3),"multiSelect":true,"allowFreeText":true}]);
+    let mut b = structured_connect(&f, "session-2");
+    let mut fq = f.question("session-2", OTHER); fq["questions"] = form; fq["options"] = json!([]); fq["allowFreeText"] = json!(false);
+    send(&mut b, &fq); pending(&f, OTHER);
+    let v = serde_json::to_value(f.transport.question_snapshot()).unwrap();
+    assert_eq!(v["pending"]["form"].as_array().unwrap().len(), 2);
+    assert_eq!(v["pending"]["form"][1]["multi_select"], json!(true)); assert_eq!(v["queued_count"], json!(0));
+    assert!(f.transport.answer_form(OTHER, vec![abito_island::question::ItemAnswer::Option { index: 0 }]).is_err(), "partial answer refused");
+    pending(&f, OTHER);
+    f.transport.answer_form(OTHER, vec![abito_island::question::ItemAnswer::Option { index: 1 },
+        abito_island::question::ItemAnswer::Options { indexes: vec![2], text: Some("y más".into()) }]).unwrap();
+    let got = reply(&mut b);
+    assert_eq!(got["answer"], json!({"type":"form","answers":[{"type":"option","value":"v2"},{"type":"options","values":["v3"],"text":"y más"}]}));
+    // a connection that did NOT negotiate it is closed on a structured field (old behaviour for unknown shapes)
+    let mut old = f.connect("session-3", true);
+    let mut bad = f.question("session-3", "12345678-1234-4abc-8abc-123456789abf"); bad["multiSelect"] = json!(true);
+    send(&mut old, &bad); closed(&mut old);
+    // and old frames keep working on a structured connection
+    let mut c = structured_connect(&f, "session-4");
+    send(&mut c, &f.question("session-4", "12345678-1234-4abc-8abc-123456789ac0")); pending(&f, "12345678-1234-4abc-8abc-123456789ac0");
+}

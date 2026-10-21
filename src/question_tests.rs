@@ -616,3 +616,225 @@ fn a_bad_project_name_refuses_the_whole_question() {
         assert!(parse(&v).is_err(), "{bad} must be refused");
     }
 }
+
+// ======================================================================
+// Structured questions (negotiated `structured:1`): multiSelect, questionnaire, larger limits.
+// ======================================================================
+
+fn parse_s(value: &Value) -> Result<Inbound, Error> {
+    decode_with(&serde_json::to_vec(value).unwrap(), &identity(), NOW, true)
+}
+fn question_s(value: Value) -> Question {
+    match parse_s(&value).unwrap() { Inbound::Question(q) => q, _ => panic!("expected question") }
+}
+fn opts(n: usize) -> Value {
+    Value::Array((0..n).map(|i| json!({"value":format!("v{}", i + 1),"label":format!("Opción {}", i + 1),"description":format!("Detalle {}", i + 1)})).collect())
+}
+fn multi_value() -> Value {
+    let mut v = question_value(); v["options"] = opts(4); v["allowFreeText"] = json!(false); v["multiSelect"] = json!(true); v
+}
+fn item(header: &str, multi: bool, free: bool) -> Value {
+    json!({"header":header,"text":format!("¿{header}?"),"options":opts(3),"multiSelect":multi,"allowFreeText":free})
+}
+fn form_value(items: Vec<Value>) -> Value {
+    let mut v = question_value();
+    v["text"] = json!("Cuestionario"); v["options"] = json!([]); v["allowFreeText"] = json!(false); v["questions"] = Value::Array(items); v
+}
+fn slot_with(q: Question) -> QuestionSlot {
+    let mut s = QuestionSlot::new(); assert!(matches!(s.admit(7, &identity(), q, NOW).unwrap(), Admission::Accepted)); s
+}
+fn answer_body(slot: &QuestionSlot, a: HumanAnswer) -> Result<Value, Error> {
+    slot.prepare_answer(7, &identity(), ID, a, NOW).map(|d| body(d.line()))
+}
+
+#[test]
+fn structured_capability_is_exact_and_independent_of_busy_reason() {
+    let mut hello = base("questions_hello"); hello["structured"] = json!(1);
+    assert!(matches!(parse(&hello).unwrap(), Inbound::HelloStructured { busy_reason: false }));
+    hello["busyReason"] = json!(1);
+    assert!(matches!(parse(&hello).unwrap(), Inbound::HelloStructured { busy_reason: true }));
+    for bad in [json!(null),json!(0),json!(2),json!(true),json!("1"),json!(1.0),json!(1.5)] {
+        let mut h = base("questions_hello"); h["structured"] = bad; assert!(parse(&h).is_err());
+    }
+    assert!(matches!(parse(&base("questions_hello")).unwrap(), Inbound::Hello), "legacy hello unchanged");
+    assert_eq!(questions_ready_line(false, false), QUESTIONS_READY_LINE.to_vec());
+    assert_eq!(questions_ready_line(true, false), QUESTIONS_BUSY_REASON_READY_LINE.to_vec());
+    assert_eq!(questions_ready_line(false, true), b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"structured\":1}\n".to_vec());
+    assert_eq!(questions_ready_line(true, true), b"{\"v\":1,\"type\":\"questions_ready\",\"questionVersion\":1,\"busyReason\":1,\"structured\":1}\n".to_vec());
+}
+
+#[test]
+fn structured_fields_are_refused_on_a_connection_that_did_not_negotiate_them() {
+    assert_eq!(parse(&multi_value()).err(), Some(Error::InvalidSchema));
+    assert_eq!(parse(&form_value(vec![item("Ruta", false, false)])).err(), Some(Error::InvalidSchema));
+    // old frames are byte-for-byte what they were, negotiated or not
+    assert!(parse(&question_value()).is_ok()); assert!(parse_s(&question_value()).is_ok());
+    let q = question_s(question_value());
+    assert!(!q.multi_select()); assert!(q.form().is_none());
+}
+
+#[test]
+fn multi_select_question_rules() {
+    let q = question_s(multi_value()); assert!(q.multi_select());
+    for (what, mutate) in [
+        ("one option", Box::new(|v: &mut Value| v["options"] = opts(1)) as Box<dyn Fn(&mut Value)>),
+        ("five options", Box::new(|v| v["options"] = opts(5))),
+        ("no options", Box::new(|v| { v["options"] = json!([]); })),
+        ("approval", Box::new(|v| { v["kind"] = json!("approval"); v["options"] = opts(2); v["allowFreeText"] = json!(false); })),
+        ("not a bool", Box::new(|v| v["multiSelect"] = json!("yes"))),
+    ] {
+        let mut v = multi_value(); mutate(&mut v); assert!(parse_s(&v).is_err(), "{what}");
+    }
+    let mut v = multi_value(); v["multiSelect"] = json!(false);
+    assert!(!question_s(v).multi_select(), "explicit false is a plain single question");
+}
+
+#[test]
+fn multi_answer_is_a_bounded_duplicate_free_list_of_offered_values() {
+    let slot = slot_with(question_s(multi_value()));
+    let a = answer_body(&slot, HumanAnswer::Options { indexes: vec![2, 0], text: None }).unwrap();
+    assert_eq!(a["answer"], json!({"type":"options","values":["v1","v3"]}), "canonical option order, original values");
+    assert_eq!(answer_body(&slot, HumanAnswer::Options { indexes: vec![0,1,2,3], text: None }).unwrap()["answer"]["values"], json!(["v1","v2","v3","v4"]));
+    for bad in [vec![], vec![0,0], vec![4], vec![0,1,2,3,0], vec![usize::MAX]] {
+        assert_eq!(answer_body(&slot, HumanAnswer::Options { indexes: bad.clone(), text: None }).err(), Some(Error::InvalidAnswer), "{bad:?}");
+    }
+    assert_eq!(answer_body(&slot, HumanAnswer::Option { index: 0 }).err(), Some(Error::InvalidAnswer), "a multi question takes a list");
+    assert_eq!(answer_body(&slot, HumanAnswer::Text { text: "x".into() }).err(), Some(Error::InvalidAnswer), "no free text on this one");
+    assert_eq!(answer_body(&slot, HumanAnswer::Options { indexes: vec![0], text: Some("x".into()) }).err(), Some(Error::InvalidAnswer), "text only when allowed");
+    assert!(slot.active().is_some(), "preparing never consumes");
+    // a single-select question refuses a list
+    let single = slot_with(question_s(question_value()));
+    assert_eq!(answer_body(&single, HumanAnswer::Options { indexes: vec![0], text: None }).err(), Some(Error::InvalidAnswer));
+}
+
+#[test]
+fn multi_with_free_text_takes_values_and_or_text() {
+    let mut v = multi_value(); v["allowFreeText"] = json!(true);
+    let slot = slot_with(question_s(v));
+    assert_eq!(answer_body(&slot, HumanAnswer::Options { indexes: vec![1], text: Some("otra".into()) }).unwrap()["answer"], json!({"type":"options","values":["v2"],"text":"otra"}));
+    assert_eq!(answer_body(&slot, HumanAnswer::Options { indexes: vec![], text: Some("solo texto".into()) }).unwrap()["answer"], json!({"type":"options","values":[],"text":"solo texto"}));
+    for bad in [HumanAnswer::Options { indexes: vec![], text: None }, HumanAnswer::Options { indexes: vec![], text: Some(" \n".into()) },
+                HumanAnswer::Options { indexes: vec![0], text: Some("bad\u{0000}".into()) }] {
+        assert_eq!(answer_body(&slot, bad).err(), Some(Error::InvalidAnswer));
+    }
+}
+
+#[test]
+fn questionnaire_shape_rules() {
+    let q = question_s(form_value(vec![item("Ruta", false, false), item("Extras", true, true)]));
+    assert_eq!(q.form().unwrap().len(), 2);
+    let ok = |n: usize| form_value((0..n).map(|i| item(&format!("P{i}"), false, false)).collect());
+    assert!(parse_s(&ok(1)).is_ok()); assert!(parse_s(&ok(4)).is_ok());
+    assert!(parse_s(&ok(0)).is_err()); assert!(parse_s(&ok(5)).is_err());
+    let mut bad: Vec<(&str, Value)> = vec![];
+    let mut v = ok(1); v["questions"][0]["options"] = opts(1); bad.push(("item one option", v));
+    let mut v = ok(1); v["questions"][0]["options"] = opts(5); bad.push(("item five options", v));
+    let mut v = ok(1); v["questions"][0]["options"] = json!([]); bad.push(("item no options", v));
+    let mut v = ok(1); v["questions"][0]["header"] = json!(""); bad.push(("empty header", v));
+    let mut v = ok(1); v["questions"][0].as_object_mut().unwrap().remove("header"); bad.push(("missing header", v));
+    let mut v = ok(1); v["questions"][0]["extra"] = json!(1); bad.push(("unknown item field", v));
+    let mut v = ok(1); v["options"] = opts(2); bad.push(("top-level options with a questionnaire", v));
+    let mut v = ok(1); v["allowFreeText"] = json!(true); bad.push(("top-level free text with a questionnaire", v));
+    let mut v = ok(1); v["multiSelect"] = json!(true); bad.push(("top-level multiSelect with a questionnaire", v));
+    let mut v = ok(1); v["kind"] = json!("approval"); bad.push(("approval questionnaire", v));
+    let mut v = ok(1); v["questions"][0]["options"][1]["value"] = json!("v1"); bad.push(("duplicate value inside an item", v));
+    let mut v = ok(1); v["questions"] = json!({"a":1}); bad.push(("not an array", v));
+    for (what, v) in bad { assert!(parse_s(&v).is_err(), "{what}"); }
+    // the same option values may repeat ACROSS items
+    assert!(parse_s(&ok(2)).is_ok());
+}
+
+#[test]
+fn questionnaire_answer_is_all_or_nothing_one_entry_per_question() {
+    let slot = slot_with(question_s(form_value(vec![item("Ruta", false, true), item("Extras", true, false), item("Libre", false, true)])));
+    let full = HumanAnswer::Form { answers: vec![
+        ItemAnswer::Option { index: 1 }, ItemAnswer::Options { indexes: vec![2, 0], text: None }, ItemAnswer::Text { text: "mi texto".into() }] };
+    let a = answer_body(&slot, full).unwrap();
+    assert_eq!(a["answer"], json!({"type":"form","answers":[
+        {"type":"option","value":"v2"}, {"type":"options","values":["v1","v3"]}, {"type":"text","text":"mi texto"}]}));
+    let ok = || vec![ItemAnswer::Option { index: 0 }, ItemAnswer::Options { indexes: vec![0], text: None }, ItemAnswer::Option { index: 2 }];
+    assert!(answer_body(&slot, HumanAnswer::Form { answers: ok() }).is_ok());
+    // wrong count: too few (partial) or too many
+    let mut short = ok(); short.pop();
+    let mut long = ok(); long.push(ItemAnswer::Option { index: 0 });
+    assert_eq!(answer_body(&slot, HumanAnswer::Form { answers: short }).err(), Some(Error::InvalidAnswer));
+    assert_eq!(answer_body(&slot, HumanAnswer::Form { answers: long }).err(), Some(Error::InvalidAnswer));
+    assert_eq!(answer_body(&slot, HumanAnswer::Form { answers: vec![] }).err(), Some(Error::InvalidAnswer));
+    // one invalid entry anywhere sinks the whole answer
+    for (i, bad) in [(0, ItemAnswer::Option { index: 3 }), (1, ItemAnswer::Option { index: 0 }), (1, ItemAnswer::Options { indexes: vec![], text: None }),
+                     (1, ItemAnswer::Options { indexes: vec![1, 1], text: None }), (1, ItemAnswer::Text { text: "x".into() }), (2, ItemAnswer::Options { indexes: vec![0], text: None })] {
+        let mut answers = ok(); answers[i] = bad;
+        assert_eq!(answer_body(&slot, HumanAnswer::Form { answers }).err(), Some(Error::InvalidAnswer), "entry {i}");
+    }
+    // the item without free text refuses text; the whole-question forms refuse single-question answers
+    assert_eq!(answer_body(&slot, HumanAnswer::Option { index: 0 }).err(), Some(Error::InvalidAnswer));
+    assert_eq!(answer_body(&slot, HumanAnswer::Text { text: "x".into() }).err(), Some(Error::InvalidAnswer));
+    assert_eq!(answer_body(&slot, HumanAnswer::Options { indexes: vec![0], text: None }).err(), Some(Error::InvalidAnswer));
+    assert!(slot.active().is_some(), "nothing was consumed by any refusal");
+    // a form answer on a plain question is refused too
+    let plain = slot_with(question_s(question_value()));
+    assert_eq!(answer_body(&plain, HumanAnswer::Form { answers: vec![ItemAnswer::Option { index: 0 }] }).err(), Some(Error::InvalidAnswer));
+}
+
+#[test]
+fn a_questionnaire_takes_one_queue_slot_and_leaves_the_others() {
+    let mut slot = QuestionSlot::new();
+    slot.admit(1, &identity(), question_s(form_value(vec![item("A", false, false), item("B", false, false)])), NOW).unwrap();
+    let mut other = question_value(); other["id"] = json!(OTHER_ID);
+    slot.admit(2, &identity(), question_s(other), NOW).unwrap();
+    assert_eq!(slot.len(), 2);
+    let d = slot.prepare_answer(1, &identity(), ID, HumanAnswer::Form { answers: vec![ItemAnswer::Option { index: 0 }, ItemAnswer::Option { index: 1 }] }, NOW).unwrap();
+    slot.commit_delivery(d).unwrap();
+    assert_eq!(slot.len(), 1); assert_eq!(slot.active().unwrap().question().id(), OTHER_ID);
+}
+
+#[test]
+fn structured_limits_are_exact_at_the_boundary_and_legacy_limits_do_not_move() {
+    let with = |f: &dyn Fn(&mut Value)| { let mut v = question_value(); f(&mut v); v };
+    // legacy (not negotiated): 500 / 60 / 160
+    assert!(parse(&with(&|v| v["text"] = json!("a".repeat(500)))).is_ok());
+    assert!(parse(&with(&|v| v["text"] = json!("a".repeat(501)))).is_err());
+    assert!(parse(&with(&|v| v["options"][0]["label"] = json!("a".repeat(61)))).is_err());
+    assert!(parse(&with(&|v| v["options"][0]["description"] = json!("a".repeat(161)))).is_err());
+    // negotiated: 2000 / 120 / 400, header 32
+    assert!(parse_s(&with(&|v| v["text"] = json!("a".repeat(2000)))).is_ok());
+    assert!(parse_s(&with(&|v| v["text"] = json!("a".repeat(2001)))).is_err());
+    assert!(parse_s(&with(&|v| v["options"][0]["label"] = json!("a".repeat(120)))).is_ok());
+    assert!(parse_s(&with(&|v| v["options"][0]["label"] = json!("a".repeat(121)))).is_err());
+    assert!(parse_s(&with(&|v| v["options"][0]["description"] = json!("a".repeat(400)))).is_ok());
+    assert!(parse_s(&with(&|v| v["options"][0]["description"] = json!("a".repeat(401)))).is_err());
+    let hdr = |n: usize| { let mut it = item("x", false, false); it["header"] = json!("h".repeat(n)); form_value(vec![it]) };
+    assert!(parse_s(&hdr(32)).is_ok()); assert!(parse_s(&hdr(33)).is_err());
+    let item_text = |n: usize| { let mut it = item("x", false, false); it["text"] = json!("t".repeat(n)); form_value(vec![it]) };
+    assert!(parse_s(&item_text(2000)).is_ok()); assert!(parse_s(&item_text(2001)).is_err());
+}
+
+#[test]
+fn structured_frame_cap_is_16384_bytes_and_the_legacy_cap_stays_4096() {
+    assert_eq!(STRUCTURED_FRAME_BYTES, 16384);
+    let raw = serde_json::to_string(&question_value()).unwrap();
+    let pad = |n: usize| format!("{raw}{}", " ".repeat(n - raw.len()));
+    assert!(decode_with(pad(16384).as_bytes(), &identity(), NOW, true).is_ok());
+    assert_eq!(decode_with(pad(16385).as_bytes(), &identity(), NOW, true).err(), Some(Error::FrameTooLarge));
+    assert!(decode(pad(4096).as_bytes(), &identity(), NOW).is_ok());
+    assert_eq!(decode(pad(4097).as_bytes(), &identity(), NOW).err(), Some(Error::FrameTooLarge));
+    assert_eq!(decode_with(pad(4097).as_bytes(), &identity(), NOW, false).err(), Some(Error::FrameTooLarge));
+    // four fat questions do not fit by characters alone: the byte cap decides
+    let mut it = item("x", false, false); it["text"] = json!("🙂".repeat(2000)); it["options"] = json!((0..4).map(|i| json!({"value":format!("v{i}"),"label":"🙂".repeat(120),"description":"🙂".repeat(400)})).collect::<Vec<_>>());
+    assert_eq!(parse_s(&form_value(vec![it; 4])).err(), Some(Error::FrameTooLarge));
+}
+
+#[test]
+fn free_text_limit_is_2000_legacy_and_4000_structured_and_the_answer_frame_stays_bounded() {
+    let legacy = slot_with(question(question_value()));
+    assert!(answer_body(&legacy, HumanAnswer::Text { text: "a".repeat(2000) }).is_ok());
+    assert!(answer_body(&legacy, HumanAnswer::Text { text: "a".repeat(2001) }).is_err());
+    let structured = slot_with(question_s(question_value()));
+    assert!(answer_body(&structured, HumanAnswer::Text { text: "a".repeat(4000) }).is_ok());
+    assert!(answer_body(&structured, HumanAnswer::Text { text: "a".repeat(4001) }).is_err());
+    // a questionnaire of long entries is bounded by the 16384-byte answer frame, as a whole
+    let slot = slot_with(question_s(form_value(vec![item("A", false, true), item("B", false, true), item("C", false, true), item("D", false, true)])));
+    let entry = |n: usize| ItemAnswer::Text { text: "🙂".repeat(n) };
+    assert!(answer_body(&slot, HumanAnswer::Form { answers: vec![entry(900), entry(900), entry(900), entry(900)] }).is_ok());
+    assert_eq!(answer_body(&slot, HumanAnswer::Form { answers: vec![entry(1100), entry(1100), entry(1100), entry(1100)] }).err(), Some(Error::FrameTooLarge));
+}
