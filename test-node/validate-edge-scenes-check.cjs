@@ -59,4 +59,12 @@ test('the focus scene encodes the A+E rules: every session is a blob row (no 2x2
   assert.match(f, /\.centre-name/);
   assert.doesNotMatch(f, /querySelector\('\.who \.name'\)/, 'the who-row text is gone: the centre column says the session name');
 });
+test('the terminal shortcut scene REPORTS which mode the product wrote, so the native readback is judged against the right expectation (stale class-only assumption after fc7f679)', () => {
+  const a = between('async function shortcutDispatch()', 'async function shortcutTerminalAbsent()');
+  assert.match(a, /terminal_mode:mode/);
+  assert.match(a, /class_only:mode==='focused-class'/);
+  const probe = fs.readFileSync(path.join(__dirname, '../src/probe.rs'), 'utf8');
+  const focusAt = probe.indexOf('AbitoValidate.sessionsFocus()'), shortcutAt = probe.indexOf('AbitoValidate.shortcutDispatch()');
+  assert.ok(focusAt > 0 && shortcutAt > focusAt, 'the focus scene runs BEFORE the shortcut scene and leaves a session focused: the order is the cause');
+});
 console.log(`validate-edge-scenes: ${passed} checks ok`);

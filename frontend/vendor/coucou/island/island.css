@@ -1006,3 +1006,22 @@ html[data-theme="light"] .q-approval-btn.q-approve::after { background: var(--in
   left: calc(50% - 310px); width: 620px; top: 42px; height: 108px; padding: 8px; gap: 8px; box-shadow: none; z-index: 4;
 }
 #capsule[data-view="overview"] #notices[data-list="open"] ~ #blobs, #capsule[data-notice-list="open"] #blobs { opacity: 0; visibility: hidden; pointer-events: none; }
+
+/* ══ The notice capsule: the title lives INSIDE its own box and ellipsizes (screen gate: «Conexión caída» ran under «Abrir» and the capsule
+   spilled left of the column). #notice-open is the flexible part; ring | text | action | × are siblings that never overlap. ══════════════ */
+#notice-pill { min-width: 0; max-width: 100%; box-sizing: border-box; }
+#notice-open { flex: 1 1 0; min-width: 0; overflow: hidden; }
+#notice-open .notice-text { flex: 1 1 0; min-width: 0; overflow: hidden; }
+#notices #notice-title, #notices[data-tone] #notice-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#notices #notice-sub { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#notice-ring { flex: 0 0 14px; }
+#notice-action { flex: 0 0 auto; }
+/* The capsule is 174px: ring 14 + title + «Abrir» 40 + × 28 do not fit with a long title. The capsule is the WHOLE band (it drops the 28px
+   reserved for the «i», which has no business next to an actionable notice) and «Abrir» is a compact 38px; the title ellipsizes in the rest. */
+#notice-pill { gap: 2px; margin-right: 0 !important; }
+#notice-row { padding-right: 0; }
+#notice-action { padding: 0 6px; min-height: 20px; font-size: 10.5px; flex: 0 0 auto; }
+#capsule #notice-dismiss { margin: -8px -14px -8px -14px; }
+#notices #notice-title, #notices[data-tone] #notice-title { min-width: 0; }
+#notice-open .notice-text { min-width: 0; }
+#notices:has(#notice-pill:not([hidden])) #notice-info { display: none; }
