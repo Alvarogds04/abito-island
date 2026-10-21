@@ -47,7 +47,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   assert(!text(page).includes('si Abito puede escribir por ti'), 'Abito never asks to type automatically');
   assert(String(page.children[0].className).includes('hub-hero'), 'D3: the hero is the first thing on the page; the feedback line must not sit above it');
   const labels = all(page).filter(e=>e.className==='hub-label').map(e=>e.textContent);
-  assert.deepEqual(labels,['Teclas','Micrófono','Reconocimiento','Notetaker','App','Privacidad'], 'upstream section order');
+  assert.deepEqual(labels,['Probar','Teclas','Micrófono','Reconocimiento','Notetaker','App','Privacidad'], 'upstream section order, with the #503 S27 «Probar» area first');
   assert.deepEqual(all(page).filter(e=>e.className==='title').map(e=>e.textContent),['Mantén una tecla para dictar en cualquier lugar','Mantener para dictar','Posición de la píldora','Manos libres','Volver a pegar el último dictado','Cancelar un dictado','Micrófono','Parakeet, en tu ordenador','Resúmenes','Abrir esta ventana al abrir Abito','Guardar el historial']);
   assert(text(page).includes('612')); assert(text(page).includes('Ctrl+Alt+V')); assert(!all(page).some(e=>e.tagName==='option'&&e.attrs.value==='right_ctrl'));
   const row = title => all(page).find(e=>e.className==='hub-row' && all(e).some(n=>n.textContent===title));

@@ -4,7 +4,7 @@ import { t } from "./i18n-es.js";
 import { onEvent } from "./bridge-shim.js";
 import { dataLife } from "./data-pages.js";
 import { FlowBridge } from "./flow-shim.js";
-import { button, card, divider, keyKeycap, keycap, label, number, row, segmented, select, toggle, icon, iconButton, shortCount } from "./ui.js";
+import { button, card, divider, keyKeycap, keyLabel, keycap, label, number, row, segmented, select, toggle, icon, iconButton, shortCount } from "./ui.js";
 import { trusted } from "./runtime.js";
 import { emptyState, glowCard } from "./hero.js";
 const unavailable = (el) => {
@@ -107,6 +107,35 @@ async function flowSettingsPage(page, ctx, invoke) {
   const prefs = status.prefs;
   const copied = h("div", { class: "hub-note", role: "status" });
   page.append(ctx.hero("flowsettings", t("Settings"), null));
+  const keyName = keyLabel("wayland", status.platform), micName = prefs.mic || "";
+  const mic = status.mics.find((m) => m.name === prefs.mic);
+  const tryField = h("textarea", { id: "dictation-try-field", class: "hub-input", rows: "3", readonly: "true", "aria-label": "Lo que dictaste", placeholder: "Lo que dictes aparece acá" });
+  const tryStatus = h("div", { id: "dictation-try-status", class: "hub-note", role: "status", "aria-live": "polite" });
+  const checks = h("div", { id: "dictation-try-checks", class: "dictation-checks" });
+  const check = (ok, text) => h("span", { class: ok ? "dictation-check ok" : "dictation-check bad" }, h("span", { class: "state-ico", "aria-hidden": "true", text: ok ? "✓" : "✗" }), h("span", { class: "state-word", text }));
+  const parakeetReady = status.models.parakeet.state === "ready", keysOk = status.keys === "ok" || status.keys === "wayland";
+  checks.append(
+    // «predeterminado del sistema» is a valid choice even with no list; a stored mic that is no longer present is not.
+    check(!micName || !!mic, !micName ? "Micrófono: predeterminado del sistema" : mic ? `Micrófono: ${mic.name}` : `Micrófono: ${micName} (no está conectado)`),
+    check(keysOk, keysOk ? `Tecla: ${keyName}` : "Tecla: no disponible aquí"),
+    check(parakeetReady, parakeetReady ? "Reconocimiento: Parakeet" : "Reconocimiento: falta descargar Parakeet")
+  );
+  const refreshTry = () => void life.work(async () => {
+    const entries = await FlowBridge.history();
+    if (!life.alive()) return;
+    tryField.value = entries[0]?.text ?? "";
+    tryStatus.textContent = entries[0] ? "Último dictado." : "";
+  });
+  void life.listen("dictation:history", () => refreshTry());
+  page.append(label("Probar"), h(
+    "div",
+    { id: "dictation-try", class: "dictation-try" },
+    h("div", { class: "dictation-try-title", text: `Probar: mantené ${keyName} y hablá` }),
+    tryField,
+    tryStatus,
+    h("div", { class: "hub-note", text: "Se copia al portapapeles: pegá con Ctrl+V donde escribas." }),
+    checks
+  ));
   const edges = [["bottom", t("Bottom")], ["left", t("Left")], ["right", t("Right")]];
   page.append(label(t("Keys")));
   const keysCard = card(
@@ -139,7 +168,7 @@ async function flowSettingsPage(page, ctx, invoke) {
   page.append(label(t("Microphone")));
   const mics = [["", t("System default")], ...status.mics.map((m) => [m.name, m.name])];
   if (prefs.mic && !mics.some(([id]) => id === prefs.mic)) mics.push([prefs.mic, prefs.mic]);
-  page.append(card(row(t("Microphone"), t("The one Abito listens to for dictation and calls."), trusted(select(mics, prefs.mic, (mic) => save((p) => p.mic = mic))))));
+  page.append(card(row(t("Microphone"), t("The one Abito listens to for dictation and calls."), trusted(select(mics, prefs.mic, (mic2) => save((p) => p.mic = mic2))))));
   page.append(label(t("Recognition")));
   page.append(card(
     row(t("Parakeet, on your computer"), t("The most accurate, offline, 25 languages. Downloaded once (about {0} MB).", { 0: number(status.models.downloadMb) }), modelsControl(ctx, life)),

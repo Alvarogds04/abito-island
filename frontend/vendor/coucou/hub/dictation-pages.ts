@@ -6,7 +6,7 @@ import { onEvent } from './bridge-shim.js';
 import { dataLife } from './data-pages.js';
 import { FlowBridge, type Edge, type ModelsStatus } from './flow-shim.js';
 import type { HubContext } from './shell.js';
-import { button, card, divider, keyKeycap, keycap, label, number, row, segmented, select, toggle, icon, iconButton, shortCount } from './ui.js';
+import { button, card, divider, keyKeycap, keyLabel, keycap, label, number, row, segmented, select, toggle, icon, iconButton, shortCount } from './ui.js';
 import { trusted } from './runtime.js';
 import { emptyState, glowCard } from './hero.js';
 const unavailable = <T extends HTMLElement>(el: T): T => { (el as any).disabled = true; el.title = 'No disponible todavía'; return el; };
@@ -70,6 +70,33 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext, invok
   const prefs = status.prefs;
   const copied = h('div', {class:'hub-note',role:'status'});
   page.append(ctx.hero("flowsettings", t("Settings"), null));
+
+  // ── Probar (#503 S27, Opción B) ──
+  // The host delivers dictation to the CLIPBOARD (never into a field) and emits no microphone level, so this area is honest
+  // about both: the field shows the LAST dictation read from the local history when a new one lands (the event carries no
+  // text), and there is no level meter. It adds no command: `history` is the closed read the history page already uses.
+  const keyName = keyLabel('wayland', status.platform), micName = prefs.mic || '';
+  const mic = status.mics.find((m) => m.name === prefs.mic);
+  const tryField = h('textarea', { id: 'dictation-try-field', class: 'hub-input', rows: '3', readonly: 'true', 'aria-label': 'Lo que dictaste', placeholder: 'Lo que dictes aparece acá' }) as HTMLTextAreaElement;
+  const tryStatus = h('div', { id: 'dictation-try-status', class: 'hub-note', role: 'status', 'aria-live': 'polite' });
+  const checks = h('div', { id: 'dictation-try-checks', class: 'dictation-checks' });
+  const check = (ok: boolean, text: string) => h('span', { class: ok ? 'dictation-check ok' : 'dictation-check bad' }, h('span', { class: 'state-ico', 'aria-hidden': 'true', text: ok ? '✓' : '✗' }), h('span', { class: 'state-word', text }));
+  const parakeetReady = status.models.parakeet.state === 'ready', keysOk = status.keys === 'ok' || status.keys === 'wayland';
+  checks.append(
+    // «predeterminado del sistema» is a valid choice even with no list; a stored mic that is no longer present is not.
+    check(!micName || !!mic, !micName ? 'Micrófono: predeterminado del sistema' : mic ? `Micrófono: ${mic.name}` : `Micrófono: ${micName} (no está conectado)`),
+    check(keysOk, keysOk ? `Tecla: ${keyName}` : 'Tecla: no disponible aquí'),
+    check(parakeetReady, parakeetReady ? 'Reconocimiento: Parakeet' : 'Reconocimiento: falta descargar Parakeet'));
+  const refreshTry = () => void life.work(async () => {
+    const entries = await FlowBridge.history();
+    if (!life.alive()) return;
+    tryField.value = entries[0]?.text ?? '';
+    tryStatus.textContent = entries[0] ? 'Último dictado.' : '';
+  });
+  void life.listen('dictation:history', () => refreshTry());
+  page.append(label('Probar'), h('div', { id: 'dictation-try', class: 'dictation-try' },
+    h('div', { class: 'dictation-try-title', text: `Probar: mantené ${keyName} y hablá` }), tryField, tryStatus,
+    h('div', { class: 'hub-note', text: 'Se copia al portapapeles: pegá con Ctrl+V donde escribas.' }), checks));
 
   // ── Keys ──
   const edges: [Edge, string][] = [["bottom", t("Bottom")], ["left", t("Left")], ["right", t("Right")]];

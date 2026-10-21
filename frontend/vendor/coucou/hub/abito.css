@@ -107,3 +107,12 @@ section.abito-card > h2 { gap: 8px; }
 .engine-status .state-ico { width: 1em; text-align: center; }
 .engine-status.on { color: var(--green); } .engine-status.busy { color: var(--amber); } .engine-status.error { color: var(--red, #f4505e); } .engine-status.off { color: var(--dim); }
 .engine-status .hint { flex: 1 1 200px; font-weight: 400; }
+
+/* #503 S27 (Dictado, Opción B): the «Probar» area above the settings: instruction, the last dictation, and what is ready. */
+.dictation-try { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 14px; background: var(--hub-card); }
+.dictation-try-title { font: 700 14px var(--font); }
+.dictation-try textarea { width: 100%; min-height: 64px; resize: none; }
+.dictation-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.dictation-check { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--font); }
+.dictation-check .state-ico { font-weight: 700; width: 1em; text-align: center; }
+.dictation-check.ok { color: var(--green); } .dictation-check.bad { color: var(--amber); }
