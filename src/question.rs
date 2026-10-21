@@ -102,8 +102,12 @@ pub struct Question {
     expires_at: u64,
     /// Who is asking (`pi` when the frame carries no `agent`): a short validated slug.
     agent: String,
+    /// OPTIONAL display name of the asking session's project (S3); never an identity.
+    project_name: Option<String>,
 }
 impl Question {
+    /// The asking session's project name, when the producer sent a valid one.
+    pub fn project_name(&self) -> Option<&str> { self.project_name.as_deref() }
     /// The wire identity of the asking agent (`pi` by default).
     pub fn agent(&self) -> &str { &self.agent }
     /// The human-facing name: the four known agents have their proper spelling, any other
@@ -159,6 +163,8 @@ enum Wire {
         #[serde(rename = "expiresAt")] expires_at: u64,
         /// OPTIONAL (P1): absent = `pi`. A present value must be a safe slug (see `agent_slug_ok`).
         #[serde(default, deserialize_with = "present_string")] agent: Option<String>,
+        /// OPTIONAL (S3): display name of the project, same grammar as `settled` (`project_name_ok`).
+        #[serde(default, rename = "projectName", deserialize_with = "present_string")] project_name: Option<String>,
     },
     #[serde(rename = "question_cancel")]
     Cancel {
@@ -203,14 +209,17 @@ pub fn decode(body: &[u8], identity: &Identity, now: u64) -> Result<Inbound, Err
              if busy_reason { Inbound::HelloBusyReason } else { Inbound::Hello })
         }
         Wire::Question { v, question_version, project, session_id, at, id, kind, text,
-                         options, allow_free_text, expires_at, agent } => {
+                         options, allow_free_text, expires_at, agent, project_name } => {
             let base = Base { project, session_id, at };
             let agent = match agent {
                 None => DEFAULT_AGENT.to_owned(),
                 Some(a) if agent_slug_ok(&a) => a,
                 Some(_) => return Err(Error::InvalidQuestion),
             };
-            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent };
+            if project_name.as_deref().is_some_and(|n| !crate::protocol::project_name_ok(n)) {
+                return Err(Error::InvalidQuestion);
+            }
+            let question = Question { base: base.clone(), id, kind, text, options, allow_free_text, expires_at, agent, project_name };
             validate_question(&question, now)?;
             (v, question_version, base, Inbound::Question(question))
         }

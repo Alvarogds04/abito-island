@@ -597,3 +597,22 @@ fn a_stale_ticket_never_consumes_another_queued_question() {
     assert!(slot.commit_delivery(ticket).is_err());
     assert_eq!(ids(&slot), vec![qid(2)]);
 }
+
+// ---- who asks: agent + project name travel with the question (S3) -------------
+
+#[test]
+fn a_question_may_carry_a_validated_project_name_and_it_is_optional() {
+    assert_eq!(question(question_value()).project_name(), None, "old producers: unchanged");
+    let mut v = question_value(); v["agent"] = json!("codex"); v["projectName"] = json!("proyecto-beta");
+    let q = question(v);
+    assert_eq!(q.agent_label(), "Codex");
+    assert_eq!(q.project_name(), Some("proyecto-beta"));
+}
+
+#[test]
+fn a_bad_project_name_refuses_the_whole_question() {
+    for bad in [json!(""), json!(" x"), json!("x "), json!("a/b"), json!("x".repeat(65)), json!("<b>"), json!(null), json!(7), json!("línea\nnueva")] {
+        let mut v = question_value(); v["projectName"] = bad.clone();
+        assert!(parse(&v).is_err(), "{bad} must be refused");
+    }
+}

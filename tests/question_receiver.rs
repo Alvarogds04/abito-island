@@ -381,3 +381,20 @@ fn lost_ack_is_never_answerable_and_removed_at_original_deadline() {
     assert!(f.transport.question_snapshot().deliveries.is_empty());
     assert_eq!(f.transport.question_snapshot().notice, Some(transport::QuestionOutcome::AckLost)); quiet(&mut a);
 }
+#[test]
+fn the_view_names_who_asks_agent_and_project_and_old_producers_stay_unlabelled() {
+    let f = Fixture::new(); let mut a = f.connect("session-1", true); let mut b = f.connect("session-2", true);
+    let mut q = f.question("session-1", ID); q["agent"] = json!("codex"); q["projectName"] = json!("proyecto-beta");
+    send(&mut a, &q); pending(&f, ID);
+    send(&mut b, &f.question("session-2", OTHER)); // an old producer: no agent, no projectName
+    wait(|| f.transport.question_snapshot().queued_count == 1);
+    let v = serde_json::to_value(f.transport.question_snapshot()).unwrap();
+    assert_eq!(v["pending"]["agent"], "codex"); assert_eq!(v["pending"]["agent_label"], "Codex");
+    assert_eq!(v["pending"]["project_name"], "proyecto-beta");
+    assert_eq!(v["queued"][0]["agent"], "pi"); assert!(v["queued"][0].get("project_name").is_none());
+    // a refused project name never reaches the view
+    let mut c = f.connect("session-3", true);
+    let mut bad = f.question("session-3", "12345678-1234-4abc-8abc-123456789abf"); bad["projectName"] = json!("a/b");
+    send(&mut c, &bad); closed(&mut c);
+    assert_eq!(f.transport.question_snapshot().queued_count, 1);
+}

@@ -67,7 +67,8 @@ impl Questions {
                 options: q.options().iter().enumerate().map(|(index, o)| QuestionOptionView {
                     index, label: o.label().into(), description: o.description().into(),
                 }).collect(), allow_free_text: q.allow_free_text(), expires_at: q.expires_at(),
-                agent: q.agent().into(), agent_label: q.agent_label() }
+                agent: q.agent().into(), agent_label: q.agent_label(),
+                project_name: q.project_name().map(str::to_owned) }
         };
         let pending = self.slot.active().map(view);
         // Everyone waiting BEHIND the one shown, oldest first (the head is `pending`).

@@ -23,6 +23,9 @@ pub struct PendingQuestionView {
     pub options: Vec<QuestionOptionView>, pub allow_free_text: bool, pub expires_at: u64,
     /// Who asks (P1): the validated slug and its display name.
     pub agent: String, pub agent_label: String,
+    /// Project name of the asking session when the producer sent one (S3); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
