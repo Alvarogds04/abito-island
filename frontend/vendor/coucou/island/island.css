@@ -1098,3 +1098,7 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 /* ══ T1 · S4 (04 expandida general, A): a 15px title, steps dimmed except the current one (>= 4.5:1 on the card) ══════════════════ */
 .centre-name { font: 600 15px/20px var(--font); }
 .centre-steps li:not([data-current="true"]):not([data-state="running"]):not([data-state="error"]) { color: var(--dim-2); }
+
+/* ══ T1 · S6 (06 pregunta simple, B): option title 13px + a one-line grey description 11px ══════════════════════════════════════ */
+.q-label { font-size: 13px; }
+.q-desc { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

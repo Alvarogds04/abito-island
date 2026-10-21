@@ -61,7 +61,7 @@ async function open(scenario = {}) {
     } : scenario.question ? {
       id: UUID, kind: scenario.question === 'approval' ? 'question' : 'question', agent: scenario.question === 'approval' ? 'claude-code' : 'pi', agent_label: 'Pi', project_name: 'api',
       text: scenario.question === 'approval' ? 'Claude Code asks permission: Bash: rm -rf build/ && npm run build' : '¿Qué editor preferís?',
-      options: scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: '' }, { index: 1, label: 'emacs', description: '' }, { index: 2, label: 'vscode', description: '' }],
+      options: scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: scenario.described ? 'modal, ya lo usás en el servidor' : '' }, { index: 1, label: 'emacs', description: scenario.described ? 'extensible, más pesado' : '' }, { index: 2, label: 'vscode', description: '' }],
       allow_free_text: scenario.question !== 'approval', expires_at: Date.now() + 600000, free_text_max: 2000,
     } : null;
     window.__TAURI__ = {
