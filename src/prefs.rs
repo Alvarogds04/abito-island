@@ -164,6 +164,19 @@ const POSITION: &str = "position";
 /// A plausible virtual-desktop coordinate in physical px: no real monitor
 /// arrangement reaches this, so a larger value is corrupt data, never a desktop.
 const POSITION_LIMIT: u32 = 1_000_000;
+/// G16: whole seconds the folded island waits before hiding at the edge.
+const ABSENCE_SECONDS: std::ops::RangeInclusive<u16> = 5..=300;
+const ABSENCE_DEFAULT_SECONDS: u16 = 10;
+fn valid_absence_seconds(v: u16) -> bool { ABSENCE_SECONDS.contains(&v) }
+/// The new key wins; an invalid or absent one falls back to the pre-change `absence_minutes` (1–120 minutes, x 60, clamped to 300).
+fn absence_seconds_from(v: &Value) -> Option<u16> {
+    let new = v.get("absence_seconds").and_then(Value::as_u64).and_then(|s| u16::try_from(s).ok()).filter(|s| valid_absence_seconds(*s));
+    new.or_else(|| {
+        let minutes = v.get("absence_minutes").and_then(Value::as_u64).and_then(|m| u16::try_from(m).ok()).filter(|m| (1..=120).contains(m))?;
+        Some((minutes * 60).min(*ABSENCE_SECONDS.end()))
+    })
+}
+
 /// The optional theme mode key (#380). Absent = `system`, and absence is preserved.
 const THEME: &str = "theme";
 
@@ -270,8 +283,10 @@ pub struct Prefs {
     /// #336 T1b-a: whether a trusted mouse entry may open the settled compact island.
     /// `None` means the default (off) and is never written.
     pub open_on_hover: Option<bool>,
-    /// G16: optional whole idle minutes (1–120); absent means three minutes.
-    pub absence_minutes: Option<u16>,
+    /// G16: optional whole seconds the folded island waits before it hides at the edge (5–300); absent means ten seconds.
+    /// A file written before this change carries `absence_minutes` instead: it is still READ (minutes x 60, clamped to 300) and
+    /// never written again, so the file converts the first time it is saved.
+    pub absence_seconds: Option<u16>,
     /// #415 WU2: the blobs the human created by hand (label + optional palette colour),
     /// in creation order. `None` means none, and nothing is written for it, so an
     /// untouched file keeps its bytes.
@@ -350,7 +365,7 @@ impl Default for Prefs {
             chosen_models: None,
             auto_close_seconds: None,
             open_on_hover: None,
-            absence_minutes: None,
+            absence_seconds: None,
             custom_blobs: None,
             monitor: None,
             settings_window: None,
@@ -582,7 +597,7 @@ impl Prefs {
 
     /// #336: the effective hover policy — absent means off.
     pub fn open_on_hover(&self) -> bool { self.open_on_hover.unwrap_or(false) }
-    pub fn absence_minutes(&self) -> u16 { self.absence_minutes.filter(|v| (1..=120).contains(v)).unwrap_or(3) }
+    pub fn absence_seconds(&self) -> u16 { self.absence_seconds.filter(|v| valid_absence_seconds(*v)).unwrap_or(ABSENCE_DEFAULT_SECONDS) }
 
     /// S10 (L30): the effective plan-pill policy — absent means off.
     pub fn show_plan_in_notch(&self) -> bool { self.show_plan_in_notch.unwrap_or(false) }
@@ -617,7 +632,7 @@ impl Prefs {
             auto_close_seconds: v.get("auto_close_seconds").and_then(Value::as_u64)
                 .and_then(|s| u16::try_from(s).ok()).filter(|s| *s == 0 || (5..=120).contains(s)),
             open_on_hover: v.get("open_on_hover").and_then(Value::as_bool),
-            absence_minutes: v.get("absence_minutes").and_then(Value::as_u64).and_then(|v| u16::try_from(v).ok()).filter(|v| (1..=120).contains(v)),
+            absence_seconds: absence_seconds_from(&v),
             custom_blobs: {
                 let blobs = custom_blobs_from(v.get(CUSTOM_BLOBS));
                 (!blobs.is_empty()).then_some(blobs)
@@ -671,7 +686,7 @@ impl Prefs {
         if let Some(seconds) = self.auto_close_seconds.filter(|s| *s == 0 || (5..=120).contains(s)) {
             v["auto_close_seconds"] = json!(seconds);
         }
-        if let Some(minutes) = self.absence_minutes.filter(|v| (1..=120).contains(v)) { v["absence_minutes"] = json!(minutes); }
+        if let Some(seconds) = self.absence_seconds.filter(|v| valid_absence_seconds(*v)) { v["absence_seconds"] = json!(seconds); }
         if let Some(hover) = self.open_on_hover {
             v["open_on_hover"] = json!(hover);
         }
@@ -768,7 +783,7 @@ pub enum Command {
     /// shape — integer `auto_close_seconds` 0 («Nunca», #438) or 5..=120 and
     /// `open_on_hover`.
     SetIslandInteraction { auto_close_seconds: u16, open_on_hover: bool },
-    SetAbsenceMinutes(u16),
+    SetAbsenceSeconds(u16),
     /// #389: the platform monitor name the island is pinned to (Ajustes → Panel).
     /// A choice is only ever one of the keys the island itself saw and offered;
     /// falling back when a stored key is no longer connected is placement's job.
@@ -951,10 +966,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             }
             Ok(Command::SetChosenModels { provider: provider.to_string(), models: clean })
         }
-        Some("set_absence_minutes") if map.len() == 2 => {
-            let minutes = map.get("minutes").and_then(Value::as_u64).ok_or(CommandError)?;
-            if !(1..=120).contains(&minutes) { return Err(CommandError); }
-            Ok(Command::SetAbsenceMinutes(minutes as u16))
+        Some("set_absence_seconds") if map.len() == 2 => {
+            let seconds = map.get("seconds").and_then(Value::as_u64).ok_or(CommandError)?;
+            let seconds = u16::try_from(seconds).map_err(|_| CommandError)?;
+            if !valid_absence_seconds(seconds) { return Err(CommandError); }
+            Ok(Command::SetAbsenceSeconds(seconds))
         }
         // #336 T1b-a: exactly action + auto_close_seconds + open_on_hover.
         // `as_u64` already refuses floats, strings, null and negatives; the
@@ -1103,9 +1119,9 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             if !pill_offered(id) { return Err(CommandError); }
             next.pill_colors.remove(id);
         }
-        Command::SetAbsenceMinutes(minutes) => {
-            if !(1..=120).contains(minutes) { return Err(CommandError); }
-            next.absence_minutes = Some(*minutes);
+        Command::SetAbsenceSeconds(seconds) => {
+            if !valid_absence_seconds(*seconds) { return Err(CommandError); }
+            next.absence_seconds = Some(*seconds);
         }
         // #336 T1b-a: both fields commit together under the same gate; the
         // range/type checks already ran at parse and run again here for

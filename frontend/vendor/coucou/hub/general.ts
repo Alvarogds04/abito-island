@@ -84,12 +84,12 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       if (!seconds.value.trim() || !Number.isInteger(value) || value !== 0 && (value < 5 || value > 120)) { issue = 'Usa 0 o un entero entre 5 y 120 segundos.'; paint(); return; }
       patch({ autoCloseInterval: value });
     });
-    const absence = identify(h('input', { type: 'number', min: '1', max: '120', step: '1', value: String(prefs.absenceMinutes ?? 3), 'aria-label': 'Minutos sin uso antes de ocultar' }) as HTMLInputElement, 'hub-absence');
+    const absence = identify(h('input', { type: 'number', min: '5', max: '300', step: '1', value: String(prefs.absenceSeconds ?? 10), 'aria-label': 'Segundos antes de ocultar la isla plegada' }) as HTMLInputElement, 'hub-absence');
     absence.addEventListener('change', e => {
       if (!e.isTrusted) return;
-      const minutes = Number(absence.value);
-      if (!absence.value.trim() || !Number.isInteger(minutes) || minutes < 1 || minutes > 120) { issue = 'Usa un entero entre 1 y 120 minutos.'; paint(); return; }
-      directPrefs({ action: 'set_absence_minutes', minutes });
+      const seconds = Number(absence.value);
+      if (!absence.value.trim() || !Number.isInteger(seconds) || seconds < 5 || seconds > 300) { issue = 'Usa un entero entre 5 y 300 segundos.'; paint(); return; }
+      directPrefs({ action: 'set_absence_seconds', seconds });
     });
     const theme = V.themeView(prefs);
     const themeSelect = trusted(select(theme.options.map((o: any) => [o.id, o.label]), theme.mode, value => directPrefs({ action: 'set_theme', theme: value })));
@@ -126,7 +126,7 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
       row(t('Open on hover'), hover),
       hint(t('Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.')),
       row(t('Auto-close'), seconds, h('span', { class: 'hint', text: t('seconds after you leave the island') })),
-      row('Ocultar tras', absence, h('span', { class: 'hint', text: 'minutos sin uso; vuelve al acercar el mouse o con un aviso' })),
+      row('Ocultar tras', absence, h('span', { class: 'hint', text: 'segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta' })),
       row(t('Island lives on'), screen), row(t('Theme'), themeSelect),
       row(t('Launch at startup'), (() => {
         const control = identify(trusted(toggle(autostart.enabled === true, enabled => run(async () => {

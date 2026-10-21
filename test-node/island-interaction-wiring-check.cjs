@@ -421,9 +421,13 @@ test('B4 a text field that is hidden or inert (a closed question card) no longer
   g.focus({ type: 'text', tag: 'textarea' }); g.mutate(); g.advance(60000);
   assert.equal(g.desktopCalls.includes('autoClose'), false, 'a visible text field still protects what is being typed');
 });
-test('B5 the edge-hide setting is MINUTES (Ajustes -> General -> «Ocultar tras», absence_minutes 1..120, default 3), not 10 seconds', () => {
+test('B5 the edge-hide setting is SECONDS (Ajustes -> General -> «Ocultar tras», absence_seconds 5..300, default 10; old minutes migrate)', () => {
   const prefs = fs.readFileSync(path.join(__dirname, '../src/prefs.rs'), 'utf8');
-  assert.match(prefs, /absence_minutes\(&self\) -> u16 \{ self\.absence_minutes\.filter\(\|v\| \(1\.\.=120\)\.contains\(v\)\)\.unwrap_or\(3\) \}/);
+  assert.match(prefs, /ABSENCE_SECONDS: std::ops::RangeInclusive<u16> = 5\.\.=300/);
+  assert.match(prefs, /ABSENCE_DEFAULT_SECONDS: u16 = 10/);
+  assert.match(prefs, /\(minutes \* 60\)\.min\(\*ABSENCE_SECONDS\.end\(\)\)/);
+  assert.match(read('island.js'), /absenceSeconds:p\.absenceSeconds \?\? 10/);
+  assert.doesNotMatch(read('island.js'), /notice: !!\(current\?\.notices/, 'status notices no longer feed the edge guard');
 });
 
 console.log(`island-interaction-wiring-check: ${passed} passed, ${failed} failed`);

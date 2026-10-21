@@ -590,14 +590,13 @@
     if (edgeInteraction) {
       // Native input-mask changes may swallow pointerleave. Reconcile against
       // WebKit's live hover hit-test before arming another idle deadline.
-      const facts = { ...interactionFacts(), pointerInside: capsule.matches(':hover'), pinned: !!interaction?.snapshot().pinned,
-        notice: !!(current?.notices?.length || current?.unavailable || (O && O.bridgeView(current))) };
+      const facts = { ...interactionFacts(), pointerInside: capsule.matches(':hover'), pinned: !!interaction?.snapshot().pinned };
       edgeInteraction.update(facts);
     }
   }
   function applyInteractionPrefs(p) {
     if (!interaction || !p) return;
-    if (edgeInteraction) edgeInteraction.setPreferences({ sound:p.sound !== false, absenceMinutes:p.absenceMinutes ?? 3 });
+    if (edgeInteraction) edgeInteraction.setPreferences({ sound:p.sound !== false, absenceSeconds:p.absenceSeconds ?? 10 });
     // An absent/foreign pair (a host without #336) keeps the module defaults.
     if (Number.isInteger(p.autoCloseSeconds) && typeof p.openOnHover === 'boolean') {
       try { interaction.setPreferences({ autoCloseSeconds: p.autoCloseSeconds, openOnHover: p.openOnHover }); }

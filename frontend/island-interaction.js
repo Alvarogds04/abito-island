@@ -9,6 +9,9 @@
 })(typeof window === 'object' ? window : globalThis, function () {
   const DEFAULTS = Object.freeze({ autoCloseSeconds: 15, openOnHover: false });
   const HOVER_DELAY_MS = 600;
+  // G16: whole seconds the FOLDED island waits before it hides at the edge (Ajustes -> General -> «Ocultar tras»).
+  const EDGE_ABSENCE = Object.freeze({ min: 5, max: 300, default: 10 });
+  const EDGE_BLOCKERS = Object.freeze(['question', 'approval', 'request', 'decision', 'card']);
   const BLOCKERS = Object.freeze(['question', 'approval', 'request', 'decision', 'card',
     'dragging', 'editing', 'composing', 'draft', 'settings', 'models']);
 
@@ -227,17 +230,24 @@
   function createEdgeController(options) {
     const now = createClock(options.now);
     let facts = {}, inside = false, hidden = false, stopped = false;
-    let sound = true, minutes = 3, timer = null, generation = 0;
+    let sound = true, seconds = EDGE_ABSENCE.default, timer = null, generation = 0;
     function cancel() { generation++; if (timer !== null) options.cancel(timer); timer = null; }
     function show(value) { if (hidden !== value) { hidden = value; options.onHidden(value); } }
-    function allowed() { return clearGuards(facts) && facts.state === 'compact' && facts.notice === false && facts.pinned === false && !inside; }
+    // Human: «solo lo frena una pregunta pendiente». The edge hide waits only for a pending question/permission (a queued one is the
+    // same flag: the head is pending) and for a pointer over the island. Status notices («Sin motor», the hotkey chip, a downed
+    // bridge), a pin, a draft, an open field or panel, a drag and the stale `data-view` of a just-folded island do not.
+    // A missing `state`/`settled`/`nativeReady`/`question` fact is still not permission (fail closed).
+    function allowed() {
+      return facts.state === 'compact' && facts.settled === true && facts.nativeReady === true &&
+        EDGE_BLOCKERS.every(key => facts[key] === false) && !inside;
+    }
     function reconcile(restart = false) {
       if (stopped) return;
       if (restart) cancel();
       if (!allowed()) { cancel(); show(false); return; }
       if (hidden || timer !== null) return;
       const serial = ++generation;
-      const due = now() + (sound ? minutes * 60000 : 1000);
+      const due = now() + (sound ? seconds * 1000 : 1000);
       function deliver() {
         if (stopped || serial !== generation) return;
         timer = null;
@@ -254,9 +264,9 @@
       update(next) { if (!stopped) { facts = { ...next }; if (typeof facts.pointerInside === 'boolean') inside = facts.pointerInside; reconcile(); } },
       setPreferences(p) {
         if (stopped) return;
-        if (!p || typeof p.sound !== 'boolean' || !Number.isInteger(p.absenceMinutes) || p.absenceMinutes < 1 || p.absenceMinutes > 120) throw new TypeError('Invalid absence preferences.');
-        const changed = sound !== p.sound || minutes !== p.absenceMinutes;
-        sound = p.sound; minutes = p.absenceMinutes; reconcile(changed);
+        if (!p || typeof p.sound !== 'boolean' || !Number.isInteger(p.absenceSeconds) || p.absenceSeconds < EDGE_ABSENCE.min || p.absenceSeconds > EDGE_ABSENCE.max) throw new TypeError('Invalid absence preferences.');
+        const changed = sound !== p.sound || seconds !== p.absenceSeconds;
+        sound = p.sound; seconds = p.absenceSeconds; reconcile(changed);
       },
       enter(event) { if (!stopped && mouse(event)) { inside = true; reconcile(); } },
       leave(event) { if (!stopped && mouse(event)) { inside = false; reconcile(true); } },
@@ -265,5 +275,5 @@
       snapshot() { return { hidden, inside }; },
     });
   }
-  return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, validPreferences, eligible, createClock, countdown, createCountdownView, createController, createEdgeController });
+  return Object.freeze({ DEFAULTS, HOVER_DELAY_MS, BLOCKERS, EDGE_ABSENCE, EDGE_BLOCKERS, validPreferences, eligible, createClock, countdown, createCountdownView, createController, createEdgeController });
 });
