@@ -350,9 +350,9 @@ test('centreView: steps are bounded to what fits (last 2) and a long name is cut
 });
 
 // ---- I: the empty state in the centre, with a CTA ------------------------------------------------------------------------------
-test('emptyView: nothing running -> «Todo tranquilo» + «Nueva conversación»; failures and unknown states are NOT empty', () => {
+test('emptyView: nothing running -> «Todo tranquilo» + «Preguntar a Abito»; failures and unknown states are NOT empty', () => {
   const e = L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [] }), pending: null, finished: false });
-  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } });
+  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Arrastrá un archivo o preguntá.', cta: { label: 'Preguntar a Abito', action: 'new-chat' } });
   assert.deepEqual(L.emptyView({ view: null, pending: null, finished: false }).cta.action, 'new-chat', 'no list yet and nothing pending: still a calm empty centre');
   assert.equal(L.emptyView({ view: { state: 'error' }, pending: null, finished: false }), null, 'a failed list is not "everything is calm": the engine row owns that');
   assert.equal(L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [{ id: 's-0000000a', kind: 'pi', cwd: 'x', state: 'sleeping', origin: null }] }), pending: null, finished: false }), null, 'a session exists: the centre shows it');
@@ -379,10 +379,10 @@ test('wiring D/E/I: the centre is fed by island-layout.js; CSS lets the finished
   assert.match(lay, /abito:sessions-view/, 'the centre follows the ticker\'s focus event: a blob click, the compact bar\'s mini mascot and the «principal» preference all end there');
   const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
   assert.match(pv, /abito:session-select/, 'the blob click already dispatches the selection the centre listens to');
-  assert.equal(decls('#notice-card .title.one-line')['white-space'], 'normal', 'the finished result wraps');
-  assert.equal(decls('#notice-card .title.one-line')['text-overflow'], 'clip');
+  assert.equal(decls('#notice-card #notice-card-message')['white-space'], 'nowrap', 'S10: the finished message is ONE line in the band (full text in the tooltip)');
+  assert.equal(decls('#notice-card #notice-card-message')['text-overflow'], 'ellipsis');
   const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
-  assert.match(isl, /finishedLayout\(/, 'the island grows for a long result');
+  assert.match(isl, /FINISHED_BAND_H = 36/, 'S10: the island is 36px taller while the band shows');
   assert.match(isl, /abito:centre-new/, 'the CTA opens a new conversation through the existing «+»');
 });
 
@@ -498,7 +498,11 @@ test('S2 compactView: up to 3 coloured minis + «+N», the activity line from RE
   const none = L.compactView({ rows: [], focusId: null, pending: null });
   assert.deepEqual([none.minis, none.more, none.activity, none.badge, none.width], [[], 0, '', '', 288], 'nothing running: the plain 288 pill');
   assert.equal(L.compactView({ rows, focusId: null, pending: { kind: 'question', agent: 'pi', text: '¿Qué editor?' } }).badge, 'question');
-  assert.equal(L.compactView({ rows: [], focusId: null, pending: { kind: 'question', agent: 'pi', text: 'x' } }).width, 440, 'a question widens the pill (S3)');
+  const ask = L.compactView({ rows, focusId: null, pending: { kind: 'question', agent: 'pi', text: '¿Qué editor preferís?\nvim o emacs' } });
+  assert.deepEqual([ask.width, ask.activity, ask.reply, ask.minis.length, ask.more], [560, '¿Qué editor preferís?', true, 0, 0], 'S3: a question widens the pill, shows its first line + «Responder», drops the minis');
+  const perm = L.compactView({ rows: [], focusId: null, pending: { kind: 'question', agent: 'claude-code', text: 'Claude Code asks permission: Bash: rm -rf build/', options: [{ index: 0, label: 'Allow once' }, { index: 1, label: 'Deny' }] } });
+  assert.equal(perm.badge, 'approval'); assert.match(perm.activity, /^Ejecutar: rm -rf build/);
+  assert.equal(L.compactView({ rows, focusId: null, pending: null }).reply, false);
   assert.equal(L.compactView(null).width, 288);
 });
 test('S1/S2 wiring + CSS: the strip element, the 8px activation zone (24px hidden offset), the mini row and the activity line exist', () => {

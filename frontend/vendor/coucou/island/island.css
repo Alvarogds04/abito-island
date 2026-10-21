@@ -1087,3 +1087,37 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 #compact-badge[data-kind="working"]::before { content: "•••"; color: #7aa7ff; letter-spacing: -1px; }
 #compact-badge[data-kind="question"]::before { content: "?"; color: #22d3ee; }
 #compact-badge[data-kind="approval"]::before { content: "!"; color: #f5a524; }
+
+/* ══ T1 · S3 (03 alerta, A): the pill widens to 560, shows the question's first line and «Responder» (44x24+ target, visible focus) ═══ */
+#compact-reply { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: none; min-width: 64px; height: 24px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--ink); color: var(--primary-ink); font: 600 12px var(--font); cursor: pointer; z-index: 5; }
+#capsule[data-phase="compact"] #compact-reply:not([hidden]) { display: block; }
+#compact-reply::after { content: ""; position: absolute; inset: -4px -2px; }
+#compact-reply:focus-visible { outline: 2px solid var(--island-live); outline-offset: 2px; }
+#capsule[data-compact-ask="true"] .compact-activity { right: 90px; }
+
+/* ══ T1 · S4 (04 expandida general, A): a 15px title, steps dimmed except the current one (>= 4.5:1 on the card) ══════════════════ */
+.centre-name { font: 600 15px/20px var(--font); }
+.centre-steps li:not([data-current="true"]):not([data-state="running"]):not([data-state="error"]) { color: var(--dim-2); }
+
+/* ══ T1 · S6 (06 pregunta simple, B): option title 13px + a one-line grey description 11px ══════════════════════════════════════ */
+.q-label { font-size: 13px; }
+.q-desc { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* ══ T1 · S8 (08 cuestionario, A): progress dots + «Paso N de M» + Atrás ══════════════════════════════════════════════════════ */
+#question-dots { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; vertical-align: middle; }
+#question-dots i { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--dim-3); box-sizing: border-box; }
+#question-dots i[data-state="done"] { background: var(--dim-2); border-color: var(--dim-2); }
+#question-dots i[data-state="current"] { background: var(--ink); border-color: var(--ink); }
+
+/* ══ T1 · S10 (10 «Pi terminó», B): a fixed 32px band UNDER the unchanged overview; island = 184 + 36 ═════════════════════════════ */
+#capsule[data-phase="expanded"][data-notice-view="notices"] #overview-view { opacity: 1; visibility: visible; pointer-events: auto; }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #blobs { opacity: 1; visibility: visible; pointer-events: auto; }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices,
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices[data-scroll] { left: calc(50% - 350px); width: 700px; top: 178px; height: 32px; padding: 0 12px 0 14px; overflow: hidden; border-radius: 16px; box-sizing: border-box; background: var(--card); border: 1px solid var(--hairline); }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notices::before { background: radial-gradient(220px 120px at 50% 160%, var(--wash) 0%, rgba(0, 0, 0, 0) 70%); }
+#capsule[data-phase="expanded"][data-notice-view="notices"] #notice-card:not([hidden]) { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; height: 100%; min-height: 0; }
+#notice-card .who-row { flex: 0 0 auto; gap: 6px; white-space: nowrap; }
+#notice-card #notice-card-message { flex: 1 1 auto; min-width: 0; font: 500 12.5px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#notice-card .actions { flex: 0 0 auto; display: flex; gap: 8px; margin: 0; }
+#notice-card .btn { min-height: 24px; height: 24px; margin: 0; padding: 0 12px; border-radius: 12px; font: 600 12px var(--font); }
+#notice-card .btn::after { inset: -4px -2px; }

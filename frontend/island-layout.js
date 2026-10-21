@@ -180,7 +180,7 @@
     const v = o.view;
     if (v && v.state === 'error') return null;
     if (v && v.state === 'ready' && Array.isArray(v.rows) && v.rows.length) return null;
-    return { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } };
+    return { title: 'Todo tranquilo', sub: 'Arrastrá un archivo o preguntá.', cta: { label: 'Preguntar a Abito', action: 'new-chat' } };
   }
 
   // ---- D: «Pi terminó» in the centre, the result untruncated ----------------------------------------------------------------------
@@ -236,7 +236,7 @@
   }
 
   // ---- T1 · S2 (02 compacta, A): the mascot + up to 3 coloured mini-mascots + «+N», the real activity line, a state badge -----------
-  const COMPACT_W = 288, COMPACT_WIDE = 440, MINIS = 3;
+  const COMPACT_W = 288, COMPACT_WIDE = 440, COMPACT_ASK = 560, MINIS = 3;
   function compactView(o) {
     const rows = o && Array.isArray(o.rows) ? o.rows.filter(r => r && typeof r.id === 'string') : [];
     const pending = o && o.pending && typeof o.pending === 'object' ? o.pending : null;
@@ -249,14 +249,18 @@
       activity = step ? `${name} · ${step.name}…` : name;
       if (isRunning(focus)) badge = 'working';
     }
+    // S3 (03 alerta, A): a waiting question/permission widens the pill and shows its first line + «Responder»; no separate toast
+    let reply = false;
     if (pending) {
       badge = approvalView(pending, '') ? 'approval' : (pending.kind === 'approval' ? 'approval' : 'question');
-      if (!activity) activity = bound(String(pending.text || '').split(/\r?\n/)[0], 40);
+      const first = String(pending.text || '').split(/\r?\n/).map(l => l.trim()).find(Boolean) || '';
+      const av = approvalView(pending, '');
+      activity = bound(av ? `${av.title} ${av.command}` : first, 44); reply = true;
     }
-    return { minis, more: Math.max(0, rows.length - MINIS), activity, badge, width: rows.length || pending ? COMPACT_WIDE : COMPACT_W };
+    return { minis: reply ? [] : minis, more: reply ? 0 : Math.max(0, rows.length - MINIS), activity, badge, reply, width: reply ? COMPACT_ASK : rows.length ? COMPACT_WIDE : COMPACT_W };
   }
 
-  return { tipFor, tipPlacement, ROW, rowsViewport, EDGE_STRIP, edgeStripView, compactView, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
+  return { isRunning, tipFor, tipPlacement, ROW, rowsViewport, EDGE_STRIP, edgeStripView, compactView, pickFocus, centreView, emptyView, finishedLayout, STATE_WORD, badgePosition, W, columnWidths, statusCounts, attribute, blobRows, focusOverflow, layoutMode, approvalView, approvalKey, MAX_QUEUED };
 });
 
 function mount(L) {
@@ -291,7 +295,7 @@ function mount(L) {
     }
     paintCentre(rows, attributedId);
     paintCompact(rows);
-    doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId } }));
+    doc.dispatchEvent(new CustomEvent('abito:layout', { detail: { attributedId, counts, mode: state.mode, focusId, running: rows.filter(L.isRunning).map(r => ({ kind: String(r.kindLabel || '').toLowerCase().replace(/\s+/g, '-'), cwd: r.cwd })) } }));
   }
   // One delegated tooltip for every element of the island that carries a title: hover (after a short delay) and keyboard focus show it,
   // leave/blur/Escape hide it. It never takes the pointer, so it cannot swallow a click.
@@ -353,6 +357,7 @@ function mount(L) {
         const li = doc.createElement('li'); li.textContent = step.name; li.dataset.state = step.state; li.dataset.current = String(step.current); return li;
       }));
     }
+    doc.dispatchEvent(new CustomEvent('abito:empty-shown', { detail: { shown: !!empty } }));
     if (empty) {
       cEmpty.querySelector('.centre-empty-title').textContent = empty.title;
       cEmpty.querySelector('.centre-empty-sub').textContent = empty.sub;
