@@ -102,3 +102,25 @@ test('S25 Atajos: every control that existed survives: switches, keycaps, recap 
   assert(all(ui).some(e => e.attrs.id === 'hub-recap') && all(ui).some(e => e.attrs.id === 'hub-recap-clear'), 'the weekly recap rows are still mounted');
   assert.equal((text(ui).match(/Atajo de X11/g) || []).length, 1, 'the shared backend footer appears once');
 });
+
+test('S25 Atajos: the portal\'s description of a key is TRANSLATED («Pulse <Shift><Control>n» -> Ctrl+Shift+N), never shown raw', async () => {
+  const { portalTriggerKeys, keyText } = await load('shortcuts.js');
+  // portalTriggerKeys returns the app's canonical accelerator (what displayKeys / the host already speak); keyText is what is DRAWN
+  const accel = [['Pulse <Shift><Control>n', 'Ctrl+Shift+n'], ['Press <Control><Alt>space', 'Ctrl+Alt+Space'], ['<Control><Alt>t', 'Ctrl+Alt+t'], ['Pulse <Control><Alt>Right', 'Ctrl+Alt+Right'],
+    ['Pulse <Shift><Control><Alt>a', 'Ctrl+Alt+Shift+a'], ['Drücke <Primary><Mod1>F9', 'Ctrl+Alt+F9'], ['Pulse <Super>l', 'Super+l']];
+  for (const [raw, expected] of accel) assert.equal(portalTriggerKeys(raw)?.toLowerCase(), expected.toLowerCase(), raw);
+  const shown = [['Pulse <Shift><Control>n', 'Ctrl+Shift+N'], ['Pulse <Control><Alt>Right', 'Ctrl+Alt+→'], ['Press <Control><Alt>space', 'Ctrl+Alt+Space']];
+  for (const [raw, expected] of shown) assert.equal(keyText(raw, '', ''), expected, raw);
+  assert.equal(keyText('Pulse <Shift><Control>n', 'Ctrl+Alt+A', ''), 'Ctrl+Shift+N', 'the translated, effective binding wins over the configured one');
+  assert.equal(keyText('', 'Ctrl+Alt+A', ''), 'Ctrl+Alt+A', 'no portal text: the configured combo');
+  assert.equal(keyText('Pulse <basura', 'Ctrl+Alt+A', ''), 'Ctrl+Alt+A', 'unparseable portal text never reaches the screen');
+  assert.equal(keyText('Pulse <basura', '', 'Ctrl+Alt+D'), 'Ctrl+Alt+D', 'and falls back to the default when nothing is configured');
+  for (const bad of ['', 'Pulse', 'n', '<Control>', '<Control><Alt>', 'Pulse <Control>a b', '<Shift>n']) assert.equal(portalTriggerKeys(bad), null, JSON.stringify(bad));
+  assert.equal(portalTriggerKeys('x'.repeat(5000) + ' <Control>a'), null, 'bounded input');
+});
+
+test('S25 Atajos: a key cell NEVER contains «Pulse», «<» or «>» unless it is capturing; capturing says «Pulsa las teclas…»', async () => {
+  const { ui } = await mount();
+  const caps = all(find(ui, 'global-shortcuts')).filter(e => e.className.split(' ').includes('keycap'));
+  assert(caps.length > 0); for (const k of caps) assert(!/Pulse|[<>]/.test(k.textContent), k.textContent);
+});

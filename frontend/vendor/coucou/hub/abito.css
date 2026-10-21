@@ -96,7 +96,7 @@ section.abito-card > h2 { gap: 8px; }
 .shortcut-table { display: flex; flex-direction: column; }
 .shortcut-table .shortcut { display: grid; grid-template-columns: 44px minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(120px, 1fr); align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--hairline); }
 .shortcut-table .shortcut-head { min-height: 28px; grid-template-columns: 44px minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(120px, 1fr); font: 600 11px var(--font); color: var(--dim); }
-.shortcut-table .shortcut-head > :first-child { grid-column: 2; }
+.shortcut-table .shortcut-head > :first-child { grid-column: 1 / 3; } /* «Acción» heads the switch AND the name: the switch is part of the action */
 .shortcut-table .shortcut .keycap { grid-column: 3; grid-row: 1; justify-self: start; min-height: 36px; }
 .shortcut-table .shortcut .shortcut-state { grid-column: 4; grid-row: 1; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .shortcut-head > :nth-child(2) { grid-column: 3; } .shortcut-head > :nth-child(3) { grid-column: 4; }

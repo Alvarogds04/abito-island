@@ -105,11 +105,13 @@ test('S25 Atajos: visual order is Acción | Tecla | Estado, a header over every 
   assert(grid.name < grid.key && grid.key < grid.st, 'Acción, then Tecla, then Estado');
 });
 
-test('S25 Atajos: an assigned key reads «Shift+Ctrl+N», never the raw portal text «Pulse <Shift><Control>n»; «Pulse…» only while capturing', async r => {
+test('S25 Atajos: an assigned key reads «Ctrl+Shift+N» (the page\'s canonical modifier order), never the raw portal text «Pulse <Shift><Control>n»; «Pulse…» only while capturing', async r => {
   await r.go('Atajos');
   const keys = await r.page.evaluate(() => [...document.querySelectorAll('#global-shortcuts .keycap')].map(k => k.textContent.trim()));
   assert(keys.length > 0); for (const k of keys) { assert(!/Pulse|<|>/.test(k), `raw instruction in a key cell: ${k}`); assert(/\+|[A-Z]/.test(k), `not a key name: ${k}`); }
-  assert(keys.includes('Shift+Ctrl+N') || keys.some(k => /^Shift\+Ctrl\+N$/.test(k)), `expected «Shift+Ctrl+N» in ${JSON.stringify(keys)}`);
+  assert(keys.includes('Ctrl+Shift+N'), `expected «Ctrl+Shift+N» in ${JSON.stringify(keys)}`);
+  // same modifier order as every other row of the page (Ctrl, Alt, Shift): one convention, not two
+  for (const k of keys) { const mods = k.split('+').slice(0, -1); const order = ['Ctrl', 'Alt', 'Shift', 'Win']; assert.deepEqual(mods, [...mods].sort((a, b) => order.indexOf(a) - order.indexOf(b)), `modifier order in ${k}`); }
   await r.page.locator('#global-shortcuts .keycap').first().click(); await r.page.waitForTimeout(300);
   assert.match(await r.page.locator('#global-shortcuts .keycap').first().textContent(), /Pulsa/, 'while capturing, the cell asks for the keys');
 });
