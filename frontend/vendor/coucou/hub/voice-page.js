@@ -31,7 +31,15 @@ async function voicePage(page, ctx) {
     return VoiceBridge.setPrefs(p);
   });
   const box = h("div", {});
-  page.append(ctx.hero("voice", "OK Abito", t("Say « OK Abito », then ask anything: add a pill, play music, the weather, an email to prepare.")), box);
+  const banner = h("div", { id: "voice-status", class: "voice-status", role: "status", "aria-live": "polite" });
+  page.append(ctx.hero("voice", "OK Abito", t("Say « OK Abito », then ask anything: add a pill, play music, the weather, an email to prepare.")), banner, box);
+  function paintBanner() {
+    banner.replaceChildren();
+    const k = st?.vad?.state ?? "missing", p = st?.parakeet?.state ?? "missing";
+    const [kind, icon, word] = !st ? ["unknown", "·", "No disponible todavía"] : st.error ? ["error", "✗", `Error: ${st.error}`] : k === "downloading" || p === "downloading" ? ["busy", "…", "Descargando modelos"] : k !== "ready" || p !== "ready" ? ["error", "✗", "Falta descargar los modelos"] : st.prefs.enabled && st.listening ? ["on", "●", "Escuchando"] : st.prefs.enabled ? ["busy", "…", "Activando"] : ["off", "○", "Apagado"];
+    banner.className = `voice-status ${kind}`;
+    banner.append(h("span", { class: "state-ico", "aria-hidden": "true", text: icon }), h("span", { class: "state-word", text: word }));
+  }
   function modelControl() {
     const el = h("div", { style: "display:flex;align-items:center;gap:8px" });
     const k = st?.vad?.state ?? "missing", p = st?.parakeet?.state ?? "missing";
@@ -57,6 +65,7 @@ async function voicePage(page, ctx) {
   }
   function draw() {
     box.replaceChildren();
+    paintBanner();
     if (!st) {
       box.append(card(row(t("Dictation is off"), "No disponible")));
       return;
@@ -69,25 +78,50 @@ async function voicePage(page, ctx) {
     sensitivity.addEventListener("change", () => void save((p) => {
       p.sensitivity = Math.max(0, Math.min(100, Math.round(Number(sensitivity.value))));
     }));
+    const value = h("span", { id: "voice-sensitivity-value", class: "voice-sensitivity-value", text: `${st.prefs.sensitivity ?? 50} %` });
+    sensitivity.setAttribute("aria-describedby", "voice-sensitivity-value");
+    sensitivity.addEventListener("input", () => {
+      value.textContent = `${Math.max(0, Math.min(100, Math.round(Number(sensitivity.value))))} %`;
+    });
+    const result = h("div", { id: "voice-probe-result", class: "hub-note", role: "status", "aria-live": "polite" });
+    const probe = trusted(button("Probar", () => void (async () => {
+      let now = null;
+      try {
+        now = await VoiceBridge.status();
+      } catch {
+        now = null;
+      }
+      if (!alive) return;
+      if (now) {
+        st = now;
+        paintBanner();
+      }
+      const live = now?.prefs?.enabled && now?.listening, pct = now?.prefs?.sensitivity ?? st?.prefs.sensitivity ?? 50;
+      result.textContent = now ? `Sensibilidad ${pct} %. Ahora: ${live ? "Escuchando" : now.prefs.enabled ? "Activando" : "Apagado"}. No se abrió el micrófono.` : "No se pudo comprobar el estado.";
+    })(), "", true));
+    const privacy = h(
+      "details",
+      { id: "voice-privacy", class: "voice-privacy" },
+      h("summary", { text: "Privacidad" }),
+      h("div", { class: "hub-note", text: t("Your voice never leaves this computer: Parakeet turns it into text here. Only the words after « OK Abito » go to Anthropic with your Claude key, and to ElevenLabs if you picked it for the answers.") }),
+      h("div", { class: "hub-note", text: t("An email is never sent by Abito: your mail app opens with it written, and you send it.") })
+    );
     box.append(
-      label(t("Listening")),
+      label("Activación"),
       card(
         row(t("Listen for « OK Abito »"), t("The microphone stays open; only what follows « OK Abito » goes further."), trusted(toggle(st.prefs.enabled, (on) => void save((p) => {
           p.enabled = on;
         })))),
         divider(),
-        row(t("Parakeet, on your computer"), t("Hears « OK Abito » here, without the internet."), modelControl())
-      ),
-      label(t("Answers")),
-      card(row(t("Abito answers out loud"), null, output)),
-      label(t("Sensitivity")),
-      card(row(t("Wake-word sensitivity"), t("Higher hears « OK Abito » more easily, and mishears more."), sensitivity)),
-      label(t("Privacy")),
-      card(
-        h("div", { class: "hub-note", text: t("Your voice never leaves this computer: Parakeet turns it into text here. Only the words after « OK Abito » go to Anthropic with your Claude key, and to ElevenLabs if you picked it for the answers.") }),
+        row(t("Parakeet, on your computer"), t("Hears « OK Abito » here, without the internet."), modelControl()),
         divider(),
-        h("div", { class: "hub-note", text: t("An email is never sent by Abito: your mail app opens with it written, and you send it.") })
+        row(t("Wake-word sensitivity"), t("Higher hears « OK Abito » more easily, and mishears more."), sensitivity, value, probe),
+        result
       ),
+      label("Respuestas"),
+      card(row(t("Abito answers out loud"), null, output)),
+      label("Privacidad"),
+      card(privacy),
       message
     );
     if (st.error) message.textContent = st.error;

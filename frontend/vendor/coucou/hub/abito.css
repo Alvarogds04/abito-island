@@ -54,3 +54,11 @@ section.abito-card > h2 { gap: 8px; }
 .field-error:empty { display: none; }
 .key-eye { min-width: 44px; min-height: 36px; background: transparent; border: 0; color: var(--dim); }
 .key-eye[aria-pressed="true"] { color: var(--ink); }
+
+/* #503 S22 (OK Abito, Opción A): live status banner (icon + word, never colour alone), numeric sensitivity, folded privacy. */
+.voice-status { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; padding: 10px 14px; border-radius: 12px; background: var(--hub-card); font: 600 13px var(--font); }
+.voice-status .state-ico { width: 1em; text-align: center; }
+.voice-status.on { color: var(--green); } .voice-status.busy { color: var(--amber); } .voice-status.error { color: var(--red, #f4505e); } .voice-status.off, .voice-status.unknown { color: var(--dim); }
+.voice-sensitivity-value { min-width: 4ch; text-align: right; font: 600 12px var(--font); font-variant-numeric: tabular-nums; }
+.voice-privacy > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font: 600 13px var(--font); }
+.voice-privacy[open] > summary { margin-bottom: 6px; }
