@@ -5,7 +5,7 @@ import { renderRecapRows } from './recap.js';
 import { createBridge } from '../bridge-abito.js';
 import { toggle, select, button } from './ui.js';
 import { t, LANGUAGES } from './i18n-es.js';
-import { notchSection, notchRow as row, notchHint as hint } from './notch.js';
+import { notchCard, notchRow as row, notchHint as hint } from './notch.js';
 
 // Keep upstream controls literal: a capture guard rejects synthetic gestures
 // before their upstream listeners run, including buttons inside segmented controls.
@@ -119,30 +119,38 @@ export async function renderGeneral({ invoke, V }: { invoke: (cmd: string, args:
     const soundsFolder = identify(trusted(h('button', { text: t('Open sounds folder'), onclick: () => { run(async () => { await send('sound_action', { action: 'reveal' }); }, 'No se pudo abrir la carpeta de sonidos (el administrador de archivos no respondió). Ábrela a mano: la carpeta «sounds» dentro de la carpeta de configuración de Abito.'); } })), 'hub-sounds-folder');
     const soundsReload = identify(trusted(h('button', { text: t('Reload sounds'), onclick: () => { run(async () => { await send('sound_action', { action: 'reload' }); await countCustom(); }); } })), 'hub-sounds-reload');
     const language = unavailable(select([['', t('System')], ...LANGUAGES], '', () => {}), 'hub-language'); language.className = '';
-    root.append(notchSection(t('General'),
-      row(t('Sound'), sound, volume),
-      h('div', { class: 'row' }, soundsFolder, soundsReload, h('span', { class: 'hint', text: customCount > 0 ? t('{0} custom', { 0: customCount }) : '' })),
-      hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload.")),
-      row(t('Open on hover'), hover),
-      hint(t('Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.')),
-      row(t('Auto-close'), seconds, h('span', { class: 'hint', text: t('seconds after you leave the island') })),
-      row('Ocultar tras', absence, h('span', { class: 'hint', text: 'segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta' })),
-      row(t('Island lives on'), screen), row(t('Theme'), themeSelect),
-      row(t('Launch at startup'), (() => {
-        const control = identify(trusted(toggle(autostart.enabled === true, enabled => run(async () => {
-          autostart = await send('prefs_action', { action: 'set_autostart', enabled });
-        }))), 'hub-autostart') as HTMLButtonElement;
-        control.setAttribute('aria-pressed', String(autostart.enabled === true));
-        control.disabled = typeof autostart.enabled !== 'boolean';
-        return control;
-      })()),
-      recap,
-      row(t('Language'), language, h('span', { class: 'hint', text: 'No disponible todavía' })),
-      row('Nombre visible', name, save), nameIssue,
-      hint('El movimiento no se puede configurar en Abito.'),
-      row('Atajo global', capture, change, trusted(button('Original', () => shortcut({ action: 'reset' }))), enabled),
-      hint(g.hotkey?.note || g.hotkey?.backendLabel || ''),
-      h('p', { class: 'hub-note', role: 'status', text: issue })));
+    const startup = (() => {
+      const control = identify(trusted(toggle(autostart.enabled === true, enabled => run(async () => {
+        autostart = await send('prefs_action', { action: 'set_autostart', enabled });
+      }))), 'hub-autostart') as HTMLButtonElement;
+      control.setAttribute('aria-pressed', String(autostart.enabled === true));
+      control.disabled = typeof autostart.enabled !== 'boolean';
+      return control;
+    })();
+    // #503 S18 (Opción A): three cards by task. Same controls, ids, labels and closed commands as before.
+    root.append(
+      notchCard('Apariencia',
+        row(t('Language'), language, h('span', { class: 'hint', text: 'No disponible todavía' })),
+        row(t('Theme'), themeSelect),
+        hint('Sistema sigue el tema de tu escritorio.'),
+        row('Nombre visible', name, save), nameIssue,
+        hint('El movimiento no se puede configurar en Abito.'),
+        row(t('Launch at startup'), startup),
+        hint('Abre Abito al iniciar la sesión del escritorio.')),
+      notchCard('Isla',
+        row(t('Open on hover'), hover),
+        hint(t('Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.')),
+        row(t('Auto-close'), seconds, h('span', { class: 'hint', text: t('seconds after you leave the island') })),
+        row('Ocultar tras', absence, h('span', { class: 'hint', text: 'segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta' })),
+        row(t('Island lives on'), screen),
+        row('Atajo global', capture, change, trusted(button('Original', () => shortcut({ action: 'reset' }))), enabled),
+        hint(g.hotkey?.note || g.hotkey?.backendLabel || 'Combinación que abre o cierra la isla desde cualquier app.'),
+        recap),
+      notchCard('Sonido',
+        row(t('Sound'), sound, volume),
+        h('div', { class: 'row' }, soundsFolder, soundsReload, h('span', { class: 'hint', text: customCount > 0 ? t('{0} custom', { 0: customCount }) : '' })),
+        hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload."))),
+      h('p', { class: 'hub-note', role: 'status', text: issue }));
     themeSelect.className = '';
     if (capturing) { capture.focus?.(); }
   }

@@ -4,7 +4,7 @@ import { renderRecapRows } from "./recap.js";
 import { createBridge } from "../bridge-abito.js";
 import { toggle, select, button } from "./ui.js";
 import { t, LANGUAGES } from "./i18n-es.js";
-import { notchSection, notchRow as row, notchHint as hint } from "./notch.js";
+import { notchCard, notchRow as row, notchHint as hint } from "./notch.js";
 function trusted(el) {
   for (const node of [el, ...el.querySelectorAll("button")]) {
     for (const type of ["click", "change", "input"]) node.addEventListener(type, (e) => {
@@ -183,34 +183,45 @@ async function renderGeneral({ invoke, V }) {
     const language = unavailable(select([["", t("System")], ...LANGUAGES], "", () => {
     }), "hub-language");
     language.className = "";
-    root.append(notchSection(
-      t("General"),
-      row(t("Sound"), sound, volume),
-      h("div", { class: "row" }, soundsFolder, soundsReload, h("span", { class: "hint", text: customCount > 0 ? t("{0} custom", { 0: customCount }) : "" })),
-      hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload.")),
-      row(t("Open on hover"), hover),
-      hint(t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.")),
-      row(t("Auto-close"), seconds, h("span", { class: "hint", text: t("seconds after you leave the island") })),
-      row("Ocultar tras", absence, h("span", { class: "hint", text: "segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta" })),
-      row(t("Island lives on"), screen),
-      row(t("Theme"), themeSelect),
-      row(t("Launch at startup"), (() => {
-        const control = identify(trusted(toggle(autostart.enabled === true, (enabled2) => run(async () => {
-          autostart = await send("prefs_action", { action: "set_autostart", enabled: enabled2 });
-        }))), "hub-autostart");
-        control.setAttribute("aria-pressed", String(autostart.enabled === true));
-        control.disabled = typeof autostart.enabled !== "boolean";
-        return control;
-      })()),
-      recap,
-      row(t("Language"), language, h("span", { class: "hint", text: "No disponible todavía" })),
-      row("Nombre visible", name, save),
-      nameIssue,
-      hint("El movimiento no se puede configurar en Abito."),
-      row("Atajo global", capture, change, trusted(button("Original", () => shortcut({ action: "reset" }))), enabled),
-      hint(g.hotkey?.note || g.hotkey?.backendLabel || ""),
+    const startup = (() => {
+      const control = identify(trusted(toggle(autostart.enabled === true, (enabled2) => run(async () => {
+        autostart = await send("prefs_action", { action: "set_autostart", enabled: enabled2 });
+      }))), "hub-autostart");
+      control.setAttribute("aria-pressed", String(autostart.enabled === true));
+      control.disabled = typeof autostart.enabled !== "boolean";
+      return control;
+    })();
+    root.append(
+      notchCard(
+        "Apariencia",
+        row(t("Language"), language, h("span", { class: "hint", text: "No disponible todavía" })),
+        row(t("Theme"), themeSelect),
+        hint("Sistema sigue el tema de tu escritorio."),
+        row("Nombre visible", name, save),
+        nameIssue,
+        hint("El movimiento no se puede configurar en Abito."),
+        row(t("Launch at startup"), startup),
+        hint("Abre Abito al iniciar la sesión del escritorio.")
+      ),
+      notchCard(
+        "Isla",
+        row(t("Open on hover"), hover),
+        hint(t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.")),
+        row(t("Auto-close"), seconds, h("span", { class: "hint", text: t("seconds after you leave the island") })),
+        row("Ocultar tras", absence, h("span", { class: "hint", text: "segundos con la isla plegada; vuelve al acercar el mouse, con un aviso o con una pregunta" })),
+        row(t("Island lives on"), screen),
+        row("Atajo global", capture, change, trusted(button("Original", () => shortcut({ action: "reset" }))), enabled),
+        hint(g.hotkey?.note || g.hotkey?.backendLabel || "Combinación que abre o cierra la isla desde cualquier app."),
+        recap
+      ),
+      notchCard(
+        "Sonido",
+        row(t("Sound"), sound, volume),
+        h("div", { class: "row" }, soundsFolder, soundsReload, h("span", { class: "hint", text: customCount > 0 ? t("{0} custom", { 0: customCount }) : "" })),
+        hint(t("Drop a file named like one of el personaje's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload."))
+      ),
       h("p", { class: "hub-note", role: "status", text: issue })
-    ));
+    );
     themeSelect.className = "";
     if (capturing) {
       capture.focus?.();

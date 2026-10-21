@@ -132,9 +132,9 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   assert(calls.some(([c,p])=>c==='monitor_action'&&p.action==='list'&&Object.keys(p).length===1), 'real display list');
   assert(calls.some(([c,p])=>c==='sound_action'&&p.action==='list'&&Object.keys(p).length===1), 'custom sound count');
   calls.length = 0;
-  assert.equal(ui.firstChild.tagName, 'section', 'General uses the upstream settings section');
-  assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' General']);
-  assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Sonido','Abrir al pasar el cursor','Cierre automático','Ocultar tras','La isla vive en','Tema','Abrir al iniciar sesión','Resumen semanal','','','Idioma','Nombre visible','Atajo global']);
+  assert.equal(ui.firstChild.tagName, 'section', 'General is made of settings sections (#503 S18: three task cards)');
+  assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(text), [' Apariencia', ' Isla', ' Sonido']);
+  assert.deepEqual(all(ui).filter(e => e.tagName === 'label').map(e => e.textContent), ['Idioma','Tema','Nombre visible','Abrir al iniciar sesión','Abrir al pasar el cursor','Cierre automático','Ocultar tras','La isla vive en','Atajo global','Resumen semanal','','','Sonido']);
   assert(!all(ui).some(e => e.className === 'hub-segmented'));
   for (const id of ['hub-language']) {
     const el = all(ui).find(e => e.attrs.id === id); assert(el?.disabled, id);

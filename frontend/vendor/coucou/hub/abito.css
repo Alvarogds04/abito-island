@@ -9,3 +9,8 @@ body.settings-window { background: #000; color: #f5f6f8; }
 .abito-settings-feedback:empty { display: none; }
 /* Coucou sizes the empty-state character's canvas at 64px (hub.css .hub-empty canvas); Abito's character is an SVG. */
 .hub-empty svg { width: 64px; height: 64px; }
+/* #503 S18+ (Ajustes, chosen designs): each task group is a titled card; rows are at least 44px tall and every
+   switch keeps a 44px hit area (touch-target-size) without changing its drawn size. */
+body.hub-window section.abito-card { gap: 6px; }
+body.hub-window section.abito-card > .row { min-height: 44px; }
+body.hub-window section.abito-card .switch::before { content: ""; position: absolute; inset: -12px -6px; }

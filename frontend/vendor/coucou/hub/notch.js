@@ -3,7 +3,9 @@ import { h } from "../views/dom.js";
 const notchSection = (title, ...children) => h("section", {}, h("h2", {}, h("span", { text: title })), ...children);
 const notchRow = (title, ...controls) => h("div", { class: "row" }, h("label", { text: title }), ...controls);
 const notchHint = (text) => h("div", { class: "hint", text });
+const notchCard = (title, ...children) => h("section", { class: "abito-card", "aria-label": title }, h("h2", {}, h("span", { text: title })), ...children);
 export {
+  notchCard,
   notchHint,
   notchRow,
   notchSection
