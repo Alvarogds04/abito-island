@@ -76,6 +76,7 @@ async function open(scenario = {}) {
             if (at >= 0) snap.notices.splice(at, 1);
             snap.revision += 1; queueMicrotask(() => window.__emit('desktop:state', structuredClone(snap)));
           }
+          if (a === 'autoClose') { (window.__autoCloses = window.__autoCloses || []).push(performance.now()); if (!window.__refuseClose) { snap.state = 'compact'; snap.revision += 1; queueMicrotask(() => window.__islandSetState && window.__islandSetState('compact')); } else throw new Error('pendiente'); }
           if (a === 'expand') { snap.state = 'expanded'; snap.revision += 1; queueMicrotask(() => window.__islandSetState && window.__islandSetState('overview')); }
           return structuredClone(snap);
         }
@@ -107,6 +108,7 @@ async function open(scenario = {}) {
     };
     window.__emit = (name, payload) => (listeners[name] || []).forEach(fn => fn({ payload }));
   }, { scenario, SESSIONS, UUID });
+  if (scenario.fakeClock) await page.clock.install({ time: 0 }); // time still flows; runFor() jumps it (before any page script runs)
   await page.goto(`${base}/index.html`);
   if (scenario.theme) await page.evaluate(t => { document.documentElement.dataset.theme = t; }, scenario.theme);
   await page.waitForTimeout(500);

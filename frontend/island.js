@@ -554,9 +554,10 @@
   });
   if (idleFold) {
     const touch = event => { if (event.isTrusted === true) idleFold.touch(); };
-    for (const type of ['pointermove', 'pointerdown', 'keydown', 'input', 'wheel']) capsule.addEventListener(type, touch, true);
-    capsule.addEventListener('pointerenter', () => idleFold.setInside(true));
-    capsule.addEventListener('pointerleave', () => idleFold.setInside(false));
+    // #capsule is the whole transparent window: only the island's own box counts as «over the island»
+    for (const type of ['pointermove', 'pointerdown', 'keydown', 'input', 'wheel']) island.addEventListener(type, touch, true);
+    island.addEventListener('pointerenter', () => idleFold.setInside(true));
+    island.addEventListener('pointerleave', () => idleFold.setInside(false));
     const typing = el => !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable === true);
     document.addEventListener('focusin', event => idleFold.setFieldFocus(typing(event.target)));
     document.addEventListener('focusout', () => idleFold.setFieldFocus(typing(document.activeElement)));
