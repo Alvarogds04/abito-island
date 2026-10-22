@@ -45,7 +45,7 @@ async function open(scenario = {}) {
   const page = await browser.newPage({ viewport: { width: 752, height: 340 } });
   await page.addInitScript(({ scenario, SESSIONS, UUID }) => {
     const listeners = {};
-    const sessions = scenario.sessions === undefined ? SESSIONS : scenario.sessions;
+    const sessions = scenario.manyPi ? Array.from({ length: 14 }, (_, i) => ({ id: 's-' + (0x100 + i).toString(16).padStart(8, '0'), kind: 'pi', cwd: 'proyecto-' + i, state: i === 0 ? 'running' : 'sleeping', origin: null })) : scenario.sessions === undefined ? SESSIONS : scenario.sessions;
     const notices = Array.from({ length: scenario.notices || 0 }, (_, i) => ({ id: `n${i + 1}`, title: scenario.noticeTitle || 'Pi terminó su turno', detail: `Resultado número ${i + 1}`, severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: 'pi', projectName: 'workspace' }));
     if (scenario.finishedCard) notices.push({ id: UUID, title: 'Pi terminó su turno', detail: scenario.finishedText || 'Migración aplicada, 14 tests pasan.', severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: scenario.finishedCard, projectName: 'api' });
     const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' ? 0 : 1 };
