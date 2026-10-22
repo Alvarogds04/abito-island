@@ -264,9 +264,14 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
   if (wantTools) {
     watch('agent:state', p => { connection = { ...connection, ...p }; paint(); });
     for (const action of ['view','agents_list']) work(() => call('agent_action',{action}), p => { connection = { ...connection, ...p }; paint(); });
+    // Reading which keys exist is INFORMATION, not an action of the human: with the OS keychain unreachable (no Secret Service, the
+    // validator's isolated session) a failed read means «no key we can see», shown by the row itself as «falta llave». It must not
+    // write the shared «No se pudo completar» notice that is reserved for something the human asked for (#503 S32 gate).
     work(async () => {
       const next: Record<string,boolean> = {};
-      for (const key of ['anthropic-api-key','google-api-key','openai-api-key']) next[key] = (await call('secret_action', V.keyPayload('present',key)))?.present === true;
+      for (const key of ['anthropic-api-key','google-api-key','openai-api-key']) {
+        try { next[key] = (await call('secret_action', V.keyPayload('present',key)))?.present === true; } catch { next[key] = false; }
+      }
       return next;
     }, p => { presence = p; paint(); });
   }

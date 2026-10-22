@@ -53,13 +53,20 @@ async function open(scenario = {}) {
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         const p = (args && args.payload) || {}; const a = p.action; calls.push([cmd, a]);
+        // The host's REAL limiter (src/bridge.rs RateLimiter): ONE fixed 1 s window shared by prefs/agent/secret/models/specialists/plan
+        // actions, 30 calls, then every call is refused with `rate-exceeded` until the window rolls over. The validator hit it (#503 S32 gate).
+        if (['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action'].includes(cmd)) {
+          const now = Date.now(); const lim = window.__limiter || (window.__limiter = { start: 0, n: 0 });
+          if (now - lim.start >= 1000) { lim.start = now; lim.n = 0; }
+          if (++lim.n > 30) { window.__rateRefused = (window.__rateRefused || 0) + 1; throw new Error('{"code":"rate-exceeded","message":"Rate exceeded"}'); }
+        }
         if (cmd === 'dictation_action') { if (a === 'status') { await delay(scenario.statusDelayMs || 0); return structuredClone(dictation); } return a === 'history' ? [] : a === 'stats' ? { all: { words: 0, wordsPerMinute: 0 }, streak: 0 } : { ok: true }; }
         if (cmd === 'prefs_action') return a === 'autostart_view' ? { enabled: false } : structuredClone(prefs);
         if (cmd === 'hotkey_action') { if (a === 'suspend') { suspended = true; for (const id of Object.keys(COMBOS)) window.__emit(id === 'toggleIsland' ? 'hotkey:state' : id === 'desktopToggle' ? 'hotkey-desktop:state' : `hotkey-${id}:state`, binding(id)); } if (a === 'resume') suspended = false; return binding(p.id || 'toggleIsland'); }
         if (cmd === 'recap_action') return a === 'prefs' ? { enabled: true } : { ok: true };
         if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1' }] };
         if (cmd === 'sound_action') return a === 'list' ? { names: [] } : { ok: true };
-        if (cmd === 'secret_action') return { present: false };
+        if (cmd === 'secret_action') { if (scenario.keychainDown) throw new Error('keychain_unavailable'); return { present: false }; }
         if (cmd === 'models_action') return { profiles: [] };
         if (cmd === 'specialists_action') return { specialists: [], active: null };
         if (cmd === 'plan_action') return { available: false };
