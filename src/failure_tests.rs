@@ -339,3 +339,10 @@ fn a_permission_error_is_reported_not_swallowed() {
     assert!(store(&blocker.join("sub"), &record()).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_short_home_never_eats_the_start_of_a_longer_path() {
+    assert_eq!(redact("/home/alvaro/x /home/a/y", "/home/a", ""), "~/x ~/y");
+    assert_eq!(redact("home=/home/a", "/home/a", ""), "home=~");
+    assert_eq!(redact("/home/ab/z", "/home/a", ""), "~/z", "another user's home is still hidden by the generic rule");
+}

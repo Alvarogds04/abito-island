@@ -88,3 +88,28 @@ fn prefs_file_is_created_private() {
     assert_eq!(mode, 0o600);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+#[test]
+fn what_leaves_the_machine_is_redacted_again_whatever_the_caller_sends() {
+    let e = env();
+    let edited_title = "[island] crash for alice@example.com in /home/alvaro/x";
+    let edited_body = "I added: key sk-ant-api03-AbCdEfGhIjKlMnOpQrSt\nfile /home/alvaro/Apps/a.rs\nmail bob@corp.io\nhost 100.64.0.7 nas.tail1.ts.net\nowner alvaro";
+    let out = outgoing(edited_title, edited_body, &e.home, &e.user);
+    let clipboard = out.clipboard.clone();
+    let IssueUrl::Url(url) = &out.url else { panic!("short text fits") };
+    // decode the URL so percent-encoding cannot hide a leak
+    let decoded = url.replace("%2F", "/").replace("%40", "@").replace("%20", " ").replace("%0A", "\n");
+    for text in [&clipboard, url, &decoded] {
+        for leaked in ["sk-ant", "alvaro", "alice@", "bob@", "100.64.0.7", "ts.net", "AbCdEf"] {
+            assert!(!text.contains(leaked), "leaked {leaked}: {text}");
+        }
+    }
+    assert!(clipboard.contains("<secret>") && clipboard.contains("<email>") && clipboard.contains("~/Apps/a.rs"), "{clipboard}");
+}
+
+#[test]
+fn outgoing_is_idempotent_on_already_redacted_text() {
+    let e = env();
+    let once = outgoing("t <secret> ~/x <email>", "b <ip> <host> <user>", &e.home, &e.user);
+    assert_eq!(once.clipboard, "t <secret> ~/x <email>\n\nb <ip> <host> <user>");
+}

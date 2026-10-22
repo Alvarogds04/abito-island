@@ -1,7 +1,7 @@
 //! #503 «reportar fallos» T2 (pure half): the closed schema of the one command `failure_action`, the failure prefs
 //! (switch + «no volver a preguntar») and the choice of which stored failures still deserve a notice.
 //! The host (`failurehost.rs`) owns the files, the browser and the clipboard; nothing here touches either.
-use crate::failure::{self, Env, FailureRecord, Stored};
+use crate::failure::{self, Env, FailureRecord, IssueUrl, Stored};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -82,6 +82,16 @@ impl Prefs {
         f.write_all(&bytes)?;
         std::fs::rename(&tmp, path)
     }
+}
+
+/// Everything the browser or the clipboard will receive. The text the human edited is untrusted input: it is redacted AGAIN here,
+/// whatever the page sent, before the URL or the clipboard text exist.
+pub struct Outgoing { pub url: IssueUrl, pub clipboard: String }
+
+pub fn outgoing(title: &str, body: &str, home: &str, user: &str) -> Outgoing {
+    let title = failure::redact(title, home, user);
+    let body = failure::redact(body, home, user);
+    Outgoing { url: failure::issue_url(&title, &body), clipboard: format!("{title}\n\n{body}") }
 }
 
 /// Failures still worth a notice: switch on, not muted for good, not postponed this launch. Newest first.

@@ -58,16 +58,19 @@ fn run(command: Command, dir: PathBuf) -> Result<Value, BridgeError> {
             let fingerprint = failure::fingerprint_of(&rec);
             Ok(json!({"title": report.title, "body": report.body, "fingerprint": fingerprint, "searchUrl": failure::search_url(&fingerprint)}))
         }
-        Command::Send { title, body } => match failure::issue_url(&title, &body) {
+        Command::Send { title, body } => {
+            let out = cmd::outgoing(&title, &body, &env.home, &env.user);
+            match out.url {
             IssueUrl::Url(url) => { open_browser(&url)?; Ok(json!({"opened": true, "copied": false})) }
             IssueUrl::TooLong => {
                 // too long for a URL: the FULL text goes to the clipboard, the browser opens an empty form to paste it into
-                let copied = abito_island::flow::paste::copy(&format!("{title}\n\n{body}")) == abito_island::flow::paste::Outcome::Copied;
+                let copied = abito_island::flow::paste::copy(&out.clipboard) == abito_island::flow::paste::Outcome::Copied;
                 if !copied { return Err(err("clipboard_unavailable")); }
                 open_browser(&format!("https://github.com/{}/issues/new?labels={}", failure::REPO, "bug%2Cauto-report"))?;
                 Ok(json!({"opened": true, "copied": true}))
             }
-        },
+            }
+        }
     }
 }
 

@@ -312,9 +312,29 @@ fn redact_tokens(s: &str) -> String {
 
 fn redact_home(s: &str, home: &str) -> String {
     let mut t = s.to_owned();
-    if home.len() > 1 { t = t.replace(home, "~"); }
+    if home.len() > 1 { t = replace_at_boundary(&t, home.trim_end_matches('/')); }
     for prefix in ["/home/", "/Users/"] { t = replace_user_dir(&t, prefix); }
     replace_windows_users(&t)
+}
+
+/// Replace `home` by `~` only where it is a whole path prefix (followed by a separator, whitespace, a quote or the end),
+/// so `/home/a` never eats the start of `/home/alvaro`.
+fn replace_at_boundary(s: &str, home: &str) -> String {
+    if home.is_empty() { return s.to_owned(); }
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(p) = rest.find(home) {
+        out.push_str(&rest[..p]);
+        let after = &rest[p + home.len()..];
+        match after.chars().next() {
+            None => out.push('~'),
+            Some(c) if matches!(c, '/' | '\\') || c.is_whitespace() || matches!(c, '"' | '\'' | ':' | ',' | ';' | ')' | ']') => out.push('~'),
+            Some(_) => out.push_str(home),
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 fn seg_end(rest: &str) -> usize {
