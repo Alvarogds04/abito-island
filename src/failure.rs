@@ -219,12 +219,12 @@ fn looks_secret(run: &str) -> bool {
 }
 
 fn redact_tokens(s: &str) -> String {
-    let in_run = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '+' | '=');
+    let in_run = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '+');
     let mut out = String::new();
     let mut run = String::new();
     let flush = |run: &mut String, out: &mut String| {
         if run.is_empty() { return; }
-        let trimmed = run.trim_end_matches(['.', '=']);
+        let trimmed = run.trim_end_matches('.');
         let tail = &run[trimmed.len()..];
         if looks_secret(trimmed) { out.push_str(SECRET); out.push_str(tail); } else { out.push_str(run); }
         run.clear();

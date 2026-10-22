@@ -198,3 +198,15 @@ fn note_writes_a_redacted_local_record_without_network() {
     assert!(!all[0].record.message.contains("hunter22"), "{}", all[0].record.message);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn each_listed_prefix_is_redacted_on_its_own() {
+    for secret in ["ghp_0123456789abcdefghijABCDEFGHIJ", "gho_0123456789abcdefghijABCDEFGHIJ", "github_pat_11AAAAAAA0abcdefghijklmnop_QRSTUV",
+        "glpat-abcdefghij0123456789", "xoxb-111111111111-222222222222-abcdefABCDEF", "AIzaSyD-abcdefghijklmnopqrstuvwxyz01234"] {
+        for wrap in ["{}", "token {} end", "\"{}\"", "({})", "x={}", "{}."] {
+            let text = wrap.replace("{}", secret);
+            let out = r(&text);
+            assert!(!out.contains(&secret[..12]), "leaked {secret} in {text:?}: {out}");
+        }
+    }
+}
