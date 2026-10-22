@@ -472,7 +472,7 @@
   // The ids mirror KNOWN_KEYS of src/secrets.rs (the host refuses anything else). Labels are OURS; the page never
   // shows a value, only «Guardada» / «Sin definir», and sends a value only inside one `set`.
   const KEY_LABELS = Object.freeze({
-    'anthropic-api-key': 'Anthropic', 'openai-api-key': 'OpenAI', 'google-api-key': 'Google', 'openrouter-api-key': 'OpenRouter',
+    'anthropic-api-key': 'Anthropic', 'openai-api-key': 'OpenAI', 'google-api-key': 'Google', 'openrouter-api-key': 'OpenRouter', 'nan-api-key': 'NaN', 'opencode-go-api-key': 'OpenCode Go',
     'openai-compatible-key': 'Compatible con OpenAI', 'n8n-url': 'n8n (dirección)', 'n8n-api-key': 'n8n (clave)',
     'vercel-token': 'Vercel', 'github-token': 'GitHub', 'stripe-api-key': 'Stripe', 'resend-api-key': 'Resend', 'resend-from': 'Resend (remitente)',
     'smtp-host': 'Correo SMTP (servidor)', 'smtp-user': 'Correo SMTP (usuario)', 'smtp-password': 'Correo SMTP (contraseña)', 'smtp-from': 'Correo SMTP (remitente)',

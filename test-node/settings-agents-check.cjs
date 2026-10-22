@@ -114,9 +114,9 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   assert(!text(ui.children[0]).includes('No disponible todavía No disponible todavía'));
   ui.dispose();
   ui=await renderChatSettings(opts);await ui.settled();
-  assert.deepEqual(heads().map(h=>h.replace(/ [✓✗·].*$/,'')),['Claude','Google AI','OpenAI','OpenRouter','Modelos locales','Contexto de la ventana activa']); // #503 S21: one card per provider
-  assert.deepEqual(calls.filter(([c,p])=>c==='secret_action'&&p.action==='present').map(([,p])=>p.key),['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key']);
-  for(const id of ['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key']) {
+  assert.deepEqual(heads().map(h=>h.replace(/ [✓✗·].*$/,'')),['Claude','Google AI','OpenAI','OpenRouter','NaN','OpenCode Go','Modelos locales','Contexto de la ventana activa']); // #503 S21: one card per provider
+  assert.deepEqual(calls.filter(([c,p])=>c==='secret_action'&&p.action==='present').map(([,p])=>p.key),['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key','nan-api-key','opencode-go-api-key']);
+  for(const id of ['anthropic-api-key','google-api-key','openai-api-key','openrouter-api-key','nan-api-key','opencode-go-api-key']) {
     const input=all(ui).find(e=>e.attrs.id===`chat-key-${id}`);assert.equal(input.type,'password');
     const scope=all(ui).find(e=>e.className==='row'&&e.children.includes(input));
     calls.length=0;input.value='fixture-only';button(scope,id==='anthropic-api-key'?'Guardar clave':'Guardar').fire('click',false);await ui.settled();assert.deepEqual(calls,[]);

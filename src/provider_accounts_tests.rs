@@ -345,3 +345,11 @@ fn account_sender_and_shared_rate_guard_reject_before_mutation() {
     assert_eq!(AccountStore::guard("main", "tauri://localhost", &mut rate, 0).unwrap_err().code, "rate-exceeded");
     assert!(AccountStore::guard("main", "tauri://localhost", &mut rate, 1000).is_ok());
 }
+
+/// #503 S3: the NaN and OpenCode Go chat accounts reference the chat key itself (single source of truth, no second copy).
+#[test]
+fn nan_and_opencode_go_accounts_share_the_chat_key() {
+    assert_eq!(super::shared_credential_ref("key-nan"), Some("nan-api-key"));
+    assert_eq!(super::shared_credential_ref("key-opencodego"), Some("opencode-go-api-key"));
+    assert_eq!(super::shared_credential_ref("personal"), None);
+}

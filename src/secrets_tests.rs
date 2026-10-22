@@ -128,3 +128,12 @@ fn the_service_name_is_abitos_own() {
     assert_eq!(SERVICE, "com.abitog.AbitoTauri");
     assert!(!SERVICE.to_lowercase().contains("coucou"));
 }
+
+/// #503 S3: NaN and OpenCode Go keys live in the closed keychain list like every other chat key.
+#[test]
+fn nan_and_opencode_go_keys_are_known() {
+    for key in ["nan-api-key", "opencode-go-api-key"] {
+        assert!(KNOWN_KEYS.contains(&key), "{key}");
+        assert!(parse_command(&json!({"action":"set","key":key,"value":"v"})).is_some(), "{key}");
+    }
+}

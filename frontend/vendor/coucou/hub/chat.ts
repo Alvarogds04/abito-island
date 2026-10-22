@@ -10,10 +10,14 @@ import { t } from './i18n-es.js';
 import { keyAccountCommand, keyAccountId } from './keyaccounts.js';
 const UNAVAILABLE = 'No disponible todavía';
 const STORE = 'Secret Service (GNOME Keyring, KWallet)';
+// #503 S3: providers outside Coucou's table (core/providers.ts) name their keychain key here.
+const KEYS: Record<string, string> = { nan: 'nan-api-key', opencodego: 'opencode-go-api-key' };
 const CLOUD = [
   ['google','Google AI','AIza…','aistudio.google.com'],
   ['openai','OpenAI','sk-…','platform.openai.com'],
   ['openrouter','OpenRouter','sk-or-…','openrouter.ai/keys'],
+  ['nan','NaN','…','api.nan.builders'],
+  ['opencodego','OpenCode Go','…','opencode.ai/go (sin verificar)'],
 ];
 const button = (key: string, fn: () => void, kind = '') => trusted(h('button', { class: kind, text: t(key), onclick: fn })) as HTMLButtonElement;
 const input = (type: string, placeholder: string, id: string) => h('input', {
@@ -155,7 +159,7 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
   apiSection.children[0].prepend(api.dot);
   const providerCards: HTMLElement[] = [];
   for (const [id, name, placeholder, site] of CLOUD) {
-    const k = keyRow(providerDef(id).key!, name, placeholder);
+    const k = keyRow(KEYS[id] ?? providerDef(id).key!, name, placeholder);
     const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t('Model'), modelPicker(id)), k.feedback, engineSlot(id));
     c.setAttribute('title', t('Key from {site}', {site})); // long explanation = tooltip, not a paragraph (S1)
     c.children[0].prepend(k.dot); providerCards.push(c);
@@ -221,7 +225,7 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
   drawModels();
   watch('agent:state', next => { state = { ...state, ...next }; drawModels(); });
   watch('prefs:state', next => { prefs = next; drawModels(); paintContext(); });
-  for (const key of ['anthropic-api-key', ...CLOUD.map(([id]) => providerDef(id).key!)]) work(() => call('secret_action', V.keyPayload('present', key)), result => { present[key] = result?.present === true; keyRefresh[key](); });
+  for (const key of ['anthropic-api-key', ...CLOUD.map(([id]) => KEYS[id] ?? providerDef(id).key!)]) work(() => call('secret_action', V.keyPayload('present', key)), result => { present[key] = result?.present === true; keyRefresh[key](); });
   for (const action of ['view','models_list']) work(() => call('agent_action', { action }), next => { state = { ...state, ...next }; drawModels(); });
   work(() => call('prefs_action', { action:'view' }), next => { prefs = next; drawModels(); paintContext(); });
   return Object.assign(s.finish(), { slotFor: (name: string) => engineSlots[name] || engineOthers });

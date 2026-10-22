@@ -9,10 +9,13 @@ import { t } from "./i18n-es.js";
 import { keyAccountCommand, keyAccountId } from "./keyaccounts.js";
 const UNAVAILABLE = "No disponible todavía";
 const STORE = "Secret Service (GNOME Keyring, KWallet)";
+const KEYS = { nan: "nan-api-key", opencodego: "opencode-go-api-key" };
 const CLOUD = [
   ["google", "Google AI", "AIza…", "aistudio.google.com"],
   ["openai", "OpenAI", "sk-…", "platform.openai.com"],
-  ["openrouter", "OpenRouter", "sk-or-…", "openrouter.ai/keys"]
+  ["openrouter", "OpenRouter", "sk-or-…", "openrouter.ai/keys"],
+  ["nan", "NaN", "…", "api.nan.builders"],
+  ["opencodego", "OpenCode Go", "…", "opencode.ai/go (sin verificar)"]
 ];
 const button = (key, fn, kind = "") => trusted(h("button", { class: kind, text: t(key), onclick: fn }));
 const input = (type, placeholder, id) => h("input", {
@@ -209,7 +212,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
   apiSection.children[0].prepend(api.dot);
   const providerCards = [];
   for (const [id, name, placeholder, site] of CLOUD) {
-    const k = keyRow(providerDef(id).key, name, placeholder);
+    const k = keyRow(KEYS[id] ?? providerDef(id).key, name, placeholder);
     const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t("Model"), modelPicker(id)), k.feedback, engineSlot(id));
     c.setAttribute("title", t("Key from {site}", { site }));
     c.children[0].prepend(k.dot);
@@ -302,7 +305,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     drawModels();
     paintContext();
   });
-  for (const key of ["anthropic-api-key", ...CLOUD.map(([id]) => providerDef(id).key)]) work(() => call("secret_action", V.keyPayload("present", key)), (result) => {
+  for (const key of ["anthropic-api-key", ...CLOUD.map(([id]) => KEYS[id] ?? providerDef(id).key)]) work(() => call("secret_action", V.keyPayload("present", key)), (result) => {
     present[key] = result?.present === true;
     keyRefresh[key]();
   });

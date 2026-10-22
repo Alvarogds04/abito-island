@@ -676,6 +676,8 @@ fn shared_credential_ref(id: &str) -> Option<&'static str> {
         "key-google" => Some("google-api-key"),
         "key-openai" => Some("openai-api-key"),
         "key-openrouter" => Some("openrouter-api-key"),
+        "key-nan" => Some("nan-api-key"),
+        "key-opencodego" => Some("opencode-go-api-key"),
         _ => None,
     }
 }

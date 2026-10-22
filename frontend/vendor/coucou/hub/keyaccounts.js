@@ -31,9 +31,29 @@ const KEY_ACCOUNTS = {
     api: "openai-completions",
     models: ["openrouter/auto"],
     defaultModel: "openrouter/auto"
+  },
+  // #503 S3. NaN: OpenAI-compatible, base URL from the human (L1). OpenCode Go: endpoint + models from opencode.ai/docs/go (2026-10-22);
+  // «sin verificar»: no real call was made with a key. Auth is presumed `Authorization: Bearer <key>` (sin verificar).
+  "nan-api-key": {
+    id: "key-nan",
+    provider: "custom",
+    nombre: "NaN",
+    baseUrl: "https://api.nan.builders/v1",
+    api: "openai-completions",
+    models: ["nan-default"],
+    defaultModel: "nan-default"
+  },
+  "opencode-go-api-key": {
+    id: "key-opencodego",
+    provider: "custom",
+    nombre: "OpenCode Go",
+    baseUrl: "https://opencode.ai/inference/go/openai/v1",
+    api: "openai-completions",
+    models: ["kimi-k3", "glm-5.2", "deepseek-v4-pro"],
+    defaultModel: "kimi-k3"
   }
 };
-const keyAccountId = (keyId) => KEY_ACCOUNTS[keyId] ? `key-${KEY_ACCOUNTS[keyId].provider}` : null;
+const keyAccountId = (keyId) => KEY_ACCOUNTS[keyId] ? KEY_ACCOUNTS[keyId].id ?? `key-${KEY_ACCOUNTS[keyId].provider}` : null;
 function keyAccountCommand(keyId, action, value, owned) {
   const preset = KEY_ACCOUNTS[keyId], accountId = keyAccountId(keyId);
   if (!preset || !accountId) return null;
