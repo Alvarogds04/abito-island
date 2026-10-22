@@ -260,7 +260,9 @@ function mount(V) {
   // «Ver todas»: the link sits in the who-row; the full list is a dialog over the card (Esc / Volver return to the link).
   let pendingQuestion = null;
   const seeAll = mkEl('button', 'see-all'); seeAll.type = 'button'; seeAll.hidden = true;
-  who.append(seeAll);
+  // v8 S12: «Todas» lives at the bottom of the blobs card (the MD's «Ver todas →»), not loose under the mascot
+  const linksBox = document.getElementById('blobs-links');
+  (linksBox || who).append(seeAll);
   const overlay = mkEl('div', 'sessions-all'); overlay.hidden = true;
   overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', 'Todas las sesiones');
   const overlayHead = mkEl('div', 'sessions-all-head');
@@ -354,7 +356,15 @@ function mount(V) {
   function paintMiniGrid(view) {
     if (!grid) return;
     grid.setAttribute('aria-hidden', 'false'); grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', 'Sesiones activas');
-    const all = V.sessionRows(view, prefs), rows = all.slice(0, 3); // S2: 3 coloured minis + «+N»
+    const all = V.sessionRows(view, prefs);
+    // v8 S2: every visible mini has ITS OWN colour: when two share the agent's colour (14 Pi sessions), the later ones step through the
+    // palette from the agent's colour, skipping the colours already on screen
+    const taken = new Set(), order = ['green', 'blue', 'mint', 'orange', 'purple'];
+    const rows = all.slice(0, 3).map(r => {
+      let color = r.color;
+      if (taken.has(color)) { const at = Math.max(0, order.indexOf(color)); for (let k = 1; k <= order.length; k++) { const c = order[(at + k) % order.length]; if (!taken.has(c)) { color = c; break; } } }
+      taken.add(color); return { ...r, color };
+    });
     const key = all.length + '|' + rows.map(r => `${r.id}:${r.text}:${r.color}:${r.pose}:${r.id === memory.focus?.id}`).join('|');
     if (key === gridKey) return;
     gridKey = key;
@@ -398,7 +408,7 @@ function mount(V) {
     ticker.el.title = task?.steps?.at(-1) ?? ''; // full text fallback when a long step is cut
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
     const more = V.moreView(view);
-    seeAll.hidden = !more || !w; if (more) { seeAll.textContent = more.label; seeAll.setAttribute('aria-label', more.aria); }
+    seeAll.hidden = !more || !w; if (linksBox) linksBox.hidden = seeAll.hidden; if (more) { seeAll.textContent = more.label; seeAll.setAttribute('aria-label', more.aria); }
     if (!overlay.hidden) paintOverlay();
     jump.hidden = !memory.focus || integrationFocused;
     jump.setAttribute('aria-label', `Abrir una terminal · ${w?.name || ''}`);

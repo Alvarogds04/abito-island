@@ -351,8 +351,14 @@
     const m = /^(.+?)\s+(termin[oó].*)$/i.exec(title);
     const name = rich ? proj : m ? m[1] : title;
     const verb = rich ? `${label(slug)} terminó` : m ? m[2].replace(/\s+su turno$/i, '') : '';
+    // v8 S10/S28: the band is ONE short line. The daemon's standing caveat («No confirma que…») adds nothing next to «Pi terminó» and is
+    // dropped; a real result keeps its first sentence cut at a word (the full text stays in the tooltip, `full`)
     const detail = clean(notice && notice.detail);
-    return { name, verb, message: detail || title, terminal: { label: 'Abrir terminal', available: true, target: 'terminal', hint: '' }, ok: { label: 'OK' } };
+    const CAVEAT = /^no confirma que\b/i;
+    const full = detail || title;
+    const first = (detail && !CAVEAT.test(detail) ? detail.split(/(?<=[.!?])\s/)[0] : '').trim();
+    const cut = first.length > 44 ? `${first.slice(0, 43).replace(/\s+\S*$/, '')}…` : first;
+    return { name, verb, message: cut, full, terminal: { label: 'Abrir terminal', available: true, target: 'terminal', hint: '' }, ok: { label: 'OK' } };
   }
   // ---- #493 (human L38): Coucou's Spring, frame-rate independent ---------------------------------------------------------
   // Coucou advances its spring in fixed 1/240 s sub-steps and treats a frame longer than 50 ms as 50 ms (core/anim.ts `Spring`,

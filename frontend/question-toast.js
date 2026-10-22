@@ -152,10 +152,12 @@ function mount(T) {
   const runClose = () => {
     stopClose(); if (!view) return;
     running = true; startedAt = Date.now(); bar.style.animationPlayState = 'running';
-    closeTimer = setTimeout(() => { running = false; if (view) { dismissedId = view.id; render(); } }, Math.max(0, remaining));
+    // v8: in the chat view and on the hidden strip the toast is the ONLY click target to the question, so the 8 s only FOLDS its body
+    // (the pill stays); only Escape dismisses it
+    closeTimer = setTimeout(() => { running = false; if (view) { setExpanded(false); bar.style.opacity = '0'; } }, Math.max(0, remaining));
   };
   const pauseClose = () => { if (!running) return; running = false; stopClose(); remaining = Math.max(0, remaining - (Date.now() - startedAt)); bar.style.animationPlayState = 'paused'; };
-  const restartClose = () => { remaining = T.TOAST.ms; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; bar.style.animationDuration = `${T.TOAST.ms}ms`; runClose(); };
+  const restartClose = () => { bar.style.opacity = ''; remaining = T.TOAST.ms; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; bar.style.animationDuration = `${T.TOAST.ms}ms`; runClose(); };
   const island = doc.getElementById('island');
   const set = (el, o) => { for (const k of ['x', 'y', 'width', 'height']) el.setAttribute(k, String(Math.round(o[k] * 100) / 100)); };
 

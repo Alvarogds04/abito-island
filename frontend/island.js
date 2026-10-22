@@ -385,6 +385,7 @@
     if (!raf) raf = requestAnimationFrame(tick);
   }
   window.__islandSetState = setPhase;
+  window.__islandConceal = setConcealed; // the page-side hidden state (the host drives it through the edge interaction); also lets the real-layout harness reach it
   // U1: called from Rust (chathost::apply_view) with the chat height from
   // geometry::CHAT_VISIBLE — the frontend never owns that number.
   window.__islandSetView = (view, vw, vh) => {
@@ -956,7 +957,7 @@
   // S10 (10 «Pi terminó», B): the notice is a fixed 32px band UNDER the overview, so the island is 36px taller while it shows.
   const FINISHED_BAND_H = 36;
   function fitFinished(shown) {
-    const next = shown ? OVERVIEW.h + FINISHED_BAND_H : 0;
+    const next = shown || capsule.dataset.noticeBand === 'true' ? OVERVIEW.h + FINISHED_BAND_H : 0;
     if (next !== finishedH) { finishedH = next; render(); }
   }
   // the band appears when an agent finished and goes away while THAT agent runs again (human note: «aparece y se oculta dependiendo si terminó, o si está corriendo»)
@@ -973,13 +974,16 @@
     const selected = noticeLane?.view === 'notices' ? current?.notices?.find(n => n.id === noticeLane.id) : first;
     const v = selected && !agentRunning(selected) && O.finishedCardView ? O.finishedCardView(selected, NV && NV.agentLabel) : null;
     noticeCard.hidden = !v;
+    // v8: a retained «settled» notice is the band too (never ALSO a capsule in the blobs column); transport errors keep the capsule
+    const retained = !!v && !noticeLane && !!selected && (selected.kind || 'settled') === 'settled' && /termin/i.test(selected.title || '') && (current?.notices?.length || 0) === 1; // several notices stay the grouped «Ver» list
+    capsule.dataset.noticeBand = retained ? 'true' : 'false';
     document.dispatchEvent(new CustomEvent('abito:finished-shown', { detail: { shown: !!v && noticeLane?.view === 'notices' } }));
     if (!v) { fitFinished(false); return; }
     $('notice-card-name').textContent = v.name;
     $('notice-card-verb').textContent = v.verb;
-    const msg = $('notice-card-message'); msg.textContent = v.message; msg.setAttribute('data-tip', v.message);
+    const msg = $('notice-card-message'); msg.textContent = v.message; msg.hidden = !v.message; msg.setAttribute('data-tip', v.full);
     const t = $('notice-card-terminal'); t.disabled = !v.terminal.available;
-    fitFinished(noticeLane?.view === 'notices');
+    fitFinished(noticeLane?.view === 'notices' || retained);
   }
   // «Abrir terminal» = the closed host verb `focus_host {target:'terminal'}` (focushost.rs): no command, path or window id
   // ever leaves the page; a refusal is the host's public Spanish reason, shown on the button and announced politely.

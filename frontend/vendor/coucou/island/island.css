@@ -1150,3 +1150,29 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 .card-left > .sessions-all { padding: 4px 12px 4px 108px; }
 .sessions-all-list { margin-top: 2px; gap: 4px 6px; }
 .card-left > .sessions-all, .sessions-all button { pointer-events: auto; }
+
+/* ══ v8 S1: the hidden island sits 24px up (window y -24..8), so its VISIBLE part is the island's last 8px. The thread lives there
+   (island y 24..27 = window y 0..3), never at the island's own top, which is off screen. Rest is a visible light grey. ═══════════ */
+#edge-strip { top: 24px; height: 3px; border-radius: 0 0 3px 3px; }
+#edge-strip[data-state="rest"] { background: var(--dim-2); }
+#capsule[data-edge-hidden="true"] #edge-strip { opacity: 1; }
+
+/* ══ v8 S7: the reason a disabled «Hecho» is disabled is visible text beside it (dim-2 on the card, >= 4.5:1) ═════════════════════ */
+#question-reason { flex: 1 1 auto; min-width: 0; margin-right: auto; font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#question-reason[hidden] { display: none; }
+
+/* ══ v8 S10: a RETAINED finished notice (no lane) is the SAME 32px band; the blobs-column capsule is not drawn for it ═══════════════ */
+#capsule[data-phase="expanded"][data-notice-band="true"]:not([data-notice-view="notices"]):not([data-question="pending"]):not([data-card]) #notices { left: calc(50% - 350px); width: 700px; top: 178px; height: 32px; padding: 0 12px 0 14px; overflow: hidden; border-radius: 16px; box-sizing: border-box; background: var(--card); border: 1px solid var(--hairline); opacity: 1; visibility: visible; }
+#capsule[data-notice-band="true"] #notice-row, #capsule[data-notice-band="true"] #notice-pill, #capsule[data-notice-band="true"] #notice-detail, #capsule[data-notice-band="true"] #notice-list, #capsule[data-notice-band="true"] #notice-chips { display: none; }
+#capsule[data-phase="expanded"][data-notice-band="true"]:not([data-notice-view="notices"]) #notice-card:not([hidden]) { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; height: 100%; min-height: 0; }
+#capsule[data-notice-band="true"] #notices::before { background: radial-gradient(220px 120px at 50% 160%, rgba(52, 211, 153, 0.5) 0%, rgba(0, 0, 0, 0) 70%); }
+#notice-card #notice-card-message[hidden] { display: none; }
+
+/* ══ v8 S12: «Todas» at the bottom of the blobs card (16px row, 44px hit through ::after) ═══════════════════════════════════════ */
+#blobs-links { flex: 0 0 16px; height: 16px; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px 0 8px; }
+#blobs-links[hidden] { display: none; }
+#blobs-links .see-all { position: relative; margin: 0; padding: 0 2px; height: 16px; font: 500 11px/16px var(--font); color: var(--dim-2); opacity: 1; }
+#blobs-links .see-all::after { content: ""; position: absolute; inset: -14px -8px; }
+#blobs-links .see-all:hover { color: var(--ink); }
+#capsule[data-layout="focus"] #blobs-links { justify-content: center; padding: 0; }
+#blobs { overflow: clip; }

@@ -229,7 +229,10 @@
       const v = N.multiView(n, multiDraft);
       prevEl.hidden = true;
       primaryEl.textContent = v.label; primaryEl.dataset.kind = 'done'; primaryEl.disabled = !view.controlsEnabled || !v.canDone;
-      if (v.reason) { primaryEl.title = v.reason; primaryEl.setAttribute('aria-description', v.reason); } else { primaryEl.removeAttribute('title'); primaryEl.removeAttribute('aria-description'); }
+      // v8 S7: the reason is visible text beside the disabled button (and its accessible description), gone once it can be pressed
+      const why = $('question-reason'); if (why) { why.textContent = v.reason || ''; why.hidden = !v.reason; }
+      if (v.reason) primaryEl.setAttribute('aria-description', v.reason); else primaryEl.removeAttribute('aria-description');
+      primaryEl.removeAttribute('title');
     }
     if (item && showText && textEl.value !== draft.text && document.activeElement !== textEl) { textEl.value = draft.text; growText(); } // each step keeps its own draft
   }

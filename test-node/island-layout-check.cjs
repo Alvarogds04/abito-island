@@ -169,13 +169,17 @@ test('approvalView is SAFE: only the exact known label pair maps to Aprobar/Rech
   const swapped = L.approvalView(harness('Claude Code asks permission: Bash: ls', [opt(0, 'Deny'), opt(1, 'Allow once')]), 'Claude Code');
   assert.deepEqual(swapped.actions.map(a => [a.role, a.index]), [['reject', 0], ['approve', 1]]);
 });
-test('approvalView: Pi\'s kind=approval keeps ITS OWN two labels (no assumption which one approves), in the pill look', () => {
-  const pi = { id: '0b3a5c9e-8f27-4d11-9a0e-1c2d3e4f5a6b', kind: 'approval', agent: 'pi', text: '¿Borrar la carpeta build?', options: [opt(0, 'Borrar'), opt(1, 'Mantener')], allowFreeText: false };
-  const v = L.approvalView(pi, 'Pi');
-  assert.equal(v.badge, '!');
-  assert.equal(v.title, 'Aprobar:');
-  assert.equal(v.command, '¿Borrar la carpeta build?');
-  assert.deepEqual(v.actions.map(a => [a.role, a.label, a.key, a.index]), [['option', 'Borrar', '1', 0], ['option', 'Mantener', '2', 1]]);
+test('approvalView: Pi\'s kind=approval with the exact pair «Aprobar»/«Rechazar» follows the MD (Rechazar N | Aprobar Y, Aprobar primary, short title); other labels keep their own order', () => {
+  const pi = (text, opts) => ({ id: '0b3a5c9e-8f27-4d11-9a0e-1c2d3e4f5a6b', kind: 'approval', agent: 'pi', text, options: opts, allowFreeText: false });
+  const v = L.approvalView(pi('¿Me das permiso para ejecutar: rm -rf build/ && npm run build?', [opt(0, 'Aprobar'), opt(1, 'Rechazar')]), 'Pi');
+  assert.equal(v.badge, '!'); assert.equal(v.title, 'Ejecutar:'); assert.equal(v.command, 'rm -rf build/ && npm run build');
+  assert.deepEqual(v.actions.map(a => [a.role, a.label, a.key, a.index]), [['reject', 'Rechazar', 'N', 1], ['approve', 'Aprobar', 'Y', 0]], 'MD order and keys; the index is the option\'s own');
+  const plain = L.approvalView(pi('¿Borrar la carpeta build?', [opt(0, 'Aprobar'), opt(1, 'Rechazar')]), 'Pi');
+  assert.equal(plain.title, 'Permiso:'); assert.equal(plain.command, '¿Borrar la carpeta build?');
+  // any other wording is NOT guessed: its own labels, its own order, numeric keys
+  const other = L.approvalView(pi('¿Borrar la carpeta build?', [opt(0, 'Borrar'), opt(1, 'Mantener')]), 'Pi');
+  assert.equal(other.title, 'Permiso:');
+  assert.deepEqual(other.actions.map(a => [a.role, a.label, a.key, a.index]), [['option', 'Borrar', '1', 0], ['option', 'Mantener', '2', 1]]);
 });
 test('approvalKey: Y approves and N rejects only for a known pair, trusted, unmodified, not typing, not repeating', () => {
   const v = L.approvalView(harness('Claude Code asks permission: Bash: ls'), 'Claude Code');

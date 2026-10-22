@@ -97,11 +97,13 @@ test('question: <asker> pregunta with a white dot, plain pill options (no key ba
 test('finishedCardView: name + verb from the host title, the detail is the bold message, «Abrir terminal» focuses the terminal through focus_host', () => {
   const O = require(path.join(frontend, 'overview-view.js'));
   const v = O.finishedCardView({ title: 'Pi terminó su turno', detail: 'Listo: 42 tests pasan.' });
-  assert.deepEqual([v.name, v.verb, v.message], ['Pi', 'terminó', 'Listo: 42 tests pasan.']);
+  assert.deepEqual([v.name, v.verb, v.message, v.full], ['Pi', 'terminó', 'Listo: 42 tests pasan.', 'Listo: 42 tests pasan.']);
+  assert.equal(O.finishedCardView({ title: 'Pi terminó su turno', detail: 'No confirma que la tarea haya salido bien ni que las pruebas hayan pasado.' }).message, '', 'v8: the standing caveat is not shown in the band');
+  assert.ok(O.finishedCardView({ title: 'Pi terminó su turno', detail: 'Migración aplicada y todos los tests pasan sin errores en staging ahora.' }).message.length <= 44, 'v8: a long result is cut at a word to fit one line');
   assert.deepEqual(v.terminal, { label: 'Abrir terminal', available: true, target: 'terminal', hint: '' });
   assert.equal(v.ok.label, 'OK');
   const bare = O.finishedCardView({ title: 'Aviso local', detail: '' });
-  assert.deepEqual([bare.name, bare.verb, bare.message], ['Aviso local', '', 'Aviso local']);
+  assert.deepEqual([bare.name, bare.verb, bare.full], ['Aviso local', '', 'Aviso local']);
   // S10 (L25): the additive wire fields give Coucou's «<project> <agent> terminó»; bad or partial ones fall back to the title
   const label = slug => ({ 'claude-code': 'Claude Code', codex: 'Codex', pi: 'Pi' }[slug] || slug);
   const rich = O.finishedCardView({ title: 'Pi terminó su turno', detail: 'Hecho.', projectName: 'sb-second-brain', agent: 'claude-code' }, label);

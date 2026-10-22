@@ -15,7 +15,10 @@ if (!H.findPlaywright()) { console.log('SKIPPED island-s13-check: no playwright 
     s = await st(); assert.equal(s.play, 'paused', 'hover pauses the bar');
     await r.page.waitForTimeout(9000); s = await st(); assert.equal(s.hidden, false, 'still here after 9 s while hovered');
     await r.page.mouse.move(5, 330); await r.page.waitForTimeout(1500); s = await st(); assert.equal(s.play, 'running', 'leaving resumes it');
-    await r.page.waitForTimeout(9000); s = await st(); assert.equal(s.hidden, true, 'it closes by itself when the time is up');
+    await r.page.waitForTimeout(9000); s = await st(); assert.equal(s.hidden, false, 'v8: the toast is the ONLY click target to the question here (chat/hidden), so the timer folds its body but never removes it');
+    const exp = await r.page.evaluate(() => document.getElementById('question-toast').dataset.expanded); assert.equal(exp, 'false', 'the timer collapsed the expanded body');
+    const t2 = (await r.measure('#question-toast'))[0]; assert.ok(t2.shown && t2.h >= 30, 'the pill is still drawn and clickable');
+    assert.ok((await r.hit('#question-toast'))[0].ok);
   } finally { await r.close(); }
   console.log('island-s13-check: ok');
 })().catch(e => { console.error('FAIL', e.message, e.actual, e.expected); process.exit(1); });

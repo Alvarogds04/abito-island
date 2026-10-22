@@ -107,8 +107,16 @@
     if (!n || typeof n !== 'object' || !Array.isArray(n.options) || n.options.length !== 2 || n.allowFreeText === true) return null;
     const label = typeof agentLabel === 'string' && agentLabel ? agentLabel : 'El agente';
     if (n.kind === 'approval') {
-      return { badge: '!', title: "Aprobar:", tool: null, command: String(n.text || ''), secretsHidden: false,
-        actions: n.options.map((o, i) => ({ role: 'option', label: o.label, key: String(i + 1), index: o.index })) };
+      // v8 S9: Pi's own approval. The exact pair «Aprobar»/«Rechazar» (matched by LABEL, never by position) gets the MD layout
+      // (Rechazar N | Aprobar Y, Aprobar primary); any other wording keeps its own labels and order with numeric keys. The title is the
+      // S28-short «Ejecutar:» when the text names a command, else «Permiso:».
+      const text = String(n.text || '');
+      const ex = /^[¿]?\s*(?:me das )?permiso para ejecutar:?\s*([\s\S]*?)\??\s*$/i.exec(text);
+      const yes = n.options.find(o => o.label === 'Aprobar'), no = n.options.find(o => o.label === 'Rechazar');
+      const known = yes && no && yes !== no;
+      return { badge: '!', title: ex ? 'Ejecutar:' : 'Permiso:', tool: null, command: ex ? ex[1] : text, secretsHidden: false,
+        actions: known ? [{ role: 'reject', label: 'Rechazar', key: 'N', index: no.index }, { role: 'approve', label: 'Aprobar', key: 'Y', index: yes.index }]
+          : n.options.map((o, i) => ({ role: 'option', label: o.label, key: String(i + 1), index: o.index })) };
     }
     const m = n.kind === 'question' && typeof n.text === 'string' ? ASKS.exec(n.text) : null;
     if (!m) return null;
@@ -278,7 +286,8 @@ function mount(L) {
   function fitList() {
     if (!blobsCard || !blobsList || typeof getComputedStyle !== 'function') return;
     const cs = getComputedStyle(blobsCard);
-    const avail = blobsCard.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+    const links = doc.getElementById('blobs-links');
+    const avail = blobsCard.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0) - (links && !links.hidden ? 16 : 0);
     const v = L.rowsViewport(avail);
     blobsList.style.maxHeight = `${v.height}px`; blobsList.style.flex = '0 0 auto'; blobsList.style.height = `${v.height}px`;
   }
@@ -315,10 +324,13 @@ function mount(L) {
       const text = L.tipFor({ title: el.getAttribute('data-tip'), visibleText: el.textContent });
       if (!text) return;
       const island = doc.getElementById('island').getBoundingClientRect(), b = el.getBoundingClientRect();
-      tip.textContent = text; tip.hidden = false; tipFor = el;
+      tip.textContent = text; tip.hidden = false; tipFor = el; shownAt = Date.now();
       const p = L.tipPlacement({ x: b.left - island.left, y: b.top - island.top, w: Math.min(tip.offsetWidth || 160, 220), h: b.height }, { w: island.width, h: island.height });
       tip.style.left = `${p.left}px`; tip.style.top = `${p.top}px`;
     }
+    // v8: a lost/synthetic pointer never sends pointerout: poll the row's hover/focus state and cap the tip at 6 s
+    let shownAt = 0;
+    setInterval(() => { if (tip.hidden || !tipFor) return; const active = (tipFor.matches && (tipFor.matches(':hover') || tipFor.matches(':focus-visible') || tipFor.contains(doc.activeElement))); if (!active || Date.now() - shownAt > 6000) hideTip(); }, 400);
     const arm = el => { clearTimeout(tipTimer); if (!el || el === tipFor) return; hideTip(); tipTimer = setTimeout(() => showTip(el), 350); };
     doc.addEventListener('pointerover', e => { const el = titled(e.target); if (el && doc.getElementById('island').contains(el)) arm(el); else hideTip(); });
     doc.addEventListener('pointerleave', hideTip); doc.addEventListener('pointerdown', hideTip, true);
@@ -385,6 +397,7 @@ function mount(L) {
   if (listen) listen('question:state', e => apply(e && e.payload)).catch(() => {});
   if (invoke) invoke('question_action', { payload: { action: 'view' } }).then(apply, () => {});
   new MutationObserver(syncMode).observe(capsule, { attributes: true, attributeFilter: ['data-question', 'data-card'] });
+  const linksBox = doc.getElementById('blobs-links'); if (linksBox) new MutationObserver(fitList).observe(linksBox, { attributes: true, attributeFilter: ['hidden'] });
   new MutationObserver(fitList).observe(capsule, { attributes: true, attributeFilter: ['data-notices-calm', 'data-layout', 'data-phase', 'data-view'] });
   syncMode(); publish();
 }
