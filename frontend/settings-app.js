@@ -68,7 +68,10 @@ const invoke = (command, args) => {
     if (!exact(args, ['payload']) || !p ||
       !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'train_record', 'train_undo', 'train_cancel', 'train_finish', 'train_reset'].includes(p.action)) ||
         (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, ['enabled', 'output', 'gender', 'sensitivity']) && Number.isInteger(p.prefs.sensitivity) && p.prefs.sensitivity >= 0 && p.prefs.sensitivity <= 100 &&
-          typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)))) return Promise.reject(new Error('No disponible'));
+          typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)) ||
+        (exact(p, ['action', 'id']) && ['model_download', 'model_cancel', 'model_delete'].includes(p.action) && typeof p.id === 'string' && /^[a-z0-9.-]{1,40}$/.test(p.id)) ||
+        (exact(p, ['action', 'speech']) && p.action === 'set_speech' && exact(p.speech, ['language', 'model', 'words']) && typeof p.speech.language === 'string' && /^[a-z]{2,4}$/.test(p.speech.language) &&
+          typeof p.speech.model === 'string' && /^[a-z0-9.-]{1,40}$/.test(p.speech.model) && Array.isArray(p.speech.words) && p.speech.words.length <= 50 && p.speech.words.every(w => typeof w === 'string' && w.length <= 40)))) return Promise.reject(new Error('No disponible'));
   }
   return rawInvoke(command, args);
 };

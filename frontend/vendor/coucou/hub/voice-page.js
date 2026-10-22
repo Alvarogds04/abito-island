@@ -112,6 +112,52 @@ async function voicePage(page, ctx) {
     }
     return card(row("Entrenar mi voz", "Abito aprende cómo se transcribe TU «OK Abito». Solo se guarda el texto, en este equipo.", controls), status);
   }
+  const LANG_NAMES = { es: "Español", en: "English", fr: "Français", de: "Deutsch", it: "Italiano", pt: "Português", ca: "Català", auto: "Automático" };
+  function speechCard() {
+    const sp = st?.speech;
+    if (!sp) return card(row("Modelo de voz", "No disponible todavía"));
+    const apply2 = (change) => void work(() => {
+      const s = { language: sp.language, model: sp.model, words: [...sp.words] };
+      change(s);
+      return VoiceBridge.setSpeech(s);
+    });
+    const lang = trusted(h("select", { id: "voice-language", "aria-label": "Idioma de la voz" }));
+    for (const code of sp.languages) lang.append(h("option", { value: code, text: LANG_NAMES[code] ?? code, ...code === sp.language ? { selected: "selected" } : {} }));
+    lang.value = sp.language;
+    lang.addEventListener("change", () => apply2((s) => {
+      s.language = lang.value;
+    }));
+    const active = sp.models.find((m) => m.active);
+    const langNote = h("div", { class: "hub-note", text: active && !active.forcesLanguage ? `${active.name} elige el idioma solo y no admite fijarlo: para fijar el español usá un modelo Whisper.` : "El idioma queda fijo: Abito no adivina otro." });
+    const list = h("div", { id: "voice-models", style: "display:flex;flex-direction:column;gap:6px" });
+    for (const m of sp.models) {
+      const downloading = m.state?.state === "downloading";
+      const pct = Math.round(Math.max(0, Math.min(1, m.state?.fraction ?? 0)) * 100);
+      const state = m.active ? "En uso" : downloading ? `Descargando ${pct} %` : m.installed ? "Descargado" : m.state?.state === "failed" ? `Falló: ${m.state.error}` : "Sin descargar";
+      const actions = h("div", { style: "display:flex;gap:6px;align-items:center" });
+      if (downloading) actions.append(trusted(button("Cancelar", () => void work(() => VoiceBridge.modelCancel(m.id)), "", true)));
+      else if (!m.installed) actions.append(trusted(button(`Descargar ${m.sizeMb} MB`, () => void work(() => VoiceBridge.modelDownload(m.id)), "primary")));
+      else {
+        if (!m.active) actions.append(trusted(button("Usar este", () => apply2((s) => {
+          s.model = m.id;
+        }), "primary")));
+        if (!m.active) actions.append(trusted(button("Borrar", () => void work(() => VoiceBridge.modelDelete(m.id)), "", true)));
+      }
+      list.append(row(`${m.name} · ${m.sizeMb} MB`, `${m.note} Idiomas: ${m.languages.join(", ")}. Licencia: ${m.license}. ${state}.`, actions));
+    }
+    const words = trusted(h("textarea", { id: "voice-words", rows: "3", "aria-label": "Palabras personalizadas", placeholder: "Una por línea. «Abito» ya está incluida.", text: sp.words.join("\n") }));
+    words.addEventListener("change", () => apply2((s) => {
+      s.words = words.value.split("\n").map((w) => w.trim()).filter(Boolean);
+    }));
+    return card(
+      row("Idioma", "El que escucha Abito para «OK Abito» y el dictado.", lang),
+      langNote,
+      divider(),
+      list,
+      divider(),
+      row("Palabras personalizadas", "Nombres o términos que Abito corrige al transcribir, además de «Abito».", words)
+    );
+  }
   function draw() {
     box.replaceChildren();
     paintBanner();
@@ -167,6 +213,8 @@ async function voicePage(page, ctx) {
         row(t("Wake-word sensitivity"), t("Higher hears « OK Abito » more easily, and mishears more."), sensitivity, value, probe),
         result
       ),
+      label("Modelo de voz"),
+      speechCard(),
       label("Tu voz"),
       trainingCard(),
       label("Respuestas"),

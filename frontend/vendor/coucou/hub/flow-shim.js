@@ -67,7 +67,12 @@ const VoiceBridge = Object.freeze({
   trainUndo: () => voiceCall({ action: "train_undo" }),
   trainCancel: () => voiceCall({ action: "train_cancel" }),
   trainFinish: () => voiceCall({ action: "train_finish" }),
-  trainReset: () => voiceCall({ action: "train_reset" })
+  trainReset: () => voiceCall({ action: "train_reset" }),
+  // Ajustes → Voz: language, model in use, custom words; explicit model download / cancel / delete.
+  setSpeech: (speech) => voiceCall({ action: "set_speech", speech: { language: String(speech.language), model: String(speech.model), words: speech.words.map(String) } }),
+  modelDownload: (id) => voiceCall({ action: "model_download", id }),
+  modelCancel: (id) => voiceCall({ action: "model_cancel", id }),
+  modelDelete: (id) => voiceCall({ action: "model_delete", id })
 });
 export {
   FlowBridge,
