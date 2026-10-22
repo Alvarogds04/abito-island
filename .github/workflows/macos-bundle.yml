@@ -25,6 +25,8 @@ jobs:
           echo "${SHERPA_SHA256}  $RUNNER_TEMP/$A" | shasum -a 256 -c -
           tar -xjf "$RUNNER_TEMP/$A" -C "$RUNNER_TEMP"
           echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/sherpa-onnx-v${SHERPA_VERSION}-osx-arm64-static-lib/lib" >> "$GITHUB_ENV"
+      - name: macOS unit tests (S1 host lifetime sentinel, getpeereid transport, runtime root)
+        run: cargo test --lib --locked -- daemonhost transport agentconn
       - name: Build .app and .dmg (bundling enabled for CI only)
         run: |
           npx --yes @tauri-apps/cli@2 build --ci --bundles app,dmg \
