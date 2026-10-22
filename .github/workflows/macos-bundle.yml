@@ -26,7 +26,7 @@ jobs:
       - name: Build .app and .dmg (bundling enabled for CI only)
         run: |
           npx --yes @tauri-apps/cli@2 build --ci --bundles app,dmg \
-            --config '{"bundle":{"active":true,"icon":["icons/icon.png"],"category":"Productivity","macOS":{"minimumSystemVersion":"12.0"}}}' \
+            --config '{"bundle":{"active":true,"icon":["icons/icon-macos.png"],"category":"Productivity","macOS":{"minimumSystemVersion":"12.0"}}}' \
             -- --locked
       - name: Zip the .app
         run: |
