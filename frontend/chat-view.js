@@ -298,6 +298,15 @@
         text: `Archivos adjuntos: ${names}`,
       });
     }
+    // S3 (#503): «contexto» — exactly what the live-state context told the model on this turn.
+    if (turn.live_context && typeof turn.live_context.text === 'string' && turn.live_context.text) {
+      const omitted = Number(turn.live_context.trimmed_lines) > 0 ? ` (${turn.live_context.trimmed_lines} líneas recortadas)` : '';
+      rows.push({
+        kind: 'context', short: 'Contexto', icon: 'info',
+        text: `Contexto enviado al modelo${omitted}: ${turn.live_context.text}`,
+        detail: turn.live_context.text,
+      });
+    }
     rows.push(...toolRows(turn));
     rows.push(...approvalRows(turn));
     if (turn.trimmed_turns > 0) {
@@ -461,6 +470,14 @@
     }
     return Array.from(turns.values()).sort((a,b) => Number(a.turn_id.slice(2)) - Number(b.turn_id.slice(2)));
   }
+  // S6 (#503): who the human can talk to: Abito first, then every specialist (valid id + name only).
+  function specialistRows(specialists) {
+    const list = specialists && Array.isArray(specialists.specialists) ? specialists.specialists : [];
+    const valid = list.filter(s => s && typeof s.id === 'string' && s.id && typeof s.name === 'string' && s.name.trim());
+    const active = specialists && valid.some(s => s.id === specialists.active) ? specialists.active : null;
+    return [{ id: null, text: 'Abito', aria: 'Hablar con Abito', current: active === null },
+      ...valid.map(s => ({ id: s.id, text: s.name.trim(), aria: `Hablar con ${s.name.trim()}`, current: s.id === active }))];
+  }
   function conversationRows(listing) {
     return ((listing && Array.isArray(listing.conversations)) ? listing.conversations : []).map(c => {
       const specialist = c.specialist && c.specialist.name || 'Abito';
@@ -553,5 +570,5 @@
     return n;
   }
   function chatHeight(view) { return Math.min(CHAT_MAX_H, CHAT_MIN_H + messageCount(view) * CHAT_GROWTH); }
-  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, sendState, needsCheck, checkPlan, statusLine, announcement, atBottom, newRequestId, turnRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
+  return { staleSnapshot, messageCount, chatHeight, CHAT_MIN_H, CHAT_MAX_H, mergeHistory, conversationRows, reconcileRows, rowKey, poseFor, statusView, draftWord, targetAria, noticeAnnouncement, activates, gateLabel, filterChosen, modelRows, modelMeters, modelsInfo, modelsCount, emptyGreeting, cleanDisplayName, cleanLine, CARD_NAME_MAX, CARD_SUMMARY_MAX, DRAFT_MAX, stateLabel, scalarCount, draftProblem, canSend, sendState, needsCheck, checkPlan, statusLine, announcement, atBottom, newRequestId, turnRows, specialistRows, toolRows, approvalRows, activeTurn, activeRole, modelButtonLabel, modelButtonAria, modelButtonEnabled, modelRoleNote, formatSize };
 });

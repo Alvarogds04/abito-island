@@ -6,7 +6,6 @@ import { toggle } from './ui.js';
 import { notchSection as section, notchRow as row, notchHint as hint } from './notch.js';
 import { session, trusted } from './runtime.js';
 import { t } from './i18n-es.js';
-import { MAX_DECLARED } from '../core/pills.js';
 const UNAVAILABLE = 'No disponible todavía';
 const AGENTS: [string,string,boolean][] = [
   ['codex','Codex',true], ['copilot-cli','GitHub Copilot CLI',true], ['muse','Muse Code',true],
@@ -98,10 +97,8 @@ export async function renderAgentSettings({ invoke, V, P, listen, timers }: any)
     const isMain = !!cur && cur.mainPill === pill, on = isMain || !!cur?.declaredPills.includes(pill);
     const sw = trusted(toggle(on, () => { if (cur && pill && !isMain && P.toggle(P.normalize(prefs), pill)) work(() => call('prefs_action', { action: 'toggle_declared_pill', id: pill }), next => { prefs = next; paint(); }, () => paint()); })) as HTMLButtonElement;
     sw.setAttribute('aria-label', `En la isla: ${id}`); sw.setAttribute('aria-pressed', String(on));
-    const full = !!cur && !on && cur.declaredPills.length >= MAX_DECLARED;
-    sw.disabled = !cur || !pill || isMain || full;
+    sw.disabled = !cur || !pill || isMain;
     if (isMain) sw.setAttribute('title', 'Es la píldora principal de la isla.');
-    else if (full) sw.setAttribute('title', 'Ya usas las 4 píldoras; quita una en Pestañas activas.');
     else if (!cur || !pill) sw.setAttribute('title', UNAVAILABLE);
     return h('span', { class: 'agent-island', role: 'cell' }, sw);
   }

@@ -67,6 +67,11 @@ pub struct Cache {
 }
 
 impl Cache {
+    /// S2 (#503): the pulse already cached for the island (no fetch, no clock), as the page sees it.
+    pub fn cached_pulse(&self) -> Option<Value> {
+        self.pulse.as_ref().and_then(|p| serde_json::to_value(p).ok())
+    }
+
     /// Serves the cache while fresh, else `fetch`es once. A failure caches nothing.
     pub fn refresh<F>(&mut self, section: Section, now_ms: u64, fetch: F) -> Result<Value, Unavailable>
     where

@@ -10,7 +10,7 @@ import { icon, keyLabel } from "./ui.js";
 
 export type PageId =
   | "dictation" | "notes" | "insights" | "dictionary" | "snippets" | "styles" | "flowsettings"
-  | "general" | "pills" | "agents" | "chat" | "accounts" | "voice" | "integrations" | "phone" | "shortcuts";
+  | "general" | "chat" | "accounts" | "voice" | "integrations" | "phone" | "shortcuts";
 
 interface PageDef {
   id: PageId;
@@ -32,13 +32,12 @@ export const FLOW_PAGES: PageDef[] = [
 
 export const NOTCH_PAGES: PageDef[] = [
   { id: "general", icon: "gear", title: () => t("General"), subtitle: () => t("Abito, his sounds and how the island behaves.") },
-  { id: "pills", icon: "grid", title: () => t("Active pills"), subtitle: () => t("The pills shown in the island, their order and their colours.") },
-  { id: "agents", icon: "terminal", title: () => t("Agents"), subtitle: () => t("Claude Code, Codex and the other agents Abito follows.") },
+  // #503 S32: «Pestañas activas», «Integraciones» and «Agentes» are ONE page: every tool, whether it is an agent, an AI or a service.
+  { id: "integrations", icon: "puzzle", title: () => "Integraciones y agentes", subtitle: () => "Los agentes, las IA y los servicios que Abito sigue, y cuáles se ven en la isla." },
   { id: "chat", icon: "chat", title: () => t("Chat"), subtitle: () => t("The AI of the island's chat, with your own keys.") },
   // #503 S26: the engine and the accounts (Pi, Claude…) had no page of their own: reachable only inside Chat/Integrations.
   { id: "accounts", icon: "lock", title: () => "Conexiones", subtitle: () => "El motor de Abito y las cuentas con las que inicia sesión." },
   { id: "voice", icon: "wave", title: () => "OK Abito" },
-  { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
   { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") },
 ];

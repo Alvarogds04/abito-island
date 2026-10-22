@@ -4,7 +4,7 @@ import { h } from '../views/dom.js';
 import { colorDot } from '../settings/colors.js';
 import { statusDot } from '../settings/parts.js';
 import { pillColor } from '../core/pill-colors.js';
-import { availablePills, MAX_DECLARED } from '../core/pills.js';
+import { availablePills } from '../core/pills.js';
 import { notchSection as section, notchHint as hint } from './notch.js';
 import { session, trusted } from './runtime.js';
 import { t } from './i18n-es.js';
@@ -42,13 +42,13 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
   function refresh() {
     const cur = P.normalize(prefs);
     // Owner-approved security exception: a persistent OS keychain is not "never on disk".
-    note.textContent = t('Pick up to {max} pills to show next to el personaje — {used}/{max} in use.',{max:MAX_DECLARED,used:cur.declaredPills.length})
+    note.textContent = t('Pick the pills to show next to el personaje — {used} in use.',{used:cur.declaredPills.length})
       + ' ' + t('Keys are stored in the {store}.',{store:STORE}) + ' ' + t('Keys stay in the system keychain.');
     for(const update of refreshColors) update();
     for(const [id,sw] of switches) {
       const active = cur.declaredPills.includes(id);
       sw.classList.toggle('on',active);sw.setAttribute('aria-pressed',String(active));
-      sw.disabled = !known || busy || id === cur.mainPill || (!active && cur.declaredPills.length >= MAX_DECLARED);
+      sw.disabled = !known || busy || id === cur.mainPill;
     }
   }
   function save(payload: any) {
@@ -157,7 +157,7 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
     refreshColors.push(()=>dot.style.setProperty('background',pillColor(def.id,def.color,prefs.pillColors)));
     list.append(body(h('div',{class:'int-head'},h('div',{class:'int-id'},sw,dot,h('span',{class:'int-name',text:def.name})),badge,actions)));
   }
-  root.append(section(t('Integrations'),note,list),s.message);
+  root.append(section('Servicios',note,list),s.message);
   refresh();
   watch('prefs:state',next=>{prefs=next;known=true;refresh();});
   work(()=>call('prefs_action',{action:'view'}),next=>{prefs=next;known=true;refresh();});

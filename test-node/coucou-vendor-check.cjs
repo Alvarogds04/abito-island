@@ -91,8 +91,8 @@ function hashTree() {
   assert.deepEqual(pills.PILL_CATALOG.map(p => p.id), [...rustIds[1].matchAll(/"([^"]+)"/g)].map(m => m[1]));
   assert.equal(pills.DEFAULT_MAIN_PILL, 'integration_claude');
   assert.equal(pills.DEFAULT_MAIN_PILL, prefs.match(/pub const DEFAULT_MAIN_PILL: &str = "([^"]+)";/)?.[1]);
-  assert.equal(pills.MAX_DECLARED, 4);
-  assert.equal(pills.MAX_DECLARED, Number(prefs.match(/pub const MAX_DECLARED_PILLS: usize = (\d+);/)?.[1]));
+  assert.equal(pills.MAX_DECLARED, undefined, 'S32: no declared-pill limit in the vendored core');
+  assert(!/MAX_DECLARED_PILLS/.test(prefs), 'S32: nor in Rust');
   for (const os of ['windows', 'linux']) {
     const ids = pills.availablePills(os).map(p => p.id);
     assert.equal(ids.length, os === 'windows' ? 24 : 23);
