@@ -47,14 +47,15 @@
   // Visible geometry inside the ONE 672x340 logical native window (geometry.rs).
   // The resting island is Coucou's 288x32 bar, square on top, radius 14 below.
   // The character keeps Coucou's botPosition('compact'): cx 40, cy 16, diameter 20.
-  const COMPACT = { w: 288, h: 32, r: 14, gap: 0, clay: 23, clayX: 40, drop: 1 };
+  const COMPACT = { w: 288, h: 32, r: 16, gap: 6, clay: 23, clayX: 40, drop: 1 };
   // S10 (L19): Coucou's own bot placement (core/layout.ts VIEW_LAYOUTS): overview botX 68 / diameter 58,
   // approval, question, error and finished botX 62 / diameter 56, centred on the 84pt card row
   // (cy 101 from the island top). The box is diameter * 128/112 because the engine draws ~112 of 128
   // viewBox units; only scale/position change, the engine is frozen. `cy` is the visible blob centre.
   // S10 (L24, «Notch pegado arriba como Coucou»): the expanded island is stuck to the top edge of the screen (gap 0) with
   // Coucou's corners 0 0 14 14; Rust pins every view with geometry::island_window_rect.
-  const OVERVIEW = { w: 720, h: 184, r: 14, gap: 0, clay: 66, clayX: 68, cy: 113 };
+  const GAP_TOP = 6; // S29: the shell floats 6px under the screen's top edge (hidden strip stays flush: gap*(1-conceal))
+  const OVERVIEW = { w: 720, h: 184, r: 22, gap: 6, clay: 66, clayX: 68, cy: 113 };
   const RECAP_H = 208; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
   const QUESTION_H = 224; // default; a long question grows it (abito:question-size), capped by the fixed window
   let questionH = QUESTION_H;
@@ -242,9 +243,9 @@
     const h = lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.x), p);
     const QT = window.AbitoQuestionToast, withToast = (shape) => (QT && toastShown ? QT.shapeWithToast(shape, true) : shape);
     reportShape(withToast([lerp(compactW, lerp(OVERVIEW.w, CHAT.w, q.target), target),
-      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) - 24 * conceal.target]), withToast([w, h - 24 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
+      lerp(COMPACT.h, lerp(overviewHeight, CHAT.h, q.target), target) + GAP_TOP * (1 - conceal.target) - 24 * conceal.target]), withToast([w, h + GAP_TOP * (1 - conceal.x) - 24 * conceal.x]), mode === 'idle' && q.mode === 'idle' && !conceal.moving);
     // corners: square on top (the bar and the notch meet the screen edge), r14 below
-    const rTop = 0, rBottom = lerp(COMPACT.r, OVERVIEW.r, p);
+    const rTop = lerp(COMPACT.r, OVERVIEW.r, p), rBottom = rTop; // S29: rounded on ALL corners, Sileo's pill family (its pill rx is 16)
     const gap = lerp(COMPACT.gap, OVERVIEW.gap, p);
     // the question card is 148 high (200 island): the character centres on it, 15px lower than on the 108 cards
     const ovBase = recapShown ? { ...OVERVIEW_CARD, cy: 42 + (RECAP_H - 52) / 2 } : questionShown ? { ...OVERVIEW_CARD, cy: OVERVIEW_CARD.cy + (questionH - OVERVIEW.h) / 2 } : cardShown ? OVERVIEW_CARD : OVERVIEW;
@@ -254,7 +255,7 @@
     put(island, 'width', w + 'px');
     put(island, 'height', h + 'px');
     put(island, 'borderRadius', `${rTop}px ${rTop}px ${rBottom}px ${rBottom}px`);
-    put(island, 'top', (gap - 24 * conceal.x) + 'px');
+    put(island, 'top', (gap * (1 - conceal.x) - 24 * conceal.x - 0 * conceal.x) + 'px');
     put(island, 'bottom', 'auto');
     // R6 is only scaled and positioned (never redrawn): centred in the
     // overview, small at the left of the header in the chat view.

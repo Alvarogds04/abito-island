@@ -1176,3 +1176,14 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 #blobs-links .see-all:hover { color: var(--ink); }
 #capsule[data-layout="focus"] #blobs-links { justify-content: center; padding: 0; }
 #blobs { overflow: clip; }
+
+/* ══ S29: the expanded shell and its cards are visibly translucent (text/controls/mascot stay opaque) ═══════════════════════════ */
+:root { --card-solid: #141518; }
+html[data-theme="light"] { --card-solid: var(--card-bg); }
+#capsule[data-phase="expanded"] { --card: color-mix(in srgb, var(--card-solid) 78%, transparent); --card-flat: color-mix(in srgb, var(--card-solid) 60%, transparent); }
+#capsule[data-edge-hidden="true"] { --card: var(--card-solid); }
+
+/* ══ S30: NO coloured outline on the blob rows; the session colour lives on its mascot. Selected = background + the «◂» mark; keyboard focus keeps its ring ══ */
+.pill-choice, .pill-choice[data-color], .pill-choice[data-color="green"], .pill-choice[data-color="blue"], .pill-choice[data-color="mint"], .pill-choice[data-color="orange"], .pill-choice[data-color="purple"], .pill-choice[data-color^="#"], .pill-choice[aria-pressed="true"] { border-color: transparent; }
+.pill-choice[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); }
+html[data-theme="light"] .pill-choice[aria-pressed="true"] { background: rgba(0, 0, 0, 0.1); }
