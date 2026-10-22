@@ -42,7 +42,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const confirmReset=()=>{click(find('shortcut-reset'));click(all(find('shortcut-reset-confirm')).find(e=>e.tagName==='button'&&e.textContent==='Restablecer'));};
   ui=await renderIntegrations(opts);await ui.settled();
   assert.equal(text(ui.children[0].children[0]).trim(),'Integraciones');
-  assert(text(ui).includes('Elige hasta 4 pestañas para mostrar junto al personaje — 0/4 en uso.'));
+  assert(text(ui).includes('Elige las pestañas para mostrar junto al personaje — 0 en uso.'));
   assert(text(ui).includes('Las claves se quedan en el llavero del sistema.'));
   assert(text(ui).includes('Secret Service (GNOME Keyring, KWallet)'));
   assert(!/nunca en el disco|never on disk/i.test(text(ui)),'approved truthful-copy exception');
@@ -60,10 +60,10 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   }
   calls.length=0;click(find('declare-integration_stripe'),false);await ui.settled();assert.deepEqual(calls,[]);
   click(find('declare-integration_stripe'));await ui.settled();assert.deepEqual(calls,[['prefs_action',{action:'toggle_declared_pill',id:'integration_stripe'}]]);
-  assert(text(ui).includes('1/4 en uso'));
+  assert(text(ui).includes('1 en uso'));
   for(const id of ['integration_github','integration_vercel','integration_n8n']){click(find(`declare-${id}`));await ui.settled();}
-  calls.length=0;click(find('declare-integration_resend'));await ui.settled();assert.deepEqual(calls,[],'fifth pill rejected');
-  click(find('declare-integration_stripe'));await ui.settled();assert.equal(prefs.declaredPills.length,3,'removal at capacity remains possible');
+  calls.length=0;click(find('declare-integration_resend'));await ui.settled();assert.deepEqual(calls,[['prefs_action',{action:'toggle_declared_pill',id:'integration_resend'}]],'S32: the fifth pill is accepted');assert.equal(prefs.declaredPills.length,5);
+  click(find('declare-integration_stripe'));await ui.settled();assert.equal(prefs.declaredPills.length,4,'removal stays possible');
   const dot=()=>all(find('integration_stripe')).find(e=>e.className.includes('color-dot'));
   calls.length=0;click(dot(),false);assert.equal(document.body.children.length,0);click(dot());
   let palette=document.body.children[0];const swatch=palette.children[0];click(swatch,false);await ui.settled();assert.deepEqual(calls,[]);click(swatch);await ui.settled();

@@ -86,6 +86,32 @@ function noOverlaps(list, why) {
     } finally { await r.close(); }
   }
 
+  // S32: no limit on declared pills. Seven service pills (more than the old four; the island draws the ones that have a card) are WHOLE rows in a column that scrolls: nothing is cut, nothing is dropped, and the
+  // last one is reachable by scrolling the list (never by growing the island).
+  {
+    const ten = ['integration_github', 'integration_resend', 'integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_notion', 'integration_calcom'];
+    const r = await H.open({ github: true, declared: ten });
+    try {
+      const rows0 = await r.page.evaluate(() => [...document.querySelectorAll('.pill-choice')].map(b => b.dataset.pillId));
+      assert.deepEqual(rows0.slice(1, 8), ten, `all seven declared pills are rows after Abito, in order (got ${rows0.join(',')})`);
+      const list = (await r.measure('#pill-choices'))[0];
+      const measure = async () => (await r.measure('.pill-choice')).filter(b => b.shown);
+      const rows = await measure();
+      const partial = rows.filter(b => { const vis = Math.min(b.bottom, list.bottom) - Math.max(b.top, list.top); return vis > 0.5 && vis < b.h - 0.5; });
+      assert.deepEqual(partial.map(label), [], 'no row is cut at the top of the list');
+      const scrollable = await r.page.evaluate(() => { const l = document.querySelector('#pill-choices'); return { sh: l.scrollHeight, ch: l.clientHeight }; });
+      assert.ok(scrollable.sh > scrollable.ch + 20, `seven rows plus the sessions overflow the column, so it scrolls (${scrollable.sh} > ${scrollable.ch})`);
+      await r.page.evaluate(id => { const l = document.querySelector('#pill-choices'), row = document.getElementById(`pill-choice-${id}`); l.scrollTop = row.offsetTop - l.offsetTop; }, ten[6]);
+      await r.page.waitForTimeout(150);
+      const last = (await r.measure(`#pill-choice-${ten[6]}`))[0];
+      const list2 = (await r.measure('#pill-choices'))[0];
+      assert.ok(last.top >= list2.top - 0.5 && last.bottom <= list2.bottom + 0.5, `the seventh pill is reachable and whole after scrolling (${label(last)} in ${label(list2)})`);
+      const win = await r.page.evaluate(() => ({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }));
+      assert.ok(list2.bottom <= win.h, 'the island did not grow past its window to fit them');
+      passed += 1;
+    } finally { await r.close(); }
+  }
+
   // the jump button and the centre text never share pixels, whatever the centre says
   {
     const r = await H.open({});

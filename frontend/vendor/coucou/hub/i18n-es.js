@@ -109,7 +109,7 @@ const es = {
   "words/min": "palabras/min",
   "days in a row": "días seguidos",
   // Slice 4: Spanish entries/substrings from upstream strings.json/extra.json, brand replacement only.
-  "Pick up to {max} pills to show next to el personaje — {used}/{max} in use.": "Elige hasta {max} pestañas para mostrar junto al personaje — {used}/{max} en uso.",
+  "Pick the pills to show next to el personaje — {used} in use.": "Elige las pestañas para mostrar junto al personaje — {used} en uso.",
   "Keys are stored in the {store}.": "Las claves se guardan en {store}.",
   "Keys stay in the system keychain.": "Las claves se quedan en el llavero del sistema.",
   "Secret key": "Clave secreta",
@@ -282,7 +282,7 @@ const es = {
   "Language": "Idioma",
   "System": "Sistema",
   "Choose the tools you use. Abito only shows what you declare here.": "Elige las herramientas que usas. Abito solo muestra lo que declares aquí.",
-  "{used}/{max} slots in use — the main tool doesn't take one.": "{used}/{max} espacios en uso — la herramienta principal no ocupa ninguno.",
+  "{used} in the island — the main tool is always there.": "{used} en la isla — la herramienta principal siempre está.",
   "Main tool": "Herramienta principal",
   "Main": "Principal",
   "Where you code": "Dónde programas",

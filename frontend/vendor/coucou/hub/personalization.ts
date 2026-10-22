@@ -2,7 +2,7 @@
 // Active pills adapted from Coucou src/settings/main.ts activePillsSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
 import { h, clear } from '../views/dom.js';
 import { colorDot } from '../settings/colors.js';
-import { PILL_CATEGORIES, pillDefinition, MAX_DECLARED } from '../core/pills.js';
+import { PILL_CATEGORIES, pillDefinition } from '../core/pills.js';
 import { t } from './i18n-es.js';
 import { notchSection, notchRow, notchHint } from './notch.js';
 import { row, card, select, toggle, segmented, label } from './ui.js';
@@ -174,14 +174,13 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
     const restore = preserveFocus(root); closeDots(); clear(root);
     const cur = P.normalize(prefs), choices = C.mainChoices();
     const main = trusted(select(choices.map((d: any) => [d.id,pillDefinition(d.id)?.name || d.name]),cur.mainPill,id => { if(P.chooseMain(cur,id)) run({type:'prefs',payload:{action:'set_main_pill',id}}); })); main.className = ''; main.disabled = saving; main.setAttribute('aria-label','Píldora principal');
-    const slots = h('div', { class: 'hint', text: t("{used}/{max} slots in use — the main tool doesn't take one.", { used: cur.declaredPills.length, max: MAX_DECLARED }) });
-    slots.classList.toggle('full', cur.declaredPills.length >= MAX_DECLARED);
+    const slots = h('div', { class: 'hint', text: t('{used} in the island — the main tool is always there.', { used: cur.declaredPills.length }) });
     const groups = h('div', { style: 'display:flex;flex-direction:column;gap:12px' });
     const hookIds: Record<string,string> = { integration_claude:'claude-code', agent_cursor:'cursor', agent_codex:'codex', agent_gemini:'gemini-cli', agent_copilot:'copilot-cli', agent_opencode:'opencode', agent_amp:'amp' };
     const hooks = V.agentsView(connection).rows || [];
     function pillRow(entry: any) {
       const d = pillDefinition(entry.id) || entry, isMain = d.id === cur.mainPill;
-      const on = cur.declaredPills.includes(d.id), full = !isMain && !on && cur.declaredPills.length >= MAX_DECLARED;
+      const on = cur.declaredPills.includes(d.id), full = false;
       const dot = colorDot(d, 'width:10px;height:10px', () => P.normalize(prefs).pillColors, next => {
         if (saving) return;
         run({type:'prefs',payload:Object.hasOwn(next,d.id) ? {action:'set_pill_color',id:d.id,color:next[d.id]} : {action:'clear_pill_color',id:d.id}});
