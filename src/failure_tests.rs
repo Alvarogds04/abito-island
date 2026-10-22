@@ -1,0 +1,182 @@
+use super::*;
+
+const HOME: &str = "/home/alvaro";
+const USER: &str = "alvaro";
+fn r(t: &str) -> String { redact(t, HOME, USER) }
+
+#[test]
+fn redacts_known_secret_prefixes() {
+    for secret in ["sk-ant-api03-AbCdEfGhIjKlMnOpQrSt", "sk-proj1234567890abcdef", "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "github_pat_11ABCDEFG0abcdefghij", "xoxb-1234-5678-abcdefg", "AKIAIOSFODNN7EXAMPLE", "AIzaSyA-abcdefghijklmnopqrstuv",
+        "ya29.a0AfH6SMBxxxxxxxxxxxx", "hf_abcdefghijklmnopqrstu", "re_AbCdEfGh12345678", "npm_abcdefghijklmnopqrstuvwx",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcDEF123"] {
+        let out = r(&format!("failed with key {secret} while loading"));
+        assert!(!out.contains(secret), "leaked {secret}: {out}");
+        assert!(out.contains("<secret>"), "{out}");
+        assert!(out.starts_with("failed with key ") && out.ends_with(" while loading"), "{out}");
+    }
+}
+
+#[test]
+fn redacts_bearer_and_key_value_secrets_but_keeps_the_key_name() {
+    let out = r("Authorization: Bearer abc.def-ghi");
+    assert!(!out.contains("abc.def-ghi") && out.contains("Authorization"), "{out}");
+    let out = r(r#"{"api_key":"hunter2hunter2","model":"x"}"#);
+    assert!(!out.contains("hunter2") && out.contains("api_key") && out.contains(r#""model":"x""#), "{out}");
+    let out = r("password=swordfish token: abcd1234 secret = \"zzz\" other=fine");
+    assert!(!out.contains("swordfish") && !out.contains("abcd1234") && !out.contains("zzz"), "{out}");
+    assert!(out.contains("other=fine"), "{out}");
+}
+
+#[test]
+fn high_entropy_strings_are_redacted_but_plain_words_paths_and_short_hashes_stay() {
+    let blob = "Zk3Jf9QxL2mV8pTrWb6YcNd4HsGa7UeX1oIq5KvB";
+    let out = r(&format!("odd {blob} value"));
+    assert!(!out.contains(blob) && out.contains("<secret>"), "{out}");
+    let keep = "panicked at src/voicehost.rs:120:9 fingerprint=3fa9c01b7d2e internationalization-configuration-management";
+    assert_eq!(r(keep), keep);
+}
+
+#[test]
+fn redacts_oauth_codes_and_url_credentials() {
+    let out = r("callback http://127.0.0.1:8080/cb?code=4%2F0AbCdEf&state=xyz123&scope=mail more");
+    assert!(!out.contains("4%2F0AbCdEf") && !out.contains("xyz123"), "{out}");
+    assert!(out.contains("scope=mail") && out.contains("127.0.0.1:8080/cb"), "{out}");
+    let out = r("fetch https://user:pw0rd@example.test/x?access_token=aaa&id_token=bbb ok");
+    assert!(!out.contains("pw0rd") && !out.contains("aaa") && !out.contains("bbb"), "{out}");
+}
+
+#[test]
+fn home_path_becomes_tilde_and_other_users_homes_too() {
+    assert_eq!(r("open /home/alvaro/Apps/x/y.rs failed"), "open ~/Apps/x/y.rs failed");
+    assert_eq!(r("open /home/maria/f and /Users/Bob/g and C:\\Users\\Eve\\h"), "open ~/f and ~/g and ~\\h");
+    assert_eq!(r("home=/home/alvaro"), "home=~");
+}
+
+#[test]
+fn user_name_is_replaced_as_a_whole_word_case_insensitively() {
+    let out = r("user Alvaro logged in as alvaro; alvarogds stays? no: ALVARO");
+    assert!(!out.to_lowercase().contains("alvaro;") && !out.contains("Alvaro") && !out.contains("ALVARO"), "{out}");
+    assert!(out.contains("<user>"), "{out}");
+    assert_eq!(r("nombre alvarado"), "nombre alvarado");
+    assert_eq!(redact("nothing here", HOME, ""), "nothing here"); // an empty user name must not match everywhere
+}
+
+#[test]
+fn emails_are_redacted() {
+    let out = r("sent to alice.b+tag@mail.example.com and Bob@Corp.io today");
+    assert_eq!(out, "sent to <email> and <email> today");
+}
+
+#[test]
+fn conversation_content_never_reaches_the_report_log() {
+    let lines = vec![
+        "INFO daemon started".to_owned(),
+        "chat: user said: my diagnosis is private".to_owned(),
+        "DEBUG transcript=hola abito escribí a mi madre".to_owned(),
+        "WARN prompt: dime algo".to_owned(),
+        "ERROR conversation 42 failed to load".to_owned(),
+        "ERROR voice model load failed".to_owned(),
+    ];
+    let kept = safe_log_lines(&lines, HOME, USER, 50);
+    assert_eq!(kept, vec!["INFO daemon started", "ERROR voice model load failed"]);
+}
+
+#[test]
+fn log_tail_is_capped_to_the_last_n_lines_and_long_lines_are_cut() {
+    let lines: Vec<String> = (0..80).map(|i| format!("line {i}")).collect();
+    let kept = safe_log_lines(&lines, HOME, USER, 50);
+    assert_eq!(kept.len(), 50);
+    assert_eq!(kept[0], "line 30");
+    assert_eq!(kept[49], "line 79");
+    let long = vec!["x ".repeat(400)];
+    assert!(safe_log_lines(&long, HOME, USER, 50)[0].chars().count() <= 301);
+}
+
+#[test]
+fn fingerprint_is_stable_and_ignores_volatile_parts() {
+    let a = fingerprint("island", "voice-load", "failed to load /home/alvaro/m/x.onnx after 120 ms (pid 4411) at 0x7ffd1234");
+    let b = fingerprint("island", "voice-load", "failed to load /home/maria/m/x.onnx after 87 ms (pid 9) at 0x55aa00ff");
+    assert_eq!(a, b);
+    assert_eq!(a.len(), 12);
+    assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_ne!(a, fingerprint("daemon", "voice-load", "failed to load /home/alvaro/m/x.onnx after 120 ms (pid 4411) at 0x7ffd1234"));
+    assert_ne!(a, fingerprint("island", "agent-down", "failed to load /home/alvaro/m/x.onnx after 120 ms (pid 4411) at 0x7ffd1234"));
+    assert_ne!(a, fingerprint("island", "voice-load", "a different error entirely"));
+}
+
+fn record() -> FailureRecord {
+    FailureRecord { at_secs: 1_700_000_000, process: "island".into(), step: "voice-load".into(),
+        message: "load failed for /home/alvaro/models/x.onnx key=sk-ant-api03-AbCdEfGhIjKlMnOpQrSt".into(),
+        version: "0.2.0".into(), os: "Ubuntu 24.04".into(), session: "wayland".into() }
+}
+
+#[test]
+fn report_has_every_s2_field_and_is_redacted() {
+    let rep = build_report(&record(), &["INFO ok".to_owned(), "ERROR in /home/alvaro/x".to_owned()], HOME, USER);
+    for needle in ["0.2.0", "Ubuntu 24.04", "wayland", "island", "voice-load", "load failed for ~/models/x.onnx", &fingerprint_of(&record()), "INFO ok", "ERROR in ~/x"] {
+        assert!(rep.body.contains(needle), "missing {needle}: {}", rep.body);
+    }
+    assert!(!rep.body.contains("sk-ant") && !rep.body.contains("alvaro"), "{}", rep.body);
+    assert!(rep.title.contains("island") && rep.title.contains(&fingerprint_of(&record())), "{}", rep.title);
+    assert!(!rep.title.contains("alvaro") && rep.title.len() <= 120);
+}
+
+#[test]
+fn issue_url_is_encoded_targets_the_public_repo_and_carries_labels() {
+    let IssueUrl::Url(u) = issue_url("[crash] a b", "line1\nüñ & = ? #x") else { panic!("short text must fit") };
+    assert!(u.starts_with("https://github.com/Alvarogds04/abito-island/issues/new?title="), "{u}");
+    assert!(u.contains("title=%5Bcrash%5D%20a%20b") && u.contains("&body=line1%0A%C3%BC%C3%B1%20%26%20%3D%20%3F%20%23x"), "{u}");
+    assert!(u.ends_with("&labels=bug%2Cauto-report"), "{u}");
+    assert!(u.is_ascii());
+}
+
+#[test]
+fn too_long_text_is_not_sent_in_the_url() {
+    assert_eq!(issue_url("t", &"a".repeat(MAX_URL_LEN)), IssueUrl::TooLong);
+    let IssueUrl::Url(u) = issue_url("t", &"a".repeat(1000)) else { panic!() };
+    assert!(u.len() <= MAX_URL_LEN);
+    // multibyte text expands 6x when encoded: the cap is on the ENCODED length
+    assert_eq!(issue_url("t", &"ü".repeat(MAX_URL_LEN / 4)), IssueUrl::TooLong);
+}
+
+#[test]
+fn search_url_points_at_the_repo_issue_search_with_the_fingerprint() {
+    assert_eq!(search_url("3fa9c01b7d2e"), "https://github.com/Alvarogds04/abito-island/issues?q=is%3Aissue%203fa9c01b7d2e");
+    assert!(!search_url("a b&c").contains("a b&c"));
+}
+
+#[test]
+fn records_round_trip_through_the_local_store_and_dedupe_by_fingerprint() {
+    let dir = std::env::temp_dir().join(format!("abito-failure-{}-{}", std::process::id(), line!()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(load_all(&dir).is_empty());
+    let rec = record();
+    store(&dir, &rec).unwrap();
+    store(&dir, &rec).unwrap();
+    let all = load_all(&dir);
+    assert_eq!(all.len(), 1, "the same fingerprint is one failure, repeated");
+    assert_eq!(all[0].record, rec);
+    assert_eq!(all[0].count, 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_corrupt_store_is_ignored_not_fatal() {
+    let dir = std::env::temp_dir().join(format!("abito-failure-{}-{}", std::process::id(), line!()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(STORE_FILE), "not json\n{\"x\":1}\n").unwrap();
+    assert!(load_all(&dir).is_empty());
+    store(&dir, &record()).unwrap();
+    assert_eq!(load_all(&dir).len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn panic_info_becomes_a_record_with_location_and_no_network() {
+    let env = Env { version: "0.2.0".into(), os: "Ubuntu".into(), session: "x11".into(), home: HOME.into(), user: USER.into() };
+    let rec = record_from_panic("island", "payload /home/alvaro/x token=abc123", Some(("src/voicehost.rs", 12)), &env, 5);
+    assert_eq!((rec.step.as_str(), rec.at_secs, rec.version.as_str()), ("panic", 5, "0.2.0"));
+    assert!(rec.message.contains("payload ~/x") && rec.message.contains("src/voicehost.rs:12"), "{}", rec.message);
+    assert!(!rec.message.contains("abc123"), "the record is redacted before it ever touches disk");
+}

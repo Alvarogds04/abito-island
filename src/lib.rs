@@ -28,6 +28,7 @@ pub mod chatlane;
 pub mod conversations;
 pub mod core;
 pub mod desktop;
+pub mod failure;
 pub mod files;
 pub mod contextwin;
 pub mod focushost;
