@@ -47,15 +47,15 @@
   // Visible geometry inside the ONE 672x340 logical native window (geometry.rs).
   // The resting island is Coucou's 288x32 bar, square on top, radius 14 below.
   // The character keeps Coucou's botPosition('compact'): cx 40, cy 16, diameter 20.
-  const COMPACT = { w: 288, h: 32, r: 16, gap: 6, clay: 23, clayX: 40, drop: 1 };
+  const COMPACT = { w: 288, h: 32, r: 16, gap: 0, clay: 23, clayX: 40, drop: 1 };
   // S10 (L19): Coucou's own bot placement (core/layout.ts VIEW_LAYOUTS): overview botX 68 / diameter 58,
   // approval, question, error and finished botX 62 / diameter 56, centred on the 84pt card row
   // (cy 101 from the island top). The box is diameter * 128/112 because the engine draws ~112 of 128
   // viewBox units; only scale/position change, the engine is frozen. `cy` is the visible blob centre.
   // S10 (L24, «Notch pegado arriba como Coucou»): the expanded island is stuck to the top edge of the screen (gap 0) with
   // Coucou's corners 0 0 14 14; Rust pins every view with geometry::island_window_rect.
-  const GAP_TOP = 6; // S29: the shell floats 6px under the screen's top edge (hidden strip stays flush: gap*(1-conceal))
-  const OVERVIEW = { w: 720, h: 184, r: 22, gap: 6, clay: 66, clayX: 68, cy: 113 };
+  const GAP_TOP = 0; // S29 (human: «No lo separes, me gusta que esté pegada»): the shell is flush to the top edge again
+  const OVERVIEW = { w: 720, h: 184, r: 22, gap: 0, clay: 66, clayX: 68, cy: 113 };
   const RECAP_H = 208; // Coucou VIEW_LAYOUTS.recap: the recap card needs two more text lines than the overview card
   const QUESTION_H = 224; // default; a long question grows it (abito:question-size), capped by the fixed window
   let questionH = QUESTION_H;
@@ -546,6 +546,24 @@
         onCountdown: value => { if (countdownView) countdownView.update(value); },
       })
     : null;
+  // S31: after 30 s without interaction the EXPANDED island (any view, pinned or not) folds to the compact pill. The fold goes through the
+  // host's atomically guarded `autoClose` (it refuses while a question/permission is pending: that stays visible through S3's pill).
+  const idleFold = window.AbitoIslandIdle?.create({
+    now: () => performance.now(), schedule: (fn, ms) => setTimeout(fn, ms), cancel: id => clearTimeout(id),
+    collapse: () => (window.desktop && window.desktop.autoClose ? window.desktop.autoClose() : Promise.reject(new Error('host unavailable'))),
+  });
+  if (idleFold) {
+    const touch = event => { if (event.isTrusted === true) idleFold.touch(); };
+    // #capsule is the whole transparent window: only the island's own box counts as «over the island»
+    for (const type of ['pointermove', 'pointerdown', 'keydown', 'input', 'wheel']) island.addEventListener(type, touch, true);
+    island.addEventListener('pointerenter', () => idleFold.setInside(true));
+    island.addEventListener('pointerleave', () => idleFold.setInside(false));
+    const typing = el => !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable === true);
+    document.addEventListener('focusin', event => idleFold.setFieldFocus(typing(event.target)));
+    document.addEventListener('focusout', () => idleFold.setFieldFocus(typing(document.activeElement)));
+    new MutationObserver(() => idleFold.setExpanded(capsule.dataset.phase === 'expanded')).observe(capsule, { attributes: true, attributeFilter: ['data-phase'] });
+    idleFold.setExpanded(capsule.dataset.phase === 'expanded');
+  }
   const edgeInteraction = window.AbitoIslandInteraction?.createEdgeController({
     now: () => performance.now(), schedule: (fn, ms) => setTimeout(fn, ms), cancel: id => clearTimeout(id), onHidden: setConcealed,
   });

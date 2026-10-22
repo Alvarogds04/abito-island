@@ -93,8 +93,13 @@ startHub(root, {
       const mounted = [];
       // Each renderer retains its closed IPC planner and per-mount cleanup.
       try {
-        if (page === 'agents') mounted.push(await renderAgentSettings(options));  // options.P = the pills module: «En isla» is the pill declaration
-        if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page, navigate }));
+        // #503 S32: «Pestañas activas», «Integraciones» and «Agentes» are ONE page, drawn by the three renderers one after the other:
+        // the main-tool selector + the AI pills, the agents table (+ plan usage, recap), the services, then Abito's instructions and
+        // the specialists. Each keeps its own closed IPC planner and cleanup.
+        if (page === 'integrations') {
+          mounted.push(await renderPills({ ...personal, page: 'pills', part: 'tools', navigate }));
+          mounted.push(await renderAgentSettings(options));  // options.P = the pills module: «En la isla» is the pill declaration
+        }
         if (page === 'chat') {
           const chat = await renderChatSettings(options);
           const accounts = await renderAccounts({ ...options, page: 'chat', slotFor: chat.slotFor });
@@ -107,6 +112,8 @@ startHub(root, {
         }
         if (page === 'integrations') mounted.push(await renderIntegrations(personal));
         if (page === 'shortcuts') mounted.push(await renderShortcuts(options));
+        // S32: the «Conectores» list repeated every agent; the agents table is the one row per agent now.
+        if (page === 'integrations') mounted.push(await renderPills({ ...personal, page: 'agents', part: 'abito', navigate }));
         if (mounted.length) container.append(...mounted);
         else container.append(renderUnavailable(page));
       } catch {

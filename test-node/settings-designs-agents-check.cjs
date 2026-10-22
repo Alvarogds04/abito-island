@@ -53,7 +53,7 @@ test('S20 Agentes: Estado is icon + word per row; rows are 40px; Pi reads from t
   assert(/\.agent-row\s*\{[^}]*min-height:\s*40px/.test(css), '40px rows');
 });
 
-test('S20 Agentes: «En isla» is the pill declaration through the SAME closed command; main/full/unknown are disabled with a reason', async () => {
+test('S20 Agentes: «En isla» is the pill declaration through the SAME closed command; main/unknown are disabled with a reason; there is no «full» (S32: no limit)', async () => {
   const { ui, calls, store } = await mount();
   const sw = id => all(entry(ui, id)).find(e => e.className.split(' ').includes('switch'));
   assert.equal(sw('claude-code').disabled, true); assert.equal(sw('claude-code').attrs['aria-pressed'], 'true'); assert(sw('claude-code').attrs.title, 'why: it is the main pill');
@@ -63,9 +63,9 @@ test('S20 Agentes: «En isla» is the pill declaration through the SAME closed c
   codex.fire('click'); await ui.settled();
   assert.deepEqual(calls.filter(([c]) => c === 'prefs_action' && c).map(([, p]) => p).filter(p => p.action === 'toggle_declared_pill'), [{ action: 'toggle_declared_pill', id: 'agent_codex' }]);
   assert.deepEqual(store.declaredPills, ['agent_codex']);
-  // slots full: a switch that is off cannot be turned on
+  // S32: four declared pills no longer block the fifth: the switch stays usable
   const full = await mount({ prefs: { declaredPills: ['agent_cursor', 'agent_gemini', 'agent_opencode', 'agent_amp'] } });
-  assert.equal(all(entry(full.ui, 'codex')).find(e => e.className.split(' ').includes('switch')).disabled, true);
+  assert.equal(all(entry(full.ui, 'codex')).find(e => e.className.split(' ').includes('switch')).disabled, false);
 });
 
 test('S20 Agentes: the action cell is Instalar… when nothing is installed, ⋮ with Reinstalar/Desinstalar when it is; the review flow is unchanged', async () => {

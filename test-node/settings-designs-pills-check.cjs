@@ -60,7 +60,7 @@ test('S19 Pills: contextual action per row: ready -> ⋮ (colour), missing key -
   assert(!buttons(openai).some(b => b.attrs['aria-label']?.startsWith('Más opciones')), 'a missing row offers its fix, not the menu');
   configure.fire('click', false); install.fire('click', false); assert.deepEqual(seen, [], 'synthetic clicks do nothing');
   configure.fire('click'); install.fire('click');
-  assert.deepEqual(seen, ['integrations', 'agents'], 'keys live in Integraciones, hooks in Agentes');
+  assert.deepEqual(seen, ['integrations', 'integrations'], 'S32: keys and hooks both live on the one «Integraciones y agentes» page');
 });
 
 test('S19 Pills: the ⋮ menu opens the colour palette through the SAME closed command; nothing else changed', async () => {
@@ -90,5 +90,5 @@ test('S19 Pills: the state and action live in the generated module, the hub pass
   assert.match(shell, /renderNotch\(def\.id, container, ctx\.navigate\)/);
   const entry = fs.readFileSync(path.join(__dirname, '../frontend/settings-app.js'), 'utf8');
   assert.match(entry, /async renderNotch\(page, container, navigate\)/);
-  assert.match(entry, /renderPills\(\{ \.\.\.personal, page, navigate \}\)/);
+  assert.match(entry, /renderPills\(\{ \.\.\.personal, page: 'pills', part: 'tools', navigate \}\)/, 'S32: the hub passes its navigator to the pills part of the one page');
 });

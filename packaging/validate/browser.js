@@ -412,7 +412,7 @@
     await wait(()=>root.textContent.trim().length>20 && root.querySelector('button,input,select,textarea'), 'contenido y controles '+page);
     const text=root.textContent;
     if (/No se pudieron (leer|abrir) los ajustes/.test(text)) return {ok:false,reason:'renderer de ajustes mostró su fallback de error',text};
-    if (page==='agents' && /install_failed|No se pudo completar/i.test(text)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text};
+    if (page==='integrations' && /install_failed|No se pudo completar/i.test(text)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text};
     const controls=[...root.querySelectorAll('button,input,select,textarea')];
     const before=await snapshot();
     let effect, limitation;
@@ -428,7 +428,7 @@
       await click(b);
       const action=page==='dictionary'?'words':'snippets';
       effect=await wait(async()=>{const data=await invoke('dictation_action',{action});return JSON.stringify(data).includes(page==='dictionary'?'Validador':'firma validador') && data;},'dato guardado '+page);
-    } else if(page==='insights'||page==='pills') {
+    } else if(page==='insights') {
       const segment=root.querySelector('.hub-segmented');
       const target=segment && [...segment.querySelectorAll('button')].find(b=>!b.classList.contains('on'));
       const selected=target.textContent;
@@ -498,7 +498,7 @@
       await click(control);
       if(page==='shortcuts') effect=await wait(async()=>{const h=await invoke('hotkey_action',{action:'view',id:'desktopToggle'});return h.enabled===false && h;},'atajo desactivado');
       else effect=await assertChanged();
-      if(page==='agents') {
+      if(page==='integrations') {
         const instructions=byId('abito-instructions');
         if(!instructions || !root.textContent.includes('Se aplican a los próximos mensajes del chat de Abito.')) throw new Error('instrucciones con explicación falsa o ausente');
         instructions.value='Responde en español neutro.';
@@ -510,8 +510,8 @@
     // Preferences can repaint the page while installer previews arrive asynchronously.
     // Check the CURRENT full DOM as well, not just the pre-interaction/truncated text.
     const finalText=document.querySelector('.hub-page')?.textContent || '';
-    if (page==='agents' && /install_failed|No se pudo completar/i.test(finalText)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text:finalText};
-    if (page==='agents') document.querySelector('.hub-page')?.scrollIntoView({block:'start'});
+    if (page==='integrations' && /install_failed|No se pudo completar/i.test(finalText)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text:finalText};
+    if (page==='integrations') document.querySelector('.hub-page')?.scrollIntoView({block:'start'});
     return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
   }
   async function integrationStates(state) {

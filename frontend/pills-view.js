@@ -61,7 +61,7 @@
     }, () => { busy = false; paint(); say('No se pudo elegir el destino; se mantuvo el anterior.'); });
   }
   // Coucou (views.ts otherTasks.slice(0, 4)): the grid shows every pill but the focused one, at most four; the focused
-  // integration pill is the card on the left, so main + MAX_DECLARED (4) = five pills in total, never more.
+  // integration pill is the card on the left, so main + every declared pill (no limit, S32).
   // A+E: the right column is ONE scrolling list. The human's declared pills (Abito, specialists, integrations) come FIRST and are
   // never pushed out; the live agent sessions follow. No cap of four: the column scrolls.
   // Design 16 (option A, «GitHub ◂»): the focused integration STAYS a row, marked pressed, exactly like the focused session: its card is the

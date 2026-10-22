@@ -144,7 +144,7 @@ fn err(code: &str) -> BridgeError {
 /// uses): the page that reaches the webview is always one of these exact strings, never text from the payload.
 pub(crate) const PAGES: &[&str] = &[
     "dictation", "notes", "insights", "dictionary", "snippets", "styles", "flowsettings",
-    "general", "pills", "agents", "chat", "voice", "integrations", "phone", "shortcuts",
+    "general", "integrations", "chat", "voice", "phone", "shortcuts",
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -163,6 +163,8 @@ pub(crate) fn parse_settings_window_request(payload: &Value) -> Option<Request> 
         "open" if obj.len() == 1 => Some(Request::Open(None)),
         "open" if obj.len() == 2 => {
             let wanted = obj.get("page")?.as_str()?;
+            // S32: «Pestañas activas» (pills) and «Agentes» (agents) became the one «integrations» page: an old link still lands there.
+            let wanted = if wanted == "pills" || wanted == "agents" { "integrations" } else { wanted };
             PAGES.iter().copied().find(|p| *p == wanted).map(|p| Request::Open(Some(p)))
         }
         _ => None,
@@ -309,8 +311,11 @@ mod tests {
         use super::{parse_settings_window_request, Request};
         assert_eq!(parse_settings_window_request(&json!({"action": "open"})), Some(Request::Open(None)));
         assert_eq!(parse_settings_window_request(&json!({"action": "close"})), Some(Request::Close));
-        for page in ["general", "pills", "agents", "chat", "voice", "integrations", "phone", "shortcuts", "dictation", "flowsettings"] {
+        for page in ["general", "chat", "voice", "integrations", "phone", "shortcuts", "dictation", "flowsettings"] {
             assert_eq!(parse_settings_window_request(&json!({"action": "open", "page": page})), Some(Request::Open(Some(page_id(page)))), "{page}");
+        }
+        for old in ["pills", "agents"] {
+            assert_eq!(parse_settings_window_request(&json!({"action": "open", "page": old})), Some(Request::Open(Some(page_id("integrations")))), "S32: the old {old} link lands on the combined page");
         }
         for bad in [json!({"action": "open", "page": "accounts"}), json!({"action": "open", "page": "Accounts"}), json!({"action": "open", "page": "accounts "}), json!({"action": "open", "page": "../x"}),
             json!({"action": "open", "page": ""}), json!({"action": "open", "page": 1}), json!({"action": "open", "page": null}), json!({"action": "open", "page": ["accounts"]}),

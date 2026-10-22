@@ -33,7 +33,7 @@ test('S18 General: «Atajo del sistema» is not a loose label: it is a value row
 });
 
 test('S19 Pills: no card of the page is an empty box (the «Colores de identidad» section drew an empty field over the Abito row)', async r => {
-  await r.go('Pestañas activas');
+  await r.go('Integraciones y agentes');
   const empty = await r.page.evaluate(() => [...document.querySelectorAll('.hub-card')].filter(c => !c.children.length && !c.textContent.trim()).map(c => c.parentElement && c.parentElement.querySelector('.hub-label') ? c.parentElement.querySelector('.hub-label').textContent : c.className));
   assert.deepEqual(empty, [], `empty cards: ${JSON.stringify(empty)}`);
   const rows = await r.page.evaluate(() => { const sec = [...document.querySelectorAll('section')].find(s => /colores de identidad/i.test((s.querySelector('.hub-label') || {}).textContent || '')); const card = sec.querySelector('.hub-card'); return { rowInsideCard: !!card && !!card.querySelector('.hub-row'), rows: sec.querySelectorAll('.hub-row').length }; });
@@ -189,6 +189,29 @@ test('S27 Ajustes (dictado): the microphone meter moves with the host\'s levels 
   const calls = (await r.calls()).map(([c]) => c); assert(!calls.some(c => /mic|record|level/i.test(c)), 'the page only listens: no command was sent for the meter');
 });
 
+test('S32 Integraciones y agentes: ONE sidebar entry replaces «Pestañas activas», «Integraciones» and «Agentes»', async r => {
+  const items = await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item')].map(e => e.textContent.trim()));
+  assert.equal(items.filter(t => t === 'Integraciones y agentes').length, 1, `the combined entry exists once: ${JSON.stringify(items)}`);
+  for (const gone of ['Pestañas activas', 'Agentes', 'Integraciones']) assert(!items.includes(gone), `«${gone}» is not a sidebar entry any more: ${JSON.stringify(items)}`);
+  assert.equal(items.filter(t => /integraciones|agentes|pestañas/i.test(t)).length, 1, 'no other entry for the three');
+});
+
+test('S32 Integraciones y agentes: the one page holds the main tool, the agents, the AI, the services and Abito\'s instructions + specialists, with no limit text', async r => {
+  await r.go('Integraciones y agentes');
+  const page = await r.page.evaluate(() => { const root = document.querySelector('.hub-page'); return { text: root.textContent.replace(/\s+/g, ' '),
+    heads: [...root.querySelectorAll('.hub-label, h2, h3')].map(e => e.textContent.trim()),
+    agentRows: root.querySelectorAll('.agent-row:not(.agent-head)').length, serviceCards: root.querySelectorAll('.int-card').length,
+    mainSelect: !!root.querySelector('select'), instructions: !!root.querySelector('#abito-instructions') }; });
+  assert(page.mainSelect, 'the «Herramienta principal» selector is at the top');
+  assert(page.agentRows >= 5, `the agents table is on the page (${page.agentRows} rows)`);
+  assert(page.serviceCards >= 6, `the services are on the page (${page.serviceCards} cards)`);
+  assert(page.instructions, 'Abito instructions are on the page');
+  const order = ['Herramienta principal', 'Agentes', 'Servicios', 'Especialistas'].map(h => page.heads.findIndex(x => x.toLowerCase().includes(h.toLowerCase())));
+  assert(order.every(i => i >= 0), `sections present: ${JSON.stringify(page.heads)}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), `sections in order main, agents, services, specialists: ${JSON.stringify(order)}`);
+  assert.doesNotMatch(page.text, /\d\/4|hasta 4|las 4 píldoras|Pestañas activas/, 'no «N/4» and no limit sentence anywhere');
+});
+
 test('S5 Chat replaces Conexiones: engine first, provider rows inside the matching chat cards, extras before the reserved toggle slot', async r => {
   const titles = await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item')].map(e => e.textContent.trim()));
   assert(!titles.includes('Conexiones'), `FAIL S5: obsolete «Conexiones» entry in ${JSON.stringify(titles)}`);
@@ -239,7 +262,7 @@ test('S26 deep link: an unknown or hostile page name falls back to the default p
 // Every Ajustes page, as the sidebar lists them. A card or input-looking box with nothing in it is a defect wherever it appears: the
 // human found it three times (Pills, Integraciones, Conexiones), each time by eye, each time the same pattern (a card created before
 // its children exist, then left empty by the state).
-const PAGES = ['Dictado', 'Notetaker', 'Estadísticas', 'Diccionario', 'Fragmentos', 'Estilos', 'Ajustes', 'General', 'Pestañas activas', 'Agentes', 'Chat', 'OK Abito', 'Integraciones', 'Teléfono Android', 'Atajos'];
+const PAGES = ['Dictado', 'Notetaker', 'Estadísticas', 'Diccionario', 'Fragmentos', 'Estilos', 'Ajustes', 'General', 'Integraciones y agentes', 'Chat', 'OK Abito', 'Teléfono Android', 'Atajos'];
 const EMPTY_BOXES = () => [...document.querySelectorAll('.hub-page .hub-card, .hub-page section, .hub-page .abito-card, .hub-page .hub-row, .hub-page .row')].filter(el => {
   const b = el.getBoundingClientRect(); if (b.width < 40 || b.height < 8) return false;               // not drawn
   if (el.querySelector('input, select, textarea, button, a, svg, canvas, img, .switch, .keycap, .swatch, .hub-segmented')) return false;

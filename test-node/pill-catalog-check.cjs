@@ -54,12 +54,12 @@ test('S4 default main and four default declarations; explicit empty list stays e
   const m = M();
   assert.deepEqual(m.normalize({}), { mainPill: ids[0], declaredPills: defaults, pillColors: {}, blobs: [] });
   assert.deepEqual(m.normalize({ declaredPills: [] }), { mainPill: ids[0], declaredPills: [], pillColors: {}, blobs: [] });
-  assert.equal(m.MAX_DECLARED, 4);
+  assert.equal(m.MAX_DECLARED, undefined, 'S32: there is no limit on declared pills');
   const a = m.normalize({}); a.declaredPills.pop();
   assert.deepEqual(m.normalize({}).declaredPills, defaults, 'defaults are never mutable shared state');
 });
 
-test('S6 damaged saved input keeps first4 valid distinct choices, excluding main', () => {
+test('S6 damaged saved input keeps EVERY valid distinct choice (no cap), excluding main', () => {
   const m = M();
   for (const raw of [null, [], 7, 'bad']) assert.deepEqual(m.normalize(raw), m.normalize({}));
   const raw = { mainPill: 'ai_openai', declaredPills: [null, 'unknown', ids[0],
@@ -67,29 +67,32 @@ test('S6 damaged saved input keeps first4 valid distinct choices, excluding main
     'ai_google', 'agent_amp', 'integration_notion', 'integration_spotify'] };
   const before = JSON.stringify(raw);
   assert.deepEqual(m.normalize(raw), { mainPill: ids[0],
-    declaredPills: ['agent_gemini', 'ai_google', 'agent_amp', 'integration_notion'], pillColors: {}, blobs: [] });
+    declaredPills: ['agent_gemini', 'ai_google', 'agent_amp', 'integration_notion', 'integration_spotify'], pillColors: {}, blobs: [] });
   assert.equal(JSON.stringify(raw), before, 'load normalization does not mutate input');
   assert.deepEqual(m.normalize({ mainPill: 'agent_codex', declaredPills: defaults }).declaredPills, defaults);
 });
 
-test('S6 submitted state rejects types, duplicates, unknowns, main and fifth choice', () => {
+test('S6 submitted state rejects types, duplicates, unknowns and main; a fifth choice is valid', () => {
   const m = M();
   const good = { mainPill: ids[0], declaredPills: [] };
   assert.equal(m.valid(good), true);
   for (const mainPill of ['unknown', 'ai_openai', null, 1]) assert.equal(m.valid({ ...good, mainPill }), false);
   for (const declaredPills of [null, 'x', [1], ['unknown'], [ids[0]],
     ['agent_amp', 'agent_amp'], ['agent_claude-desktop'], ['integration_music'],
-    [...defaults, 'ai_google']]) assert.equal(m.valid({ ...good, declaredPills }), false);
+    ]) assert.equal(m.valid({ ...good, declaredPills }), false);
+  assert.equal(m.valid({ ...good, declaredPills: [...defaults, 'ai_google'] }), true, 'five declared pills are valid');
+  assert.equal(m.valid({ ...good, declaredPills: [...defaults, 'ai_google', 'ai_openai', 'agent_amp', 'integration_notion'] }), true, 'and nine');
 });
 
-test('S4 toggle zero-to-four choices; main is not a slot and fifth refusal is immutable', () => {
+test('S4 toggle: main is not a slot, any number of choices can be declared, refusals are immutable', () => {
   const m = M();
   let state = { mainPill: ids[0], declaredPills: [] };
   for (const id of defaults) state = m.toggle(state, id);
   assert.deepEqual(state.declaredPills, defaults);
   const before = JSON.stringify(state);
-  for (const id of [ids[0], 'ai_google', 'unknown', 'integration_music', null]) assert.equal(m.toggle(state, id), null);
+  for (const id of [ids[0], 'unknown', 'integration_music', null]) assert.equal(m.toggle(state, id), null);
   assert.equal(JSON.stringify(state), before);
+  assert.deepEqual(m.toggle(state, 'ai_google').declaredPills, [...defaults, 'ai_google'], 'the fifth is accepted');
   state = m.toggle(state, defaults[1]);
   assert.deepEqual(state.declaredPills, [defaults[0], defaults[2], defaults[3]]);
   assert.deepEqual(m.toggle(state, 'ai_google').declaredPills, [...state.declaredPills, 'ai_google']);
