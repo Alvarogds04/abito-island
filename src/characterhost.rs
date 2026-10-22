@@ -120,6 +120,12 @@ fn island_origin(app: &AppHandle) -> Option<(f64, f64)> {
 /// Click-through everywhere but the round body (Coucou: `set_desktop_shape`). GDK sets the X11
 /// input shape on the window's GdkWindow, so no extra X11 crate is involved; must run on the GTK
 /// thread and after the window is realized (we call it right after `show`).
+#[cfg(not(target_os = "linux"))]
+fn apply_shape(_app: &AppHandle, _win: &WebviewWindow) {
+    // No GDK input shape off Linux: the window keeps its full (transparent) rectangle.
+}
+
+#[cfg(target_os = "linux")]
 fn apply_shape(app: &AppHandle, win: &WebviewWindow) {
     let handle = win.clone();
     let _ = app.run_on_main_thread(move || {
@@ -173,11 +179,14 @@ fn paint_highlight(app: &AppHandle, rect: Option<Rect>) {
     let Some(w) = win else { return };
     // Realize while hidden, then apply GDK's EMPTY region BEFORE the first show.
     // If the native input shape cannot be established, fail closed and keep it hidden.
-    use gtk::prelude::WidgetExt;
-    let Ok(gtk_win) = w.gtk_window() else { let _ = w.hide(); return };
-    gtk_win.realize();
-    let Some(gdk) = gtk_win.window() else { let _ = w.hide(); return };
-    gdk.input_shape_combine_region(&gtk::cairo::Region::create(), 0, 0);
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::WidgetExt;
+        let Ok(gtk_win) = w.gtk_window() else { let _ = w.hide(); return };
+        gtk_win.realize();
+        let Some(gdk) = gtk_win.window() else { let _ = w.hide(); return };
+        gdk.input_shape_combine_region(&gtk::cairo::Region::create(), 0, 0);
+    }
     let _ = w.set_ignore_cursor_events(true);
     let _ = w.set_position(PhysicalPosition::new(r.x.round() as i32, r.y.round() as i32));
     let _ = w.set_size(tauri::PhysicalSize::new(r.w.round().max(1.0) as u32, r.h.round().max(1.0) as u32));
@@ -487,6 +496,10 @@ pub async fn character_carry_end(webview: tauri::Webview, app: AppHandle, c: Sta
 
 /// Global pointer position (X11 root, physical px). Under GNOME/XWayland the server only learns the
 /// pointer while it is over an X11 window, so away from those the eyes keep the last position.
+#[cfg(not(target_os = "linux"))]
+fn pointer() -> Option<(f64, f64)> { None }
+
+#[cfg(target_os = "linux")]
 fn pointer() -> Option<(f64, f64)> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt;

@@ -1,10 +1,10 @@
 //! GTK 3.24: explicit logical widget requests suppress NO_CONTENT_CHILD_NAT
 //! (200), which otherwise becomes fixed-window WM hints with an empty child.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use gtk::prelude::*;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::sync::atomic::Ordering;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use tauri::Manager;
 use tauri::WebviewWindow;
 
@@ -23,7 +23,7 @@ pub(crate) fn logical_size(w: i32, h: i32, scale: f64) -> Result<(i32, i32), &'s
     Ok((convert(w)?, convert(h)?))
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn defer(task: impl FnOnce() + Send + 'static) {
     gtk::glib::idle_add_once(task);
 }
@@ -31,7 +31,7 @@ pub(crate) fn defer(task: impl FnOnce() + Send + 'static) {
 /// run_on_main_thread may inline; installing an idle source does NOT dispatch
 /// it. GTK handles are obtained only in that later default GUI-context turn,
 /// after compact admission guards have returned. No synthetic resize ACK.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()> {
     let generation = win
         .state::<super::AppState>()
@@ -74,7 +74,7 @@ pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()>
 /// D3: Windows uses a real plain resize; the GTK logical hint only suppresses
 /// GTK's empty-child WM-hint bug and has no equivalent role on this target.
 /// U2 validates this direct resize in the Windows VM.
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn set_size(win: &WebviewWindow, w: i32, h: i32) -> tauri::Result<()> {
     win.set_size(tauri::PhysicalSize::new(w as u32, h as u32))
 }
@@ -105,6 +105,6 @@ pub(crate) fn start_view_test(win: &WebviewWindow) {
     });
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, target_os = "linux"))]
 #[path = "nativewindow_tests.rs"]
 mod tests;

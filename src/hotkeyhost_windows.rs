@@ -26,10 +26,10 @@ use abito_island::hotkey::win32::Grabber;
 /// mounts this file under cfg(not(unix)), and the only non-unix build here is
 /// x86_64-pc-windows-msvc). The alias documents the shape this file would have
 /// elsewhere: a grab that exists but holds nothing.
-#[cfg(all(not(unix), not(windows)))]
+#[cfg(not(any(target_os = "linux", windows)))]
 #[derive(Default)]
 struct Grabber;
-#[cfg(all(not(unix), not(windows)))]
+#[cfg(not(any(target_os = "linux", windows)))]
 impl Grabber {
     fn status(&self) -> hotkey::Status {
         hotkey::Status::Unsupported

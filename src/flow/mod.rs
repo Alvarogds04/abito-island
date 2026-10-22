@@ -174,7 +174,7 @@ pub fn running_apps() -> Vec<(String, String)> { context_apps(false) }
 // Both the picker and capture-start use the same stable app id. No title is retained
 // or passed to cleanup. A successful empty extension reply is authoritative.
 fn context_apps(foreground: bool) -> Vec<(String, String)> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     if let Some(rows) = crate::contextwin::dbus::recent_windows(None) {
         let mut apps = Vec::new();
         for row in rows {

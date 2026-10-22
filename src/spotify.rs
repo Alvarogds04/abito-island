@@ -374,10 +374,10 @@ pub fn now_ms() -> f64 {
 
 // ── Linux: MPRIS over zbus ────────────────────────────────────────────────────
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub use client::Client;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod client {
     use super::*;
     use std::collections::HashMap;

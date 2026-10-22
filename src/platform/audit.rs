@@ -12,12 +12,12 @@
 use super::Availability;
 
 /// Why the audit is or is not served by this binary. main.rs logs this once.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn availability() -> Availability {
     Availability::Provided
 }
 
-#[cfg(windows)]
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn availability() -> Availability {
     Availability::Unavailable(
         "native audit reads the GTK widget tree and X11 window hints; Windows offers neither, and its UI Automation equivalent is out of scope for this port",
@@ -25,19 +25,19 @@ pub(crate) fn availability() -> Availability {
 }
 
 /// Opt-in switch. On Windows there is nothing to opt into, so it never enables.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn enabled() -> bool {
     crate::nativeaudit::enabled()
 }
 
-#[cfg(windows)]
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn enabled() -> bool {
     false
 }
 
 /// Enqueue native getters on the main thread. Callers never wait and never
 /// carry host guards into the closure.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn sample(
     app: &tauri::AppHandle,
     stage: &'static str,
@@ -47,7 +47,7 @@ pub(crate) fn sample(
     crate::nativeaudit::sample(app, stage, attempt, desired);
 }
 
-#[cfg(windows)]
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn sample(
     _app: &tauri::AppHandle,
     _stage: &'static str,

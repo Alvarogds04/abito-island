@@ -140,9 +140,9 @@ pub(crate) fn voice_prefs_snapshot(app: &AppHandle) -> Prefs {
 }
 
 fn context_extension_available() -> bool {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     { abito_island::contextwin::dbus::available(None) }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     { false }
 }
 

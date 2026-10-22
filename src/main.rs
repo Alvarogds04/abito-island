@@ -27,9 +27,9 @@
 mod autostart;
 mod characterhost;
 mod chathost;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod hotkeyhost;
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 #[path = "hotkeyhost_windows.rs"]
 mod hotkeyhost;
 mod tray;
@@ -52,7 +52,7 @@ mod spotifyhost;
 mod specialists;
 mod specialistshost;
 mod modelshost;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod nativeaudit;
 mod nativewindow;
 mod islandshape;
@@ -70,7 +70,7 @@ use abito_island::chat::ChatError;
 use abito_island::chatlane::{self, Target};
 use abito_island::core::{self, Core, ReleaseOutcome, TogglePlan, WindowIo};
 use abito_island::desktop::{self, IslandState};
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use abito_island::hotkey;
 use abito_island::geometry::{self, Edge, Rect};
 #[cfg(any(debug_assertions, feature = "probe"))]
@@ -1479,7 +1479,7 @@ fn dispatch_action(
                     // WM's own focus-on-map, and the keyboard would be handed
                     // back. The Windows hotkey host has no twin for this and
                     // neither does the reveal there: cfg(unix) only.
-                    #[cfg(unix)]
+                    #[cfg(target_os = "linux")]
                     let reveal_before = hotkey::x11::active_window(None);
                     let (stale_expanded, edge) = {
                         let core = state.core.lock().expect("core lock");
@@ -1508,7 +1508,7 @@ fn dispatch_action(
                             sync_host_visible(&win);
                         }
                     }
-                    #[cfg(unix)]
+                    #[cfg(target_os = "linux")]
                     {
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(250));

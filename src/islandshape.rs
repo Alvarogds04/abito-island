@@ -65,13 +65,13 @@ pub(crate) fn input_rects(report: Report, window: (i32, i32), protected: bool) -
     rects
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 static SHAPE: std::sync::Mutex<((i32, i32), Report)> = std::sync::Mutex::new(
     ((288, 32), Report { w: 288, h: 32, settled: true }));
 
 /// GDK consumes logical pixels and must only be called on GTK's event thread.
 /// An idle follows nativewindow's queued size request; realize before obtaining GdkWindow.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn apply(app: &tauri::AppHandle, report: Option<Report>) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -104,7 +104,7 @@ pub(crate) fn apply(app: &tauri::AppHandle, report: Option<Report>) {
     });
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn apply(_app: &tauri::AppHandle, _report: Option<Report>) {}
 
 #[cfg(test)]

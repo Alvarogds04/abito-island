@@ -157,5 +157,5 @@ pub fn fallback_for(backend: Backend, status: super::Status) -> Fallback {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub mod client;

@@ -97,7 +97,7 @@ pub fn from_stacking(windows: Vec<(String, String, String)>) -> Vec<Candidate> {
         .collect()
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub mod dbus {
     use super::*;
     use zbus::blocking::{Connection, Proxy};
@@ -262,6 +262,12 @@ pub mod x11 {
 }
 
 /// The context to attach, or `None`. Extension first, X11 fallback.
+#[cfg(not(target_os = "linux"))]
+pub fn capture(_bus_address: Option<&str>, _display: Option<&str>) -> Option<ActiveWindow> { None }
+
+#[cfg(not(target_os = "linux"))]
+pub fn capture_at(_point: (f64, f64), _scale: f64) -> Option<(ActiveWindow, Rect)> { None }
+
 #[cfg(target_os = "linux")]
 pub fn capture(bus_address: Option<&str>, display: Option<&str>) -> Option<ActiveWindow> {
     if let Some(found) = dbus::recent_windows(bus_address).as_deref().and_then(pick_external) {
