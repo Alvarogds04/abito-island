@@ -4,6 +4,16 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn selected_default_keeps_local_request_bytes() {
+    let TargetSelection::Local(selected) = default_selection() else { panic!("default must remain local") };
+    let old = default_target();
+    assert_eq!(selected.endpoint.origin(), old.endpoint.origin());
+    assert_eq!(selected.profile, old.profile);
+    assert_eq!(crate::localmodel::completion_body(&selected.alias, &[], selected.max_output).as_bytes(), br#"{"chat_template_kwargs":{"enable_thinking":false},"max_tokens":1024,"messages":[],"model":"Abito-gpt","stream":true}"#);
+}
+
+
 fn health() -> Value {
     json!({"status": "ok"})
 }

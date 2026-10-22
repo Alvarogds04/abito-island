@@ -39,6 +39,10 @@ sha2 = "0.10"
 # here adds only this crate's edge — the lock gains exactly one line (the
 # dependency edge), no new packages, no version changes.
 base64 = "0.22"
+# Cloud chat and subscription OAuth use the existing rustls stack on every platform.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = { version = "0.3", default-features = false }
+tokio = { version = "1", default-features = false, features = ["rt", "time", "net", "io-util", "sync", "macros"] }
 
 # ---- Unix-only platform layer (Windows port, U1a) ----------------------------
 # These were unconditional [dependencies], which made the whole crate
@@ -71,9 +75,6 @@ sherpa-onnx = { version = "1.13.8", default-features = false, features = ["stati
 # Model download over HTTPS (only on the user's click). reqwest 0.12, not the
 # 0.13 Tauri already pulls: 0.13's rustls needs aws-lc-rs + rustls-platform-verifier,
 # which are not available offline; 0.12's rustls-tls is ring + webpki-roots.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-futures-util = { version = "0.3", default-features = false }
-tokio = { version = "1", default-features = false, features = ["rt", "time", "net", "io-util", "sync", "macros"] }
 # Dictation (#467): the microphone. Apache-2.0. PulseAudio (or PipeWire's
 # PulseAudio server) for the device list on Linux.
 cpal = { version = "0.18", features = ["pulseaudio"] }

@@ -23,6 +23,8 @@ pub const SERVICE: &str = "com.abitog.AbitoTauri";
 /// Every key the island may store. Anything outside this list is refused.
 pub const KNOWN_KEYS: &[&str] = &[
     "anthropic-api-key",
+    "claude-oauth",
+    "chatgpt-oauth",
     "openai-api-key",
     "google-api-key",
     "openrouter-api-key",
@@ -125,7 +127,7 @@ pub fn parse_command(payload: &Value) -> Option<Command> {
         .copied()
         .find(|k| obj.get("key").and_then(Value::as_str) == Some(*k))?;
     match obj.get("action")?.as_str()? {
-        "set" if obj.len() == 3 => {
+        "set" if obj.len() == 3 && !matches!(key, "claude-oauth" | "chatgpt-oauth") => {
             let value = obj.get("value")?.as_str()?;
             if value.is_empty() || value.len() > MAX_VALUE_BYTES || value.contains('\0') {
                 return None;

@@ -34,6 +34,16 @@ pub const ISLAND_MAX_OUTPUT_TOKENS: usize = 1024;
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11002";
 pub const DEFAULT_ALIAS: &str = "Abito-gpt";
 
+pub enum TargetSelection { Local(Target), Cloud(crate::cloudmodel::CloudTarget) }
+pub fn default_selection() -> TargetSelection { TargetSelection::Local(default_target()) }
+#[allow(clippy::too_many_arguments)]
+pub fn run_selected(lane: &SharedLane, turn_id: &str, target: &TargetSelection, source: &dyn crate::cloudmodel::CredentialSource, system: &str, deadlines: Deadlines, publish: &(dyn Fn() + Send + Sync)) {
+    match target {
+        TargetSelection::Local(local) => run_turn(lane, turn_id, local, system, deadlines, publish),
+        TargetSelection::Cloud(cloud) => crate::cloudmodel::run_turn(lane, turn_id, cloud, source, system, deadlines, publish),
+    }
+}
+
 /// The default local target (`local-abito-gpt`, revision 1).
 pub fn default_target() -> Target {
     Target {
@@ -251,7 +261,7 @@ pub fn availability_of(result: &Result<Ready, ChatError>) -> Availability {
 #[derive(Debug)]
 pub struct Lane {
     pub convo: Conversation,
-    cancel: Option<(String, Arc<Cancel>)>,
+    pub(crate) cancel: Option<(String, Arc<Cancel>)>,
     /// Last preflight shown to the human (`busy` → "en cola").
     pub queue_note: Option<String>,
     /// Last availability read (metadata only).

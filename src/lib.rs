@@ -55,6 +55,7 @@ pub mod integrations;
 pub mod integrations_net;
 pub mod servicedetail;
 pub mod localmodel;
+pub mod cloudmodel;
 pub mod imapcmd;
 pub mod mailcmd;
 #[cfg(target_os = "linux")]
@@ -70,6 +71,7 @@ pub mod recap;
 pub mod recap_cmd;
 pub mod recap_spool;
 pub mod secrets;
+pub mod provider_oauth;
 pub mod sounds;
 pub mod question;
 pub mod spotify;
