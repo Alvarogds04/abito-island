@@ -14,6 +14,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const calls = [], events = {};
   const hash = 'a'.repeat(64), hash2 = 'b'.repeat(64), hash3 = 'c'.repeat(64);
   let state = { connection:'connected', agents:[{id:'claude-code',state:'not_connected',plan_hash:hash,summary:'Add managed hooks',reviewable:true},{id:'codex',state:'connected',backup:true},{id:'recap',state:'not_connected',plan_hash:hash2,summary:'Adds notify-only hooks that only count activity for the weekly recap. No command text, path or prompt is kept. A backup is made first.',reviewable:true},{id:'statusline',state:'not_connected',plan_hash:hash3,summary:'Adds the status-line relay in ~/.claude/settings.json. An existing status line keeps working (the relay prints it). A backup is made first.',reviewable:true}], providers:[],accounts:[],models:null };
+  const keychain = new Set();
   let ui, secretFailure = false, accountFailure = false; const planPrefs = { claude: false, codex: false };
   const soon = Date.now() + 3600e3;
   let planReply = {
@@ -23,9 +24,9 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
   const invoke = async (cmd,{payload:p}) => {
     if (cmd === 'secret_action' && p.action === 'set') assert.equal(all(ui).find(e => e.attrs.id === `chat-key-${p.key}`).value, '', 'clear masked key BEFORE IPC');
     calls.push([cmd,p]);
-    if (cmd === 'secret_action') { if (secretFailure) throw new Error('fixture-secret-error'); return {present:p.action === 'set'}; }
+    if (cmd === 'secret_action') { if (secretFailure) throw new Error('fixture-secret-error'); if (p.action === 'set') keychain.add(p.key); if (p.action === 'clear') keychain.delete(p.key); return {present:keychain.has(p.key)}; }
     if (cmd === 'plan_action') return planReply[p.action];
-    if (cmd === 'agent_action' && /^abito_account_/.test(p.action)) { if (accountFailure) throw new Error('fixture-account-error'); const secretNow = p.config?.apiKey; calls.push(['__secret_seen', secretNow ? 'yes' : 'no']); if (p.action === 'abito_account_remove') state.ownedAccounts = { accounts: (state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId) }; else state.ownedAccounts = { accounts: [...(state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId), { accountId: p.accountId, provider: p.provider, hasCredential: !!p.config.apiKey, config: { nombre: p.config.nombre, baseUrl: p.config.baseUrl, api: p.config.api, compat: {}, models: p.config.models, defaultModel: p.config.defaultModel } }] }; return structuredClone(state); }
+    if (cmd === 'agent_action' && /^abito_account_/.test(p.action)) { if (accountFailure) throw new Error('fixture-account-error'); const secretNow = p.config?.apiKey; calls.push(['__secret_seen', secretNow ? 'yes' : 'no']); if (p.action === 'abito_account_remove') state.ownedAccounts = { accounts: (state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId) }; else state.ownedAccounts = { accounts: [...(state.ownedAccounts?.accounts || []).filter(a => a.accountId !== p.accountId), { accountId: p.accountId, provider: p.provider, hasCredential: keychain.has(`${p.provider}-api-key`), config: { nombre: p.config.nombre, baseUrl: p.config.baseUrl, api: p.config.api, compat: {}, models: p.config.models, defaultModel: p.config.defaultModel } }] }; return structuredClone(state); }
     if (cmd === 'prefs_action' && p.action === 'view') return {chosenModels:{}, showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex};
     if (cmd === 'prefs_action' && p.action === 'set_show_plan_in_notch') { planPrefs.claude = p.show_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
     if (cmd === 'prefs_action' && p.action === 'set_show_codex_plan_in_notch') { planPrefs.codex = p.show_codex_plan_in_notch; return {showPlanInNotch: planPrefs.claude, showCodexPlanInNotch: planPrefs.codex}; }
@@ -139,7 +140,8 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
       assert(created, `${key} creates its provider account`);
       assert.equal(created[1].accountId, `key-${provider}`); assert.equal(created[1].provider, provider);
       assert.equal(created[1].config.nombre, nombre); assert.equal(created[1].config.baseUrl, baseUrl); assert.equal(created[1].config.api, api);
-      assert.equal(created[1].config.apiKey, 'sk-fixture-1'); assert(created[1].config.models.includes(created[1].config.defaultModel));
+      assert(!Object.hasOwn(created[1].config, 'apiKey'), 'account carries config only, never the chat key'); assert(created[1].config.models.includes(created[1].config.defaultModel));
+      assert.equal(state.ownedAccounts.accounts.find(a => a.accountId === `key-${provider}`).hasCredential, true);
       assert.deepEqual(calls.map(([c, p]) => c === 'secret_action' ? `secret:${p.action}` : c === 'agent_action' ? p.action : c).filter(x => x !== '__secret_seen'), [`secret:set`, 'abito_account_create'], 'keychain first, then the account');
       assert.equal(field(key).value, '', 'field cleared');
       assert(!text(ui).includes('sk-fixture-1'), 'secret never rendered');
@@ -148,7 +150,7 @@ const { dom, all, text } = require('./settings-accounts-check.cjs');
     calls.length = 0; field('openai-api-key').value = 'sk-fixture-2';
     button(scopeOf('openai-api-key'), 'Guardar').fire('click'); await ui.settled();
     const saved = calls.find(([c, p]) => c === 'agent_action' && /^abito_account_/.test(p.action));
-    assert.equal(saved[1].action, 'abito_account_save'); assert.equal(saved[1].accountId, 'key-openai'); assert.equal(saved[1].config.apiKey, 'sk-fixture-2');
+    assert.equal(saved[1].action, 'abito_account_save'); assert.equal(saved[1].accountId, 'key-openai'); assert(!Object.hasOwn(saved[1].config, 'apiKey'), 'replacement goes only to the keychain');
     // remove: the keychain entry AND the account we created
     calls.length = 0; button(scopeOf('openai-api-key'), 'Quitar').fire('click'); await ui.settled();
     assert.deepEqual(calls.map(([c, p]) => c === 'secret_action' ? `secret:${p.action}` : p.action).filter(x => x !== undefined), ['secret:clear', 'abito_account_remove']);

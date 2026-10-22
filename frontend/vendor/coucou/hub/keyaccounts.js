@@ -45,7 +45,8 @@ function keyAccountCommand(keyId, action, value, owned) {
     action: exists ? "abito_account_save" : "abito_account_create",
     accountId,
     provider,
-    config: { nombre, baseUrl, api, compat: {}, models: [...models], defaultModel, apiKey: value }
+    // secret_action owns the shared key; the account stores only its reference.
+    config: { nombre, baseUrl, api, compat: {}, models: [...models], defaultModel }
   };
 }
 export {

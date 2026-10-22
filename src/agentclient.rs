@@ -658,11 +658,33 @@ struct AccountConfig {
     compat: std::collections::BTreeMap<String, bool>,
     models: Vec<String>,
     default_model: String,
+    // Legacy disk input / write-only command input. Never persist a credential.
+    #[serde(default, skip_serializing)]
     api_key: Option<String>,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct AccountRecord { account_id: String, provider: String, config: AccountConfig }
+struct AccountRecord {
+    account_id: String, provider: String, config: AccountConfig,
+    #[serde(default)]
+    credential_ref: Option<String>,
+}
+
+fn shared_credential_ref(id: &str) -> Option<&'static str> {
+    match id {
+        "key-anthropic" => Some("anthropic-api-key"),
+        "key-google" => Some("google-api-key"),
+        "key-openai" => Some("openai-api-key"),
+        "key-openrouter" => Some("openrouter-api-key"),
+        _ => None,
+    }
+}
+fn credential_ref(id: &str) -> String {
+    shared_credential_ref(id).map(str::to_owned).unwrap_or_else(|| format!("account-{id}"))
+}
+fn valid_account_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 4096 && !key.chars().any(char::is_whitespace) && !has_control(key)
+}
 
 pub struct AccountCommand { action: String, record: AccountRecord, keep_key: bool }
 impl fmt::Debug for AccountCommand {
@@ -713,6 +735,7 @@ fn parse_account(payload: &Value) -> Result<AccountCommand, CommandError> {
     let provider = map.get("provider").and_then(Value::as_str).filter(|s| strict_id(s)).ok_or(CommandError)?;
     let config = map.get("config").and_then(Value::as_object).ok_or(CommandError)?;
     let keep_key = !config.contains_key("apiKey");
+    if !keep_key && shared_credential_ref(account_id).is_some() { return Err(CommandError); }
     let config: AccountConfig = serde_json::from_value(Value::Object(config.clone())).map_err(|_| CommandError)?;
     let local = matches!(provider, "ollama" | "lmstudio");
     if !label_ok(&config.nombre) || !account_url(&config.base_url, local)
@@ -721,20 +744,25 @@ fn parse_account(payload: &Value) -> Result<AccountCommand, CommandError> {
         || config.models.is_empty() || config.models.len() > 64
         || config.models.iter().any(|s| s.is_empty() || s.len() > 200 || s.trim() != s || has_control(s))
         || !config.models.contains(&config.default_model)
-        || config.api_key.as_ref().is_some_and(|s| s.is_empty() || s.len() > 4096 || s.chars().any(char::is_whitespace) || has_control(s)) {
+        || config.api_key.as_ref().is_some_and(|s| !valid_account_key(s)) {
         return Err(CommandError);
     }
     let unique: std::collections::HashSet<_> = config.models.iter().collect();
     if unique.len() != config.models.len() { return Err(CommandError); }
     Ok(AccountCommand { action: map["action"].as_str().unwrap().into(),
-        record: AccountRecord { account_id: account_id.into(), provider: provider.into(), config }, keep_key })
+        record: AccountRecord { account_id: account_id.into(), provider: provider.into(), config,
+            credential_ref: Some(credential_ref(account_id)) }, keep_key })
 }
 
 /// Single host-owned store, protected by SettingsHost's transaction mutex.
 /// The disk representation is deliberately NOT Debug or a public response.
-pub struct AccountStore { path: std::path::PathBuf, records: Vec<AccountRecord> }
+pub struct AccountStore {
+    path: std::path::PathBuf,
+    records: Vec<AccountRecord>,
+    secrets: std::sync::Arc<dyn crate::secrets::SecretStore + Send + Sync>,
+}
 impl AccountStore {
-    pub fn load(path: std::path::PathBuf) -> Result<Self, crate::bridge::BridgeError> {
+    pub fn load(path: std::path::PathBuf, secrets: std::sync::Arc<dyn crate::secrets::SecretStore + Send + Sync>) -> Result<Self, crate::bridge::BridgeError> {
         use std::io::Read;
         let mut records = Vec::new();
         match std::fs::symlink_metadata(&path) {
@@ -753,19 +781,47 @@ impl AccountStore {
                 if disk.version != 1 || disk.accounts.len() > 64 { return Err(account_error("store_unavailable")); }
                 let mut ids = std::collections::HashSet::new();
                 for record in disk.accounts {
+                    let expected_ref = credential_ref(&record.account_id);
+                    if record.credential_ref.as_ref().is_some_and(|r| r != &expected_ref)
+                        || record.config.api_key.as_ref().is_some_and(|k| !valid_account_key(k)) {
+                        return Err(account_error("store_unavailable"));
+                    }
+                    // Serialization intentionally omits the legacy key. Validate all records
+                    // before touching the keychain, retaining migration input only in memory.
                     let payload = json!({"action":"abito_account_create", "accountId":record.account_id,
                         "provider":record.provider,"config":record.config});
-                    let parsed = parse_account(&payload).map_err(|_| account_error("store_unavailable"))?;
+                    let mut parsed = parse_account(&payload).map_err(|_| account_error("store_unavailable"))?;
                     if !ids.insert(parsed.record.account_id.clone()) { return Err(account_error("store_unavailable")); }
+                    parsed.record.config.api_key = record.config.api_key;
                     records.push(parsed.record);
                 }
             }
         }
-        Ok(Self { path, records })
+        let mut store = Self { path, records, secrets };
+        let migrating = store.records.iter().any(|r| r.config.api_key.is_some());
+        if migrating {
+            for record in &store.records {
+                if let Some(key) = &record.config.api_key {
+                    let reference = record.credential_ref.as_deref().expect("validated reference");
+                    let shared = shared_credential_ref(&record.account_id).is_some();
+                    let existing = if shared {
+                        store.secrets.read(reference).map_err(|_| account_error("keychain_unavailable"))?
+                    } else { None };
+                    if existing.is_none() {
+                        store.secrets.write(reference, key).map_err(|_| account_error("keychain_unavailable"))?;
+                    }
+                }
+            }
+            // No file write (not even a temporary file) until EVERY secret is safe.
+            store.persist(&store.records).map_err(|_| account_error("save_failed"))?;
+            for record in &mut store.records { record.config.api_key = None; }
+        }
+        Ok(store)
     }
     pub fn view(&self) -> Value {
         let accounts: Vec<_> = self.records.iter().map(|r| json!({
-            "accountId":r.account_id,"provider":r.provider,"hasCredential":r.config.api_key.is_some(),
+            "accountId":r.account_id,"provider":r.provider,"hasCredential":r.credential_ref.as_deref()
+                .and_then(|key| self.secrets.read(key).ok().flatten()).is_some_and(|key| !key.is_empty()),
             "config":{"nombre":r.config.nombre,"baseUrl":r.config.base_url,"api":r.config.api,
                 "compat":r.config.compat,"models":r.config.models,"defaultModel":r.config.default_model}
         })).collect();
@@ -773,9 +829,21 @@ impl AccountStore {
     }
     fn remove(&mut self, account_id: &str, publish: impl FnOnce(Value)) -> Result<Value, crate::bridge::BridgeError> {
         let at = self.records.iter().position(|r| r.account_id == account_id).ok_or_else(|| account_error("account_missing"))?;
+        let record = &self.records[at];
+        let owned_ref = credential_ref(account_id);
+        let owned = shared_credential_ref(account_id).is_none()
+            && record.credential_ref.as_deref() == Some(owned_ref.as_str());
+        let previous = if owned {
+            let previous = self.secrets.read(&owned_ref).map_err(|_| account_error("keychain_unavailable"))?;
+            self.secrets.delete(&owned_ref).map_err(|_| account_error("keychain_unavailable"))?;
+            previous
+        } else { None };
         let mut next = self.records.clone();
         next.remove(at);
-        self.persist(&next).map_err(|_| account_error("save_failed"))?;
+        if self.persist(&next).is_err() {
+            if let Some(key) = previous { let _ = self.secrets.write(&owned_ref, &key); }
+            return Err(account_error("save_failed"));
+        }
         self.records = next;
         let snapshot = self.view();
         publish(snapshot.clone());
@@ -795,11 +863,27 @@ impl AccountStore {
         if at.is_none() && self.records.len() >= 64 { return Err(account_error("account_limit")); }
         if let Some(at) = at {
             if self.records[at].provider != command.record.provider { return Err(account_error("account_identity")); }
-            if command.keep_key { command.record.config.api_key = self.records[at].config.api_key.clone(); }
         }
+        let reference = credential_ref(&command.record.account_id);
+        let changed_key = !command.keep_key;
+        let previous = if changed_key {
+            let previous = self.secrets.read(&reference).map_err(|_| account_error("keychain_unavailable"))?;
+            match command.record.config.api_key.take() {
+                Some(key) => self.secrets.write(&reference, &key),
+                None => self.secrets.delete(&reference),
+            }.map_err(|_| account_error("keychain_unavailable"))?;
+            previous
+        } else { None };
         let mut next = self.records.clone();
         match at { Some(at) => next[at] = command.record, None => next.push(command.record) }
-        self.persist(&next).map_err(|_| account_error("save_failed"))?;
+        if self.persist(&next).is_err() {
+            if changed_key {
+                // Best-effort compensation: two independent stores cannot commit atomically.
+                match previous { Some(key) => { let _ = self.secrets.write(&reference, &key); },
+                    None => { let _ = self.secrets.delete(&reference); } }
+            }
+            return Err(account_error("save_failed"));
+        }
         self.records = next;
         let snapshot = self.view();
         publish(snapshot.clone());
@@ -850,7 +934,11 @@ fn private_account_file(meta: &std::fs::Metadata) -> bool {
     #[cfg(not(unix))] { let _ = meta; false }
 }
 fn account_error(code: &str) -> crate::bridge::BridgeError {
-    crate::bridge::BridgeError { code: code.into(), message: "No se pudo guardar la cuenta. Revisá los datos y la URL (HTTPS remota o HTTP de loopback local).".into() }
+    crate::bridge::BridgeError { code: code.into(), message: if code == "keychain_unavailable" {
+        "El llavero del sistema no está disponible; las claves siguen donde estaban. Desbloquéalo o instala un servicio de secretos y reintenta."
+    } else {
+        "No se pudo guardar la cuenta. Revisá los datos y la URL (HTTPS remota o HTTP de loopback local)."
+    }.into() }
 }
 
 // Additive internal-Pi tool stream. Malformed streams stay unavailable; session
