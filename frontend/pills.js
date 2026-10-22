@@ -9,7 +9,6 @@
   else root.AbitoPills = Object.freeze(api);
 })(typeof self !== 'undefined' ? self : this, (C, A) => {
   const DEFAULT_MAIN = 'integration_claude';
-  const MAX_DECLARED = 4;
   const DEFAULT_DECLARED = Object.freeze(['integration_resend', 'integration_n8n', 'integration_vercel', 'integration_github']);
   // #415 WU2: created blobs — label + optional palette colour entries, at most eight,
   // in creation order. Same validation philosophy as src/prefs.rs valid_blob_name:
@@ -31,7 +30,7 @@
     const values = Array.isArray(input.declaredPills) ? input.declaredPills : DEFAULT_DECLARED;
     const declaredPills = [];
     for (const id of values) {
-      if (id !== mainPill && C.offered(id, os) && !declaredPills.includes(id) && declaredPills.length < MAX_DECLARED) declaredPills.push(id);
+      if (id !== mainPill && C.offered(id, os) && !declaredPills.includes(id)) declaredPills.push(id);
     }
     // #346: only a real catalog id carrying a palette name survives; everything else
     // — hostile shape, off-set colour, unknown pill, prototype key — reads as no colour.
@@ -56,13 +55,12 @@
   }
   function valid(state, os = C.HOST_OS) {
     return !!state && isMain(state.mainPill, os) && Array.isArray(state.declaredPills) &&
-      state.declaredPills.length <= MAX_DECLARED && new Set(state.declaredPills).size === state.declaredPills.length &&
+      new Set(state.declaredPills).size === state.declaredPills.length &&
       state.declaredPills.every(id => id !== state.mainPill && C.offered(id, os));
   }
   function toggle(state, id, os = C.HOST_OS) {
     if (!valid(state, os) || id === state.mainPill || !C.offered(id, os)) return null;
     const active = state.declaredPills.includes(id);
-    if (!active && state.declaredPills.length >= MAX_DECLARED) return null;
     return { mainPill: state.mainPill, declaredPills: active ? state.declaredPills.filter(x => x !== id) : [...state.declaredPills, id] };
   }
   function chooseMain(state, id, os = C.HOST_OS) {
@@ -164,5 +162,5 @@
       'Elegir este blob no conecta el servicio. No hay una sesión activa disponible para esta vista.';
     return { id, name: def.name, offered, connected: false, word, detail, icon: 'plug-off', tone: 'faint', aria: `${def.name}: ${word}. ${detail}` };
   }
-  return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_DECLARED, MAX_BLOBS, MAX_BLOB_NAME, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor, createBlob, deleteBlob, setBlobColor, colorOfBlob, reorderDeclared, reorderBlobs };
+  return { DEFAULT_MAIN, DEFAULT_DECLARED, MAX_BLOBS, MAX_BLOB_NAME, normalize, valid, toggle, chooseMain, order, visible, selection, detail, colorOf, setColor, clearColor, createBlob, deleteBlob, setBlobColor, colorOfBlob, reorderDeclared, reorderBlobs };
 });

@@ -283,7 +283,6 @@ const PILL_CATALOG = [
   }
 ];
 const DEFAULT_MAIN_PILL = "integration_claude";
-const MAX_DECLARED = 4;
 const HOST_OS = typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent ?? "") ? "windows" : "linux";
 function pillDefinition(id) {
   return PILL_CATALOG.find((p) => p.id === id);
@@ -335,7 +334,6 @@ function toggleDeclared(d, id, os = HOST_OS) {
   if (id === d.mainPill) return null;
   if (!availablePills(os).some((p) => p.id === id)) return null;
   if (d.activeIntegrations.includes(id)) return d.activeIntegrations.filter((x) => x !== id);
-  if (d.activeIntegrations.length >= MAX_DECLARED) return null;
   return [...d.activeIntegrations, id];
 }
 function chooseMainPill(d, id, os = HOST_OS) {
@@ -350,7 +348,6 @@ function orderPills(tasks, mainPill) {
 export {
   DEFAULT_MAIN_PILL,
   HOST_OS,
-  MAX_DECLARED,
   PILL_CATALOG,
   PILL_CATEGORIES,
   availablePills,

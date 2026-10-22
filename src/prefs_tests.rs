@@ -760,7 +760,7 @@ fn f032_optional_defaults_and_saved_normalization() {
     let raw = r#"{"v":1,"sound":true,"main_pill":"ai_google","declared_pills":["unknown","integration_claude","agent_gemini","agent_gemini","ai_google","agent_amp","integration_notion","integration_spotify",7,"integration_music","agent_claude-desktop"]}"#;
     let loaded = Prefs::from_text(Some(raw));
     let v: Value = serde_json::from_str(&loaded.to_text()).unwrap();
-    assert_eq!(v["declared_pills"], json!(["agent_gemini","ai_google","agent_amp","integration_notion"]));
+    assert_eq!(v["declared_pills"], json!(["agent_gemini","ai_google","agent_amp","integration_notion","integration_spotify"]), "S32: the fifth is kept, not dropped for being the fifth");
     assert!(loaded.sound);
     assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded);
     for raw in [r#"{"v":1,"main_pill":"unknown","declared_pills":false}"#,
@@ -798,16 +798,29 @@ fn f032_main_and_toggle_public_transactions_preserve_legacy_fields() {
     assert_eq!(v["main_pill"],"agent_cursor");
     assert_eq!(v["declared_pills"],json!(["agent_codex","ai_openai","integration_github","integration_notion"]));
     assert_eq!(events.lock().unwrap().len(),6);
+    // S32: a fifth declared pill is accepted too (it was refused before there was no limit)
+    let fifth = parse_command(&json!({"action":"toggle_declared_pill","id":"ai_google"})).unwrap();
+    let with_fifth = transact(&serial,&state,&fifth,|p| { *disk.lock().unwrap()=p.to_text(); true },|_| {}).unwrap();
+    assert_eq!(with_fifth.declared_pills().len(), 5);
+    let undo = parse_command(&json!({"action":"toggle_declared_pill","id":"ai_google"})).unwrap();
+    transact(&serial,&state,&undo,|p| { *disk.lock().unwrap()=p.to_text(); true },|_| {}).unwrap();
     let before = state.lock().unwrap().clone(); let bytes = disk.lock().unwrap().clone();
     for payload in [
-        json!({"action":"toggle_declared_pill","id":"ai_google"}),
         json!({"action":"toggle_declared_pill","id":"agent_cursor"}),
     ] {
+        // (a refusal is by id now: the main pill; never by count)
         let command = parse_command(&payload).unwrap();
         let mut writes=0; let mut published=0;
         assert_eq!(transact(&serial,&state,&command,|_| { writes+=1; true },|_| { published+=1; }),Err(CommandError));
         assert_eq!(writes,0); assert_eq!(published,0); assert_eq!(*state.lock().unwrap(),before); assert_eq!(*disk.lock().unwrap(),bytes);
     }
+    for id in ["not_a_pill", "integration_music"] {
+        match parse_command(&json!({"action":"toggle_declared_pill","id":id})) {
+            Err(_) => {}
+            Ok(c) => assert_eq!(transact(&serial,&state,&c,|_| true,|_| {}), Err(CommandError), "{id} is refused by id, not by count"),
+        }
+    }
+    assert_eq!(*state.lock().unwrap(),before);
     let remove = parse_command(&json!({"action":"toggle_declared_pill","id":"agent_codex"})).unwrap();
     let mut writes=0; let mut published=0;
     assert_eq!(transact(&serial,&state,&remove,|_| { writes+=1; false },|_| { published+=1; }),Err(CommandError));
@@ -2296,4 +2309,46 @@ fn a_stored_absence_in_minutes_migrates_to_seconds_and_the_next_write_uses_the_n
     // a file with neither key writes neither
     let none: Value = serde_json::from_str(&Prefs::default().to_text()).unwrap();
     assert!(none.get("absence_seconds").is_none() && none.get("absence_minutes").is_none());
+}
+
+// ── S32: no limit on the declared pills (#503) ──
+fn offered_non_main(n: usize) -> Vec<String> {
+    PILL_IDS.iter().filter(|id| pill_offered(id) && **id != DEFAULT_MAIN_PILL).take(n).map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn the_fifth_and_the_tenth_declared_pill_are_accepted_and_persisted() {
+    use std::sync::Mutex;
+    let state = Mutex::new(Prefs::from_text(Some(r#"{"v":1,"declared_pills":[]}"#))); let serial = Mutex::new(());
+    let disk = Mutex::new(state.lock().unwrap().to_text());
+    let ids = offered_non_main(10); assert_eq!(ids.len(), 10, "the catalogue offers at least ten non-main pills");
+    for (n, id) in ids.iter().enumerate() {
+        let command = parse_command(&json!({"action":"toggle_declared_pill","id":id})).unwrap();
+        let next = transact(&serial,&state,&command,|p| { *disk.lock().unwrap()=p.to_text(); true },|_| {}).unwrap_or_else(|_| panic!("pill number {} was refused", n + 1));
+        assert_eq!(next.declared_pills().len(), n + 1);
+    }
+    let v: Value = serde_json::from_str(&disk.lock().unwrap()).unwrap();
+    assert_eq!(v["declared_pills"], json!(ids), "all ten are on disk, in order");
+    assert_eq!(Prefs::from_text(Some(&disk.lock().unwrap())).declared_pills(), ids, "and a fresh load keeps every one of them");
+}
+
+#[test]
+fn normalising_never_drops_a_pill_for_being_the_fifth_or_later() {
+    let ids = offered_non_main(12);
+    let text = json!({"v":1,"declared_pills":ids}).to_string();
+    assert_eq!(Prefs::from_text(Some(&text)).declared_pills(), ids);
+    // the same rules as before still hold: duplicates, unknown ids and the main pill are dropped, nothing else
+    let mut noisy = ids.clone(); noisy.insert(2, ids[0].clone()); noisy.insert(1, "not_a_pill".into()); noisy.push(DEFAULT_MAIN_PILL.into());
+    assert_eq!(Prefs::from_text(Some(&json!({"v":1,"declared_pills":noisy}).to_string())).declared_pills(), ids);
+}
+
+#[test]
+fn prefs_saved_with_four_pills_load_exactly_as_before() {
+    let four = offered_non_main(4);
+    let text = json!({"v":1,"declared_pills":four}).to_string();
+    let loaded = Prefs::from_text(Some(&text));
+    assert_eq!(loaded.declared_pills(), four);
+    assert_eq!(Prefs::from_text(Some(&loaded.to_text())), loaded, "round trip is stable");
+    // and no stored list at all still means today's defaults
+    assert_eq!(Prefs::from_text(Some(r#"{"v":1}"#)).declared_pills(), DEFAULT_DECLARED_PILLS.iter().map(|s| s.to_string()).collect::<Vec<_>>());
 }
