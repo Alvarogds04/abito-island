@@ -75,7 +75,7 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
   for (const css of ['settings/settings.css', 'hub/hub.css']) assert(html.includes(`vendor/coucou/${css}`));
   const entry = fs.readFileSync(path.join(root, 'frontend/settings-app.js'), 'utf8');
   assert(entry.includes("import { renderAgentSettings }")); assert(entry.includes("import { renderChatSettings }"));
-  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action']", 'J1 adds only the closed dictation and voice commands');
+  assert.equal(entry.match(/const allowed = new Set\(([^;]+)\);/)[1], "['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'oauth_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action']", 'only closed host commands, including subscription OAuth');
   const guardCalls = [], guardContext = { window: { __TAURI__: { core: { invoke: async (...args) => guardCalls.push(args) } } }, document: {getElementById: () => ({})},
     setInvoke() {}, dictationPage() {}, flowSettingsPage() {}, dictionaryPage() {}, snippetsPage() {}, stylesPage() {}, insightsPage() {}, voicePage() {}, inactivePages: {}, startHub: async () => {}, TextEncoder };
   require('node:vm').runInNewContext(entry.replace(/^import .*;\n/gm, '') + '\nglobalThis.closedInvoke = invoke;', guardContext);

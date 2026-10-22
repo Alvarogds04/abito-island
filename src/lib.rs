@@ -72,6 +72,7 @@ pub mod recap_cmd;
 pub mod recap_spool;
 pub mod secrets;
 pub mod provider_oauth;
+pub mod oauthcmd;
 pub mod sounds;
 pub mod question;
 pub mod spotify;

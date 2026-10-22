@@ -80,6 +80,22 @@ test('S4 Chat: ONE list of AI providers: no second «Configuración de proveedor
   assert(await r.page.evaluate(() => !!document.getElementById('chat-window-context') && !!document.getElementById('chat-extras')), 'slots for the context toggle');
 });
 
+test('S2 Chat: subscription rows belong to Claude/OpenAI only and fit within their own cards', async r => {
+  await r.go('Chat');
+  await r.page.waitForFunction(() => document.querySelector('#chat-subscription-anthropic')?.textContent.includes('sin sesión'));
+  const rows = await r.page.evaluate(() => [...document.querySelectorAll('[id^="chat-subscription-"]')].map(row => {
+    const card = row.closest('.abito-card'), cb = card.getBoundingClientRect();
+    const bad = [...row.querySelectorAll('input,button,span')].filter(el => { const b = el.getBoundingClientRect(); return b.width && (b.left < cb.left || b.right > cb.right - 8); }).map(e => e.tagName);
+    return { id:row.id, card:card.querySelector('h2').textContent.trim().split(/\s/)[0], text:row.textContent, bad };
+  }));
+  assert.deepEqual(rows.map(r => [r.id,r.card]), [['chat-subscription-anthropic','Claude'],['chat-subscription-openai','OpenAI']]);
+  for (const row of rows) { assert(row.text.includes('✗ sin sesión')); assert(row.text.includes('Iniciar sesión con suscripción')); assert.deepEqual(row.bad,[]); }
+  const claude = r.page.locator('#chat-subscription-anthropic'); await claude.getByText('Iniciar sesión con suscripción',{exact:true}).click();
+  await claude.getByPlaceholder('Pega aquí el código').waitFor({state:'visible'});
+  const overflow = await claude.evaluate(row => { const cb = row.closest('.abito-card').getBoundingClientRect(); return [...row.querySelectorAll('input,button')].some(el => { const b = el.getBoundingClientRect(); return b.width && b.right > cb.right - 8; }); });
+  assert.equal(overflow,false); await claude.getByText('Cancelar',{exact:true}).click();
+});
+
 test('S1 Chat: no long paragraph on the provider cards (explanations are tooltips)', async r => {
   await r.go('Chat');
   const long = await r.page.evaluate(() => [...document.querySelectorAll('.abito-card .hint, #chat-local-models .hint')].filter(e => e.textContent.length > 90 && !e.closest('#chat-window-context')).map(e => e.textContent.slice(0, 50)));

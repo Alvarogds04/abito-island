@@ -33,6 +33,113 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
   const present = {};
   let state = null, prefs = {}, modelBusy = false;
   const keyRefresh = {};
+  const subscriptionCleanups = [];
+  function subscriptionRow(group, provider) {
+    const box = h("div", { id: `chat-subscription-${group}`, title: `Usa tu suscripción de ${provider === "claude" ? "Claude" : "ChatGPT"}. El inicio de sesión se hace en tu navegador; Abito guarda el acceso solo en el llavero del sistema. Sin verificar con el proveedor.`, style: "display:flex;flex-direction:column;gap:6px;min-width:0" });
+    const badge = h("span", { class: "hint", role: "status" });
+    const controls = h("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0" });
+    const manual = h("div", { style: "display:flex;flex-wrap:wrap;gap:8px;min-width:0" });
+    const code = input("text", "Pega aquí el código", `chat-oauth-code-${provider}`);
+    code.maxLength = 2048;
+    code.setAttribute("aria-label", "Pega aquí el código");
+    const url = h("div", { style: "user-select:text;overflow-wrap:anywhere;min-width:0", text: "" });
+    const alert = h("div", { class: "hint notice err", role: "alert", "aria-live": "polite" });
+    const generic = "No se pudo completar el inicio de sesión. Vuelve a intentarlo.";
+    let waiting = false, busy = false, status = "", epoch = 0, timer = null;
+    const stop = () => {
+      if (timer !== null) (timers || globalThis).clearTimeout(timer);
+      timer = null;
+    };
+    const paint = () => {
+      badge.textContent = waiting ? "Esperando el navegador…" : status === "present" ? "✓ sesión iniciada" : status === "expired" ? "· caducada, vuelve a iniciar sesión" : status === "absent" ? "✗ sin sesión" : "· Leyendo…";
+      begin.hidden = waiting || status === "present";
+      begin.disabled = busy;
+      logout.hidden = waiting || status !== "present";
+      logout.disabled = busy;
+      cancel.hidden = !waiting;
+      send.disabled = busy;
+      code.disabled = busy;
+      manual.hidden = !waiting || provider !== "claude";
+      manual.style.setProperty("display", manual.hidden ? "none" : "flex");
+    };
+    const refresh = (version = epoch) => work(() => call("oauth_action", { action: "status", provider }), (result2) => {
+      if (version !== epoch) return;
+      status = result2?.state;
+      paint();
+    }, () => {
+      if (version === epoch) alert.textContent = generic;
+    });
+    const poll = (version) => {
+      if (!waiting || version !== epoch || !s.alive()) return;
+      timer = s.later(() => {
+        timer = null;
+        work(() => call("oauth_action", { action: "poll", provider }), (result2) => {
+          if (version !== epoch || !waiting) return;
+          if (result2?.state === "waiting") poll(version);
+          else finish(result2, version);
+        }, () => {
+          if (version === epoch) finish({ state: "error", message: generic }, version);
+        });
+      }, 1500);
+    };
+    const finish = (result2, version) => {
+      if (version !== epoch) return;
+      waiting = false;
+      busy = false;
+      stop();
+      code.value = "";
+      url.textContent = "";
+      if (result2?.state === "error") alert.textContent = result2.message || generic;
+      paint();
+      refresh(version);
+    };
+    const act = (action, input2) => {
+      if (busy && action !== "cancel") return;
+      stop();
+      const version = ++epoch;
+      busy = true;
+      alert.textContent = "";
+      url.textContent = "";
+      paint();
+      work(() => call("oauth_action", { action, provider, ...action === "complete" ? { input: input2 } : {} }), (result2) => {
+        if (version !== epoch) return;
+        busy = false;
+        if (action === "begin" && result2?.state === "waiting") {
+          waiting = true;
+          if (provider === "claude" && result2.browserOpened === false && typeof result2.authUrl === "string") url.textContent = result2.authUrl;
+          paint();
+          poll(version);
+        } else finish(result2, version);
+      }, () => {
+        if (version === epoch) finish({ state: "error", message: generic }, version);
+      });
+    };
+    const begin = button("Iniciar sesión con suscripción", () => act("begin"));
+    const logout = button("Cerrar sesión", () => act("sign_out"));
+    const cancel = button("Cancelar", () => {
+      code.value = "";
+      waiting = false;
+      act("cancel");
+    });
+    const send = button("Enviar", () => {
+      const draft = code.value;
+      code.value = "";
+      if (draft) act("complete", draft);
+    });
+    controls.append(h("span", { text: "Suscripción" }), badge, begin, logout, cancel);
+    manual.append(code, send);
+    box.append(controls, manual, url, alert);
+    subscriptionCleanups.push(() => {
+      ++epoch;
+      stop();
+      waiting = false;
+      code.value = "";
+      url.textContent = "";
+    });
+    paint();
+    refresh();
+    return box;
+  }
   function keyRow(id, title, placeholder, primary = false) {
     const field = input("password", placeholder, `chat-key-${id}`);
     field.maxLength = 2048;
@@ -107,12 +214,12 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
       busy = true;
       save.disabled = remove.disabled = test.disabled = true;
       clear(feedback);
-      work(() => call("secret_action", payload), (result) => {
-        if (result?.present !== (action === "set")) {
+      work(() => call("secret_action", payload), (result2) => {
+        if (result2?.present !== (action === "set")) {
           feedback.append(h("div", { class: "notice err", text: "No se confirmó el cambio de la clave." }));
           return;
         }
-        present[id] = result.present;
+        present[id] = result2.present;
         if (primary) feedback.append(h("div", { class: "notice ok", text: action === "set" ? t("Key saved in the {store}.", { store: STORE }) : t("Key removed.") }));
         refresh();
         const account = keyAccountCommand(id, action, value, V.ownedAccounts(state?.ownedAccounts));
@@ -208,12 +315,13 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
   }
   const engineSlots = {};
   const engineSlot = (group) => engineSlots[group] = h("div", { id: `chat-engine-slot-${group}` });
-  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), modelPicker("anthropic")), api.feedback, engineSlot("anthropic"));
+  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), modelPicker("anthropic")), api.feedback, subscriptionRow("anthropic", "claude"), engineSlot("anthropic"));
   apiSection.children[0].prepend(api.dot);
   const providerCards = [];
   for (const [id, name, placeholder, site] of CLOUD) {
     const k = keyRow(KEYS[id] ?? providerDef(id).key, name, placeholder);
     const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t("Model"), modelPicker(id)), k.feedback, engineSlot(id));
+    if (id === "openai") c.append(subscriptionRow("openai", "chatgpt"));
     c.setAttribute("title", t("Key from {site}", { site }));
     c.children[0].prepend(k.dot);
     providerCards.push(c);
@@ -305,8 +413,8 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     drawModels();
     paintContext();
   });
-  for (const key of ["anthropic-api-key", ...CLOUD.map(([id]) => KEYS[id] ?? providerDef(id).key)]) work(() => call("secret_action", V.keyPayload("present", key)), (result) => {
-    present[key] = result?.present === true;
+  for (const key of ["anthropic-api-key", ...CLOUD.map(([id]) => KEYS[id] ?? providerDef(id).key)]) work(() => call("secret_action", V.keyPayload("present", key)), (result2) => {
+    present[key] = result2?.present === true;
     keyRefresh[key]();
   });
   for (const action of ["view", "models_list"]) work(() => call("agent_action", { action }), (next) => {
@@ -318,7 +426,11 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     drawModels();
     paintContext();
   });
-  return Object.assign(s.finish(), { slotFor: (name) => engineSlots[name] || engineOthers });
+  const result = s.finish(), dispose = result.dispose;
+  return Object.assign(result, { dispose: () => {
+    subscriptionCleanups.forEach((fn) => fn());
+    dispose();
+  }, slotFor: (name) => engineSlots[name] || engineOthers });
 }
 export {
   renderChatSettings

@@ -38,6 +38,7 @@ mod githubhost;
 mod mailhost;
 mod monitorshost;
 mod secretshost;
+mod oauthhost;
 mod soundshost;
 mod recaphost;
 mod planhost;
@@ -1886,6 +1887,7 @@ fn main() {
             integrationshost::integration_action,
             spotifyhost::spotify_action,
             secretshost::secret_action,
+            oauthhost::oauth_action,
             githubhost::github_action,
             mailhost::mail_action,
             monitorshost::monitor_action,

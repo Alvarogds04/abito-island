@@ -45,6 +45,7 @@ async function open(scenario = {}) {
     // The shortcuts host: `suspend` (a key is being captured) RELEASES every grab, so each action then reports what the real host reports
     // with nothing held: status `unsupported`, no `effective` key (hotkeyhost.rs view_of + idle_status). `resume` restores them.
     let suspended = false;
+    const oauthStates = { ...scenario.oauthStates };
     // one DISTINCT combination per action (the real host never hands two actions the same key), and the portal's own sentence for each
     const COMBOS = { toggleIsland: ['Ctrl+Alt+A', '<Shift><Control>n'], openChat: ['Ctrl+Alt+Space', '<Control><Alt>space'], goToAlert: ['Ctrl+Alt+Shift+A', '<Shift><Control><Alt>a'], jumpToTerminal: ['Ctrl+Alt+T', '<Control><Alt>t'],
       nextPill: ['Ctrl+Alt+Right', '<Control><Alt>Right'], prevPill: ['Ctrl+Alt+Left', '<Control><Alt>Left'], muteToggle: ['Ctrl+Alt+M', '<Control><Alt>m'], desktopToggle: ['Ctrl+Alt+D', '<Control><Alt>d'], wardrobeToggle: ['Ctrl+Alt+W', '<Control><Alt>w'] };
@@ -55,7 +56,7 @@ async function open(scenario = {}) {
         const p = (args && args.payload) || {}; const a = p.action; calls.push([cmd, a]);
         // The host's REAL limiter (src/bridge.rs RateLimiter): ONE fixed 1 s window shared by prefs/agent/secret/models/specialists/plan
         // actions, 30 calls, then every call is refused with `rate-exceeded` until the window rolls over. The validator hit it (#503 S32 gate).
-        if (['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action'].includes(cmd)) {
+        if (['prefs_action', 'agent_action', 'secret_action', 'oauth_action', 'models_action', 'specialists_action', 'plan_action'].includes(cmd)) {
           const now = Date.now(); const lim = window.__limiter || (window.__limiter = { start: 0, n: 0 });
           if (now - lim.start >= 1000) { lim.start = now; lim.n = 0; }
           if (++lim.n > 30) { window.__rateRefused = (window.__rateRefused || 0) + 1; throw new Error('{"code":"rate-exceeded","message":"Rate exceeded"}'); }
@@ -67,6 +68,14 @@ async function open(scenario = {}) {
         if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1' }] };
         if (cmd === 'sound_action') return a === 'list' ? { names: [] } : { ok: true };
         if (cmd === 'secret_action') { if (scenario.keychainDown) throw new Error('keychain_unavailable'); return { present: false }; }
+        if (cmd === 'oauth_action') {
+          if (a === 'status') return { provider:p.provider, state:oauthStates[p.provider] || 'absent' };
+          if (a === 'begin') return { state:'waiting', manual:p.provider === 'claude', browserOpened:true };
+          if (a === 'poll') { const state = scenario.oauthPoll || 'waiting'; if (state === 'done') oauthStates[p.provider] = 'present'; return { state }; }
+          if (a === 'complete') { oauthStates[p.provider] = 'present'; return { state:'done' }; }
+          if (a === 'sign_out') { oauthStates[p.provider] = 'absent'; return { state:'absent' }; }
+          return { state:'none' };
+        }
         if (cmd === 'models_action') return { profiles: [] };
         if (cmd === 'specialists_action') return { specialists: [], active: null };
         if (cmd === 'plan_action') return { available: false };

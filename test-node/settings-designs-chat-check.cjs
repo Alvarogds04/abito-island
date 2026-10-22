@@ -4,24 +4,35 @@
 const assert = require('node:assert/strict');
 const { test, all, text, dom, load } = require('./settings-designs-check.cjs');
 
-async function mount({ present = {}, accounts = [], failPresent = false } = {}) {
+async function mount({ present = {}, accounts = [], failPresent = false, oauth = {} } = {}) {
   let failOnce = false;
   dom();
   const { renderChatSettings } = await load('chat.js');
   const V = require('../frontend/settings-view.js');
   const real = a => a.map(x => ({ accountId: x.accountId, provider: x.provider || 'google', hasCredential: true, config: { nombre: 'N', baseUrl: 'https://x', api: 'a', compat: {}, models: ['m'], defaultModel: 'm' } }));
-  const calls = [], events = {};
+  const calls = [], events = {}, timeouts = new Map(); let timerId = 0;
+  const oauthStates = { ...oauth.states };
+  const timers = { setTimeout(fn, ms) { assert.equal(ms, 1500); timeouts.set(++timerId, fn); return timerId; }, clearTimeout(id) { timeouts.delete(id); } };
+  let ui;
   const state = { connection: 'connected', ownedAccounts: { accounts: real(accounts) }, providers: [], accounts: [], auth: {}, connectors: { items: [] } };
   const invoke = async (cmd, { payload: p }) => {
     calls.push([cmd, p]);
     if (cmd === 'secret_action') { if ((failPresent || failOnce) && p.action === 'present') { failOnce = false; throw new Error('keychain'); } return { present: p.action === 'set' ? true : p.action === 'clear' ? false : present[p.key] === true }; }
+    if (cmd === 'oauth_action') {
+      if (p.action === 'status') return { provider: p.provider, state: oauthStates[p.provider] || 'absent' };
+      if (p.action === 'begin') { if (oauth.fail) throw { message: 'No se pudo completar el inicio de sesión. Vuelve a intentarlo.' }; return { state: 'waiting', manual: p.provider === 'claude', browserOpened: oauth.browserOpened !== false, ...(oauth.browserOpened === false ? { authUrl: 'https://claude.ai/oauth/authorize?fixture' } : {}) }; }
+      if (p.action === 'poll') { const state = oauth.poll || 'waiting'; if (state === 'done') oauthStates[p.provider] = 'present'; return { state }; }
+      if (p.action === 'complete') { assert.equal(field(ui, 'chat-oauth-code-claude').value, '', 'code cleared BEFORE invoke'); oauthStates[p.provider] = 'present'; return { state: 'done' }; }
+      if (p.action === 'sign_out') { oauthStates[p.provider] = 'absent'; return { state: 'absent' }; }
+      return { state: 'none' };
+    }
     if (cmd === 'prefs_action') return { chosenModels: {}, windowContext: false, windowContextAvailable: true };
     if (cmd === 'models_action') return { profiles: [] };
     return structuredClone(state);
   };
-  const ui = await renderChatSettings({ invoke, V, listen: async (n, f) => { events[n] = f; return () => { delete events[n]; }; }, timers: { setTimeout: () => 1, clearTimeout() {} } });
+  ui = await renderChatSettings({ invoke, V, listen: async (n, f) => { events[n] = f; return () => { delete events[n]; }; }, timers });
   await ui.settled();
-  return { ui, calls, state, failNext: () => { failOnce = true; } };
+  return { ui, calls, state, timeouts, tick: async () => { const fns = [...timeouts.values()]; timeouts.clear(); fns.forEach(f => f()); await ui.settled(); }, failNext: () => { failOnce = true; } };
 }
 const card = (ui, title) => all(ui).find(e => e.tagName === 'section' && all(e).some(h => h.tagName === 'h2' && text(h).trim().startsWith(title)));
 const stateOf = c => text(all(c).find(e => e.className.split(' ').includes('card-state'))).replace(/\s+/g, ' ').trim();
@@ -29,6 +40,29 @@ const field = (c, id) => all(c).find(e => e.attrs.id === id);
 // a control that is `hidden` is not there for the user: only visible buttons count (a DISABLED one still is)
 const btn = (scope, word) => all(scope).find(e => e.tagName === 'button' && !e.hidden && (e.textContent === word || e.attrs['aria-label'] === word));
 const rowOf = (c, input) => all(c).find(e => e.className === 'row' && e.children.includes(input));
+
+test('S2 subscription trusted lifecycle, polling, sign-out and dispose', async () => {
+  const m = await mount({ oauth: { poll: 'done' } }), {ui,calls} = m;
+  const c = card(ui,'OpenAI'); assert(text(c).includes('Suscripción')); assert(text(c).includes('✗ sin sesión'));
+  calls.length = 0; btn(c,'Iniciar sesión con suscripción').fire('click',false); await ui.settled(); assert.equal(calls.length,0);
+  btn(c,'Iniciar sesión con suscripción').fire('click'); await ui.settled(); assert(text(c).includes('Esperando el navegador…')); assert.equal(m.timeouts.size,1);
+  await m.tick(); assert(text(c).includes('✓ sesión iniciada')); assert.equal(m.timeouts.size,0);
+  btn(c,'Cerrar sesión').fire('click'); await ui.settled(); assert(text(c).includes('✗ sin sesión'));
+  btn(c,'Iniciar sesión con suscripción').fire('click'); await ui.settled(); btn(c,'Cancelar').fire('click'); await ui.settled(); assert.equal(m.timeouts.size,0);
+  btn(c,'Iniciar sesión con suscripción').fire('click'); await ui.settled(); assert.equal(m.timeouts.size,1); ui.dispose(); assert.equal(m.timeouts.size,0); await m.tick();
+});
+test('S2 manual code cleared before IPC, fallback URL plain text, generic error', async () => {
+  const {ui,calls,timeouts} = await mount({ oauth: { browserOpened:false } }); const c = card(ui,'Claude');
+  btn(c,'Iniciar sesión con suscripción').fire('click'); await ui.settled();
+  const code = field(c,'chat-oauth-code-claude'); assert(code); assert.equal(code.maxLength,2048); assert.equal(code.attrs.autocomplete,'off'); assert.equal(code.attrs.spellcheck,'false');
+  assert(text(c).includes('https://claude.ai/oauth/authorize?fixture')); assert(!all(c).some(e => e.tagName === 'a'));
+  code.value='code-secret#fixture'; btn(c,'Enviar').fire('click'); assert.equal(code.value,''); await ui.settled();
+  assert.equal(timeouts.size,0); assert(text(c).includes('✓ sesión iniciada')); assert(!text(ui).includes('code-secret')); assert(all(ui).every(e => !String(e.value || '').includes('code-secret')));
+  const sent = calls.findIndex(([cmd,p]) => cmd === 'oauth_action' && p.action === 'complete'); assert(sent >= 0); assert(!JSON.stringify(calls.slice(sent+1)).includes('code-secret'));
+  btn(c,'Cerrar sesión').fire('click'); await ui.settled(); btn(c,'Iniciar sesión con suscripción').fire('click'); await ui.settled(); code.value='draft'; ui.dispose(); assert.equal(code.value,''); assert.equal(timeouts.size,0);
+  const failed = await mount({ oauth: { fail:true } }); const fc = card(failed.ui,'Claude'); btn(fc,'Iniciar sesión con suscripción').fire('click'); await failed.ui.settled();
+  assert(all(fc).some(e => e.attrs.role === 'alert' && text(e).includes('No se pudo completar el inicio de sesión. Vuelve a intentarlo.')));
+});
 
 test('S21 Chat: the page is cards in the wireframe order, each provider with its own state badge (icon + word)', async () => {
   const { ui } = await mount({ present: { 'google-api-key': true } });
