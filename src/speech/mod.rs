@@ -12,9 +12,12 @@
 //! (default `~/.local/share/abito/Models`). From then on everything runs offline.
 
 pub mod audio;
+pub mod catalog;
 pub mod train;
 pub mod words;
 pub mod wake;
+#[cfg(test)]
+mod catalog_tests;
 #[cfg(test)]
 mod train_tests;
 #[cfg(test)]
@@ -56,7 +59,7 @@ impl ModelSet {
         root.join(self.id)
     }
 
-    fn path(&self, name: &str) -> String {
+    pub fn path(&self, name: &str) -> String {
         self.dir().join(name).to_string_lossy().to_string()
     }
 
