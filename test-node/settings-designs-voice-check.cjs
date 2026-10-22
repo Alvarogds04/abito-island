@@ -42,10 +42,13 @@ test('S22 Voz: the status banner is on top and says icon + word from the REAL st
   off.push({ prefs: { enabled: true, output: 'system', gender: 'female', sensitivity: 50 }, listening: true }); assert.equal(words(banner(off.page)), '● Escuchando');
 });
 
-test('S22 Voz: three blocks in the wireframe order: Activación, Respuestas, Privacidad (collapsible, collapsed)', async () => {
+test('S22 Voz: blocks in the approved order: Activación first, then Modelo de voz (S5/L5) and Tu voz (S2), Respuestas, Privacidad last (collapsible, collapsed)', async () => {
   const { page } = await mount();
-  assert.deepEqual(cardTitles(page), ['Activación', 'Respuestas', 'Privacidad']);
-  assert.equal(all(page).filter(e => e.className === 'hub-card').length, 3);
+  // The original three blocks keep their relative order; the model picker (S5, L5: «en el mismo ajuste») and the
+  // training (S2) sit between Activación and Respuestas. Activación stays first and Privacidad last.
+  assert.deepEqual(cardTitles(page), ['Activación', 'Modelo de voz', 'Tu voz', 'Respuestas', 'Privacidad']);
+  assert.deepEqual(cardTitles(page).filter(t => ['Activación', 'Respuestas', 'Privacidad'].includes(t)), ['Activación', 'Respuestas', 'Privacidad']);
+  assert.equal(all(page).filter(e => e.className === 'hub-card').length, 5);
   const act = all(page).find(e => e.className === 'hub-card');
   assert(text(act).includes('Escuchar « OK Abito »')); assert(text(act).includes('Parakeet, en tu ordenador')); assert(text(act).includes('Sensibilidad de « OK Abito »'));
   const privacy = all(page).find(e => e.tagName === 'details' && e.attrs.id === 'voice-privacy');

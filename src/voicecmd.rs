@@ -41,12 +41,23 @@ impl Default for VoicePrefs {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Status,
     SetPrefs(VoicePrefs),
     Download,
     Remove,
+    /// «Entrenar mi voz»: hear one recording / drop the last / stop / save / forget.
+    TrainRecord,
+    TrainUndo,
+    TrainCancel,
+    TrainFinish,
+    TrainReset,
+    /// Ajustes → Voz: the language, the model in use and the custom words.
+    SetSpeech { language: String, model: String, words: Vec<String> },
+    ModelDownload(String),
+    ModelCancel(String),
+    ModelDelete(String),
 }
 
 pub fn parse_command(payload: &Value) -> Option<Command> {
@@ -55,6 +66,35 @@ pub fn parse_command(payload: &Value) -> Option<Command> {
         "status" if o.len() == 1 => Some(Command::Status),
         "download_model" if o.len() == 1 => Some(Command::Download),
         "remove_model" if o.len() == 1 => Some(Command::Remove),
+        "train_record" if o.len() == 1 => Some(Command::TrainRecord),
+        "train_undo" if o.len() == 1 => Some(Command::TrainUndo),
+        "train_cancel" if o.len() == 1 => Some(Command::TrainCancel),
+        "train_finish" if o.len() == 1 => Some(Command::TrainFinish),
+        "train_reset" if o.len() == 1 => Some(Command::TrainReset),
+        "model_download" | "model_cancel" | "model_delete" if o.len() == 2 => {
+            let id = o.get("id")?.as_str()?;
+            crate::speech::catalog::find(id)?;
+            let id = id.to_string();
+            Some(match o.get("action")?.as_str()? {
+                "model_download" => Command::ModelDownload(id),
+                "model_cancel" => Command::ModelCancel(id),
+                _ => Command::ModelDelete(id),
+            })
+        }
+        "set_speech" if o.len() == 2 => {
+            let p = o.get("speech")?.as_object()?;
+            if p.len() != 3 {
+                return None;
+            }
+            let language = p.get("language")?.as_str()?;
+            let model = p.get("model")?.as_str()?;
+            let words = p.get("words")?.as_array()?;
+            if !crate::speech::catalog::valid_language(language) || crate::speech::catalog::find(model).is_none() || words.len() > crate::speech::words::MAX_WORDS {
+                return None;
+            }
+            let words = words.iter().map(|w| w.as_str().filter(|w| w.chars().count() <= 40).map(String::from)).collect::<Option<Vec<_>>>()?;
+            Some(Command::SetSpeech { language: language.into(), model: model.into(), words })
+        }
         "set_prefs" if o.len() == 2 => {
             let p = o.get("prefs")?.as_object()?;
             if p.len() != 4 || !["enabled", "output", "gender", "sensitivity"].iter().all(|k| p.contains_key(*k)) {

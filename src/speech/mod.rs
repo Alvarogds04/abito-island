@@ -12,7 +12,18 @@
 //! (default `~/.local/share/abito/Models`). From then on everything runs offline.
 
 pub mod audio;
+pub mod catalog;
+pub mod train;
+pub mod words;
 pub mod wake;
+#[cfg(test)]
+mod catalog_tests;
+#[cfg(test)]
+mod models_tests;
+#[cfg(test)]
+mod train_tests;
+#[cfg(test)]
+mod words_tests;
 #[cfg(test)]
 mod wake_tests;
 
@@ -23,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
+use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig, OfflineWhisperModelConfig};
 
 /// Every model works on 16 kHz mono.
 pub const SAMPLE_RATE: u32 = 16_000;
@@ -50,7 +61,7 @@ impl ModelSet {
         root.join(self.id)
     }
 
-    fn path(&self, name: &str) -> String {
+    pub fn path(&self, name: &str) -> String {
         self.dir().join(name).to_string_lossy().to_string()
     }
 
@@ -193,8 +204,186 @@ pub fn status() -> ModelsStatus {
     ModelsStatus { parakeet, download_mb: PARAKEET.total_size() / 1_000_000 }
 }
 
+/// The model and language the user chose (Ajustes → Voz); Parakeet and Spanish until they pick.
+fn active_slot() -> &'static Mutex<(String, String)> {
+    static A: OnceLock<Mutex<(String, String)>> = OnceLock::new();
+    A.get_or_init(|| Mutex::new((catalog::DEFAULT_MODEL.to_string(), "es".to_string())))
+}
+
+pub fn active() -> (String, String) {
+    active_slot().lock().unwrap().clone()
+}
+
+fn active_set() -> &'static ModelSet {
+    catalog::find(&active().0).map(|e| e.set).unwrap_or(&PARAKEET)
+}
+
+/// Switches the model / language; the loaded recognizer is dropped so the next use loads the new one.
+/// An unknown model or language changes nothing.
+pub fn set_active(model: &str, language: &str) {
+    if catalog::find(model).is_none() || !catalog::valid_language(language) {
+        return;
+    }
+    let next = (model.to_string(), language.to_string());
+    let mut a = active_slot().lock().unwrap();
+    if *a != next {
+        *a = next;
+        drop(a);
+        unload();
+    }
+}
+
 pub fn is_ready() -> bool {
-    PARAKEET.is_present()
+    active_set().is_present()
+}
+
+// ── The picker's own downloads (any catalog model; explicit click, cancellable) ──
+
+struct ModelDl {
+    running: bool,
+    fraction: f64,
+    error: Option<String>,
+    cancel: bool,
+}
+
+fn model_dls() -> &'static Mutex<std::collections::HashMap<&'static str, ModelDl>> {
+    static M: OnceLock<Mutex<std::collections::HashMap<&'static str, ModelDl>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+pub fn model_state(id: &str) -> ModelState {
+    let Some(entry) = catalog::find(id) else { return ModelState::Missing };
+    if let Some(d) = model_dls().lock().unwrap().get(entry.id) {
+        if d.running {
+            return ModelState::Downloading { fraction: d.fraction };
+        }
+    }
+    if entry.set.is_present() {
+        return ModelState::Ready;
+    }
+    match model_dls().lock().unwrap().get(entry.id).and_then(|d| d.error.clone()) {
+        Some(error) => ModelState::Failed { error },
+        None => ModelState::Missing,
+    }
+}
+
+/// Starts the download of one catalog model on a background thread. ONLY from an explicit user action.
+pub fn download_model(id: &str, on_change: impl Fn(ModelState) + Send + 'static) -> Result<(), String> {
+    let entry = catalog::find(id).ok_or("unknown model")?;
+    {
+        let mut m = model_dls().lock().unwrap();
+        let d = m.entry(entry.id).or_insert(ModelDl { running: false, fraction: 0.0, error: None, cancel: false });
+        if d.running {
+            return Ok(());
+        }
+        *d = ModelDl { running: true, fraction: 0.0, error: None, cancel: false };
+    }
+    let id = entry.id;
+    on_change(model_state(id));
+    std::thread::Builder::new()
+        .name("abito-model-pick-download".into())
+        .spawn(move || {
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| rt.block_on(fetch_set(entry.set, &|f| {
+                    if let Some(d) = model_dls().lock().unwrap().get_mut(id) {
+                        d.fraction = f;
+                    }
+                    on_change(model_state(id));
+                }, &|| model_dls().lock().unwrap().get(id).is_some_and(|d| d.cancel))));
+            if let Some(d) = model_dls().lock().unwrap().get_mut(id) {
+                d.running = false;
+                d.error = result.err();
+            }
+            on_change(model_state(id));
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Stops a running download; the partial file is discarded.
+pub fn cancel_model(id: &str) {
+    if let Some(d) = model_dls().lock().unwrap().get_mut(id) {
+        if d.running {
+            d.cancel = true;
+        }
+    }
+}
+
+/// Deletes a downloaded model. The one in use cannot be deleted.
+pub fn delete_model(id: &str) -> Result<(), String> {
+    let entry = catalog::find(id).ok_or("unknown model")?;
+    if active().0 == entry.id {
+        return Err("that model is in use".into());
+    }
+    if model_state(id) != ModelState::Missing && matches!(model_state(id), ModelState::Downloading { .. }) {
+        return Err("it is downloading".into());
+    }
+    catalog::delete_in(entry, &models_dir()).map_err(|e| e.to_string())?;
+    if let Some(d) = model_dls().lock().unwrap().get_mut(entry.id) {
+        d.error = None;
+    }
+    Ok(())
+}
+
+async fn fetch_set(set: &ModelSet, progress: &dyn Fn(f64), cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+    use futures_util::StreamExt;
+    let total = set.total_size();
+    let mut done: u64 = 0;
+    let client = reqwest::Client::builder()
+        .https_only(true)
+        .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(60))
+        .user_agent(concat!("Abito/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let dir = set.dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut last = Instant::now();
+    for file in set.files {
+        let path = dir.join(file.name);
+        if std::fs::metadata(&path).map(|m| m.len() == file.size).unwrap_or(false) {
+            done += file.size;
+            continue;
+        }
+        let part = dir.join(format!("{}.part", file.name));
+        let response = client.get(file.url).send().await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("{}: HTTP {}", file.name, response.status().as_u16()));
+        }
+        let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+        let mut verifier = Verifier::new(file);
+        let mut stream = response.bytes_stream();
+        let mut ok = true;
+        while let Some(chunk) = stream.next().await {
+            if cancelled() {
+                drop(out);
+                let _ = std::fs::remove_file(&part);
+                return Err("cancelled".into());
+            }
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            if !verifier.update(&chunk) {
+                ok = false;
+                break;
+            }
+            out.write_all(&chunk).map_err(|e| e.to_string())?;
+            if last.elapsed() > Duration::from_millis(250) {
+                last = Instant::now();
+                progress((done + verifier.bytes()) as f64 / total as f64);
+            }
+        }
+        out.flush().map_err(|e| e.to_string())?;
+        drop(out);
+        if !ok || !verifier.finish() {
+            let _ = std::fs::remove_file(&part);
+            return Err(format!("{}: the file that came in is not the expected one", file.name));
+        }
+        std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+        done += file.size;
+    }
+    Ok(())
 }
 
 /// Downloads what is missing on a background thread and calls `on_change`
@@ -318,21 +507,40 @@ pub fn recognizer() -> Option<Arc<OfflineRecognizer>> {
     if let Some(r) = recognizer_slot().lock().unwrap().clone() {
         return Some(r);
     }
-    if !PARAKEET.is_present() {
+    if !active_set().is_present() {
         return None;
     }
     let _guard = load_lock().lock().unwrap();
     if let Some(r) = recognizer_slot().lock().unwrap().clone() {
         return Some(r);
     }
+    let (id, language) = active();
+    let entry = catalog::find(&id)?;
     let mut config = OfflineRecognizerConfig::default();
-    config.model_config.transducer = OfflineTransducerModelConfig {
-        encoder: Some(PARAKEET.path("encoder.int8.onnx")),
-        decoder: Some(PARAKEET.path("decoder.int8.onnx")),
-        joiner: Some(PARAKEET.path("joiner.int8.onnx")),
-    };
-    config.model_config.tokens = Some(PARAKEET.path("tokens.txt"));
-    config.model_config.model_type = Some("nemo_transducer".into());
+    match entry.engine {
+        catalog::Engine::Parakeet => {
+            config.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(PARAKEET.path("encoder.int8.onnx")),
+                decoder: Some(PARAKEET.path("decoder.int8.onnx")),
+                joiner: Some(PARAKEET.path("joiner.int8.onnx")),
+            };
+            config.model_config.tokens = Some(PARAKEET.path("tokens.txt"));
+            config.model_config.model_type = Some("nemo_transducer".into());
+        }
+        catalog::Engine::Whisper => {
+            let file = |suffix: &str| entry.set.files.iter().find(|f| f.name.ends_with(suffix)).map(|f| entry.set.path(f.name));
+            config.model_config.whisper = OfflineWhisperModelConfig {
+                encoder: file("-encoder.int8.onnx"),
+                decoder: file("-decoder.int8.onnx"),
+                // Fixed language when the user chose one; empty lets Whisper guess.
+                language: Some(catalog::effective_language(entry, &language).unwrap_or("").to_string()),
+                task: Some("transcribe".into()),
+                ..Default::default()
+            };
+            config.model_config.tokens = file("-tokens.txt");
+            config.model_config.model_type = Some("whisper".into());
+        }
+    }
     config.model_config.num_threads = threads();
     let r = OfflineRecognizer::create(&config).map(Arc::new);
     *recognizer_slot().lock().unwrap() = r.clone();
@@ -341,7 +549,7 @@ pub fn recognizer() -> Option<Arc<OfflineRecognizer>> {
 
 /// Loads the model in the background, so the first dictation is not slowed down.
 pub fn preload() {
-    if !PARAKEET.is_present() || recognizer_slot().lock().unwrap().is_some() {
+    if !active_set().is_present() || recognizer_slot().lock().unwrap().is_some() {
         return;
     }
     std::thread::spawn(|| {
@@ -358,8 +566,25 @@ pub fn unload() {
 /// quietest, near this length.
 const MAX_CHUNK_SECONDS: f64 = 28.0;
 
-/// Transcribes 16 kHz mono audio; None when the model is not there.
+fn words_slot() -> &'static Mutex<Vec<String>> {
+    static W: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    W.get_or_init(|| Mutex::new(vec![]))
+}
+
+/// The user's custom words (Ajustes → Voz); «Abito» is always built in.
+pub fn set_custom_words(words: &[String]) {
+    *words_slot().lock().unwrap() = words::clean_words(words);
+}
+
+/// What the recognizer heard, with the custom words (and «Abito») corrected: the text every
+/// consumer wants. Training uses `transcribe_raw` so it sees the model's own spelling.
 pub fn transcribe(samples: &[f32]) -> Option<String> {
+    let raw = transcribe_raw(samples)?;
+    Some(words::correct(&raw, &words_slot().lock().unwrap()))
+}
+
+/// Transcribes 16 kHz mono audio; None when the model is not there.
+pub fn transcribe_raw(samples: &[f32]) -> Option<String> {
     let rec = recognizer()?;
     let mut text = String::new();
     for (_, chunk) in audio::split_for_model(samples, SAMPLE_RATE, MAX_CHUNK_SECONDS) {

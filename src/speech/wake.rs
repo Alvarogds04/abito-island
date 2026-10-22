@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
+use super::train::Learned;
 use super::{models_dir, ModelFile, ModelState, Verifier, SAMPLE_RATE};
 use crate::voiceintent::normalise;
 
@@ -46,7 +47,9 @@ impl VadSpec {
         self.dir_in(root).join(VAD_FILE)
     }
     pub fn is_present_in(&self, root: &Path) -> bool {
-        std::fs::metadata(self.path_in(root)).map(|m| m.len() == self.size).unwrap_or(false)
+        std::fs::metadata(self.path_in(root))
+            .map(|m| m.len() == self.size)
+            .unwrap_or(false)
     }
     pub fn is_present(&self) -> bool {
         self.is_present_in(&models_dir())
@@ -79,7 +82,9 @@ pub fn install_vad(part: &Path, root: &Path) -> Result<(), String> {
     let (hash, size) = sha256_file(part).map_err(|e| e.to_string())?;
     if size != VAD.size || hash != VAD.sha256 {
         let _ = std::fs::remove_file(part);
-        return Err("The voice detector that came in is not the expected file; it was discarded.".into());
+        return Err(
+            "The voice detector that came in is not the expected file; it was discarded.".into(),
+        );
     }
     std::fs::create_dir_all(VAD.dir_in(root)).map_err(|e| e.to_string())?;
     std::fs::rename(part, VAD.path_in(root)).map_err(|e| e.to_string())
@@ -93,17 +98,27 @@ struct Dl {
 
 fn dl() -> &'static Mutex<Dl> {
     static D: OnceLock<Mutex<Dl>> = OnceLock::new();
-    D.get_or_init(|| Mutex::new(Dl { running: false, fraction: 0.0, error: None }))
+    D.get_or_init(|| {
+        Mutex::new(Dl {
+            running: false,
+            fraction: 0.0,
+            error: None,
+        })
+    })
 }
 
 pub fn status() -> ModelState {
     let d = dl().lock().unwrap();
     if d.running {
-        ModelState::Downloading { fraction: d.fraction }
+        ModelState::Downloading {
+            fraction: d.fraction,
+        }
     } else if VAD.is_present() {
         ModelState::Ready
     } else if let Some(error) = &d.error {
-        ModelState::Failed { error: error.clone() }
+        ModelState::Failed {
+            error: error.clone(),
+        }
     } else {
         ModelState::Missing
     }
@@ -125,21 +140,23 @@ pub fn download(on_change: impl Fn(ModelState) + Send + 'static) {
         d.error = None;
     }
     on_change(status());
-    let spawned = std::thread::Builder::new().name("abito-vad-download".into()).spawn(move || {
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())
-            .and_then(|rt| rt.block_on(fetch(&on_change)));
-        {
-            let mut d = dl().lock().unwrap();
-            d.running = false;
-            if let Err(e) = result {
-                d.error = Some(e);
+    let spawned = std::thread::Builder::new()
+        .name("abito-vad-download".into())
+        .spawn(move || {
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| rt.block_on(fetch(&on_change)));
+            {
+                let mut d = dl().lock().unwrap();
+                d.running = false;
+                if let Err(e) = result {
+                    d.error = Some(e);
+                }
             }
-        }
-        on_change(status());
-    });
+            on_change(status());
+        });
     if let Err(e) = spawned {
         let mut d = dl().lock().unwrap();
         d.running = false;
@@ -159,11 +176,20 @@ async fn fetch(on_change: &impl Fn(ModelState)) -> Result<(), String> {
         .user_agent(concat!("Abito/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client.get(VAD.url).send().await.map_err(|e| e.to_string())?;
+    let response = client
+        .get(VAD.url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status().as_u16()));
     }
-    let file = ModelFile { name: VAD_FILE, url: VAD.url, size: VAD.size, sha256: VAD.sha256 };
+    let file = ModelFile {
+        name: VAD_FILE,
+        url: VAD.url,
+        size: VAD.size,
+        sha256: VAD.sha256,
+    };
     let mut verifier = Verifier::new(&file);
     let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     let mut stream = response.bytes_stream();
@@ -186,7 +212,9 @@ async fn fetch(on_change: &impl Fn(ModelState)) -> Result<(), String> {
     drop(out);
     if !ok || !verifier.finish() {
         let _ = std::fs::remove_file(&part);
-        return Err("The voice detector that came in is not the expected file; it was discarded.".into());
+        return Err(
+            "The voice detector that came in is not the expected file; it was discarded.".into(),
+        );
     }
     install_vad(&part, &root)
 }
@@ -208,20 +236,33 @@ pub struct Params {
 
 pub fn params(sensitivity: u8) -> Params {
     let s = sensitivity.min(100);
-    Params { vad_threshold: 0.65 - 0.4 * (s as f32 / 100.0), tolerance: if s < 34 { 0 } else if s < 67 { 1 } else { 2 } }
+    Params {
+        vad_threshold: 0.65 - 0.4 * (s as f32 / 100.0),
+        tolerance: if s < 34 {
+            0
+        } else if s < 67 {
+            1
+        } else {
+            2
+        },
+    }
 }
 
 // ── Matching «OK Abito» in a transcript ───────────────────────────────────────
 
-const OK_WORDS: &[&str] = &["ok", "okey", "okay", "oka", "oca", "okei", "okai", "hey", "oye"];
+pub(crate) const OK_WORDS: &[&str] = &[
+    "ok", "okey", "okay", "oka", "oca", "okei", "okai", "hey", "oye",
+];
 /// Longest first, so «okey» is not read as «ok» + «ey».
 const OK_PREFIXES: &[&str] = &["okey", "okay", "okei", "okai", "oka", "oca", "ok"];
 /// Spellings the recognizer is known to give; they never need tolerance.
-const NAMES: &[&str] = &["abito", "habito", "avito", "abbito", "abeto", "habbito", "abitto"];
+pub(crate) const NAMES: &[&str] = &[
+    "abito", "habito", "avito", "abbito", "abeto", "habbito", "abitto", "yavito",
+];
 /// Mishearings seen from Parakeet. Only accepted right after an «ok» word, never alone.
 const NAMES_AFTER_OK: &[&str] = &["vito", "cavito", "kavito", "cabito", "gavito"];
 
-fn levenshtein(a: &str, b: &str) -> usize {
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
     if a.is_empty() {
         return b.len();
@@ -235,47 +276,96 @@ fn levenshtein(a: &str, b: &str) -> usize {
         row[0] = i;
         for j in 1..=b.len() {
             let t = row[j];
-            row[j] = if a[i - 1] == b[j - 1] { prev } else { prev.min(row[j]).min(row[j - 1]) + 1 };
+            row[j] = if a[i - 1] == b[j - 1] {
+                prev
+            } else {
+                prev.min(row[j]).min(row[j - 1]) + 1
+            };
             prev = t;
         }
     }
     row[b.len()]
 }
 
-fn is_name(s: &str, tolerance: usize) -> bool {
-    if NAMES.contains(&s) {
+fn is_name(s: &str, tolerance: usize, learned: &Learned) -> bool {
+    if NAMES.contains(&s) || learned.names.iter().any(|n| n == s) {
         return true;
     }
     let core = s.strip_prefix('h').unwrap_or(s);
     // Fuzzy only for words that look like it: same first letter and ending as «abito».
-    s.chars().count() >= 4 && core.starts_with('a') && s.ends_with('o') && levenshtein(core, "abito") <= tolerance
+    s.chars().count() >= 4
+        && core.starts_with('a')
+        && s.ends_with('o')
+        && levenshtein(core, "abito") <= tolerance
+}
+
+/// «Habito, ¿qué hora es?»: Parakeet sometimes drops the «OK» (or hears it as a separate
+/// «Yes.» segment). The name then still counts as a wake, but only when it is a KNOWN spelling,
+/// the FIRST word, written with a comma right after it, and followed by a command.
+fn vocative_end(words: &[&str], learned: &Learned) -> Option<usize> {
+    let first = words.first()?;
+    if words.len() < 2 || !first.ends_with(',') {
+        return None;
+    }
+    let first = normalise(first);
+    (NAMES.contains(&first.as_str()) || learned.names.contains(&first)).then_some(1)
 }
 
 /// Finds «ok abito» (or «hey/oye abito») in `raw` and returns what follows the LAST
 /// occurrence, in its original spelling. None when the phrase is absent.
 pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
+    match_wake_with(raw, tolerance, &Learned::default())
+}
+
+/// Same, plus what this person trained: extra spellings of the name, extra «OK» lead words
+/// right before a name, and the complete trained phrases (alone in a segment: a bare wake).
+pub fn match_wake_with(raw: &str, tolerance: usize, learned: &Learned) -> Option<String> {
+    if !learned.phrases.is_empty() && learned.phrases.contains(&normalise(raw)) {
+        return Some(String::new());
+    }
     let words: Vec<&str> = raw.split_whitespace().collect();
-    let norm: Vec<(usize, String)> = words.iter().enumerate().map(|(i, w)| (i, normalise(w))).filter(|(_, n)| !n.is_empty()).collect();
+    let norm: Vec<(usize, String)> = words
+        .iter()
+        .enumerate()
+        .map(|(i, w)| (i, normalise(w)))
+        .filter(|(_, n)| !n.is_empty())
+        .collect();
     let tolerance = tolerance.min(2);
     let mut end: Option<usize> = None;
     let mut i = 0;
     while i < norm.len() {
         let (_, tok) = &norm[i];
         // Glued: «okabito», «okeyabito».
-        let glued = OK_PREFIXES.iter().any(|p| tok.strip_prefix(p).is_some_and(|rest| !rest.is_empty() && is_name(rest, tolerance)));
+        let glued = OK_PREFIXES.iter().any(|p| {
+            tok.strip_prefix(p)
+                .is_some_and(|rest| !rest.is_empty() && is_name(rest, tolerance, learned))
+        });
         if glued {
             end = Some(norm[i].0 + 1);
             i += 1;
             continue;
         }
-        if OK_WORDS.contains(&tok.as_str()) && i + 1 < norm.len() {
-            if is_name(&norm[i + 1].1, tolerance) || NAMES_AFTER_OK.contains(&norm[i + 1].1.as_str()) {
+        if (OK_WORDS.contains(&tok.as_str()) || learned.leads.contains(tok)) && i + 1 < norm.len() {
+            if is_name(&norm[i + 1].1, tolerance, learned)
+                || NAMES_AFTER_OK.contains(&norm[i + 1].1.as_str())
+            {
                 end = Some(norm[i + 1].0 + 1);
                 i += 2;
                 continue;
             }
             // «a vito» → «avito»
-            if i + 2 < norm.len() && is_name(&format!("{}{}", norm[i + 1].1, norm[i + 2].1), tolerance) {
+            if i + 2 < norm.len()
+                && is_name(&format!("{}{}", norm[i + 1].1, norm[i + 2].1), tolerance, learned)
+            {
+                end = Some(norm[i + 2].0 + 1);
+                i += 3;
+                continue;
+            }
+            // «Ok ya Vito»: the first syllable heard as a short word of its own.
+            if i + 2 < norm.len()
+                && norm[i + 1].1.chars().count() <= 2
+                && (is_name(&norm[i + 2].1, tolerance, learned) || NAMES_AFTER_OK.contains(&norm[i + 2].1.as_str()))
+            {
                 end = Some(norm[i + 2].0 + 1);
                 i += 3;
                 continue;
@@ -283,9 +373,12 @@ pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
         }
         i += 1;
     }
-    let end = end?;
+    let end = end.or_else(|| vocative_end(&words, learned))?;
     let tail = words[end..].join(" ");
-    Some(tail.trim_start_matches([',', '.', ':', ';', '!', '-', '–', '—', '…', ' ']).to_string())
+    Some(
+        tail.trim_start_matches([',', '.', ':', ';', '!', '-', '–', '—', '…', ' '])
+            .to_string(),
+    )
 }
 
 // ── The flow: transcripts in, events out ──────────────────────────────────────
@@ -307,6 +400,7 @@ pub struct WakeFlow {
     armed: bool,
     idle: usize,
     in_flight: bool,
+    learned: Learned,
 }
 
 impl Default for WakeFlow {
@@ -317,7 +411,17 @@ impl Default for WakeFlow {
 
 impl WakeFlow {
     pub fn new() -> Self {
-        Self { armed: false, idle: 0, in_flight: false }
+        Self {
+            armed: false,
+            idle: 0,
+            in_flight: false,
+            learned: Learned::default(),
+        }
+    }
+
+    /// What this person trained (replaces the previous training; empty forgets it).
+    pub fn set_learned(&mut self, learned: Learned) {
+        self.learned = learned;
     }
 
     pub fn armed(&self) -> bool {
@@ -356,7 +460,7 @@ impl WakeFlow {
 
     pub fn on_transcript(&mut self, text: &str, tolerance: usize) -> Vec<FlowEvent> {
         self.in_flight = false;
-        let wake = match_wake(text, tolerance);
+        let wake = match_wake_with(text, tolerance, &self.learned);
         if self.armed {
             let command = wake.unwrap_or_else(|| text.to_string());
             let command = command.trim();
@@ -388,7 +492,9 @@ pub fn usable(segment: &[f32]) -> bool {
 }
 
 pub fn clip(segment: &[f32]) -> &[f32] {
-    &segment[..segment.len().min((MAX_SEGMENT_SECONDS * SAMPLE_RATE as f32) as usize)]
+    &segment[..segment
+        .len()
+        .min((MAX_SEGMENT_SECONDS * SAMPLE_RATE as f32) as usize)]
 }
 
 /// Hands a segment to the recognizer thread; false (dropped) while it is still busy.

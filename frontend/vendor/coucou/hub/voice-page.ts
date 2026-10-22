@@ -57,6 +57,69 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
     }
     return el;
   }
+  // «Entrenar mi voz»: the user says «OK Abito» TARGET times; the host hears each one through the live path.
+  let hearing = false, training = false;
+  function trainingCard(): HTMLElement {
+    const tr = st?.training ?? { recorded: 0, target: 5, active: false, last: null, learned: {} };
+    const learned = tr.learned ?? {};
+    const phrases: string[] = [...(learned.phrases ?? []), ...(learned.names ?? [])].filter((x, i, a) => a.indexOf(x) === i);
+    const ready = st?.vad?.state === 'ready' && st?.parakeet?.state === 'ready';
+    const step = (fn: () => Promise<any>) => async () => { hearing = true; draw(); try { await work(fn); } finally { hearing = false; if (alive) draw(); } };
+    const status = h('div', { id: 'voice-train-status', class: 'hub-note', role: 'status', 'aria-live': 'polite' });
+    const controls = h('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' });
+    const done = tr.recorded >= tr.target;
+    if (!ready) status.textContent = 'Primero descargá los modelos.';
+    else if (hearing) status.textContent = `Escuchando… decí «OK Abito» (${Math.min(tr.recorded + 1, tr.target)}/${tr.target})`;
+    else if (training || tr.active) {
+      status.textContent = done ? `Listo ${tr.recorded}/${tr.target}. Guardá para que Abito te reconozca.`
+        : tr.recorded === 0 ? `Decí «OK Abito» (1/${tr.target}).` : `Entendí: «${tr.last ?? ''}» — ${tr.recorded}/${tr.target}. Decilo otra vez.`;
+    } else if (phrases.length) status.textContent = `Entendí: ${phrases.map(p => `«${p}»`).join(', ')} — listo`;
+    else status.textContent = `Decí «OK Abito» ${tr.target} veces y Abito aprende cómo te entiende a vos. El audio no se guarda.`;
+    if (ready && !hearing) {
+      if (!(training || tr.active)) {
+        controls.append(trusted(button('Entrenar mi voz', () => { training = true; void step(() => VoiceBridge.trainRecord())(); }, 'primary')));
+        if (phrases.length) controls.append(trusted(button('Borrar entrenamiento', () => void work(VoiceBridge.trainReset), '', true)));
+      } else {
+        if (!done) controls.append(trusted(button('Grabar', () => void step(() => VoiceBridge.trainRecord())(), 'primary')));
+        else controls.append(trusted(button('Guardar', () => void work(async () => { const next = await VoiceBridge.trainFinish(); training = false; return next; }), 'primary')));
+        if (tr.recorded > 0) controls.append(trusted(button('Repetir la última', () => void work(VoiceBridge.trainUndo), '', true)));
+        controls.append(trusted(button('Cancelar', () => void work(async () => { const next = await VoiceBridge.trainCancel(); training = false; return next; }), '', true)));
+      }
+    }
+    return card(row('Entrenar mi voz', 'Abito aprende cómo se transcribe TU «OK Abito». Solo se guarda el texto, en este equipo.', controls), status);
+  }
+  // Ajustes → Voz, the Handy way: the language (Spanish by default), the models with size / languages /
+  // state, and the custom words. Downloads are explicit; the one in use cannot be deleted.
+  const LANG_NAMES: Record<string, string> = { es: 'Español', en: 'English', fr: 'Français', de: 'Deutsch', it: 'Italiano', pt: 'Português', ca: 'Català', auto: 'Automático' };
+  function speechCard(): HTMLElement {
+    const sp = st?.speech;
+    if (!sp) return card(row('Modelo de voz', 'No disponible todavía'));
+    const apply = (change: (s: any) => void) => void work(() => { const s = { language: sp.language, model: sp.model, words: [...sp.words] }; change(s); return VoiceBridge.setSpeech(s); });
+    const lang = trusted(h('select', { id: 'voice-language', 'aria-label': 'Idioma de la voz' })) as HTMLSelectElement;
+    for (const code of sp.languages as string[]) lang.append(h('option', { value: code, text: LANG_NAMES[code] ?? code, ...(code === sp.language ? { selected: 'selected' } : {}) }));
+    lang.value = sp.language;
+    lang.addEventListener('change', () => apply(s => { s.language = lang.value; }));
+    const active = (sp.models as any[]).find(m => m.active);
+    const langNote = h('div', { class: 'hub-note', text: active && !active.forcesLanguage ? `${active.name} elige el idioma solo y no admite fijarlo: para fijar el español usá un modelo Whisper.` : 'El idioma queda fijo: Abito no adivina otro.' });
+    const list = h('div', { id: 'voice-models', style: 'display:flex;flex-direction:column;gap:6px' });
+    for (const m of sp.models as any[]) {
+      const downloading = m.state?.state === 'downloading';
+      const pct = Math.round(Math.max(0, Math.min(1, m.state?.fraction ?? 0)) * 100);
+      const state = m.active ? 'En uso' : downloading ? `Descargando ${pct} %` : m.installed ? 'Descargado' : m.state?.state === 'failed' ? `Falló: ${m.state.error}` : 'Sin descargar';
+      const actions = h('div', { style: 'display:flex;gap:6px;align-items:center' });
+      if (downloading) actions.append(trusted(button('Cancelar', () => void work(() => VoiceBridge.modelCancel(m.id)), '', true)));
+      else if (!m.installed) actions.append(trusted(button(`Descargar ${m.sizeMb} MB`, () => void work(() => VoiceBridge.modelDownload(m.id)), 'primary')));
+      else {
+        if (!m.active) actions.append(trusted(button('Usar este', () => apply(s => { s.model = m.id; }), 'primary')));
+        if (!m.active) actions.append(trusted(button('Borrar', () => void work(() => VoiceBridge.modelDelete(m.id)), '', true)));
+      }
+      list.append(row(`${m.name} · ${m.sizeMb} MB`, `${m.note} Idiomas: ${(m.languages as string[]).join(', ')}. Licencia: ${m.license}. ${state}.`, actions));
+    }
+    const words = trusted(h('textarea', { id: 'voice-words', rows: '3', 'aria-label': 'Palabras personalizadas', placeholder: 'Una por línea. «Abito» ya está incluida.', text: (sp.words as string[]).join('\n') })) as HTMLTextAreaElement;
+    words.addEventListener('change', () => apply(s => { s.words = words.value.split('\n').map(w => w.trim()).filter(Boolean); }));
+    return card(row('Idioma', 'El que escucha Abito para «OK Abito» y el dictado.', lang), langNote, divider(), list, divider(),
+      row('Palabras personalizadas', 'Nombres o términos que Abito corrige al transcribir, además de «Abito».', words));
+  }
   function draw() {
     box.replaceChildren();
     paintBanner();
@@ -84,6 +147,8 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
       card(row(t('Listen for « OK Abito »'), t('The microphone stays open; only what follows « OK Abito » goes further.'), trusted(toggle(st.prefs.enabled, on => void save(p => { p.enabled = on; })))), divider(),
         row(t('Parakeet, on your computer'), t('Hears « OK Abito » here, without the internet.'), modelControl()), divider(),
         row(t('Wake-word sensitivity'), t('Higher hears « OK Abito » more easily, and mishears more.'), sensitivity, value, probe), result),
+      label('Modelo de voz'), speechCard(),
+      label('Tu voz'), trainingCard(),
       label('Respuestas'), card(row(t('Abito answers out loud'), null, output)),
       label('Privacidad'), card(privacy),
       message);

@@ -22,11 +22,11 @@ import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
 const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action']);
-// The host answers these six commands through ONE shared limiter: 30 calls per fixed 1 s window (src/bridge.rs RATE_LIMIT_PER_WINDOW),
+// The host answers these commands through ONE shared limiter: 30 calls per fixed 1 s window (src/bridge.rs RATE_LIMIT_PER_WINDOW),
 // shared with the island window. A page that reads a lot at load (the combined «Integraciones y agentes» makes ~34 calls) used to get
 // `rate-exceeded` on its tail calls and paint «No se pudo completar» before the human touched anything (#503 S32 gate). So they leave
 // in order and at most PACE_MAX per rolling second, which keeps every fixed window well under 30 and leaves room for the island.
-const LIMITED = new Set(['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action']);
+const LIMITED = new Set(['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action', 'voice_action']);
 const PACE_MAX = 20, PACE_MS = 1000;
 const sent = [];
 let paceTail = Promise.resolve();
@@ -89,9 +89,12 @@ const invoke = (command, args) => {
     const p = args?.payload;
     const exact = (v, fields) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(k => Object.hasOwn(v, k));
     if (!exact(args, ['payload']) || !p ||
-      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model'].includes(p.action)) ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'train_record', 'train_undo', 'train_cancel', 'train_finish', 'train_reset'].includes(p.action)) ||
         (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, ['enabled', 'output', 'gender', 'sensitivity']) && Number.isInteger(p.prefs.sensitivity) && p.prefs.sensitivity >= 0 && p.prefs.sensitivity <= 100 &&
-          typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)))) return Promise.reject(new Error('No disponible'));
+          typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)) ||
+        (exact(p, ['action', 'id']) && ['model_download', 'model_cancel', 'model_delete'].includes(p.action) && typeof p.id === 'string' && /^[a-z0-9.-]{1,40}$/.test(p.id)) ||
+        (exact(p, ['action', 'speech']) && p.action === 'set_speech' && exact(p.speech, ['language', 'model', 'words']) && typeof p.speech.language === 'string' && /^[a-z]{2,4}$/.test(p.speech.language) &&
+          typeof p.speech.model === 'string' && /^[a-z0-9.-]{1,40}$/.test(p.speech.model) && Array.isArray(p.speech.words) && p.speech.words.length <= 50 && p.speech.words.every(w => typeof w === 'string' && w.length <= 40)))) return Promise.reject(new Error('No disponible'));
   }
   return paced(command, () => rawInvoke(command, args));
 };
