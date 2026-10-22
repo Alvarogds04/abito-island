@@ -25,6 +25,8 @@ const STORE_MAX_BYTES: u64 = 256 * 1024;
 const STORE_KEEP_LINES: usize = 100;
 pub const MESSAGE_MAX: usize = 200;
 const TOKEN_MAX: usize = 40;
+pub const FIELD_MAX: usize = 80;
+pub const RECORD_MAX_BYTES: usize = 2048;
 const SECRET: &str = "<secret>";
 
 /// One local failure. All text fields are already redacted when a record is created.
@@ -503,8 +505,10 @@ pub fn default_dir() -> Option<PathBuf> {
 pub fn store(dir: &Path, rec: &FailureRecord) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let line = serde_json::to_string(rec).map_err(std::io::Error::other)?;
+    if line.len() > RECORD_MAX_BYTES { return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "failure record too large")); }
     std::fs::create_dir_all(dir)?;
-    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     let path = dir.join(STORE_FILE);
     if std::fs::metadata(&path).map(|m| m.len() > STORE_MAX_BYTES).unwrap_or(false) {
         let keep: Vec<String> = std::fs::read_to_string(&path).unwrap_or_default().lines().map(str::to_owned).collect();
@@ -512,7 +516,7 @@ pub fn store(dir: &Path, rec: &FailureRecord) -> std::io::Result<()> {
         std::fs::write(&path, format!("{tail}\n"))?;
     }
     let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(&path)?;
-    let line = serde_json::to_string(rec).map_err(std::io::Error::other)?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?; // an older, looser file is tightened, never trusted
     writeln!(f, "{line}")
 }
 
@@ -535,15 +539,20 @@ pub fn load_all(dir: &Path) -> Vec<Stored> {
 
 // ---------------------------------------------------------------- creation
 
+fn field(v: &str, env: &Env) -> String {
+    let r = redact(v.lines().next().unwrap_or(""), &env.home, &env.user);
+    if r.chars().count() > FIELD_MAX { let mut c: String = r.chars().take(FIELD_MAX).collect(); c.push('…'); c } else { r }
+}
+
 pub fn record_failure(process: &str, step: &str, message: &str, env: &Env, at_secs: u64) -> FailureRecord {
     FailureRecord {
         at_secs,
         process: closed_token(process),
         step: closed_token(step),
         message: safe_message(message, &env.home, &env.user),
-        version: env.version.clone(),
-        os: env.os.clone(),
-        session: env.session.clone(),
+        version: field(&env.version, env),
+        os: field(&env.os, env),
+        session: field(&env.session, env),
     }
 }
 

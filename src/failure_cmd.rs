@@ -71,12 +71,15 @@ impl Prefs {
         }
     }
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         std::fs::create_dir_all(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         let path = dir.join(PREFS_FILE);
         let tmp = dir.join(format!(".{PREFS_FILE}.{}", std::process::id()));
-        std::fs::write(&tmp, serde_json::to_vec(&json!({"enabled": self.enabled, "muted": self.muted})).map_err(std::io::Error::other)?)?;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        let bytes = serde_json::to_vec(&json!({"enabled": self.enabled, "muted": self.muted})).map_err(std::io::Error::other)?;
+        let mut f = std::fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(&tmp)?;
+        f.write_all(&bytes)?;
         std::fs::rename(&tmp, path)
     }
 }

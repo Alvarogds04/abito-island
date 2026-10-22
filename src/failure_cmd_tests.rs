@@ -78,3 +78,13 @@ fn context_lines_are_the_other_failures_oldest_first() {
     let lines = context_lines(&[b.clone(), a.clone(), c.clone()], &a.record);
     assert_eq!(lines, ["[island/c] boom", "[island/b] boom"]);
 }
+
+#[test]
+fn prefs_file_is_created_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tmp("prefsmode");
+    Prefs::default().save(&d).unwrap();
+    let mode = std::fs::metadata(d.join(PREFS_FILE)).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    let _ = std::fs::remove_dir_all(&d);
+}

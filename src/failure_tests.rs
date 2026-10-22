@@ -290,3 +290,52 @@ fn the_report_caps_a_stored_message_even_if_an_older_record_has_chat_in_it() {
     let rep = build_report(&rec, &[], HOME, USER);
     assert!(!rep.body.contains("mother"), "{}", rep.body);
 }
+
+fn tmpdir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("abito-failure-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    d
+}
+
+#[test]
+fn every_field_and_the_whole_record_are_bounded() {
+    let big = "ñ".repeat(10_000);
+    let e = Env { version: big.clone(), os: big.clone(), session: big.clone(), home: HOME.into(), user: USER.into() };
+    let rec = record_failure(&big, &big, &big, &e, 1);
+    let line = serde_json::to_string(&rec).unwrap();
+    assert!(line.len() <= RECORD_MAX_BYTES, "{} bytes", line.len());
+    for f in [&rec.version, &rec.os, &rec.session] { assert!(f.chars().count() <= FIELD_MAX + 1); }
+    // a record that is still too big (built by hand) is refused, never written
+    let dir = tmpdir("big");
+    let mut hand = rec.clone();
+    hand.message = "x".repeat(RECORD_MAX_BYTES * 2);
+    assert!(store(&dir, &hand).is_err());
+    assert!(load_all(&dir).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn store_tightens_the_modes_of_an_existing_dir_and_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tmpdir("modes");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(dir.join(STORE_FILE), "").unwrap();
+    std::fs::set_permissions(dir.join(STORE_FILE), std::fs::Permissions::from_mode(0o644)).unwrap();
+    store(&dir, &record()).unwrap();
+    let mode = |p: std::path::PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(dir.clone()), 0o700);
+    assert_eq!(mode(dir.join(STORE_FILE)), 0o600);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_permission_error_is_reported_not_swallowed() {
+    // a path whose parent is a FILE cannot become a directory; and a store we cannot chmod must not be written silently
+    let dir = tmpdir("perm");
+    std::fs::create_dir_all(&dir).unwrap();
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, "x").unwrap();
+    assert!(store(&blocker.join("sub"), &record()).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
