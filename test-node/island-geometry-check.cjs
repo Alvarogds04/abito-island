@@ -49,7 +49,9 @@ function noOverlaps(list, why) {
     try {
       const list = await boxes(r);
       noOverlaps(list, `${name}: overlapping boxes`);
-      for (const b of list) if (b.sel !== '#clay') assert.ok(inside(b, ISLAND), `${name}: ${label(b)} leaves the island`);
+      // S10/S11 (v8): while a band (finished notice / engine problem) shows, the island is 36px taller and the band is its own 32px row
+      const tall = (await r.measure('#island'))[0].h > 200 ? { ...ISLAND, bottom: ISLAND.bottom + 36 } : ISLAND;
+      for (const b of list) if (b.sel !== '#clay') assert.ok(inside(b, tall), `${name}: ${label(b)} leaves the island`);
       // the left card's content stays inside the cards' row (nothing drawn into the header or below the island)
       for (const b of list) if (!['#notices'].includes(b.sel)) assert.ok(b.top >= CARD.top - 1 && b.bottom <= CARD.bottom + 1, `${name}: ${label(b)} leaves the 132px card row`);
       // every control receives its own click (the validator clicks by coordinates)

@@ -115,7 +115,7 @@ async function open(scenario = {}) {
   if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
   if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(scenario.quick ? 1800 : 4200); // spring + the ticker's first poll (`quick`: measurements that only need the card, not the first ticker poll)
-  if (scenario.finishedCard) { await page.evaluate(id => window.__emit('desktop:notice-open', { id, kind: 'finished' }), UUID); await page.waitForTimeout(1500); }
+  if (scenario.finishedCard && !scenario.noLane) { await page.evaluate(id => window.__emit('desktop:notice-open', { id, kind: 'finished' }), UUID); await page.waitForTimeout(1500); }
   if (scenario.question) await page.waitForTimeout(600);
   return {
     page,

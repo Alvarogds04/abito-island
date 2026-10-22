@@ -29,5 +29,20 @@ if (!H.findPlaywright()) { console.log('SKIPPED island-s10-check: no playwright 
       assert.ok(!(await r.measure('#notice-card'))[0].shown, 'the band is hidden while it runs');
     } finally { await r.close(); }
   }
+  {
+    // v8: a RETAINED finished notice (no lane open) must also be the band, never ALSO a capsule in the blobs column; the boilerplate caveat is dropped
+    const BOILER = 'No confirma que la tarea haya salido bien ni que las pruebas hayan pasado.';
+    const r = await H.open({ finishedCard: 'pi', noLane: true, finishedText: BOILER });
+    try {
+      const m = await r.page.evaluate(() => { const vis = e => { const b = e.getBoundingClientRect(), c = getComputedStyle(e); return b.width > 0 && b.height > 0 && c.visibility !== 'hidden' && +c.opacity > 0 && c.display !== 'none'; };
+        const n = document.getElementById('notices').getBoundingClientRect(), isl = document.getElementById('island').getBoundingClientRect(), msg = document.getElementById('notice-card-message');
+        return { h: isl.height, band: [n.top - isl.top, n.height, n.width], capsule: ['notice-row', 'notice-pill', 'notice-list'].filter(id => document.getElementById(id) && vis(document.getElementById(id))), card: vis(document.getElementById('notice-card')),
+          msg: msg.textContent, fits: msg.scrollWidth <= msg.clientWidth + 1, tip: msg.getAttribute('data-tip') }; });
+      assert.equal(Math.round(m.h), 220); assert.deepEqual(m.band.map(Math.round), [178, 32, 700], 'one 32px band under the cards');
+      assert.deepEqual(m.capsule, [], 'the same notice is NOT also a capsule in the blobs column'); assert.ok(m.card);
+      assert.ok(m.fits && m.msg.length <= 44, `the band message fits whole: «${m.msg}»`);
+      assert.equal(m.tip, BOILER, 'the full text stays in the tooltip');
+    } finally { await r.close(); }
+  }
   console.log('island-s10-check: ok');
 })().catch(e => { console.error('FAIL', e.message, e.actual, e.expected); process.exit(1); });

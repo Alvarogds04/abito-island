@@ -1160,3 +1160,10 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 /* ══ v8 S7: the reason a disabled «Hecho» is disabled is visible text beside it (dim-2 on the card, >= 4.5:1) ═════════════════════ */
 #question-reason { flex: 1 1 auto; min-width: 0; margin-right: auto; font: 400 11px var(--font); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #question-reason[hidden] { display: none; }
+
+/* ══ v8 S10: a RETAINED finished notice (no lane) is the SAME 32px band; the blobs-column capsule is not drawn for it ═══════════════ */
+#capsule[data-phase="expanded"][data-notice-band="true"]:not([data-notice-view="notices"]):not([data-question="pending"]):not([data-card]) #notices { left: calc(50% - 350px); width: 700px; top: 178px; height: 32px; padding: 0 12px 0 14px; overflow: hidden; border-radius: 16px; box-sizing: border-box; background: var(--card); border: 1px solid var(--hairline); opacity: 1; visibility: visible; }
+#capsule[data-notice-band="true"] #notice-row, #capsule[data-notice-band="true"] #notice-pill, #capsule[data-notice-band="true"] #notice-detail, #capsule[data-notice-band="true"] #notice-list, #capsule[data-notice-band="true"] #notice-chips { display: none; }
+#capsule[data-phase="expanded"][data-notice-band="true"]:not([data-notice-view="notices"]) #notice-card:not([hidden]) { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; height: 100%; min-height: 0; }
+#capsule[data-notice-band="true"] #notices::before { background: radial-gradient(220px 120px at 50% 160%, rgba(52, 211, 153, 0.5) 0%, rgba(0, 0, 0, 0) 70%); }
+#notice-card #notice-card-message[hidden] { display: none; }

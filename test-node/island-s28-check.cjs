@@ -10,7 +10,7 @@ const alpha = c => { const m = /rgba?\(([^)]+)\)/.exec(c); if (!m) return 1; con
 
 (async () => {
   for (const theme of ['dark', 'light']) {
-    const r = await H.open({ github: true, notices: 2, theme });
+    const r = await H.open({ github: true, notices: 2, theme, engine: 'ok' });
     try {
       const isl = (await r.measure('#island'))[0];
       assert.equal(Math.round(isl.w), 720, `${theme}: island width`);
