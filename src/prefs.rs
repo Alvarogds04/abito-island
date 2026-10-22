@@ -321,6 +321,8 @@ pub settings_window: Option<bool>,
     /// #487: opt-in to read the previous window's app and title for the chat (NotchBuddy feature 8).
     /// `None` means off and is never written.
     pub window_context: Option<bool>,
+    /// S5 (#503): the chat's live-state context (sessions + integrations). `None` means ON; only `false` is written.
+    pub live_context: Option<bool>,
     /// #486 W2 (Coucou `desktopMochi`): the character lives on the desktop and where it
     /// sits, physical px. `None` = lives in the island (off) and is never written.
     pub desktop_character: Option<DesktopCharacter>,
@@ -376,6 +378,7 @@ impl Default for Prefs {
             show_plan_in_notch: None,
             show_codex_plan_in_notch: None,
             window_context: None,
+            live_context: None,
             desktop_character: None,
         }
     }
@@ -604,6 +607,7 @@ impl Prefs {
     /// S10 (L30): the effective Codex pill policy — absent means off (no `codex app-server` is ever started).
     pub fn show_codex_plan_in_notch(&self) -> bool { self.show_codex_plan_in_notch.unwrap_or(false) }
     pub fn window_context(&self) -> bool { self.window_context.unwrap_or(false) }
+    pub fn live_context(&self) -> bool { self.live_context.unwrap_or(true) }
 
     /// #366 F093: the effective Ajustes placement — absent means in-island (#408).
     pub fn settings_window_on(&self) -> bool { self.settings_window.unwrap_or(false) }
@@ -648,6 +652,7 @@ impl Prefs {
             show_plan_in_notch: v.get("show_plan_in_notch").and_then(Value::as_bool),
             show_codex_plan_in_notch: v.get("show_codex_plan_in_notch").and_then(Value::as_bool),
             window_context: v.get("window_context").and_then(Value::as_bool),
+            live_context: v.get("live_context").and_then(Value::as_bool),
             desktop_character: desktop_character_from(v.get(DESKTOP_CHARACTER)),
         };
         if prefs.declared_pills.is_some() { prefs.declared_pills = Some(prefs.declared_pills()); }
@@ -722,6 +727,9 @@ impl Prefs {
         }
         if let Some(on) = self.window_context {
             v["window_context"] = json!(on);
+        }
+        if let Some(on) = self.live_context {
+            v["live_context"] = json!(on);
         }
         if let Some(c) = self.desktop_character.filter(|c| c.spot.is_none_or(|(x, y)| valid_position(x, y))) {
             v[DESKTOP_CHARACTER] = match c.spot {
@@ -802,6 +810,7 @@ pub enum Command {
     /// S10 (L30): show or hide the Codex plan-usage pill (an opt-in to `codex app-server`). `false` stores no key.
     SetShowCodexPlanInNotch(bool),
     SetWindowContext(bool),
+    SetLiveContext(bool),
     /// #486 W2: the desktop character left or returned to the island, and the spot it sits
     /// at. Deliberately NOT produced by [`parse_command`]: only the native drop path saves
     /// it. `on:false` with no spot is the default and stores no key.
@@ -1013,6 +1022,11 @@ pub fn parse_command(payload: &Value) -> Result<Command, CommandError> {
             let on = map.get("window_context").and_then(Value::as_bool).ok_or(CommandError)?;
             Ok(Command::SetWindowContext(on))
         }
+        // S5 (#503): exactly action + live_context (a bool); no coercion.
+        Some("set_live_context") if map.len() == 2 => {
+            let on = map.get("live_context").and_then(Value::as_bool).ok_or(CommandError)?;
+            Ok(Command::SetLiveContext(on))
+        }
         // #442 T7.4: exactly action + order (≤3 unique well-shaped ids).
         Some("set_island_agents") if map.len() == 2 => {
             let order = ordered_strings(map.get("order"))?;
@@ -1205,6 +1219,7 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
         Command::SetShowPlanInNotch(on) => next.show_plan_in_notch = on.then_some(true),
         Command::SetShowCodexPlanInNotch(on) => next.show_codex_plan_in_notch = on.then_some(true),
         Command::SetWindowContext(on) => next.window_context = on.then_some(true),
+        Command::SetLiveContext(on) => next.live_context = (!on).then_some(false),
         Command::SetDesktopCharacter { on, spot } => {
             if spot.is_some_and(|(x, y)| !valid_position(x, y)) { return Err(CommandError); }
             next.desktop_character = (*on || spot.is_some()).then_some(DesktopCharacter { on: *on, spot: *spot });

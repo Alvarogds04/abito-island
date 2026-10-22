@@ -3,6 +3,8 @@
 // Copyright (c) 2026 Louis Raillé, MIT; brand names replaced.
 const es: Record<string, string> = {
   // J2: Spanish values from the same upstream tables, brand substitutions only.
+  'Live context': 'Contexto en vivo',
+  'When you write in the chat, Abito adds a short read-only summary of what it already knows: your coding-agent sessions, pending questions and the status of your connected integrations. It makes no new requests, and sends no keys, mail bodies or diffs. The chat still cannot run or approve anything. On by default.': 'Al escribir en el chat, Abito agrega un resumen corto y de solo lectura de lo que ya sabe: tus sesiones de agentes de código, las preguntas pendientes y el estado de tus integraciones conectadas. No hace consultas nuevas ni envía claves, cuerpos de correo ni diffs. El chat sigue sin poder ejecutar ni aprobar nada. Activado de fábrica.',
   'Active window context': 'Contexto de la ventana activa',
   'When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.': 'Al abrir el chat, Abito lee el nombre de la app y el título de la ventana que estabas usando y los adjunta a tu primer mensaje. Apagado de fábrica; mientras está apagado no se lee nada. El título llega al modelo con el que chateas.',
   'Add': 'Añadir', 'Add a word, e.g. Supabase': 'Añade una palabra, p. ej. Supabase',
