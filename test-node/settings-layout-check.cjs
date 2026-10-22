@@ -179,6 +179,19 @@ test('S32 Integraciones y agentes: ONE sidebar entry replaces «Pestañas activa
   assert.equal(items.filter(t => /integraciones|agentes|pestañas/i.test(t)).length, 1, 'no other entry for the three');
 });
 
+test('S32 gate: every Ajustes page that reads the host at load stays under the host\'s 30-calls-per-second limiter (no «No se pudo completar» on load)', async r => {
+  await r.close();
+  for (const title of ['Integraciones y agentes', 'Chat', 'General', 'Atajos']) {
+    const f = await H.open({ width: 960, height: 680 });
+    try {
+      await f.go(title); await f.page.waitForTimeout(1500);
+      const out = await f.page.evaluate(() => ({ refused: window.__rateRefused || 0, text: (document.querySelector('.hub-page') || document.body).textContent.replace(/\s+/g, ' ') }));
+      assert.equal(out.refused, 0, `${title}: the host refused ${out.refused} call(s) with rate-exceeded while the page loaded`);
+      assert.doesNotMatch(out.text, /No se pudo completar|Rate exceeded|rate-exceeded/, `${title}: a failure notice shows at load`);
+    } finally { await f.close(); }
+  }
+});
+
 test('S32 gate: «Integraciones y agentes» loads with NO error notice when the OS keychain is unreachable (validator env) or has no keys', async r => {
   await r.close();
   for (const [label, scenario] of [['no keys stored', {}], ['keychain unreachable', { keychainDown: true }], ['keychain unreachable and agents not reported', { keychainDown: true, agentsOk: false }]]) {
