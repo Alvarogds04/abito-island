@@ -197,7 +197,7 @@ test('main.rs reveal arm hands focus back through the existing helpers only', ()
   assert.match(body, /hotkey::x11::give_focus_back\(None, previous\)/, 'the existing best-effort hand-back is reused');
   assert.match(body, /from_millis\(250\)/, 'the same 250ms settle as the hotkeyhost pattern');
   assert.doesNotMatch(body, /set_focus/, 'the reveal never REQUESTS focus (showing ≠ taking the keyboard)');
-  assert.match(body, /#\[cfg\(unix\)\]/, 'the X11-only guard is platform-gated as elsewhere');
+  assert.match(body, /#\[cfg\(target_os = "linux"\)\]/, 'the X11-only guard is platform-gated as elsewhere');
 });
 
 console.log(`notification-reveal-check: ${passed} passed`);
