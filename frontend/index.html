@@ -43,6 +43,8 @@
        BEFORE island.js (defer keeps document order) and creates no listener,
        timer or host call by itself. -->
   <script defer src="island-interaction.js"></script>
+  <!-- S31: the expanded island folds after 30 s without interaction (pure rule + timer; loads before island.js) -->
+  <script defer src="island-idle.js"></script>
   <!-- #486: the desktop character (Coucou DesktopMochi); loads before island.js, creates nothing until the host answers. -->
   <script defer src="character-desktop-logic.js"></script>
   <script defer src="island-desktop.js"></script>

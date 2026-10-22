@@ -76,11 +76,12 @@ async function open(scenario = {}) {
             if (at >= 0) snap.notices.splice(at, 1);
             snap.revision += 1; queueMicrotask(() => window.__emit('desktop:state', structuredClone(snap)));
           }
+          if (a === 'autoClose') { (window.__autoCloses = window.__autoCloses || []).push(performance.now()); if (!window.__refuseClose) { snap.state = 'compact'; snap.revision += 1; queueMicrotask(() => window.__islandSetState && window.__islandSetState('compact')); } else throw new Error('pendiente'); }
           if (a === 'expand') { snap.state = 'expanded'; snap.revision += 1; queueMicrotask(() => window.__islandSetState && window.__islandSetState('overview')); }
           return structuredClone(snap);
         }
         if (cmd === 'agent_action') return a === 'sessions_list' ? { connection, accounts, sessions: { rows: sessions, truncated: false } } : { connection, accounts };
-        if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
+        if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.declared ? scenario.declared : scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
         if (cmd === 'github_action' && scenario.githubData === 'real') {
           // the shape src/github.rs serialises (what the validator's fake `gh` produces): PRs carry `repo`/`isDraft`/`review`, mainCI rows carry repo+branch
           const pr = { id: 'fixture/repo#42', title: 'Fixture PR', url: 'https://github.com/fixture/repo/pull/42', repo: 'fixture/repo', number: 42, isDraft: false, ci: 'failure', review: 'pending', headSha: null };
@@ -107,11 +108,14 @@ async function open(scenario = {}) {
     };
     window.__emit = (name, payload) => (listeners[name] || []).forEach(fn => fn({ payload }));
   }, { scenario, SESSIONS, UUID });
+  if (scenario.fakeClock) await page.clock.install({ time: 0 }); // time still flows; runFor() jumps it (before any page script runs)
   await page.goto(`${base}/index.html`);
   if (scenario.theme) await page.evaluate(t => { document.documentElement.dataset.theme = t; }, scenario.theme);
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__islandSetState('overview'));
   if (scenario.chat) { await page.evaluate(() => window.__islandSetView('chat', 720, 240)); await page.waitForTimeout(800); }
+  // S32: every declared service that has a card counts as «seen» (the host answered for it), so its pill shows as a row
+  if (scenario.declared) await page.evaluate(ids => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids, source: 'integrations' } })), scenario.declared);
   if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
   if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(scenario.quick ? 1800 : 4200); // spring + the ticker's first poll (`quick`: measurements that only need the card, not the first ticker poll)

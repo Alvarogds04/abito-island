@@ -141,14 +141,16 @@ fn music_controls_need_a_player_and_say_so_otherwise() {
 }
 
 #[test]
-fn a_pill_already_active_is_not_toggled_and_the_fifth_asks_which_to_drop() {
+fn a_pill_already_active_is_not_toggled_and_there_is_no_limit_to_ask_about() {
     let out = plan(&Intent::PillAdd("integration_github".into()), &state(&["integration_github"], false), Lang::En);
     assert_eq!(out.effects, vec![]);
     let full = state(&["integration_resend", "integration_n8n", "integration_vercel", "integration_github"], false);
     let out = plan(&Intent::PillAdd("integration_stripe".into()), &full, Lang::Es);
-    assert!(matches!(out.result, Outcome::Question(_)));
-    assert_eq!(out.pending, Some(Pending::RemoveWhich { to_add: "integration_stripe".into() }));
-    assert_eq!(out.effects, vec![]);
+    assert!(!matches!(out.result, Outcome::Question(_)), "no «which one do I remove?» any more: the fifth is simply added");
+    assert_eq!(out.pending, None);
+    assert_eq!(out.effects, vec![Effect::TogglePill("integration_stripe".into())]);
+    let several = plan(&Intent::PillAddMultiple(vec!["integration_stripe".into(), "ai_google".into(), "agent_codex".into()]), &full, Lang::En);
+    assert_eq!(several.effects.len(), 3, "adding several at once is not cut at four");
     let out = plan(&Intent::PillAdd("integration_stripe".into()), &state(&["integration_github"], false), Lang::Es);
     assert_eq!(out.effects, vec![Effect::TogglePill("integration_stripe".into())]);
 }
@@ -255,16 +257,17 @@ fn a_session_runs_several_actions_against_fresh_state() {
 
 #[test]
 fn a_question_rearms_the_microphone_and_the_next_phrase_answers_it() {
+    // (S32: the pill limit was the old trigger for this question; a playlist with no name asks the same kind of thing)
     let h = fake(&["integration_resend", "integration_n8n", "integration_vercel", "integration_github"], false);
     let mut s = Session::default();
-    let r = s.handle("añade Stripe", &h);
-    assert!(matches!(r.outcome, Outcome::Question(_)));
+    let r = s.handle("pon una playlist", &h);
+    assert!(matches!(r.outcome, Outcome::Question(_)), "{:?}", r.outcome);
     assert!(r.rearm);
     assert!(h.log.borrow().is_empty());
-    let r = s.handle("quita Vercel", &h);
+    let r = s.handle("rock", &h);
     assert_eq!(r.outcome, Outcome::Success);
     assert!(!r.rearm);
-    assert_eq!(h.log.borrow().len(), 2);
+    assert_eq!(h.log.borrow().len(), 1);
     // Nothing is pending any more: the same phrase is now a plain command.
     assert!(s.pending.is_none());
 }

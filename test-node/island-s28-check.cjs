@@ -29,7 +29,7 @@ const alpha = c => { const m = /rgba?\(([^)]+)\)/.exec(c); if (!m) return 1; con
       }).map(el => `${sel} «${el.textContent.trim().slice(0, 30)}» ${el.scrollWidth}>${el.clientWidth}`)), ONE_LINE);
       assert.deepEqual(bad, [], `${theme}: texts overflow their line: ${bad.join(' | ')}`);
       const below = (await r.measure('.card-left'))[0];
-      assert.ok(below && below.bottom <= 180.5 && below.h >= 131, `${theme}: card row is 132 high (y42..174), got ${JSON.stringify(below && [below.top, below.bottom])}`);
+      assert.ok(below && below.bottom <= 174.5 && below.h >= 131, `${theme}: card row is 132 high (y42..174), got ${JSON.stringify(below && [below.top, below.bottom])}`);
     } finally { await r.close(); }
   }
   console.log('island-s28-check: ok');

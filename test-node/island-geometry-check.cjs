@@ -5,8 +5,8 @@ const assert = require('node:assert/strict');
 const H = require('./island-geometry-harness.cjs');
 if (!H.findPlaywright()) { console.log('SKIPPED island-geometry-check: playwright is not installed here (no real layout engine) — NOT a pass'); process.exit(0); }
 
-const ISLAND = { left: 16, top: 6, right: 736, bottom: 190 };
-const CARD = { top: 48, bottom: 180 };
+const ISLAND = { left: 16, top: 0, right: 736, bottom: 184 };
+const CARD = { top: 42, bottom: 174 };
 const overlap = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
 const inside = (a, c) => a.left >= c.left - 0.5 && a.top >= c.top - 0.5 && a.right <= c.right + 0.5 && a.bottom <= c.bottom + 0.5;
 const label = e => `${e.id}[${Math.round(e.left)},${Math.round(e.top)},${Math.round(e.right)},${Math.round(e.bottom)}]`;
@@ -82,6 +82,32 @@ function noOverlaps(list, why) {
       assert.ok(gh.top >= list.top - 0.5 && gh.bottom <= list.bottom + 0.5, 'the GitHub blob is reachable without scrolling');
       const blobs = (await r.measure('#blobs'))[0];
       assert.ok(inside(list, blobs), 'the list lives inside its card');
+      passed += 1;
+    } finally { await r.close(); }
+  }
+
+  // S32: no limit on declared pills. Seven service pills (more than the old four; the island draws the ones that have a card) are WHOLE rows in a column that scrolls: nothing is cut, nothing is dropped, and the
+  // last one is reachable by scrolling the list (never by growing the island).
+  {
+    const ten = ['integration_github', 'integration_resend', 'integration_n8n', 'integration_vercel', 'integration_stripe', 'integration_notion', 'integration_calcom'];
+    const r = await H.open({ github: true, declared: ten });
+    try {
+      const rows0 = await r.page.evaluate(() => [...document.querySelectorAll('.pill-choice')].map(b => b.dataset.pillId));
+      assert.deepEqual(rows0.slice(1, 8), ten, `all seven declared pills are rows after Abito, in order (got ${rows0.join(',')})`);
+      const list = (await r.measure('#pill-choices'))[0];
+      const measure = async () => (await r.measure('.pill-choice')).filter(b => b.shown);
+      const rows = await measure();
+      const partial = rows.filter(b => { const vis = Math.min(b.bottom, list.bottom) - Math.max(b.top, list.top); return vis > 0.5 && vis < b.h - 0.5; });
+      assert.deepEqual(partial.map(label), [], 'no row is cut at the top of the list');
+      const scrollable = await r.page.evaluate(() => { const l = document.querySelector('#pill-choices'); return { sh: l.scrollHeight, ch: l.clientHeight }; });
+      assert.ok(scrollable.sh > scrollable.ch + 20, `seven rows plus the sessions overflow the column, so it scrolls (${scrollable.sh} > ${scrollable.ch})`);
+      await r.page.evaluate(id => { const l = document.querySelector('#pill-choices'), row = document.getElementById(`pill-choice-${id}`); l.scrollTop = row.offsetTop - l.offsetTop; }, ten[6]);
+      await r.page.waitForTimeout(150);
+      const last = (await r.measure(`#pill-choice-${ten[6]}`))[0];
+      const list2 = (await r.measure('#pill-choices'))[0];
+      assert.ok(last.top >= list2.top - 0.5 && last.bottom <= list2.bottom + 0.5, `the seventh pill is reachable and whole after scrolling (${label(last)} in ${label(list2)})`);
+      const win = await r.page.evaluate(() => ({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }));
+      assert.ok(list2.bottom <= win.h, 'the island did not grow past its window to fit them');
       passed += 1;
     } finally { await r.close(); }
   }
@@ -209,7 +235,7 @@ function noOverlaps(list, why) {
       const mode = await r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question || '', badge: !document.getElementById('clay-badge').hidden, layout: document.getElementById('capsule').dataset.layout }));
       assert.deepEqual(mode, { q: '', badge: false, layout: 'normal' }, `nothing of the question is left over: ${JSON.stringify(mode)}`);
       assert.ok(Math.abs(await islandH() - 184) < 2, `the island is back to the 184px overview, got ${await islandH()}`);
-      assert.ok(Math.abs(await clayTop() - 81) < 2, `the mascot is back at the overview position (81 = 75 + the 6px top gap), got ${await clayTop()}`);
+      assert.ok(Math.abs(await clayTop() - 75) < 2, `the mascot is back at the overview position (75), got ${await clayTop()}`);
       const list = await boxes(r);
       noOverlaps(list, 'after answering: overlapping boxes');
       passed += 1;

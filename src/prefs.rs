@@ -16,7 +16,6 @@ pub const DISPLAY_NAME_MAX: usize = 80;
 // Platform eligibility is declaration-only; it never means connected.
 pub const MAIN_PILLS: [&str; 4] = ["integration_claude", "agent_cursor", "agent_antigravity", "agent_codex"];
 pub const DEFAULT_MAIN_PILL: &str = "integration_claude";
-pub const MAX_DECLARED_PILLS: usize = 4;
 pub const DEFAULT_DECLARED_PILLS: [&str; 4] = ["integration_resend", "integration_n8n", "integration_vercel", "integration_github"];
 
 /// #415 WU2: created blobs — label + optional palette colour entries the human
@@ -555,7 +554,7 @@ impl Prefs {
         let defaults: Vec<String> = DEFAULT_DECLARED_PILLS.iter().map(|id| id.to_string()).collect();
         let mut clean = Vec::new();
         for id in self.declared_pills.as_ref().unwrap_or(&defaults) {
-            if id != self.main_pill() && pill_offered(id) && !clean.contains(id) && clean.len() < MAX_DECLARED_PILLS {
+            if id != self.main_pill() && pill_offered(id) && !clean.contains(id) {
                 clean.push(id.clone());
             }
         }
@@ -1091,7 +1090,6 @@ pub fn apply(current: &Prefs, command: &Command) -> Result<Prefs, CommandError> 
             let mut ids = current.declared_pills();
             if ids.contains(id) { ids.retain(|x| x != id); }
             else {
-                if ids.len() >= MAX_DECLARED_PILLS { return Err(CommandError); }
                 ids.push(id.clone());
             }
             next.declared_pills = Some(ids);

@@ -91,7 +91,7 @@ const es: Record<string, string> = {
   "words/min": "palabras/min",
   "days in a row": "días seguidos",
   // Slice 4: Spanish entries/substrings from upstream strings.json/extra.json, brand replacement only.
-  'Pick up to {max} pills to show next to el personaje — {used}/{max} in use.': 'Elige hasta {max} pestañas para mostrar junto al personaje — {used}/{max} en uso.',
+  'Pick the pills to show next to el personaje — {used} in use.': 'Elige las pestañas para mostrar junto al personaje — {used} en uso.',
   'Keys are stored in the {store}.': 'Las claves se guardan en {store}.',
   'Keys stay in the system keychain.': 'Las claves se quedan en el llavero del sistema.',
   'Secret key': 'Clave secreta', 'Token': 'Token', 'Instance URL': 'URL de la instancia', 'Integration token': 'Token de integración',
@@ -193,7 +193,7 @@ const es: Record<string, string> = {
   'Counts and project names only — never commands, files or prompts. Kept on this computer for 12 weeks.': 'Solo recuentos y nombres de proyecto — nunca comandos, archivos ni prompts. Se guarda en este equipo durante 12 semanas.',
   'Language': 'Idioma', 'System': 'Sistema',
   'Choose the tools you use. Abito only shows what you declare here.': 'Elige las herramientas que usas. Abito solo muestra lo que declares aquí.',
-  '{used}/{max} slots in use — the main tool doesn\'t take one.': '{used}/{max} espacios en uso — la herramienta principal no ocupa ninguno.',
+  '{used} in the island — the main tool is always there.': '{used} en la isla — la herramienta principal siempre está.',
   'Main tool': 'Herramienta principal', 'Main': 'Principal', 'Where you code': 'Dónde programas', 'AI for the chat': 'IA para el chat',
   'Coming soon': 'Próximamente', 'Hooks not installed': 'Hooks no instalados', 'Key not configured': 'Clave no configurada', 'Not connected': 'No conectado',
 };

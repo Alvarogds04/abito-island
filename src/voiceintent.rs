@@ -6,7 +6,7 @@
 //! VoiceQuery,VoiceActionRunner}.swift @71b773f, Copyright (c) 2026 Louis Raillé, MIT.
 //! The French tables are replaced by Spanish ones; the English ones are kept.
 
-use crate::prefs::{pill_offered, MAIN_PILLS, MAX_DECLARED_PILLS, PILL_IDS};
+use crate::prefs::{pill_offered, MAIN_PILLS, PILL_IDS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -1039,19 +1039,14 @@ pub fn plan(intent: &Intent, w: &World, lang: Lang) -> Plan {
         }
         Intent::PillAdd(id) => {
             if w.active.contains(id) { return ok(lang, "Esa píldora ya está activa.", "That pill is already on.", vec![]); }
-            if w.active.len() >= MAX_DECLARED_PILLS {
-                return ask(lang, "Ya hay cuatro píldoras. ¿Cuál quito?", "There are four pills already. Which one should I remove?", Pending::RemoveWhich { to_add: id.clone() });
-            }
             let n = pill_name(id);
             ok(lang, &format!("{n} añadida."), &format!("{n} added."), vec![Effect::TogglePill(id.clone())])
         }
         Intent::PillAddMultiple(ids) => {
-            let mut count = w.active.len();
             let mut added = vec![];
             let mut effects = vec![];
             for id in ids {
-                if w.active.contains(id) || count >= MAX_DECLARED_PILLS { continue; }
-                count += 1;
+                if w.active.contains(id) { continue; }
                 added.push(id.clone());
                 effects.push(Effect::TogglePill(id.clone()));
             }
@@ -1144,7 +1139,7 @@ pub fn answer_with(pending: &Pending, transcript: &str, w: &World, lang: Lang, a
             }.filter(|id| w.active.contains(id));
             let Some(entity) = entity else {
                 if !asked_again {
-                    return ask(lang, "Ya hay cuatro píldoras. ¿Cuál quito?", "There are four pills already. Which one should I remove?", pending.clone());
+                    return ask(lang, "¿Cuál quito?", "Which one should I remove?", pending.clone());
                 }
                 return fail(lang, "No he entendido.", "I didn't get that.");
             };

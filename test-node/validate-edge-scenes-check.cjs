@@ -23,6 +23,12 @@ test('S1 hidden geometry: the scenes wait for the island bottom <= 8.1 px (compa
   const isl = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
   assert.match(isl, /24 \* conceal\.x/, 'the page hides the island 24px up');
 });
+test('S31: no validator scene holds an expanded island untouched for 30 s or more (the island now folds after 30 s idle)', () => {
+  const hold = between('async function islandHoverPin()', 'return {mutedStrip');
+  const waits = [...hold.matchAll(/delay\((\d+)\)/g)].map(m => +m[1]);
+  assert.ok(waits.length > 0 && Math.max(...waits) < 30000, `the pinned-hold waits stay under 30 s: ${waits}`);
+  assert.doesNotMatch(src, /delay\((?:[3-9]\d{4}|\d{6,})\)|setTimeout\(resolve,(?:[3-9]\d{4}|\d{6,})\)/, 'no scene sleeps 30 s or more');
+});
 test('edgeIdle sets 5 seconds, waits at most 15 s, asserts the elapsed window, and edgeWake restores the previous seconds', () => {
   const idle = between('async function edgeIdle()', 'async function edgeWake()');
   assert.match(idle, /action:'set_absence_seconds',seconds:5/);
