@@ -1,0 +1,41 @@
+name: macOS bundle (unsigned .app + .dmg)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      SHERPA_VERSION: "1.13.8"
+      SHERPA_SHA256: "9091bf160dc7fdacedbc906b212badf53c2993f4e5277a0e03998e96c31d60da"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Fetch sherpa-onnx static libs (pinned sha256)
+        run: |
+          set -euo pipefail
+          A="sherpa-onnx-v${SHERPA_VERSION}-osx-arm64-static-lib.tar.bz2"
+          curl -fsSL -o "$RUNNER_TEMP/$A" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/$A"
+          echo "${SHERPA_SHA256}  $RUNNER_TEMP/$A" | shasum -a 256 -c -
+          tar -xjf "$RUNNER_TEMP/$A" -C "$RUNNER_TEMP"
+          echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/sherpa-onnx-v${SHERPA_VERSION}-osx-arm64-static-lib/lib" >> "$GITHUB_ENV"
+      - name: Build .app and .dmg (bundling enabled for CI only)
+        run: |
+          npx --yes @tauri-apps/cli@2 build --ci --bundles app,dmg \
+            --config '{"bundle":{"active":true,"icon":["icons/icon.png"],"category":"Productivity","macOS":{"minimumSystemVersion":"12.0"}}}' \
+            -- --locked
+      - name: Zip the .app
+        run: |
+          cd target/release/bundle/macos
+          ditto -c -k --keepParent *.app "$GITHUB_WORKSPACE/Abito-macos-arm64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abito-macos-arm64
+          path: |
+            Abito-macos-arm64.zip
+            target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
