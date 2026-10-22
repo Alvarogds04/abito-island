@@ -47,3 +47,19 @@ fn missing_credential_is_named() {
     assert_eq!(err.code, "credential_missing");
     assert_eq!(err.safe_message, "Configura OpenAI en Ajustes → Chat.");
 }
+
+/// Final verifier (77d6165): a cloud selection is only valid while its credential exists.
+#[test]
+fn a_cloud_id_cannot_be_selected_without_its_credential() {
+    assert_eq!(select_credentialed("cloud-openai-gpt-4o", &Store(None)).unwrap_err().code, "credential_missing");
+    assert!(select_credentialed("cloud-openai-forged", &Store(Some(("openai-api-key", "fixture")))).is_err());
+    assert_eq!(select_credentialed("cloud-openai-gpt-4o", &Store(Some(("openai-api-key", "fixture")))).unwrap().id, "cloud-openai-gpt-4o");
+    assert!(select_credentialed("cloud-openai-gpt-4o", &Store(Some(("unavailable", "")))).is_err(), "unreadable keychain never selects");
+}
+#[test]
+fn a_stale_cloud_selection_is_reset_when_the_credential_disappears() {
+    let selected = select("cloud-openai-gpt-4o").ok();
+    assert!(reconcile(selected, &Store(None)).is_none(), "key removed or signed out");
+    assert!(reconcile(selected, &Store(Some(("openai-api-key", "fixture")))).is_some(), "still credentialed: untouched");
+    assert!(reconcile(None, &Store(None)).is_none());
+}

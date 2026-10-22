@@ -52,6 +52,10 @@ impl Entry {
     pub fn view(self) -> Value { let t = self.target(); json!({"origin": t.origin(), "alias": self.model, "profile_id": self.id, "profile_revision": 1, "max_output_tokens": t.max_output}) }
     pub fn listing(self) -> Value { let mut v = self.view(); v["revision"] = json!(1); v["selectable"] = json!(true); v["cloud"] = json!(true); v["provider"] = json!(self.label); v["gate"] = json!({"state":"ready", "message":"Credencial presente."}); v }
 }
+/// Selecting a cloud id requires its credential NOW (a provider the picker would not list cannot be selected).
+pub fn select_credentialed(id: &str, store: &dyn SecretStore) -> Result<Entry, ChatError> { let e = select(id)?; e.require(store)?; Ok(e) }
+/// A saved or current cloud selection whose credential is gone (sign-out, key removed) is no selection at all.
+pub fn reconcile(selected: Option<Entry>, store: &dyn SecretStore) -> Option<Entry> { selected.filter(|e| e.present(store)) }
 pub fn cloud_entries(store: &dyn SecretStore) -> Vec<Entry> { PROFILES.iter().copied().filter(|e| e.present(store)).collect() }
 #[cfg(test)]
 #[path = "cloudprofiles_tests.rs"]

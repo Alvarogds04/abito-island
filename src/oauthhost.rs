@@ -23,13 +23,16 @@ fn open(url: &str) -> bool {
     }
 }
 #[tauri::command]
-pub async fn oauth_action(webview: tauri::Webview, state: tauri::State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
+pub async fn oauth_action(app: tauri::AppHandle, webview: tauri::Webview, state: tauri::State<'_, AppState>, payload: Value) -> Result<Value, BridgeError> {
     let url = webview.url().map(|u| u.to_string()).unwrap_or_default();
     bridge::sender_ok(webview.label(), &url)?;
     state.chat_rate.lock().map_err(|_| err("unavailable"))?.check(now_ms())?;
     let cmd = oauthcmd::parse(&payload).ok_or_else(|| err("invalid_schema"))?;
     tauri::async_runtime::spawn_blocking(move || {
         let clock = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-        FLOWS.get_or_init(Flows::default).apply(&OAuth::new(&Keychain, &RustlsHttp, &clock), cmd, &open)
+        let answer = FLOWS.get_or_init(Flows::default).apply(&OAuth::new(&Keychain, &RustlsHttp, &clock), cmd, &open);
+        // a sign-in that ended or a sign-out changes which cloud providers can answer: drop a stale selection (S2)
+        crate::modelshost::reconcile_cloud(&app);
+        answer
     }).await.map_err(|_| err("unavailable"))?.map_err(err)
 }

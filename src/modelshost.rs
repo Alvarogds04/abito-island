@@ -79,7 +79,7 @@ pub fn load_selection(app: &AppHandle, state: &AppState) {
         Saved::Absent
     };
     *state.chat_cloud.lock().expect("cloud selection lock") = match &saved {
-        Saved::Selected(id) => abito_island::cloudprofiles::select(id).ok(),
+        Saved::Selected(id) => abito_island::cloudprofiles::select_credentialed(id, &abito_island::secrets::Keychain).ok(),
         _ => None,
     };
     let target = models::initial_selection(&saved).and_then(target_of);
@@ -97,6 +97,23 @@ fn selected_id(state: &AppState) -> Option<String> {
         .expect("chat target lock")
         .as_ref()
         .map(|t| t.profile.profile_id.clone())
+}
+
+/// A cloud selection whose credential is gone (sign-out, key removed) falls back to the saved LOCAL choice, is persisted and
+/// announced, so the picker never keeps showing a provider that cannot answer. Blocking (keychain): call off the main thread.
+pub fn reconcile_cloud(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let current = *state.chat_cloud.lock().expect("cloud selection lock");
+    if current.is_none() || abito_island::cloudprofiles::reconcile(current, &abito_island::secrets::Keychain).is_some() { return; }
+    *state.chat_cloud.lock().expect("cloud selection lock") = None;
+    #[cfg(unix)]
+    if let (Some(dir), Some(t)) = (config_dir(app), state.chat_target.lock().expect("chat target lock").as_ref()) {
+        let _ = models::write_saved_file(&dir, &t.profile.profile_id);
+    }
+    state.chat.lock().expect("chat lane lock").availability = abito_island::chatlane::Availability::unchecked();
+    refresh(&state);
+    publish_models(app);
+    chathost::publish_chat(app);
 }
 
 /// Re-read local metadata (blocking: call off the main thread).
@@ -140,7 +157,7 @@ pub fn publish_models(app: &AppHandle) {
 pub fn select(app: &AppHandle, state: &AppState, profile_id: &str) -> Result<(), BridgeError> {
     let registry = registry(state);
     if profile_id.starts_with("cloud-") {
-        let cloud = abito_island::cloudprofiles::select(profile_id).map_err(err)?;
+        let cloud = abito_island::cloudprofiles::select_credentialed(profile_id, &abito_island::secrets::Keychain).map_err(err)?;
         *state.chat_cloud.lock().expect("cloud selection lock") = Some(cloud);
     } else {
         let entry = models::select(&registry, profile_id).map_err(err)?;
@@ -193,6 +210,7 @@ pub async fn models_action(
             }
             let handle = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
+                reconcile_cloud(&handle);
                 let state = handle.state::<AppState>();
                 refresh(&state);
                 publish_models(&handle);

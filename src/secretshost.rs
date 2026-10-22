@@ -21,6 +21,7 @@ fn err(code: &str) -> BridgeError {
 /// `unavailable` when the OS keychain is not reachable (no plaintext fallback).
 #[tauri::command]
 pub async fn secret_action(
+    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
     payload: Value,
@@ -33,7 +34,12 @@ pub async fn secret_action(
         .lock()
         .expect("chat rate lock")
         .check(now_ms())?;
-    tauri::async_runtime::spawn_blocking(move || secrets::apply(&Keychain, &command))
+    tauri::async_runtime::spawn_blocking(move || {
+        let answer = secrets::apply(&Keychain, &command);
+        // a removed or replaced key may leave a cloud selection without credential: reset it (S2)
+        crate::modelshost::reconcile_cloud(&app);
+        answer
+    })
         .await
         .map_err(|_| err("save_failed"))?
         .map_err(|e| err(e.code()))
