@@ -71,7 +71,7 @@ impl Env {
 const KV_KEYS: [&str; 10] = ["access_token", "refresh_token", "id_token", "client_secret", "authorization", "api_key", "apikey", "password", "passwd", "secret"];
 const KV_KEYS_WORD: [&str; 1] = ["token"];
 const URL_ONLY_KEYS: [&str; 2] = ["code", "state"];
-const STRONG_PREFIXES: [&str; 14] = ["sk-", "sk_live_", "pk_live_", "rk_live_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "AIza", "ya29.", "whsec_"];
+const STRONG_PREFIXES: [&str; 14] = ["sk-", "sk_live_", "pk_live_", "rk_live_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "aiza", "ya29.", "whsec_"];
 const WEAK_PREFIXES: [&str; 3] = ["hf_", "re_", "npm_"];
 
 fn is_alnum(c: char) -> bool { c.is_alphanumeric() }
@@ -265,22 +265,24 @@ fn entropy(s: &str) -> f64 {
     -counts.values().map(|&c| { let p = c as f64 / n; p * p.log2() }).sum::<f64>()
 }
 
+/// Prefix matching is case-insensitive (`GhP_…` is still a GitHub token to a human who retyped it); `run` is ASCII.
 fn looks_secret(run: &str) -> bool {
+    let low = run.to_ascii_lowercase();
     for p in STRONG_PREFIXES {
-        if let Some(rest) = run.strip_prefix(p) { if rest.len() >= 8 { return true; } }
+        if let Some(rest) = low.strip_prefix(p) { if rest.len() >= 8 { return true; } }
     }
     for p in WEAK_PREFIXES {
-        if let Some(rest) = run.strip_prefix(p) {
+        if let Some(rest) = low.strip_prefix(p) {
             if rest.len() >= 16 && rest.chars().all(|c| c.is_ascii_alphanumeric()) { return true; }
         }
     }
-    if let Some(rest) = run.strip_prefix("xox") {
+    if let Some(rest) = low.strip_prefix("xox") {
         if rest.len() >= 8 && rest.as_bytes()[1] == b'-' { return true; }
     }
-    if run.starts_with("eyJ") && run.len() >= 20 { return true; }
-    for p in ["AKIA", "ASIA"] {
-        if let Some(rest) = run.strip_prefix(p) {
-            if rest.len() == 16 && rest.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) { return true; }
+    if low.starts_with("eyj") && low.len() >= 20 { return true; }
+    for p in ["akia", "asia"] {
+        if let Some(rest) = low.strip_prefix(p) {
+            if rest.len() == 16 && rest.chars().all(|c| c.is_ascii_alphanumeric()) { return true; }
         }
     }
     if run.len() >= 32 {
@@ -409,19 +411,6 @@ pub fn safe_log_lines(lines: &[String], home: &str, user: &str, max: usize) -> V
 
 // ---------------------------------------------------------------- closed fields
 
-fn looks_like_conversation(text: &str) -> bool {
-    let low = text.to_lowercase();
-    CONTENT_MARKERS.iter().any(|m| low.contains(m))
-}
-
-/// The short free-form part of a record: first line only, redacted, withheld when it looks like chat content, capped.
-pub fn safe_message(msg: &str, home: &str, user: &str) -> String {
-    let first = msg.lines().next().unwrap_or("").trim();
-    if looks_like_conversation(first) { return "<message withheld: may contain conversation content>".to_owned(); }
-    let r = redact(first, home, user);
-    if r.chars().count() > MESSAGE_MAX { let mut c: String = r.chars().take(MESSAGE_MAX).collect(); c.push('…'); c } else { r }
-}
-
 /// `process` and `step` are identifiers chosen by our own code: anything else is not one of ours.
 fn closed_token(t: &str) -> String {
     if !t.is_empty() && t.chars().count() <= TOKEN_MAX && t.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) && !t.contains("..") {
@@ -429,19 +418,110 @@ fn closed_token(t: &str) -> String {
     } else { "unknown".to_owned() }
 }
 
-/// The only panic payloads whose text is ours (std/core wording with no user data). Everything else — an `expect` message,
-/// an `Err` value, a formatted string — can carry chat text and is reduced to its kind.
-fn panic_kind(payload: &str) -> String {
-    const SAFE: [&str; 9] = ["index out of bounds", "attempt to ", "explicit panic", "assertion failed", "already borrowed", "already mutably borrowed", "capacity overflow", "slice index", "byte index"];
-    if let Some(p) = SAFE.iter().find(|p| payload.starts_with(**p)) {
-        let line = payload.lines().next().unwrap_or("");
-        let cut = if *p == "assertion failed" { "assertion failed" } else { line };
-        return cut.chars().take(MESSAGE_MAX).collect();
+// ---- the record's message is STRUCTURAL: a closed reason + optional numbers + optional source location. No caller text.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelError { MissingFile, Checksum, Decode, Other }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanicKind { IndexOutOfBounds, Arithmetic, Explicit, Assertion, Borrow, CapacityOverflow, UnwrapNone, UnwrapErr, Poisoned, Other }
+
+/// Every failure Abito can record. Adding one means adding a fixed label here; there is no way to attach text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reason {
+    DaemonStartFailed, DaemonExited, AgentNoAnswer, AgentRefused, AgentLost,
+    ModelLoadFailed(ModelError), Panic(PanicKind), Manual,
+}
+
+impl Reason {
+    pub fn label(self) -> &'static str {
+        match self {
+            Reason::DaemonStartFailed => "daemon did not start",
+            Reason::DaemonExited => "daemon exited by itself",
+            Reason::AgentNoAnswer => "agent daemon did not answer",
+            Reason::AgentRefused => "agent daemon refused the connection",
+            Reason::AgentLost => "agent daemon connection lost",
+            Reason::ModelLoadFailed(ModelError::MissingFile) => "voice model failed to load: missing file",
+            Reason::ModelLoadFailed(ModelError::Checksum) => "voice model failed to load: checksum",
+            Reason::ModelLoadFailed(ModelError::Decode) => "voice model failed to load: decode",
+            Reason::ModelLoadFailed(ModelError::Other) => "voice model failed to load: other",
+            Reason::Panic(PanicKind::IndexOutOfBounds) => "panic: index out of bounds",
+            Reason::Panic(PanicKind::Arithmetic) => "panic: arithmetic overflow",
+            Reason::Panic(PanicKind::Explicit) => "panic: explicit panic",
+            Reason::Panic(PanicKind::Assertion) => "panic: assertion failed",
+            Reason::Panic(PanicKind::Borrow) => "panic: already borrowed",
+            Reason::Panic(PanicKind::CapacityOverflow) => "panic: capacity overflow",
+            Reason::Panic(PanicKind::UnwrapNone) => "panic: unwrap on a None value",
+            Reason::Panic(PanicKind::UnwrapErr) => "panic: unwrap on an Err value",
+            Reason::Panic(PanicKind::Poisoned) => "panic: poisoned lock",
+            Reason::Panic(PanicKind::Other) => "panic: unspecified",
+            Reason::Manual => "manual report",
+        }
     }
-    if payload.starts_with("called `Option::unwrap()`") { return "called `Option::unwrap()` on a `None` value".to_owned(); }
-    if payload.starts_with("called `Result::unwrap()`") { return "called `Result::unwrap()` on an `Err` value (value withheld)".to_owned(); }
-    if payload.contains("PoisonError") || payload.contains("poisoned") { return "poisoned lock".to_owned(); }
-    "panic (message withheld)".to_owned()
+
+    pub fn all() -> Vec<Reason> {
+        use ModelError::*;
+        use PanicKind::*;
+        let mut v = vec![Reason::DaemonStartFailed, Reason::DaemonExited, Reason::AgentNoAnswer, Reason::AgentRefused, Reason::AgentLost, Reason::Manual];
+        v.extend([MissingFile, Checksum, Decode, ModelError::Other].map(Reason::ModelLoadFailed));
+        v.extend([IndexOutOfBounds, Arithmetic, Explicit, Assertion, Borrow, CapacityOverflow, UnwrapNone, UnwrapErr, Poisoned, PanicKind::Other].map(Reason::Panic));
+        v
+    }
+}
+
+/// The panic payload is read ONLY to pick a kind; its text is never kept.
+pub fn classify_panic(payload: &str) -> PanicKind {
+    if payload.starts_with("index out of bounds") || payload.starts_with("slice index") || payload.starts_with("byte index") { PanicKind::IndexOutOfBounds }
+    else if payload.starts_with("attempt to ") { PanicKind::Arithmetic }
+    else if payload.starts_with("explicit panic") { PanicKind::Explicit }
+    else if payload.starts_with("assertion failed") || payload.starts_with("assertion `") { PanicKind::Assertion }
+    else if payload.starts_with("already borrowed") || payload.starts_with("already mutably borrowed") { PanicKind::Borrow }
+    else if payload.starts_with("capacity overflow") { PanicKind::CapacityOverflow }
+    else if payload.starts_with("called `Option::unwrap()`") { PanicKind::UnwrapNone }
+    else if payload.starts_with("called `Result::unwrap()`") { PanicKind::UnwrapErr }
+    else if payload.contains("PoisonError") { PanicKind::Poisoned }
+    else { PanicKind::Other }
+}
+
+fn safe_path_char(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '/') }
+
+fn valid_path(p: &str) -> bool {
+    !p.is_empty() && p.len() <= 80 && p.chars().all(safe_path_char) && !p.contains("..") && !p.starts_with('/') && !p.contains("//")
+}
+
+/// `src/…` when the file is inside a `src/` directory, else the bare file name; dropped if it is not a plain path.
+fn source_location(file: &str, line: u32) -> Option<String> {
+    let file = file.replace('\\', "/");
+    let rel = match file.rfind("src/") { Some(i) => &file[i..], None => file.rsplit('/').next().unwrap_or("") };
+    valid_path(rel).then(|| format!("{rel}:{line}"))
+}
+
+/// label [+ " (n)"] [+ " at path:line"] — the only shape a record message can have.
+pub fn compose(reason: &Reason, code: Option<i64>, location: Option<(&str, u32)>) -> String {
+    let mut m = reason.label().to_owned();
+    if let Some(n) = code { m.push_str(&format!(" ({n})")); }
+    if let Some((f, l)) = location { if let Some(loc) = source_location(f, l) { m.push_str(&format!(" at {loc}")); } }
+    m
+}
+
+/// Does `msg` have exactly the shape `compose` produces? Anything else did not come from our code and is never shown.
+pub fn valid_message(msg: &str) -> bool {
+    if msg.chars().count() > MESSAGE_MAX { return false; }
+    Reason::all().iter().any(|r| {
+        let Some(mut rest) = msg.strip_prefix(r.label()) else { return false };
+        if let Some(r2) = rest.strip_prefix(" (") {
+            let Some(end) = r2.find(')') else { return false };
+            let n = &r2[..end];
+            let digits = n.strip_prefix('-').unwrap_or(n);
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || n.parse::<i64>().is_err() { return false; }
+            rest = &r2[end + 1..];
+        }
+        if let Some(loc) = rest.strip_prefix(" at ") {
+            let Some((path, line)) = loc.rsplit_once(':') else { return false };
+            return valid_path(path) && !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) && line.parse::<u32>().is_ok();
+        }
+        rest.is_empty()
+    })
 }
 
 // ---------------------------------------------------------------- fingerprint
@@ -481,12 +561,12 @@ pub struct Report { pub title: String, pub body: String }
 pub fn build_report(rec: &FailureRecord, log: &[String], home: &str, user: &str) -> Report {
     let rd = |t: &str| redact(t, home, user);
     let fp = fingerprint_of(rec);
-    let msg = safe_message(&rec.message, home, user);
+    let msg = if valid_message(&rec.message) { rec.message.clone() } else { "unrecognized record (not shown)".to_owned() };
     let first: String = msg.lines().next().unwrap_or("").chars().take(60).collect();
     let title = format!("[{}] {}: {} ({fp})", rd(&rec.process), rd(&rec.step), first.trim());
     let log_lines = safe_log_lines(log, home, user, LOG_LINES);
     let body = format!(
-        "## What happened\n- While: {step}\n- Process: {process}\n- Error: {msg}\n\n## Environment\n- Abito: {version}\n- OS: {os}\n- Session: {session}\n- Fingerprint: `{fp}`\n\n## Last log lines\n```\n{log}\n```\n",
+        "## What happened\n- While: {step}\n- Process: {process}\n- Error: {msg}\n\n## Environment\n- Abito: {version}\n- OS: {os}\n- Session: {session}\n- Fingerprint: `{fp}`\n\n## Last log lines\n```\n{log}\n```\n\n## Details (optional, written by you)\n\n",
         step = rd(&rec.step), process = rd(&rec.process), version = rd(&rec.version), os = rd(&rec.os), session = rd(&rec.session),
         log = log_lines.join("\n"));
     Report { title, body }
@@ -512,6 +592,34 @@ pub fn issue_url(title: &str, body: &str) -> IssueUrl {
 /// «Search if it already exists»: the repo's issue search for this fingerprint.
 pub fn search_url(fingerprint: &str) -> String {
     format!("https://github.com/{REPO}/issues?q={}", encode(&format!("is:issue {fingerprint}")))
+}
+
+// ---------------------------------------------------------------- percent-decoding (so %2F cannot hide a path from redaction)
+
+fn hex_val(b: u8) -> Option<u8> { (b as char).to_digit(16).map(|d| d as u8) }
+
+fn percent_decode_once(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() && hex_val(b[i + 1]).is_some() && hex_val(b[i + 2]).is_some() {
+            out.push(hex_val(b[i + 1]).unwrap_or(0) * 16 + hex_val(b[i + 2]).unwrap_or(0));
+            i += 3;
+        } else { out.push(b[i]); i += 1; }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// At most 3 passes, stopping as soon as the text is stable; invalid sequences stay as they are.
+pub fn percent_decode_bounded(s: &str) -> String {
+    let mut cur = s.to_owned();
+    for _ in 0..3 {
+        let next = percent_decode_once(&cur);
+        if next == cur { break; }
+        cur = next;
+    }
+    cur
 }
 
 // ---------------------------------------------------------------- local store
@@ -547,7 +655,7 @@ pub struct Stored { pub record: FailureRecord, pub count: usize }
 pub fn load_all(dir: &Path) -> Vec<Stored> {
     let text = std::fs::read_to_string(dir.join(STORE_FILE)).unwrap_or_default();
     let mut out: Vec<(String, Stored)> = Vec::new();
-    for rec in text.lines().filter_map(|l| serde_json::from_str::<FailureRecord>(l).ok()) {
+    for rec in text.lines().filter_map(|l| serde_json::from_str::<FailureRecord>(l).ok()).filter(|r| valid_message(&r.message) && closed_token(&r.process) == r.process && closed_token(&r.step) == r.step) {
         let fp = fingerprint_of(&rec);
         match out.iter_mut().find(|(f, _)| *f == fp) {
             Some((_, s)) => { s.count += 1; if rec.at_secs >= s.record.at_secs { s.record = rec; } }
@@ -564,36 +672,35 @@ fn field(v: &str, env: &Env) -> String {
     if r.chars().count() > FIELD_MAX { let mut c: String = r.chars().take(FIELD_MAX).collect(); c.push('…'); c } else { r }
 }
 
-pub fn record_failure(process: &str, step: &str, message: &str, env: &Env, at_secs: u64) -> FailureRecord {
+pub fn record_failure(process: &str, step: &str, reason: Reason, code: Option<i64>, location: Option<(&str, u32)>, env: &Env, at_secs: u64) -> FailureRecord {
     FailureRecord {
         at_secs,
         process: closed_token(process),
         step: closed_token(step),
-        message: safe_message(message, &env.home, &env.user),
+        message: compose(&reason, code, location),
         version: field(&env.version, env),
         os: field(&env.os, env),
         session: field(&env.session, env),
     }
 }
 
+/// A panic keeps its KIND and file:line; the payload text is dropped (it can carry anything the program was holding).
 pub fn record_from_panic(process: &str, payload: &str, location: Option<(&str, u32)>, env: &Env, at_secs: u64) -> FailureRecord {
-    let kind = panic_kind(payload);
-    let msg = match location { Some((f, l)) => format!("{kind} at {f}:{l}"), None => kind };
-    record_failure(process, "panic", &msg, env, at_secs)
+    record_failure(process, "panic", Reason::Panic(classify_panic(payload)), None, location, env, at_secs)
 }
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Record a non-panic failure (model load error, daemon down, agent not answering). Local only; errors are swallowed.
-pub fn note(dir: &Path, process: &str, step: &str, message: &str) {
-    let _ = store(dir, &record_failure(process, step, message, &Env::detect(), now_secs()));
+/// Record a non-panic failure. Local only; errors are swallowed. There is no free-text parameter on purpose.
+pub fn note(dir: &Path, process: &str, step: &str, reason: Reason, code: Option<i64>) {
+    let _ = store(dir, &record_failure(process, step, reason, code, None, &Env::detect(), now_secs()));
 }
 
-/// `note` into the default store; the one-line hook other modules call at a failure site. Never fails, never blocks the caller on the network.
-pub fn report(process: &str, step: &str, message: &str) {
-    if let Some(dir) = default_dir() { note(&dir, process, step, message); }
+/// `note` into the default store; the one-line hook other modules call at a failure site.
+pub fn report(process: &str, step: &str, reason: Reason, code: Option<i64>) {
+    if let Some(dir) = default_dir() { note(&dir, process, step, reason, code); }
 }
 
 /// Chain a panic hook that records the panic locally and then runs the previous hook. No network, never panics itself.

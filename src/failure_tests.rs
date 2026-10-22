@@ -106,15 +106,14 @@ fn fingerprint_is_stable_and_ignores_volatile_parts() {
 }
 
 fn record() -> FailureRecord {
-    FailureRecord { at_secs: 1_700_000_000, process: "island".into(), step: "voice-load".into(),
-        message: "load failed for /home/alvaro/models/x.onnx key=sk-ant-api03-AbCdEfGhIjKlMnOpQrSt".into(),
-        version: "0.2.0".into(), os: "Ubuntu 24.04".into(), session: "wayland".into() }
+    record_failure("island", "voice-load", Reason::ModelLoadFailed(ModelError::MissingFile), Some(2), None,
+        &Env { version: "0.2.0".into(), os: "Ubuntu 24.04".into(), session: "wayland".into(), home: HOME.into(), user: USER.into() }, 1_700_000_000)
 }
 
 #[test]
 fn report_has_every_s2_field_and_is_redacted() {
     let rep = build_report(&record(), &["INFO ok".to_owned(), "ERROR in /home/alvaro/x".to_owned()], HOME, USER);
-    for needle in ["0.2.0", "Ubuntu 24.04", "wayland", "island", "voice-load", "load failed for ~/models/x.onnx", &fingerprint_of(&record()), "INFO ok", "ERROR in ~/x"] {
+    for needle in ["0.2.0", "Ubuntu 24.04", "wayland", "island", "voice-load", "voice model failed to load: missing file (2)", &fingerprint_of(&record()), "INFO ok", "ERROR in ~/x"] {
         assert!(rep.body.contains(needle), "missing {needle}: {}", rep.body);
     }
     assert!(!rep.body.contains("sk-ant") && !rep.body.contains("alvaro"), "{}", rep.body);
@@ -179,18 +178,6 @@ fn multibyte_text_next_to_path_like_prefixes_never_panics() {
 }
 
 #[test]
-fn note_writes_a_redacted_local_record_without_network() {
-    let dir = std::env::temp_dir().join(format!("abito-failure-{}-{}", std::process::id(), line!()));
-    let _ = std::fs::remove_dir_all(&dir);
-    note(&dir, "daemon", "daemon-down", "exited: password=hunter22 at /home/zz/x");
-    let all = load_all(&dir);
-    assert_eq!(all.len(), 1);
-    assert_eq!((all[0].record.process.as_str(), all[0].record.step.as_str()), ("daemon", "daemon-down"));
-    assert!(!all[0].record.message.contains("hunter22"), "{}", all[0].record.message);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn each_listed_prefix_is_redacted_on_its_own() {
     for secret in ["ghp_0123456789abcdefghijABCDEFGHIJ", "gho_0123456789abcdefghijABCDEFGHIJ", "github_pat_11AAAAAAA0abcdefghijklmnop_QRSTUV",
         "glpat-abcdefghij0123456789", "xoxb-111111111111-222222222222-abcdefABCDEF", "AIzaSyD-abcdefghijklmnopqrstuvwxyz01234"] {
@@ -242,66 +229,10 @@ fn the_machines_own_hostname_is_redacted() {
 fn env() -> Env { Env { version: "0.2.0".into(), os: "Ubuntu".into(), session: "x11".into(), home: HOME.into(), user: USER.into() } }
 
 #[test]
-fn panic_info_becomes_a_record_with_location_and_kind_and_no_network() {
-    let rec = record_from_panic("island", "index out of bounds: the len is 3 but the index is 5", Some(("src/voicehost.rs", 12)), &env(), 5);
-    assert_eq!((rec.step.as_str(), rec.at_secs, rec.version.as_str()), ("panic", 5, "0.2.0"));
-    assert!(rec.message.contains("index out of bounds") && rec.message.contains("src/voicehost.rs:12"), "{}", rec.message);
-}
-
-#[test]
-fn a_panic_message_with_chat_text_never_reaches_the_record() {
-    for payload in [
-        "called `Result::unwrap()` on an `Err` value: ParseError(\"dime algo sobre mi madre y mi diagnóstico\")",
-        "called `Option::expect()` failed: hola abito escribí a mi madre",
-        "conversation 42: el usuario dijo que quiere ayuda con su divorcio",
-        "something odd: hola abito, mandale un mail a mi jefe",
-        "Error: 'dime la clave de mi banco'",
-    ] {
-        let rec = record_from_panic("island", payload, Some(("src/chat.rs", 7)), &env(), 1);
-        for leaked in ["madre", "diagnóstico", "divorcio", "jefe", "banco", "dijo", "escribí"] {
-            assert!(!rec.message.contains(leaked), "leaked {leaked} from {payload:?}: {}", rec.message);
-        }
-        assert!(rec.message.contains("src/chat.rs:7"), "the location is kept: {}", rec.message);
-    }
-}
-
-#[test]
-fn free_form_messages_are_withheld_when_they_look_like_conversation_and_capped_otherwise() {
-    let rec = record_failure("island", "x", "chat: user said: my diagnosis is private", &env(), 1);
-    assert!(!rec.message.contains("diagnosis"), "{}", rec.message);
-    let long = record_failure("island", "x", &"e".repeat(5000), &env(), 1);
-    assert!(long.message.chars().count() <= MESSAGE_MAX + 1, "{}", long.message.len());
-    let multi = record_failure("island", "x", "first line\nsecond line with stuff", &env(), 1);
-    assert_eq!(multi.message, "first line");
-}
-
-#[test]
-fn process_and_step_are_closed_tokens() {
-    let rec = record_failure("is land/../", "step with spaces <b>", "m", &env(), 1);
-    assert_eq!((rec.process.as_str(), rec.step.as_str()), ("unknown", "unknown"));
-    let ok = record_failure("daemon", "agent-no-answer", "m", &env(), 1);
-    assert_eq!((ok.process.as_str(), ok.step.as_str()), ("daemon", "agent-no-answer"));
-}
-
-#[test]
-fn the_report_caps_a_stored_message_even_if_an_older_record_has_chat_in_it() {
-    let mut rec = record();
-    rec.message = "conversation 9: user said hello about my mother".into();
-    let rep = build_report(&rec, &[], HOME, USER);
-    assert!(!rep.body.contains("mother"), "{}", rep.body);
-}
-
-fn tmpdir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("abito-failure-{}-{tag}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    d
-}
-
-#[test]
 fn every_field_and_the_whole_record_are_bounded() {
     let big = "ñ".repeat(10_000);
     let e = Env { version: big.clone(), os: big.clone(), session: big.clone(), home: HOME.into(), user: USER.into() };
-    let rec = record_failure(&big, &big, &big, &e, 1);
+    let rec = record_failure(&big, &big, Reason::AgentLost, Some(i64::MAX), Some((&big, u32::MAX)), &e, 1);
     let line = serde_json::to_string(&rec).unwrap();
     assert!(line.len() <= RECORD_MAX_BYTES, "{} bytes", line.len());
     for f in [&rec.version, &rec.os, &rec.session] { assert!(f.chars().count() <= FIELD_MAX + 1); }
@@ -345,4 +276,103 @@ fn a_short_home_never_eats_the_start_of_a_longer_path() {
     assert_eq!(redact("/home/alvaro/x /home/a/y", "/home/a", ""), "~/x ~/y");
     assert_eq!(redact("home=/home/a", "/home/a", ""), "home=~");
     assert_eq!(redact("/home/ab/z", "/home/a", ""), "~/z", "another user's home is still hidden by the generic rule");
+}
+
+// ---- structural exclusion (verifier round 2, point 1)
+
+const CHAT: &str = "dime algo sobre mi madre y mi diagnóstico: hola abito, mandale un mail a mi jefe";
+
+fn everything(rec: &FailureRecord, dir: &std::path::Path) -> String {
+    let rep = build_report(rec, &[], HOME, USER);
+    let raw = std::fs::read_to_string(dir.join(STORE_FILE)).unwrap_or_default();
+    let IssueUrl::Url(url) = issue_url(&rep.title, &rep.body) else { panic!("fits") };
+    format!("{}\n{}\n{raw}\n{url}\n{}", rep.title, rep.body, serde_json::to_string(rec).unwrap())
+}
+
+#[test]
+fn a_report_call_cannot_carry_free_text_anywhere() {
+    let dir = tmpdir("structural");
+    // the only inputs are closed codes and numbers; hostile process/step strings are reduced to "unknown"
+    note(&dir, CHAT, CHAT, Reason::AgentNoAnswer, Some(7));
+    let all = load_all(&dir);
+    assert_eq!(all.len(), 1);
+    let text = everything(&all[0].record, &dir);
+    for leaked in ["madre", "diagnóstico", "jefe", "dime", "hola"] {
+        assert!(!text.contains(leaked), "leaked {leaked}: {text}");
+    }
+    assert_eq!((all[0].record.process.as_str(), all[0].record.step.as_str()), ("unknown", "unknown"));
+    assert_eq!(all[0].record.message, "agent daemon did not answer (7)");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_panic_keeps_only_its_kind_and_file_line() {
+    let env = env();
+    let rec = record_from_panic("island", &format!("called `Result::unwrap()` on an `Err` value: ParseError(\"{CHAT}\")"), Some(("/home/alvaro/Apps/x/src/chat.rs", 7)), &env, 1);
+    assert_eq!(rec.step, "panic");
+    assert_eq!(rec.message, "panic: unwrap on an Err value at src/chat.rs:7");
+    for payload in [CHAT.to_owned(), format!("assertion failed: {CHAT}"), format!("index out of bounds: the len is 3 but the index is 5 {CHAT}"), format!("attempt to add with overflow {CHAT}"), format!("explicit panic {CHAT}")] {
+        let rec = record_from_panic("island", &payload, Some(("src/a.rs", 1)), &env, 1);
+        for leaked in ["madre", "diagnóstico", "jefe", "dime", "hola"] { assert!(!rec.message.contains(leaked), "{payload:?} -> {}", rec.message); }
+        assert!(valid_message(&rec.message), "{}", rec.message);
+    }
+    let no_loc = record_from_panic("island", "explicit panic", None, &env, 1);
+    assert_eq!(no_loc.message, "panic: explicit panic");
+}
+
+#[test]
+fn stored_records_with_arbitrary_text_are_not_trusted_on_load_or_in_the_report() {
+    let dir = tmpdir("untrusted");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut rec = record();
+    rec.message = format!("conversation 9: {CHAT}");
+    std::fs::write(dir.join(STORE_FILE), format!("{}\n", serde_json::to_string(&rec).unwrap())).unwrap();
+    assert!(load_all(&dir).is_empty(), "a record whose message is not one of ours is dropped");
+    let rep = build_report(&rec, &[], HOME, USER);
+    assert!(!rep.body.contains("madre") && !rep.body.contains("conversation 9"), "{}", rep.body);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn every_closed_reason_composes_a_valid_message() {
+    for r in Reason::all() {
+        let m = compose(&r, Some(-1), Some(("src/x.rs", 3)));
+        assert!(valid_message(&m), "{m}");
+        assert!(valid_message(&compose(&r, None, None)));
+    }
+    for bad in ["", "boom", "agent daemon did not answer (x)", "agent daemon did not answer at ../../etc/passwd:1", "agent daemon did not answer\nextra", "agent daemon did not answer (1) at src/a b.rs:1"] {
+        assert!(!valid_message(bad), "{bad:?}");
+    }
+}
+
+// ---- case-insensitive prefixes (point 2)
+
+#[test]
+fn prefixes_match_case_insensitively() {
+    for secret in ["GhP_0123456789abcdefghijABCDEFGHIJ", "GHP_0123456789abcdefghijABCDEFGHIJ", "gHo_0123456789abcdefghijABCDEFGHIJ", "Github_PAT_11AAAAAAA0abcdefghijklmnop",
+        "GlPat-abcdefghij0123456789", "XOXB-111111111111-222222222222-abcdefABCDEF", "Xoxp-111111111111-abcdef", "aiza-not-it-but AIZAsyD-abcdefghijklmnopqrstuvwxyz01234", "aizaSyD-abcdefghijklmnopqrstuvwxyz01234",
+        "SK-ANT-api03-AbCdEfGhIjKlMnOpQrSt", "Sk-proj1234567890abcdef", "akiaiosfodnn7example", "Eyjhbgcioijiuzi1nij9.abcdefghijklmnopqrstu", "HF_abcdefghijklmnopqrstu", "NPM_abcdefghijklmnopqrstuvwx", "Ya29.a0AfH6SMBxxxxxxxxxxxx"] {
+        let out = r(&format!("key {secret} end"));
+        assert!(out.contains("<secret>") && !out.contains(&secret[secret.len().saturating_sub(10)..]), "leaked {secret}: {out}");
+    }
+}
+
+// ---- percent-encoding (point 3), the pure decoder
+
+#[test]
+fn percent_decoding_is_bounded_and_stops_when_stable() {
+    assert_eq!(percent_decode_bounded("%2Fhome%2Falvaro"), "/home/alvaro");
+    assert_eq!(percent_decode_bounded("alvaro%40example.com"), "alvaro@example.com");
+    assert_eq!(percent_decode_bounded("sk%2Dant%2Dapi03%2DAbCdEf"), "sk-ant-api03-AbCdEf");
+    assert_eq!(percent_decode_bounded("%252Fhome"), "/home", "double-encoded");
+    assert_eq!(percent_decode_bounded("%2525252Fhome"), "%2Fhome", "at most 3 passes");
+    assert_eq!(percent_decode_bounded("100% sure %zz %4"), "100% sure %zz %4", "invalid sequences stay");
+    assert_eq!(percent_decode_bounded("plain text"), "plain text");
+    assert_eq!(percent_decode_bounded("%F0%9F"), "\u{FFFD}", "invalid utf-8 never panics");
+}
+
+fn tmpdir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("abito-failure-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    d
 }

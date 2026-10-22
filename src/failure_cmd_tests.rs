@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 
 fn env() -> Env { Env { version: "0.2.0".into(), os: "Ubuntu".into(), session: "x11".into(), home: "/home/a".into(), user: "alvaro".into() } }
-fn stored(step: &str, at: u64) -> Stored { Stored { record: failure::record_failure("island", step, "boom", &env(), at), count: 1 } }
+fn stored(step: &str, at: u64) -> Stored { Stored { record: failure::record_failure("island", step, failure::Reason::AgentLost, None, None, &env(), at), count: 1 } }
 fn tmp(tag: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(format!("abito-fcmd-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&d); d }
 
 #[test]
@@ -76,7 +76,7 @@ fn manual_report_has_a_neutral_record_and_a_known_fingerprint_finds_its_own() {
 fn context_lines_are_the_other_failures_oldest_first() {
     let (a, b, c) = (stored("a", 1), stored("b", 3), stored("c", 2));
     let lines = context_lines(&[b.clone(), a.clone(), c.clone()], &a.record);
-    assert_eq!(lines, ["[island/c] boom", "[island/b] boom"]);
+    assert_eq!(lines, ["[island/c] agent daemon connection lost", "[island/b] agent daemon connection lost"]);
 }
 
 #[test]
@@ -112,4 +112,20 @@ fn outgoing_is_idempotent_on_already_redacted_text() {
     let e = env();
     let once = outgoing("t <secret> ~/x <email>", "b <ip> <host> <user>", &e.home, &e.user);
     assert_eq!(once.clipboard, "t <secret> ~/x <email>\n\nb <ip> <host> <user>");
+}
+
+#[test]
+fn percent_encoded_secrets_are_decoded_then_redacted_before_the_url_and_clipboard() {
+    let e = env();
+    let out = outgoing("[island] crash %2Fhome%2Falvaro%2Fx", "path %2Fhome%2Falvaro%2FApps\nmail alvaro%40example.com\nkey sk%2Dant%2Dapi03%2DAbCdEfGhIjKlMnOpQrSt\ndouble %252Fhome%252Falvaro", &e.home, &e.user);
+    let IssueUrl::Url(url) = &out.url else { panic!("fits") };
+    for text in [&out.clipboard, url] {
+        for leaked in ["alvaro", "AbCdEf", "sk-ant", "sk%2Dant", "%40example", "example.com"] {
+            assert!(!text.contains(leaked), "leaked {leaked}: {text}");
+        }
+    }
+    assert!(out.clipboard.contains("~/x") && out.clipboard.contains("<email>") && out.clipboard.contains("<secret>"), "{}", out.clipboard);
+    assert!(!out.clipboard.lines().next().unwrap_or("").is_empty());
+    let nl = outgoing("a%0Ab", "c", &e.home, &e.user);
+    assert_eq!(nl.clipboard.lines().next(), Some("a b"), "a decoded newline cannot split the title");
 }

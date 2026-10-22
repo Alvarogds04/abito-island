@@ -43,7 +43,7 @@ impl HostSlot {
             Ok(()) => {}
             Err(reason) => {
                 eprintln!("island host: no_daemon ({})", reason.code());
-                crate::failure::report("daemon", "daemon-start", &format!("daemon did not start: {}", reason.code()));
+                crate::failure::report("daemon", "daemon-start", crate::failure::Reason::DaemonStartFailed, None);
                 *self.failure.lock().expect("host failure lock") = Some(reason);
             }
         }
@@ -75,7 +75,7 @@ impl HostSlot {
             let Some(host) = slot.as_mut() else { return }; // stopped: nothing left to watch
             if let Ok(Some(status)) = host.try_wait() {
                 eprintln!("island host: daemon exited by itself ({status}); reaped");
-                crate::failure::report("daemon", "daemon-exited", &format!("daemon exited by itself ({status})"));
+                crate::failure::report("daemon", "daemon-exited", crate::failure::Reason::DaemonExited, status.code().map(i64::from));
                 if let Ok(mut out) = exited.lock() { *out = Some(status); }
                 *slot = None; // Drop sees the child already reaped: no signal to a reused pid
                 return;

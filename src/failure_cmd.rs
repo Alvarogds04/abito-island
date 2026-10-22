@@ -89,8 +89,10 @@ impl Prefs {
 pub struct Outgoing { pub url: IssueUrl, pub clipboard: String }
 
 pub fn outgoing(title: &str, body: &str, home: &str, user: &str) -> Outgoing {
-    let title = failure::redact(title, home, user);
-    let body = failure::redact(body, home, user);
+    // the page may have percent-encoded what it sends: decode (bounded) BEFORE redacting so `%2Fhome%2Falvaro` cannot slip through
+    let clean = |t: &str| failure::redact(&failure::percent_decode_bounded(t), home, user);
+    let title = clean(title).split_whitespace().collect::<Vec<_>>().join(" ");
+    let body = clean(body);
     Outgoing { url: failure::issue_url(&title, &body), clipboard: format!("{title}\n\n{body}") }
 }
 
@@ -108,7 +110,7 @@ pub fn pending(all: &[Stored], prefs: &Prefs, later: &BTreeSet<String>) -> Vec<S
 pub fn record_for(all: &[Stored], fingerprint: Option<&str>, env: &Env, now: u64) -> Option<FailureRecord> {
     match fingerprint {
         Some(fp) => all.iter().find(|s| failure::fingerprint_of(&s.record) == fp).map(|s| s.record.clone()),
-        None => Some(failure::record_failure("island", "manual-report", "Reporte manual: describí acá qué pasó.", env, now)),
+        None => Some(failure::record_failure("island", "manual-report", failure::Reason::Manual, None, None, env, now)),
     }
 }
 
