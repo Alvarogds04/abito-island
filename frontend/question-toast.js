@@ -13,7 +13,7 @@
   mount(api);
 })(typeof self !== 'undefined' ? self : this, N => {
   // Sileo: HEIGHT 40, WIDTH 350. hMax = pill + the expanded body, the area the host's input region must cover.
-  const TOAST = Object.freeze({ w: 350, h: 40, hMax: 96, gap: 0, bodyMax: 120 });
+  const TOAST = Object.freeze({ w: 350, h: 40, hMax: 96, gap: 0, bodyMax: 120, ms: 8000 }); // S13: an action toast closes after 8 s (info would be 3-5 s); hover/focus pause it
 
   const firstLine = text => {
     const lines = String(text || '').split(/\r?\n/).map(l => l.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim());
@@ -121,10 +121,13 @@ function mount(T) {
   const header = mk('span', 'q-toast-header');
   const badge = mk('span', 'q-toast-badge'); badge.setAttribute('aria-hidden', 'true');
   const title = mk('span', 'q-toast-title'), queue = mk('span', 'q-toast-queue');
-  header.append(badge, title, queue);
+  const bar = mk('span', 'q-toast-progress'); bar.setAttribute('aria-hidden', 'true');
+  header.append(badge, title, queue, bar);
+  // S13: a polite live region announces the toast once (the toast itself is a button with its own label)
+  const live = mk('p', 'sr-only'); live.id = 'question-toast-live'; live.setAttribute('role', 'status'); live.setAttribute('aria-live', 'polite');
   const content = mk('span', 'q-toast-content'); const bodyText = mk('span', 'q-toast-body'); content.append(bodyText);
   toast.append(canvas, header, content);
-  capsule.append(toast);
+  capsule.append(toast, live);
 
   const icons = window.AbitoIcons;
   // like island.js: the parser only ever receives the CLOSED own registry's literal markup, never data
@@ -143,6 +146,16 @@ function mount(T) {
     || (capsule.dataset.phase === 'compact' && capsule.dataset.compactAsk === 'true' && capsule.dataset.edgeHidden !== 'true');
   const reduced = () => doc.documentElement.dataset.motion === 'reduce' || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const clear = () => { clearTimeout(expandTimer); clearTimeout(collapseTimer); };
+  // S13 countdown: remaining ms survive a pause (hover / focus); the bar is a CSS animation that pauses with it
+  let closeTimer = 0, remaining = T.TOAST.ms, startedAt = 0, running = false;
+  const stopClose = () => { clearTimeout(closeTimer); closeTimer = 0; };
+  const runClose = () => {
+    stopClose(); if (!view) return;
+    running = true; startedAt = Date.now(); bar.style.animationPlayState = 'running';
+    closeTimer = setTimeout(() => { running = false; if (view) { dismissedId = view.id; render(); } }, Math.max(0, remaining));
+  };
+  const pauseClose = () => { if (!running) return; running = false; stopClose(); remaining = Math.max(0, remaining - (Date.now() - startedAt)); bar.style.animationPlayState = 'paused'; };
+  const restartClose = () => { remaining = T.TOAST.ms; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; bar.style.animationDuration = `${T.TOAST.ms}ms`; runClose(); };
   const island = doc.getElementById('island');
   const set = (el, o) => { for (const k of ['x', 'y', 'width', 'height']) el.setAttribute(k, String(Math.round(o[k] * 100) / 100)); };
 
@@ -195,7 +208,7 @@ function mount(T) {
     view = next;
     const visible = !!next;
     if (!visible) {
-      clear(); shownId = null; setExpanded(false);
+      clear(); stopClose(); running = false; shownId = null; setExpanded(false);
       if (!toast.hidden) {
         // leaving: the pill is pulled back INTO the island (the spring in reverse), then hidden
         toast.dataset.exiting = 'true'; morphTo(0);
@@ -218,13 +231,13 @@ function mount(T) {
     toast.dataset.ready = 'true';
     place();
     if (fresh) {
-      shownId = next.id; clear();
+      shownId = next.id; clear(); live.textContent = next.aria; restartClose();
       // Sileo: auto-expand shortly after arriving, auto-collapse after a few seconds unless hovered/focused
       expandTimer = setTimeout(() => { setExpanded(true); collapseTimer = setTimeout(() => { if (!hot) setExpanded(false); }, 4500); }, 250);
     }
     doc.dispatchEvent(new CustomEvent('abito:question-toast', { detail: { shown: true } }));
   }
-  const hold = on => { hot = on; if (on) { clear(); setExpanded(true); } else collapseTimer = setTimeout(() => setExpanded(false), 800); };
+  const hold = on => { hot = on; if (on) { clear(); setExpanded(true); pauseClose(); } else { collapseTimer = setTimeout(() => setExpanded(false), 800); if (view && !running) runClose(); } };
   toast.addEventListener('pointerenter', () => hold(true));
   toast.addEventListener('pointerleave', () => hold(false));
   toast.addEventListener('focus', () => hold(true));

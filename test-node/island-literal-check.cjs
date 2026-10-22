@@ -113,8 +113,8 @@ test('notices (A+E): a 28px band over the TOP of the blobs card (x446..620, the 
   const n = decls('#notices');
   assert.equal(n.left, 'calc(50% + 176px)'); assert.equal(n.width, '174px'); assert.equal(n.height, '28px'); assert.equal(n.top, '42px');
   const lane = decls('#capsule[data-phase="expanded"][data-notice-view="notices"] #notices');
-  assert.equal(lane.width, '700px'); assert.equal(lane.padding, '4px 16px 4px 116px');
-  assert.equal(lane.height, 'var(--finished-h, 132px)', 'D: 108 unless a long result asked for more');
+  // S10 (10 «Pi terminó», B): the confirmed notice is a fixed 32px band UNDER the unchanged overview (island = 184 + 36), not a card that grows
+  assert.equal(lane.width, '700px'); assert.equal(lane.top, '178px'); assert.equal(lane.height, '32px'); assert.equal(lane.padding, '0 12px 0 14px');
 });
 
 test('Spotify card (design 17 A): Coucou np-card type scale kept (dot 6, title 600 12, sub 400 11), 44px transport boxes with the 20px ink disc inside, 56px cover, no volume bar', () => {

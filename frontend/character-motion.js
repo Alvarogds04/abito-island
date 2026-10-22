@@ -16,7 +16,7 @@
     const setTimer = options.setTimer || setTimeout, clearTimer = options.clearTimer || clearTimeout;
     const applyState = options.applyState || (next => { if (clay && clay.state !== next) clay.setState(next); });
     const blocked = options.blocked || (() => false);
-    let snapshot = null, question = null, chat = null, host = null, occupied = false;
+    let snapshot = null, question = null, chat = null, host = null, occupied = false, resting = false;
     let lastActivity = now(), finishedUntil = 0, timer = 0, destroyed = false;
     let baseline = false;
     // Shake: horizontal back-and-forth of a pressed drag (screen x, so the moving window does not
@@ -73,7 +73,7 @@
       if (source === 'idle' && !blocked() && dizzyUntil > at) state = 'dizzy';
       else if (source === 'idle' && !occupied && !dragging && !blocked()) {
         if (finishedUntil > at) state = 'finished';
-        else if (at - lastActivity >= SLEEP_MS) state = 'sleeping';
+        else if (resting || at - lastActivity >= SLEEP_MS) state = 'sleeping';
       }
       applyState(state);
       if (state !== 'idle' && clay && clay.cancelReaction) clay.cancelReaction();
@@ -112,6 +112,7 @@
       snapshot: observe,
       question(next) { question = next; lastActivity = now(); sync(); },
       chat(next) { chat = next === 'think' || next === 'speak' || next === 'error' ? next : null; sync(); },
+      rest(on) { resting = !!on; sync(); }, // S5: the empty island («Todo tranquilo») shows Abito asleep
       host(next) { host = next === 'error' ? next : null; sync(); },
       busy(value) { occupied = !!value; lastActivity = now(); sync(); },
       activity() { lastActivity = now(); finishedUntil = 0; sync(); },

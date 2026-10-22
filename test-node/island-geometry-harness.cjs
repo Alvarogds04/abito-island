@@ -47,7 +47,8 @@ async function open(scenario = {}) {
     const listeners = {};
     const sessions = scenario.sessions === undefined ? SESSIONS : scenario.sessions;
     const notices = Array.from({ length: scenario.notices || 0 }, (_, i) => ({ id: `n${i + 1}`, title: scenario.noticeTitle || 'Pi terminó su turno', detail: `Resultado número ${i + 1}`, severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: 'pi', projectName: 'workspace' }));
-    const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' || !scenario.engine ? 0 : 1 };
+    if (scenario.finishedCard) notices.push({ id: UUID, title: 'Pi terminó su turno', detail: scenario.finishedText || 'Migración aplicada, 14 tests pasan.', severity: 'info', kind: 'settled', expiresAt: Date.now() + 600000, agent: scenario.finishedCard, projectName: 'api' });
+    const snap = { state: 'expanded', notices, card: null, request: null, revision: 1, motionOverride: false, unavailable: scenario.unavailable === true, connections: scenario.engine === 'down' ? 0 : 1 };
     const accounts = scenario.engine === 'account' ? [] : [{ configured: true, local: false }];
     const connection = scenario.engine === 'down' ? 'no_daemon' : 'connected';
     const OPT = (i, label, description = '') => ({ index: i, label, description });
@@ -61,7 +62,7 @@ async function open(scenario = {}) {
     } : scenario.question ? {
       id: UUID, kind: scenario.question === 'approval' ? 'question' : 'question', agent: scenario.question === 'approval' ? 'claude-code' : 'pi', agent_label: 'Pi', project_name: 'api',
       text: scenario.question === 'approval' ? 'Claude Code asks permission: Bash: rm -rf build/ && npm run build' : '¿Qué editor preferís?',
-      options: scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: '' }, { index: 1, label: 'emacs', description: '' }, { index: 2, label: 'vscode', description: '' }],
+      options: scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: scenario.described ? 'modal, ya lo usás en el servidor' : '' }, { index: 1, label: 'emacs', description: scenario.described ? 'extensible, más pesado' : '' }, { index: 2, label: 'vscode', description: '' }],
       allow_free_text: scenario.question !== 'approval', expires_at: Date.now() + 600000, free_text_max: 2000,
     } : null;
     window.__TAURI__ = {
@@ -114,6 +115,7 @@ async function open(scenario = {}) {
   if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
   if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(scenario.quick ? 1800 : 4200); // spring + the ticker's first poll (`quick`: measurements that only need the card, not the first ticker poll)
+  if (scenario.finishedCard) { await page.evaluate(id => window.__emit('desktop:notice-open', { id, kind: 'finished' }), UUID); await page.waitForTimeout(1500); }
   if (scenario.question) await page.waitForTimeout(600);
   return {
     page,

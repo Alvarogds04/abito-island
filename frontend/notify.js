@@ -215,7 +215,11 @@
     freeform.hidden = !showText;
     if (n && n.form) {
       const v = N.formView(n, wizard);
-      stepHeader.textContent = v.mode === 'review' ? v.label : `${v.label}${v.header ? ` · ${v.header}` : ''}`;
+      stepHeader.textContent = v.mode === 'review' ? v.label : `${v.stepText}${v.header ? ` · ${v.header}` : ''}`;
+      // S8: progress dots (decoration) next to the text «Paso N de M»; Atrás keeps every answer (drafts)
+      let dotsEl = $('question-dots');
+      if (!dotsEl) { dotsEl = document.createElement('span'); dotsEl.id = 'question-dots'; dotsEl.setAttribute('aria-hidden', 'true'); stepEl.append(dotsEl); }
+      dotsEl.replaceChildren(...(v.dots || []).map(d => { const i = document.createElement('i'); i.dataset.state = d; return i; }));
       body.textContent = v.mode === 'review' ? 'Revisá tus respuestas antes de enviarlas.' : v.text;
       body.title = body.textContent;
       prevEl.hidden = !v.canPrev; prevEl.disabled = !view.controlsEnabled || !v.canPrev;
@@ -225,6 +229,7 @@
       const v = N.multiView(n, multiDraft);
       prevEl.hidden = true;
       primaryEl.textContent = v.label; primaryEl.dataset.kind = 'done'; primaryEl.disabled = !view.controlsEnabled || !v.canDone;
+      if (v.reason) { primaryEl.title = v.reason; primaryEl.setAttribute('aria-description', v.reason); } else { primaryEl.removeAttribute('title'); primaryEl.removeAttribute('aria-description'); }
     }
     if (item && showText && textEl.value !== draft.text && document.activeElement !== textEl) { textEl.value = draft.text; growText(); } // each step keeps its own draft
   }

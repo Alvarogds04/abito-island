@@ -350,9 +350,9 @@ test('centreView: steps are bounded to what fits (last 2) and a long name is cut
 });
 
 // ---- I: the empty state in the centre, with a CTA ------------------------------------------------------------------------------
-test('emptyView: nothing running -> «Todo tranquilo» + «Nueva conversación»; failures and unknown states are NOT empty', () => {
+test('emptyView: nothing running -> «Todo tranquilo» + «Preguntar a Abito»; failures and unknown states are NOT empty', () => {
   const e = L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [] }), pending: null, finished: false });
-  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Soltá un archivo o hacé tu pregunta.', cta: { label: 'Nueva conversación', action: 'new-chat' } });
+  assert.deepEqual(e, { title: 'Todo tranquilo', sub: 'Arrastrá un archivo o preguntá.', cta: { label: 'Preguntar a Abito', action: 'new-chat' } });
   assert.deepEqual(L.emptyView({ view: null, pending: null, finished: false }).cta.action, 'new-chat', 'no list yet and nothing pending: still a calm empty centre');
   assert.equal(L.emptyView({ view: { state: 'error' }, pending: null, finished: false }), null, 'a failed list is not "everything is calm": the engine row owns that');
   assert.equal(L.emptyView({ view: T.sessionsView({ type: 'sessions', schema: 'abito-sessions/view/1', truncated: false, sessions: [{ id: 's-0000000a', kind: 'pi', cwd: 'x', state: 'sleeping', origin: null }] }), pending: null, finished: false }), null, 'a session exists: the centre shows it');
@@ -379,10 +379,10 @@ test('wiring D/E/I: the centre is fed by island-layout.js; CSS lets the finished
   assert.match(lay, /abito:sessions-view/, 'the centre follows the ticker\'s focus event: a blob click, the compact bar\'s mini mascot and the «principal» preference all end there');
   const pv = fs.readFileSync(path.join(frontend, 'pills-view.js'), 'utf8');
   assert.match(pv, /abito:session-select/, 'the blob click already dispatches the selection the centre listens to');
-  assert.equal(decls('#notice-card .title.one-line')['white-space'], 'normal', 'the finished result wraps');
-  assert.equal(decls('#notice-card .title.one-line')['text-overflow'], 'clip');
+  assert.equal(decls('#notice-card #notice-card-message')['white-space'], 'nowrap', 'S10: the finished message is ONE line in the band (full text in the tooltip)');
+  assert.equal(decls('#notice-card #notice-card-message')['text-overflow'], 'ellipsis');
   const isl = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
-  assert.match(isl, /finishedLayout\(/, 'the island grows for a long result');
+  assert.match(isl, /FINISHED_BAND_H = 36/, 'S10: the island is 36px taller while the band shows');
   assert.match(isl, /abito:centre-new/, 'the CTA opens a new conversation through the existing «+»');
 });
 
