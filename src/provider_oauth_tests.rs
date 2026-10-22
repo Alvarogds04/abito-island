@@ -139,7 +139,12 @@ fn chatgpt_loopback_callback_and_fixed_port_busy() {
     http.0.lock().unwrap().push((200, serde_json::json!({"access_token":"access-secret","refresh_token":"refresh-secret","expires_in":3600,"token_type":"Bearer","id_token":format!("e30.{payload}.sig")}).to_string()));
     let mut config = PROVIDERS; config[1].client_id = "test-codex";
     let flow = OAuth::with_configs(&store, &http, &clock, &config);
-    let mut pending = flow.begin(Provider::Chatgpt).unwrap().pending;
+    let _port = CALLBACK_TEST_LOCK.lock().unwrap();
+    let mut pending = match flow.begin(Provider::Chatgpt) {
+        Ok(b) => b.pending,
+        Err(OauthError::PortBusy) => { eprintln!("SKIP: 127.0.0.1:1455 is occupied"); return; }
+        Err(e) => panic!("begin failed: {e}"),
+    };
     assert_eq!(flow.begin(Provider::Chatgpt).unwrap_err(), OauthError::PortBusy);
     assert!(!flow.complete_loopback(&mut pending).unwrap());
     let state = pending.state.secret().clone();
@@ -177,6 +182,57 @@ fn token_transport_cancellation_and_deadline() {
         server.join().unwrap();
     }
 }
+static CALLBACK_TEST_LOCK: Mutex<()> = Mutex::new(());
+#[test]
+fn state_comparison_covers_mismatch_prefix_lengths_equal_and_empty() {
+    for (a, b, equal) in [
+        (b"abc".as_slice(), b"xyz".as_slice(), false),
+        (b"same-prefix-a", b"same-prefix-b", false),
+        (b"abc", b"abcd", false), (b"abcd", b"abc", false),
+        (b"abc", b"abc", true), (b"", b"", true),
+        (b"", b"a", false), (b"a", b"", false),
+    ] { assert_eq!(state_equal(a, b), equal); }
+}
+fn invalid_loopback_consumes_flow(request: Option<Vec<u8>>) {
+    use std::io::{Read, Write};
+    let _port = CALLBACK_TEST_LOCK.lock().unwrap();
+    let store = Memory::default(); let http = Fake::new(); let clock = || 100;
+    let flow = OAuth::new(&store, &http, &clock);
+    let mut pending = match flow.begin(Provider::Chatgpt) {
+        Ok(b) => b.pending,
+        Err(OauthError::PortBusy) => { eprintln!("SKIP: 127.0.0.1:1455 is occupied"); return; }
+        Err(e) => panic!("begin failed: {e}"),
+    };
+    assert_eq!(pending.listener.as_ref().unwrap().local_addr().unwrap(), "127.0.0.1:1455".parse().unwrap());
+    // Connect before polling so the test does not depend on scheduling.
+    let mut browser = std::net::TcpStream::connect("127.0.0.1:1455").unwrap();
+    browser.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    if let Some(bytes) = request { browser.write_all(&bytes).unwrap(); }
+    let start = std::time::Instant::now();
+    assert!(flow.complete_loopback(&mut pending).is_err());
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    assert!(pending.listener.is_none()); assert!(pending.verifier.is_none());
+    assert_eq!(flow.complete_loopback(&mut pending), Err(OauthError::Used));
+    assert_eq!(flow.complete(&mut pending, "http://localhost:1455/auth/callback?code=x&state=x"), Err(OauthError::Used));
+    let mut response = Vec::new();
+    // Oversized unread headers can cause a TCP reset after the 400; close is allowed.
+    let _ = browser.read_to_end(&mut response);
+    assert!(response.is_empty() || response.starts_with(b"HTTP/1.1 400"));
+    assert!(store.0.lock().unwrap().is_empty());
+    assert!(http.0.lock().unwrap().is_empty(), "Fake panics if a token exchange was attempted");
+}
+#[test]
+fn malformed_loopback_request_consumes_flow() {
+    invalid_loopback_consumes_flow(Some(b"GET /auth/callback?code=x&state=x HTTP/1.1 extra\r\n\r\n".to_vec()));
+}
+#[test]
+fn oversized_loopback_headers_consume_flow() {
+    let mut bytes = b"GET /auth/callback?code=x&state=x HTTP/1.1\r\nX-Large: ".to_vec();
+    bytes.extend(vec![b'x'; 9000]); bytes.extend(b"\r\n\r\n");
+    invalid_loopback_consumes_flow(Some(bytes));
+}
+#[test]
+fn silent_loopback_timeout_consumes_flow() { invalid_loopback_consumes_flow(None); }
 #[test]
 fn jwt_account_id() {
     use base64::Engine;

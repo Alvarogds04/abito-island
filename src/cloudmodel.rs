@@ -9,11 +9,46 @@ use crate::provider_oauth::{OAuth, OauthError, Provider};
 pub use crate::provider_oauth::{CLAUDE_OAUTH_SYSTEM, CLAUDE_OAUTH_BETA, CODEX_URL, CODEX_BETA, CODEX_ORIGINATOR};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind { AnthropicMessages, OpenAiChat, CodexResponses }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudProvider { Anthropic, OpenAi, Google, OpenRouter, Nan, OpenCodeGo, Codex }
+// Only Rust chooses credential destinations. No settings/WebView URL is accepted.
+const CLOUD_PROVIDERS: [(CloudProvider, Kind, &str); 7] = [
+    (CloudProvider::Anthropic, Kind::AnthropicMessages, "https://api.anthropic.com/v1"),
+    (CloudProvider::OpenAi, Kind::OpenAiChat, "https://api.openai.com/v1"),
+    (CloudProvider::Google, Kind::OpenAiChat, "https://generativelanguage.googleapis.com/v1beta/openai"),
+    (CloudProvider::OpenRouter, Kind::OpenAiChat, "https://openrouter.ai/api/v1"),
+    (CloudProvider::Nan, Kind::OpenAiChat, "https://api.nan.builders/v1"),
+    (CloudProvider::OpenCodeGo, Kind::OpenAiChat, "https://opencode.ai/inference/go/openai/v1"),
+    (CloudProvider::Codex, Kind::CodexResponses, CODEX_URL),
+];
 #[derive(Clone)]
-pub struct CloudTarget { pub kind: Kind, pub profile: ProfileRef, pub model: String, pub base_url: String, pub max_output: usize }
+pub struct CloudTarget { kind: Kind, pub profile: ProfileRef, pub model: String, base_url: String, pub max_output: usize }
+impl CloudTarget {
+    pub fn new(provider: CloudProvider, profile: ProfileRef, model: String, max_output: usize) -> Self {
+        let (_, _, base) = CLOUD_PROVIDERS.iter().find(|(p, _, _)| *p == provider).expect("closed provider table");
+        Self::fixed(provider, profile, model, max_output, base).expect("fixed provider URL")
+    }
+    fn fixed(provider: CloudProvider, profile: ProfileRef, model: String, max_output: usize, base: &str) -> Result<Self, OauthError> {
+        let (_, kind, expected) = CLOUD_PROVIDERS.iter().find(|(p, _, _)| *p == provider).ok_or(OauthError::Invalid)?;
+        // Exact canonical strings reject parser normalization, ports, userinfo and path tricks.
+        if base != *expected { return Err(OauthError::Invalid); }
+        Ok(Self { kind: *kind, profile, model, base_url: base.into(), max_output })
+    }
+    #[cfg(test)]
+    pub(crate) fn loopback(kind: Kind, profile: ProfileRef, model: String, max_output: usize, base: &str, credential: &Credential) -> Result<Self, OauthError> {
+        let url = reqwest::Url::parse(base).map_err(|_| OauthError::Invalid)?;
+        if credential.oauth || url.scheme() != "http" || url.host_str() != Some("127.0.0.1") || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() { return Err(OauthError::Invalid); }
+        Ok(Self { kind, profile, model, max_output, base_url: base.into() })
+    }
+}
 impl std::fmt::Debug for CloudTarget { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("CloudTarget").field("kind", &self.kind).finish_non_exhaustive() } }
-pub struct Credential { secret: String, oauth: bool, account_id: Option<String> }
-impl Credential { pub fn new(secret: String, oauth: bool, account_id: Option<String>) -> Self { Self { secret, oauth, account_id } } }
+pub struct Credential { secret: String, oauth: bool, provider: Option<Provider>, account_id: Option<String> }
+impl Credential {
+    /// None is an API key; OAuth credentials retain their issuing vendor.
+    pub fn new(secret: String, provider: Option<Provider>, account_id: Option<String>) -> Self {
+        Self { secret, oauth: provider.is_some(), provider, account_id }
+    }
+}
 impl std::fmt::Debug for Credential { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("Credential(<redacted>)") } }
 pub trait CredentialSource: Sync {
     fn credential(&self, profile: &ProfileRef) -> Result<Credential, OauthError>;
@@ -45,14 +80,14 @@ impl CredentialSource for KeychainCredentials<'_> {
         match (self.resolve)(p)? {
             CredentialRef::ApiKey(key) => {
                 if !crate::secrets::KNOWN_KEYS.contains(&key) || !key.ends_with("-key") { return Err(OauthError::Invalid); }
-                Ok(Credential::new(self.store.read(key).map_err(|_| OauthError::Store)?.filter(|s| !s.is_empty()).ok_or(OauthError::NeedsSignIn)?, false, None))
+                Ok(Credential::new(self.store.read(key).map_err(|_| OauthError::Store)?.filter(|s| !s.is_empty()).ok_or(OauthError::NeedsSignIn)?, None, None))
             }
-            CredentialRef::Oauth(provider) => Ok(Credential::new(self.oauth.access_token(provider, (self.clock)())?, true, self.oauth.account_id(provider)?)),
+            CredentialRef::Oauth(provider) => Ok(Credential::new(self.oauth.access_token(provider, (self.clock)())?, Some(provider), self.oauth.account_id(provider)?)),
         }
     }
     fn refresh(&self, p: &ProfileRef, rejected: &str) -> Result<Credential, OauthError> {
         match (self.resolve)(p)? {
-            CredentialRef::Oauth(provider) => Ok(Credential::new(self.oauth.refresh_rejected(provider, (self.clock)(), rejected)?, true, self.oauth.account_id(provider)?)),
+            CredentialRef::Oauth(provider) => Ok(Credential::new(self.oauth.refresh_rejected(provider, (self.clock)(), rejected)?, Some(provider), self.oauth.account_id(provider)?)),
             _ => Err(OauthError::Rejected),
         }
     }
@@ -67,6 +102,13 @@ fn endpoint(target: &CloudTarget, test_http: bool) -> Result<reqwest::Url, Ended
     let suffix = match target.kind { Kind::AnthropicMessages => "/messages", Kind::OpenAiChat => "/chat/completions", Kind::CodexResponses => "/responses" };
     if !url.path().ends_with(suffix) { url.set_path(&format!("{}{suffix}", url.path().trim_end_matches('/'))); }
     Ok(url)
+}
+fn oauth_destination(kind: Kind, credential: &Credential, url: &reqwest::Url) -> bool {
+    url.scheme() == "https" && url.port_or_known_default() == Some(443) && match (kind, credential.provider) {
+        (Kind::AnthropicMessages, Some(Provider::Claude)) => url.host_str() == Some("api.anthropic.com"),
+        (Kind::CodexResponses, Some(Provider::Chatgpt)) => url.host_str() == Some("chatgpt.com"),
+        _ => false,
+    }
 }
 fn body(target: &CloudTarget, messages: &[Message], oauth: bool) -> Result<Value, Ended> {
     let system: Vec<_> = messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str().ok_or_else(failed)).collect::<Result<_, _>>()?;
@@ -162,6 +204,8 @@ fn stream_inner(target: &CloudTarget, source: &dyn CredentialSource, messages: &
                 let body = body(target, messages, credential.oauth)?;
                 let serialized = serde_json::to_vec(&body).map_err(|_| failed())?;
                 if serialized.len() > 4 * 1024 * 1024 { return Err(failed()); }
+                // Recheck immediately before attaching credentials, on every retry.
+                if credential.oauth && !oauth_destination(target.kind, &credential, &url) { return Err(failed()); }
                 let mut request = client.post(url.clone()).header("content-type", "application/json").header("accept", "text/event-stream").body(serialized);
                 request = match target.kind {
                     Kind::AnthropicMessages => {

@@ -145,7 +145,7 @@ impl<'a> OAuth<'a> {
             if pairs.iter().filter(|(k,_)| k == "code").count() != 1 || pairs.iter().filter(|(k,_)| k == "state").count() != 1 { return Err(OauthError::State); }
             (pairs.iter().find(|(k,_)| k == "code").ok_or(OauthError::State)?.1.to_string(), pairs.iter().find(|(k,_)| k == "state").ok_or(OauthError::State)?.1.to_string())
         };
-        if state != *pending.state.secret() || code.is_empty() { return Err(OauthError::State); }
+        if !state_equal(state.as_bytes(), pending.state.secret().as_bytes()) || code.is_empty() { return Err(OauthError::State); }
         let _lock = self.lock()?;
         let c = self.config(pending.provider);
         let tokens = self.exchange(pending.provider, vec![("grant_type".into(), "authorization_code".into()), ("code".into(), code), ("code_verifier".into(), verifier.secret().clone()), ("client_id".into(), c.client_id.into()), ("redirect_uri".into(), c.redirect.into())], None, (self.clock)())?;
@@ -252,6 +252,10 @@ impl<'a> OAuth<'a> {
     pub fn account_id(&self, p: Provider) -> Result<Option<String>, OauthError> { let _lock = self.lock()?; Ok(self.load(p)?.and_then(|t| t.account_id)) }
     pub fn status(&self, p: Provider) -> Result<Status, OauthError> { let _lock = self.lock()?; Ok(match self.load(p)? { None => Status::Absent, Some(t) if t.refresh_token.is_empty() || t.expires_at <= (self.clock)() => Status::Expired, Some(_) => Status::Present }) }
     pub fn sign_out(&self, p: Provider) -> Result<(), OauthError> { let _lock = self.lock()?; self.store.delete(p.key()).map_err(|_| OauthError::Store) }
+}
+fn state_equal(a: &[u8], b: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    bool::from(a.ct_eq(b))
 }
 pub fn account_id(jwt: &str) -> Option<String> {
     use base64::Engine;

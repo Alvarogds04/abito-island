@@ -24,6 +24,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sherpa-onnx",
+ "subtle",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
