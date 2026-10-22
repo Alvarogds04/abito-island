@@ -68,6 +68,24 @@ test('S21 Chat: «Probar» is VISIBLE on a card without a key, disabled, and its
   for (const p of probes) { assert(p.visible, `${p.card}: Probar not visible`); assert(p.disabled, `${p.card}: Probar must be disabled without a key`); assert.equal(p.reason, 'Guarda una clave para poder probarla.'); assert(p.reasonVisible, `${p.card}: the reason must be on screen`); }
 });
 
+test('S4 Chat: ONE list of AI providers: no second «Configuración de proveedores» / «Buscar proveedor» system, one key field per provider, each card has its model', async r => {
+  await r.go('Chat');
+  const page = await r.text('.hub-page');
+  for (const dup of ['Configuración de proveedores', 'Buscar proveedor', 'Cuentas conectadas', 'Motor corriendo']) assert(!page.includes(dup), `duplicate system still on Chat: ${dup}`);
+  const keys = await r.page.evaluate(() => [...document.querySelectorAll('input[id^="chat-key-"]')].map(i => i.id));
+  assert.equal(new Set(keys).size, keys.length, `a key field twice: ${JSON.stringify(keys)}`);
+  const cards = await r.page.evaluate(() => [...document.querySelectorAll('.abito-card')].filter(c => c.querySelector('input[id^="chat-key-"]')).map(c => [c.querySelector('h2').textContent.trim().split(/\s/)[0], !!c.querySelector('select[id^="chat-"][id$="-model"]')]));
+  assert(cards.length >= 4 && cards.every(([, hasModel]) => hasModel), `every provider card owns its model: ${JSON.stringify(cards)}`);
+  const names = cards.map(c => c[0]); assert.equal(new Set(names).size, names.length, `a provider twice: ${names}`);
+  assert(await r.page.evaluate(() => !!document.getElementById('chat-window-context') && !!document.getElementById('chat-extras')), 'slots for the context toggle');
+});
+
+test('S1 Chat: no long paragraph on the provider cards (explanations are tooltips)', async r => {
+  await r.go('Chat');
+  const long = await r.page.evaluate(() => [...document.querySelectorAll('.abito-card .hint, #chat-local-models .hint')].filter(e => e.textContent.length > 90 && !e.closest('#chat-window-context')).map(e => e.textContent.slice(0, 50)));
+  assert.deepEqual(long, [], `long text on the cards: ${JSON.stringify(long)}`);
+});
+
 test('S23 Integraciones: state and actions form COLUMNS shared by every card (a row without «¿Dónde?» no longer shifts «Conectar»), off the card border', async r => {
   await r.go('Integraciones');
   const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cb = c.getBoundingClientRect();

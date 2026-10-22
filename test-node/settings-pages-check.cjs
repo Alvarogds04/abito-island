@@ -73,7 +73,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       }
     } else {
       const cleanup = await config.renderNotch(id, container);
-      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['agent-settings',undefined],['pills','agents']], chat:[['chat-settings',undefined],['models',undefined],['accounts','chat']], accounts:[['accounts','all']], integrations:[['integrations',undefined],['accounts','integrations']], shortcuts:[['shortcuts',undefined]]}[id];
+      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['agent-settings',undefined],['pills','agents']], chat:[['chat-settings',undefined],['models',undefined]], accounts:[['accounts','all']], integrations:[['integrations',undefined],['accounts','integrations']], shortcuts:[['shortcuts',undefined]]}[id];
       if (expected) { assert.deepEqual(invoked, expected); assert(container.children.length); cleanup?.(); }
       else {
         assert(text(container).includes(id === 'phone' ? 'No disponible' : 'pendiente de conectar'));

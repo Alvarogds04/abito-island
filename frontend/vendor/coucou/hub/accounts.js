@@ -409,7 +409,7 @@ async function renderAccounts({ invoke, V, listen, timers, page = "all", keys: s
   });
   return s.finish();
 }
-async function renderModels({ invoke, V, C, listen }) {
+async function renderModels({ invoke, V, C, listen, connected = true }) {
   const s = session(invoke, listen), { root, message, call, work, watch } = s;
   let state = null, prefs = {}, listing = null, busy = false;
   const apply = (next) => {
@@ -441,7 +441,8 @@ async function renderModels({ invoke, V, C, listen }) {
     if (listing?.resources_text) locals.append(note(`Recursos: ${listing.resources_text}`));
     if (C) for (const meter of C.modelMeters(listing)) locals.append(row(meter.label, meter.aria));
     if (C) for (const m of C.modelRows(listing)) locals.append(row(m.title, [m.word, m.facts, m.message, m.note, ...m.chips.map((c) => c.text)].filter(Boolean).join(" · "), action(m.selected ? "Elegido" : "Elegir", () => change("models_action", { action: "select", profile_id: m.id }, apply), busy || !m.selectable || m.selected)));
-    root.append(providers, locals, message);
+    if (connected) root.append(providers);
+    root.append(locals, message);
     restore();
   }
   paint();

@@ -224,13 +224,14 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all', 
   return s.finish();
 }
 
-export async function renderModels({ invoke, V, C, listen }: any) {
+export async function renderModels({ invoke, V, C, listen, connected = true }: any) {
   const s = session(invoke, listen), { root, message, call, work, watch } = s;
   let state: any = null, prefs: any = {}, listing: any = null, busy = false;
   const apply = (next: any) => { listing = next; paint(); };
   function change(cmd: string, p: any, done: any) { if (busy) return; busy = true; paint(); work(() => call(cmd, p), done).finally(() => { busy = false; if (s.alive()) paint(); }); }
   function paint() {
     const restore = preserveFocus(root); clear(root);
+    // #503 S4: the chat cards already own each provider's model choice; `connected:false` leaves only the local models.
     const providers = section('Cuentas conectadas'), view = V.modelsTabView(state, prefs.chosenModels || {});
     if (view.kind !== 'ready') providers.append(status(view));
     else for (const g of view.groups) if (g.connected) for (const m of g.models) {
@@ -242,7 +243,8 @@ export async function renderModels({ invoke, V, C, listen }: any) {
     if (listing?.resources_text) locals.append(note(`Recursos: ${listing.resources_text}`));
     if (C) for (const meter of C.modelMeters(listing)) locals.append(row(meter.label, meter.aria));
     if (C) for (const m of C.modelRows(listing)) locals.append(row(m.title, [m.word, m.facts, m.message, m.note, ...m.chips.map((c: any) => c.text)].filter(Boolean).join(' · '), action(m.selected ? 'Elegido' : 'Elegir', () => change('models_action', { action: 'select', profile_id: m.id }, apply), busy || !m.selectable || m.selected)));
-    root.append(providers, locals, message); restore();
+    if (connected) root.append(providers);
+    root.append(locals, message); restore();
   }
   paint(); watch('agent:state', p => { state = { ...state, ...p }; paint(); }); watch('prefs:state', p => { prefs = p; paint(); }); watch('models:state', apply);
   work(() => call('agent_action', { action: 'view' }), p => { state = p; paint(); });

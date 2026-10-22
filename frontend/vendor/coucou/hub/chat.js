@@ -168,41 +168,48 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     return { r, dot, stateLabel, feedback, stateBadge, fieldError, testReason };
   }
   const api = keyRow("anthropic-api-key", t("API key"), "sk-ant-...", true);
-  const model = trusted(h("select", { id: "chat-anthropic-model", "aria-label": t("Model") }));
-  function drawModels() {
-    clear(model);
-    const view = V.modelsTabView(state, prefs.chosenModels || {});
-    const group = view.groups?.find((g) => g.id === "anthropic" && g.connected);
-    const offered = group?.models || [];
-    if (!offered.length) {
-      for (const [id, name] of [["claude-opus-5", "Claude Opus 5"], ["claude-sonnet-5", "Claude Sonnet 5"], ["claude-haiku-4-5", "Claude Haiku 4.5"]]) model.append(h("option", { value: id, text: name }));
-    } else for (const m of offered) model.append(h("option", { value: m.id, text: m.name }));
-    model.value = offered.find((m) => m.chosen)?.id || offered[0]?.id || "claude-opus-5";
-    model.disabled = modelBusy || !offered.length;
-    model.title = offered.length ? "Modelos elegidos de Abito; no cambia el modelo activo de una conversación." : UNAVAILABLE;
-  }
-  model.addEventListener("change", (e) => {
-    if (!e.isTrusted || model.disabled || modelBusy) return;
-    const group = V.modelsTabView(state, prefs.chosenModels || {}).groups?.find((g) => g.id === "anthropic" && g.connected);
-    const choice = group?.models.find((m) => m.id === model.value);
-    if (!choice || choice.chosen) return;
-    const payload = V.chosenModelsPayload(V.chosenToggle(prefs.chosenModels || {}, "anthropic", choice.id), "anthropic");
-    if (!payload) return;
-    modelBusy = true;
-    model.disabled = true;
-    work(() => call("prefs_action", payload), (next) => {
-      prefs = next;
-    }).finally(() => {
-      modelBusy = false;
-      if (s.alive()) drawModels();
+  const models = {};
+  const FALLBACK = { anthropic: [["claude-opus-5", "Claude Opus 5"], ["claude-sonnet-5", "Claude Sonnet 5"], ["claude-haiku-4-5", "Claude Haiku 4.5"]] };
+  const modelPicker = (group) => {
+    const select = trusted(h("select", { id: `chat-${group}-model`, "aria-label": t("Model") }));
+    models[group] = select;
+    select.addEventListener("change", (e) => {
+      if (!e.isTrusted || select.disabled || modelBusy) return;
+      const g = V.modelsTabView(state, prefs.chosenModels || {}).groups?.find((x) => x.id === group && x.connected);
+      const choice = g?.models.find((m) => m.id === select.value);
+      if (!choice || choice.chosen) return;
+      const payload = V.chosenModelsPayload(V.chosenToggle(prefs.chosenModels || {}, group, choice.id), group);
+      if (!payload) return;
+      modelBusy = true;
+      select.disabled = true;
+      work(() => call("prefs_action", payload), (next) => {
+        prefs = next;
+      }).finally(() => {
+        modelBusy = false;
+        if (s.alive()) drawModels();
+      });
     });
-  });
-  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), model), api.feedback);
+    return select;
+  };
+  function drawModels() {
+    const view = V.modelsTabView(state, prefs.chosenModels || {});
+    for (const [group, select] of Object.entries(models)) {
+      clear(select);
+      const offered = view.groups?.find((g) => g.id === group && g.connected)?.models || [];
+      if (!offered.length) for (const [id, name] of FALLBACK[group] || [["", UNAVAILABLE]]) select.append(h("option", { value: id, text: name }));
+      else for (const m of offered) select.append(h("option", { value: m.id, text: m.name }));
+      select.value = offered.find((m) => m.chosen)?.id || offered[0]?.id || FALLBACK[group]?.[0][0] || "";
+      select.disabled = modelBusy || !offered.length;
+      select.title = offered.length ? "Modelos elegidos de Abito; no cambia el modelo activo de una conversación." : UNAVAILABLE;
+    }
+  }
+  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), modelPicker("anthropic")), api.feedback);
   apiSection.children[0].prepend(api.dot);
   const providerCards = [];
   for (const [id, name, placeholder, site] of CLOUD) {
     const k = keyRow(providerDef(id).key, name, placeholder);
-    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, h("div", { class: "hint", text: t("Key from {site}", { site }) }), k.feedback);
+    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t("Model"), modelPicker(id)), k.feedback);
+    c.setAttribute("title", t("Key from {site}", { site }));
     c.children[0].prepend(k.dot);
     providerCards.push(c);
   }
@@ -230,7 +237,9 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     const label = h("label", {}, h("i", { class: "dot", style: `background:${p.accent};margin-right:8px` }), h("span", { text: t(name) }));
     block.append(h("div", { class: "row" }, label, url, connect));
     if (id === "custom") block.append(row("", key));
-    block.append(hint(`${UNAVAILABLE} — conexión de direcciones arbitrarias; los modelos verificados de Abito siguen debajo.`), exposure);
+    const na = hint(UNAVAILABLE);
+    na.setAttribute("title", "Conexión de direcciones arbitrarias no disponible todavía; los modelos verificados de Abito siguen debajo.");
+    block.append(na, exposure);
     showExposure();
     locals.append(block);
   }
@@ -258,14 +267,19 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     }
   };
   paintContext();
-  const localCard = section(t("Local models"), hint(t("Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.")), locals);
+  const localCard = section(t("Local models"), locals);
+  localCard.setAttribute("title", t("Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box."));
   localCard.setAttribute("id", "chat-local-models");
   root.append(
     apiSection,
-    hint(t("Chat with Google AI, OpenAI or OpenRouter instead of Claude: add a key here, then click the model name above the chat box to switch provider and model. Keys stay in the system keychain. These providers get no web search and no tools: they can answer, never act on this computer.")),
     ...providerCards,
+    h("div", { id: "chat-extras" }),
     localCard,
-    section(t("Active window context"), hint(t("When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.")), ctxBody),
+    (() => {
+      const w = section(t("Active window context"), hint(t("When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.")), ctxBody);
+      w.setAttribute("id", "chat-window-context");
+      return w;
+    })(),
     s.message
   );
   drawModels();
