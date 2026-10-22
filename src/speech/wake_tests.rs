@@ -89,6 +89,20 @@ fn the_command_in_the_same_segment_keeps_its_spelling() {
 }
 
 #[test]
+fn the_name_said_first_and_followed_by_a_comma_wakes_when_parakeet_drops_the_ok() {
+    // Heard live over RDP on 2026-10-22: the «OK» came out as a separate «Yes.» segment
+    // or was lost, and the phrase arrived as «Habito, ¿qué hora es?».
+    assert_eq!(m("Habito, ¿qué hora es?", 1), Some("¿qué hora es?".into()));
+    assert_eq!(m("Habito, que hora es.", 1), Some("que hora es.".into()));
+    assert_eq!(m("Abito, pon música", 0), Some("pon música".into()));
+    assert_eq!(m("Ábito, ¿qué suena?", 1), Some("¿qué suena?".into()));
+    // Only a known spelling, only as the FIRST word, only with the comma, only with a command.
+    for t in ["Hábito", "Habito,", "Habito que hora es", "Abido, pon música", "mi hábito, de leer", "Hola, habito, qué hora es", "El hábito, hace al monje"] {
+        assert_eq!(m(t, 2), None, "{t}");
+    }
+}
+
+#[test]
 fn ordinary_speech_does_not_wake() {
     for t in ["", "hola qué tal", "abito", "mi hábito de leer", "ok", "ok vale", "el hábito hace al monje", "tengo un abrigo", "okupa en abril"] {
         assert_eq!(m(t, 1), None, "{t}");

@@ -251,6 +251,17 @@ fn is_name(s: &str, tolerance: usize) -> bool {
     s.chars().count() >= 4 && core.starts_with('a') && s.ends_with('o') && levenshtein(core, "abito") <= tolerance
 }
 
+/// «Habito, ¿qué hora es?»: Parakeet sometimes drops the «OK» (or hears it as a separate
+/// «Yes.» segment). The name then still counts as a wake, but only when it is a KNOWN spelling,
+/// the FIRST word, written with a comma right after it, and followed by a command.
+fn vocative_end(words: &[&str]) -> Option<usize> {
+    let first = words.first()?;
+    if words.len() < 2 || !first.ends_with(',') {
+        return None;
+    }
+    NAMES.contains(&normalise(first).as_str()).then_some(1)
+}
+
 /// Finds «ok abito» (or «hey/oye abito») in `raw` and returns what follows the LAST
 /// occurrence, in its original spelling. None when the phrase is absent.
 pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
@@ -283,7 +294,7 @@ pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
         }
         i += 1;
     }
-    let end = end?;
+    let end = end.or_else(|| vocative_end(&words))?;
     let tail = words[end..].join(" ");
     Some(tail.trim_start_matches([',', '.', ':', ';', '!', '-', '–', '—', '…', ' ']).to_string())
 }
