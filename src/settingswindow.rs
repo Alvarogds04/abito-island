@@ -144,7 +144,7 @@ fn err(code: &str) -> BridgeError {
 /// uses): the page that reaches the webview is always one of these exact strings, never text from the payload.
 pub(crate) const PAGES: &[&str] = &[
     "dictation", "notes", "insights", "dictionary", "snippets", "styles", "flowsettings",
-    "general", "pills", "agents", "chat", "accounts", "voice", "integrations", "phone", "shortcuts", "privacy",
+    "general", "integrations", "chat", "voice", "phone", "shortcuts", "privacy",
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -163,6 +163,8 @@ pub(crate) fn parse_settings_window_request(payload: &Value) -> Option<Request> 
         "open" if obj.len() == 1 => Some(Request::Open(None)),
         "open" if obj.len() == 2 => {
             let wanted = obj.get("page")?.as_str()?;
+            // S32: «Pestañas activas» (pills) and «Agentes» (agents) became the one «integrations» page: an old link still lands there.
+            let wanted = if wanted == "pills" || wanted == "agents" { "integrations" } else { wanted };
             PAGES.iter().copied().find(|p| *p == wanted).map(|p| Request::Open(Some(p)))
         }
         _ => None,
@@ -309,10 +311,13 @@ mod tests {
         use super::{parse_settings_window_request, Request};
         assert_eq!(parse_settings_window_request(&json!({"action": "open"})), Some(Request::Open(None)));
         assert_eq!(parse_settings_window_request(&json!({"action": "close"})), Some(Request::Close));
-        for page in ["accounts", "general", "pills", "agents", "chat", "voice", "integrations", "phone", "shortcuts", "dictation", "flowsettings"] {
+        for page in ["general", "chat", "voice", "integrations", "phone", "shortcuts", "dictation", "flowsettings"] {
             assert_eq!(parse_settings_window_request(&json!({"action": "open", "page": page})), Some(Request::Open(Some(page_id(page)))), "{page}");
         }
-        for bad in [json!({"action": "open", "page": "Accounts"}), json!({"action": "open", "page": "accounts "}), json!({"action": "open", "page": "../x"}),
+        for old in ["pills", "agents"] {
+            assert_eq!(parse_settings_window_request(&json!({"action": "open", "page": old})), Some(Request::Open(Some(page_id("integrations")))), "S32: the old {old} link lands on the combined page");
+        }
+        for bad in [json!({"action": "open", "page": "accounts"}), json!({"action": "open", "page": "Accounts"}), json!({"action": "open", "page": "accounts "}), json!({"action": "open", "page": "../x"}),
             json!({"action": "open", "page": ""}), json!({"action": "open", "page": 1}), json!({"action": "open", "page": null}), json!({"action": "open", "page": ["accounts"]}),
             json!({"action": "open", "page": "accounts", "url": "https://evil.example/"}), json!({"action": "close", "page": "accounts"}),
             json!({"action": "open", "page": "constructor"}), json!({"action": "open", "page": "a".repeat(5000)}), json!({"action": "open", "label": "settings"})] {
@@ -326,8 +331,8 @@ mod tests {
     /// interpolated), and a window that already exists is told the same way instead of being rebuilt.
     #[test]
     fn s26_the_page_hint_script_is_built_from_the_closed_list_only() {
-        assert_eq!(super::page_script("accounts"), "window.__abitoHubPage=\"accounts\";");
-        assert_eq!(super::select_script("accounts"), "document.dispatchEvent(new CustomEvent('abito:hub-select',{detail:\"accounts\"}));");
+        assert_eq!(super::page_script("chat"), "window.__abitoHubPage=\"chat\";");
+        assert_eq!(super::select_script("chat"), "document.dispatchEvent(new CustomEvent('abito:hub-select',{detail:\"chat\"}));");
         for page in super::PAGES { assert!(page.bytes().all(|b| b.is_ascii_lowercase()), "{page}"); }
     }
 

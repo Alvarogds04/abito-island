@@ -23,6 +23,27 @@ import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
 const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action', 'failure_action']);
+// The host answers these commands through ONE shared limiter: 30 calls per fixed 1 s window (src/bridge.rs RATE_LIMIT_PER_WINDOW),
+// shared with the island window. A page that reads a lot at load (the combined «Integraciones y agentes» makes ~34 calls) used to get
+// `rate-exceeded` on its tail calls and paint «No se pudo completar» before the human touched anything (#503 S32 gate). So they leave
+// in order and at most PACE_MAX per rolling second, which keeps every fixed window well under 30 and leaves room for the island.
+const LIMITED = new Set(['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action', 'voice_action']);
+const PACE_MAX = 20, PACE_MS = 1000;
+const sent = [];
+let paceTail = Promise.resolve();
+const paced = (command, send) => {
+  if (!LIMITED.has(command)) return send();
+  const turn = paceTail.then(async () => {
+    for (;;) {
+      const now = Date.now();
+      while (sent.length && now - sent[0] >= PACE_MS) sent.shift();
+      if (sent.length < PACE_MAX) { sent.push(now); return; }
+      await new Promise(resolve => setTimeout(resolve, sent[0] + PACE_MS - now + 5));
+    }
+  });
+  paceTail = turn.catch(() => {});
+  return turn.then(send);
+};
 const invoke = (command, args) => {
   if (!allowed.has(command) || !rawInvoke) return Promise.reject(new Error('No disponible'));
   if (command === 'daemon_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'restart')) return Promise.reject(new Error('No disponible'));
@@ -44,6 +65,8 @@ const invoke = (command, args) => {
   }
   if (command === 'prefs_action' && args?.payload?.action === 'set_window_context' &&
     (Object.keys(args).length !== 1 || Object.keys(args.payload).length !== 2 || typeof args.payload.window_context !== 'boolean')) return Promise.reject(new Error('No disponible'));
+  if (command === 'prefs_action' && args?.payload?.action === 'set_live_context' &&
+    (Object.keys(args).length !== 1 || Object.keys(args.payload).length !== 2 || typeof args.payload.live_context !== 'boolean')) return Promise.reject(new Error('No disponible'));
   if (command === 'monitor_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'list')) return Promise.reject(new Error('No disponible'));
   if (command === 'sound_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || !['list', 'reveal', 'reload'].includes(args.payload.action))) return Promise.reject(new Error('No disponible'));
   if (command === 'dictation_action') {
@@ -76,11 +99,14 @@ const invoke = (command, args) => {
     const p = args?.payload;
     const exact = (v, fields) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(k => Object.hasOwn(v, k));
     if (!exact(args, ['payload']) || !p ||
-      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model'].includes(p.action)) ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'train_record', 'train_undo', 'train_cancel', 'train_finish', 'train_reset'].includes(p.action)) ||
         (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, ['enabled', 'output', 'gender', 'sensitivity']) && Number.isInteger(p.prefs.sensitivity) && p.prefs.sensitivity >= 0 && p.prefs.sensitivity <= 100 &&
-          typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)))) return Promise.reject(new Error('No disponible'));
+          typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)) ||
+        (exact(p, ['action', 'id']) && ['model_download', 'model_cancel', 'model_delete'].includes(p.action) && typeof p.id === 'string' && /^[a-z0-9.-]{1,40}$/.test(p.id)) ||
+        (exact(p, ['action', 'speech']) && p.action === 'set_speech' && exact(p.speech, ['language', 'model', 'words']) && typeof p.speech.language === 'string' && /^[a-z]{2,4}$/.test(p.speech.language) &&
+          typeof p.speech.model === 'string' && /^[a-z0-9.-]{1,40}$/.test(p.speech.model) && Array.isArray(p.speech.words) && p.speech.words.length <= 50 && p.speech.words.every(w => typeof w === 'string' && w.length <= 40)))) return Promise.reject(new Error('No disponible'));
   }
-  return rawInvoke(command, args);
+  return paced(command, () => rawInvoke(command, args));
 };
 setInvoke(invoke);
 const root = document.getElementById('hub');
@@ -89,7 +115,7 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
-  // The page Rust chose when it opened this window (a closed list: the shell ignores anything else), e.g. «Configurar Pi…» -> accounts.
+  // The page Rust chose when it opened this window (a closed list: the shell ignores anything else), e.g. «Configurar Pi…» -> chat.
   initialPage: window.__abitoHubPage,
   version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, privacy: (page, ctx) => privacyPage(page, ctx, invoke), dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
   async renderNotch(page, container, navigate) {
@@ -103,21 +129,27 @@ startHub(root, {
       const mounted = [];
       // Each renderer retains its closed IPC planner and per-mount cleanup.
       try {
-        if (page === 'agents') mounted.push(await renderAgentSettings(options));  // options.P = the pills module: «En isla» is the pill declaration
-        if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page, navigate }));
+        // #503 S32: «Pestañas activas», «Integraciones» and «Agentes» are ONE page, drawn by the three renderers one after the other:
+        // the main-tool selector + the AI pills, the agents table (+ plan usage, recap), the services, then Abito's instructions and
+        // the specialists. Each keeps its own closed IPC planner and cleanup.
+        if (page === 'integrations') {
+          mounted.push(await renderPills({ ...personal, page: 'pills', part: 'tools', navigate }));
+          mounted.push(await renderAgentSettings(options));  // options.P = the pills module: «En la isla» is the pill declaration
+        }
         if (page === 'chat') {
-          const chat = await renderChatSettings(options); mounted.push(chat);
-          const models = await renderModels(options);
+          const chat = await renderChatSettings(options);
+          const accounts = await renderAccounts({ ...options, page: 'chat', slotFor: chat.slotFor });
+          mounted.push(accounts, chat); // Engine line BEFORE the provider cards; rows use the cards' slots.
+          const models = await renderModels({ ...options, connected: false }); // #503 S4: one list; the cards own the model choice
           // Preserve Abito's verified model controls inside Coucou's Local models section.
           chat.querySelector?.('#chat-local-models')?.append(models);
           const disposeChat = chat.dispose;
           chat.dispose = () => { models.dispose(); disposeChat(); };
         }
         if (page === 'integrations') mounted.push(await renderIntegrations(personal));
-        // #503 S26: the engine and the accounts have their own page; their keys already live in Chat and Integraciones (no second list).
-        if (page === 'accounts') mounted.push(await renderAccounts({ ...options, page: 'all', keys: false }));
         if (page === 'shortcuts') mounted.push(await renderShortcuts(options));
-        if (page === 'chat' || page === 'integrations') mounted.push(await renderAccounts({ ...options, page, keys: page !== 'chat' }));
+        // S32: the «Conectores» list repeated every agent; the agents table is the one row per agent now.
+        if (page === 'integrations') mounted.push(await renderPills({ ...personal, page: 'agents', part: 'abito', navigate }));
         if (mounted.length) container.append(...mounted);
         else container.append(renderUnavailable(page));
       } catch {

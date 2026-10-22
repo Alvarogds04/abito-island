@@ -10,7 +10,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const base = path.resolve(__dirname, '../frontend/vendor/coucou/hub');
   const { inactivePages, renderUnavailable } = await import(pathToFileURL(path.join(base, 'pages.js')));
   const { hero } = await import(pathToFileURL(path.join(base, 'hero.js')));
-  const ids = ['dictation','notes','insights','dictionary','snippets','styles','flowsettings','general','pills','agents','chat','accounts','voice','integrations','phone','shortcuts'];
+  const ids = ['dictation','notes','insights','dictionary','snippets','styles','flowsettings','general','integrations','chat','voice','phone','shortcuts'];
   const invoked = [], disposed = [];
   let config;
   const fake = name => async opts => { invoked.push([name, opts.page]); return Object.assign(new Element('section'), { dispose() { disposed.push(name); } }); };
@@ -73,7 +73,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       }
     } else {
       const cleanup = await config.renderNotch(id, container);
-      const expected = {general:[['general',undefined]], pills:[['pills','pills']], agents:[['agent-settings',undefined],['pills','agents']], chat:[['chat-settings',undefined],['models',undefined],['accounts','chat']], accounts:[['accounts','all']], integrations:[['integrations',undefined],['accounts','integrations']], shortcuts:[['shortcuts',undefined]]}[id];
+      const expected = {general:[['general',undefined]], chat:[['chat-settings',undefined],['accounts','chat'],['models',undefined]], integrations:[['pills','pills'],['agent-settings',undefined],['integrations',undefined],['pills','agents']], shortcuts:[['shortcuts',undefined]]}[id];
       if (expected) { assert.deepEqual(invoked, expected); assert(container.children.length); cleanup?.(); }
       else {
         assert(text(container).includes(id === 'phone' ? 'No disponible' : 'pendiente de conectar'));
@@ -89,7 +89,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
     // L42: the voice-model control (Notetaker, OK Abito) is live; everything else is disabled
     for (const e of all(container).filter(e => ['button','input','select','textarea'].includes(e.tagName) && !(['notes','voice'].includes(id) && String(e.textContent || '').trim() === 'Descargar'))) assert.equal(e.disabled, true, id);
   }
-  assert(source.includes("page === 'pills' || page === 'agents'"), 'pills and agents retain the existing closed planner');
+  assert(source.includes("page === 'integrations'") && source.includes("part: 'tools'") && source.includes("part: 'abito'"), 'S32: the one page composes the pills, agents, services and Abito parts, each with its closed planner');
   assert(disposed.includes('agent-settings') && disposed.includes('chat-settings'), 'new page adapters are disposed');
   const generalSource = fs.readFileSync(path.join(base,'general.ts'),'utf8');
   assert(generalSource.includes('renderRecapRows({ invoke })'), 'General reuses the wired upstream recap rows in their original position');

@@ -43,10 +43,11 @@ if (require.main === module) (async () => {
     if (cmd === 'models_action') return structuredClone(modelListing);
     return structuredClone(state);
   };
-  const options = { invoke, V, page: 'chat', listen: async (name,f) => { events[name] = f; return () => { delete events[name]; }; }, timers: { setTimeout: (f,ms) => { timers.push({f,ms}); return timers.length; }, clearTimeout() {} } };
+  const options = { invoke, V, page: 'all', listen: async (name,f) => { events[name] = f; return () => { delete events[name]; }; }, timers: { setTimeout: (f,ms) => { timers.push({f,ms}); return timers.length; }, clearTimeout() {} } };
   ui = await renderAccounts(options); await ui.settled();
-  for (const action of ['view','connectors_list','agents_list','hooks_preview']) assert(calls.some(([c,p]) => c === 'agent_action' && p.action === action));
-  assert(timers.some(t => t.ms === V.AGENTS_WAIT_MS)); assert(timers.some(t => t.ms === V.CONNECT_WAIT_MS));
+  assert(calls.some(([c,p]) => c === 'agent_action' && p.action === 'view'));
+  assert(!calls.some(([c,p]) => c === 'agent_action' && ['connectors_list','agents_list','hooks_preview'].includes(p.action)), 'removed connectors never query the host');
+  assert(timers.some(t => t.ms === V.CONNECT_WAIT_MS));
   assert.deepEqual(calls.filter(([c]) => c === 'secret_action').map(([,p]) => p), V.KEY_IDS.map(id => V.keyPayload('present', id)));
   // #503 S26: the login buttons now read «Conectar…» on the card; the closed words API / Auth are their accessible names' ends
   const ACCESSIBLE = { API: /^Conectar con clave de API: /, Auth: /^Conectar con autentificación: /, 'Cerrar sesión': /^Cerrar sesión: / };
@@ -79,13 +80,14 @@ if (require.main === module) (async () => {
   assert(text(ui).includes('Claves'));
   ui.dispose(); assert.equal(Object.keys(events).length, 0);
   ui = await renderAccounts({ ...options, page: 'integrations' }); await ui.settled(); calls.length = 0;
-  assert(text(ui).includes('Conectores')); assert(!text(ui).includes('Claves')); assert(!text(ui).includes('Configurar proveedor'));
+  assert(!text(ui).includes('Conectores')); assert(!text(ui).includes('Claves')); assert(!text(ui).includes('Configurar proveedor'));
   ui.dispose(); assert.equal(Object.keys(events).length, 0);
   calls.length = 0;
   ui = await renderAccounts({ ...options, page:'chat', keys:false }); await ui.settled();
   assert(!text(ui).includes('Claves'), 'Coucou key controls own the Chat page; no duplicate key editor');
   assert(!calls.some(([cmd]) => cmd === 'secret_action'), 'the additional account section does not re-query keys');
-  assert(text(ui).includes('Configurar proveedor'), 'saved/custom account functionality remains available');
+  assert(text(ui).includes('Configurar proveedor') && text(ui).includes('Otros endpoints'), 'saved/custom account functionality remains available in one card');
+  for (const removed of ['Configuración de proveedores', 'Buscar proveedor', 'Conectores', 'Claves']) assert(!text(ui).includes(removed), removed);
   ui.dispose();
   // Frame-driven authentication: reuse the existing account, never invent a command.
   state = { connection:'connected', providers:[{id:'anthropic',name:'Anthropic',methods:['api_key','oauth'],configured:false}], accounts:[{accountId:'personal',provider:'anthropic',label:'Personal',authMethod:'none',configured:false}], ownedAccounts:{accounts:[]}, auth:{} };

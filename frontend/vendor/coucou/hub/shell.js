@@ -16,13 +16,10 @@ const FLOW_PAGES = [
 ];
 const NOTCH_PAGES = [
   { id: "general", icon: "gear", title: () => t("General"), subtitle: () => t("Abito, his sounds and how the island behaves.") },
-  { id: "pills", icon: "grid", title: () => t("Active pills"), subtitle: () => t("The pills shown in the island, their order and their colours.") },
-  { id: "agents", icon: "terminal", title: () => t("Agents"), subtitle: () => t("Claude Code, Codex and the other agents Abito follows.") },
+  // #503 S32: «Pestañas activas», «Integraciones» and «Agentes» are ONE page: every tool, whether it is an agent, an AI or a service.
+  { id: "integrations", icon: "puzzle", title: () => "Integraciones y agentes", subtitle: () => "Los agentes, las IA y los servicios que Abito sigue, y cuáles se ven en la isla." },
   { id: "chat", icon: "chat", title: () => t("Chat"), subtitle: () => t("The AI of the island's chat, with your own keys.") },
-  // #503 S26: the engine and the accounts (Pi, Claude…) had no page of their own: reachable only inside Chat/Integrations.
-  { id: "accounts", icon: "lock", title: () => "Conexiones", subtitle: () => "El motor de Abito y las cuentas con las que inicia sesión." },
   { id: "voice", icon: "wave", title: () => "OK Abito" },
-  { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
   { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") },
   { id: "privacy", icon: "lock", title: () => "Privacidad", subtitle: () => "Avisos de fallos y reportes que vos decidís enviar." }
@@ -52,7 +49,8 @@ const DEFAULT_STATUS = {
 };
 async function startHub(root, opts) {
   document.body.classList.add("hub-window");
-  const wanted = typeof opts.initialPage === "string" ? ALL.find((p) => p.id === opts.initialPage) : void 0;
+  const initialPage = opts.initialPage === "accounts" ? "chat" : opts.initialPage;
+  const wanted = typeof initialPage === "string" ? ALL.find((p) => p.id === initialPage) : void 0;
   let current = wanted ? wanted.id : "dictation";
   let status = DEFAULT_STATUS, statusKnown = false;
   const firstStatus = FlowBridge.status().then((real) => {
@@ -192,7 +190,8 @@ async function startHub(root, opts) {
   void firstStatus;
   await show(current);
   if (typeof document.addEventListener === "function") document.addEventListener("abito:hub-select", (e) => {
-    const id = e.detail;
+    const legacy = e.detail;
+    const id = legacy === "accounts" ? "chat" : legacy;
     if (typeof id === "string" && ALL.some((p) => p.id === id)) void show(id);
   });
   void onEvent("hub-page", (page) => {

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { classify, extraScenes, hubPages } = require('../packaging/validate/scenes.cjs');
 const expected = ['integracion-github', 'correo-keyring', 'spotify-reproductor', 'sonidos-controles', 'sonidos-audible', 'dictado-sin-modelo', 'voz-sin-modelo', 'voz-reconocimiento', 'bandeja-menu', 'autoinicio', 'personaje-escritorio', 'chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta'];
 for (const name of expected) assert(extraScenes.includes(name), `missing ${name}`);
-for (const page of ['general','agents','pills','chat','integrations','shortcuts','voice','dictation','flowsettings','dictionary','snippets','styles','insights','notes','phone']) assert(hubPages.includes(page), `missing hub page ${page}`);
+for (const page of ['general','chat','integrations','shortcuts','voice','dictation','flowsettings','dictionary','snippets','styles','insights','notes','phone']) assert(hubPages.includes(page), `missing hub page ${page}`);
 assert.equal(classify({ok:true}).verdict, 'pass');
 assert.equal(classify({ok:false,reason:'composer locked'}).verdict, 'fail');
 assert.equal(classify({ok:true,errors:['uncaught']}).verdict, 'fail');
@@ -23,14 +23,16 @@ assert.deepEqual([...hubPages].sort(), ids.sort());
 // failed with «no se encontró control seguro en accounts»). The branch is read-only: it may never press a button of the page.
 {
   const browser = fs.readFileSync(path.join(__dirname, '../packaging/validate/browser.js'), 'utf8');
-  const at = browser.indexOf("page==='accounts'"); assert(at > 0, 'ajustes-accounts has no explicit branch');
+  const at = browser.indexOf("page==='chat'"); assert(at > 0, 'ajustes-chat has no explicit read-only engine branch');
   const branch = browser.slice(at, browser.indexOf("page==='styles'", at));
   assert(/agent_action[^)]*view/.test(branch), 'it reads the host state');
   assert(!/click\(|key\(|daemon_action|account_logout|auth_start|account_create|secret_action|set_prefs/.test(branch), 'the scene must never act: no click, no restart, no login/logout, no key');
-  assert(hubPages.includes('accounts') && extraScenes.includes('ajustes-accounts'), 'the page is in the validator catalogue');
+  assert(!hubPages.includes('accounts') && !extraScenes.includes('ajustes-accounts'), 'Conexiones is no longer a page');
+  assert(extraScenes.includes('ajustes-chat'), 'the read-only engine checks moved to Chat');
   // the island deep link («Configurar Pi…») names this page, and Rust accepts exactly that id
-  assert(/PI_SECTIONS, e\.detail\) \|\| e\.detail === 'accounts:oauth'[^\n]*'accounts'/.test(fs.readFileSync(path.join(__dirname, '../frontend/settings.js'), 'utf8')), 'the deep link opens the window on accounts');
-  assert(/"accounts"/.test(fs.readFileSync(path.join(__dirname, '../src/settingswindow.rs'), 'utf8')), 'Rust lists accounts among its closed pages');
+  assert(/PI_SECTIONS, e\.detail\) \|\| e\.detail === 'accounts:oauth'[^\n]*'chat'/.test(fs.readFileSync(path.join(__dirname, '../frontend/settings.js'), 'utf8')), 'the deep link opens the window on Chat');
+  const native = fs.readFileSync(path.join(__dirname, '../src/settingswindow.rs'), 'utf8').match(/const PAGES[^=]*= &\[([\s\S]*?)\];/)[1];
+  assert(!native.includes('"accounts"') && native.includes('"chat"'), 'Rust admits Chat, not accounts');
 }
 console.log(`validate-scenes: verdict and catalog checks passed (${extraScenes.length + 6} scenes)`);
 

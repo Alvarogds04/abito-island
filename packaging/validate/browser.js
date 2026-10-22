@@ -412,7 +412,7 @@
     await wait(()=>root.textContent.trim().length>20 && root.querySelector('button,input,select,textarea'), 'contenido y controles '+page);
     const text=root.textContent;
     if (/No se pudieron (leer|abrir) los ajustes/.test(text)) return {ok:false,reason:'renderer de ajustes mostró su fallback de error',text};
-    if (page==='agents' && /install_failed|No se pudo completar/i.test(text)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text};
+    if (page==='integrations' && /install_failed|No se pudo completar/i.test(text)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text};
     const controls=[...root.querySelectorAll('button,input,select,textarea')];
     const before=await snapshot();
     let effect, limitation;
@@ -428,7 +428,7 @@
       await click(b);
       const action=page==='dictionary'?'words':'snippets';
       effect=await wait(async()=>{const data=await invoke('dictation_action',{action});return JSON.stringify(data).includes(page==='dictionary'?'Validador':'firma validador') && data;},'dato guardado '+page);
-    } else if(page==='insights'||page==='pills') {
+    } else if(page==='insights') {
       const segment=root.querySelector('.hub-segmented');
       const target=segment && [...segment.querySelectorAll('button')].find(b=>!b.classList.contains('on'));
       const selected=target.textContent;
@@ -454,7 +454,7 @@
       await click(startup());
       await wait(async()=> (await invoke('prefs_action',{action:'autostart_view'})).enabled===false,'autoinicio retirado desde General');
       effect={liveGain:live.gain,motion:'sin interruptor inerte',autostart:'on/off mediante UI',input:'XTest sobre controles reales'};
-    } else if(page==='accounts') {
+    } else if(page==='chat') {
       // #503 S26: READ-ONLY by design. This page's buttons restart the engine, log in and log out: a scene must never press them. It
       // compares what the page SHOWS with what the host SAYS: the engine line against the real connection, the cards against the
       // host's own provider list (same filter as the page: only providers that offer a login method).
@@ -465,10 +465,10 @@
       const expectedWord=bannerWord[wantedEngine]||bannerWord.no_daemon;
       if(!banner.textContent.includes(expectedWord)) return {ok:false,reason:`el motor dice «${expectedWord}» en el host pero la página muestra «${banner.textContent.trim()}»`,host:wantedEngine,text};
       for(const [other,word] of Object.entries(bannerWord)) if(other!==wantedEngine && other!=='connecting' && banner.textContent.includes(word)) return {ok:false,reason:`la página muestra «${word}» pero el host está en «${wantedEngine}»`,host:wantedEngine,text};
-      const expectedCards=(host.providers||[]).filter(p=>Array.isArray(p.methods)&&p.methods.length).map(p=>p.id);
-      const shownCards=[...root.querySelectorAll('[id^="provider-"]')].map(c=>c.id.replace(/^provider-/,''));
+      const expectedCards=(host.providers||[]).filter(p=>Array.isArray(p.methods)&&p.methods.length).map(p=>p.id).sort();
+      const shownCards=[...root.querySelectorAll('[id^="provider-"]')].map(c=>c.id.replace(/^provider-/,'')).sort();
       if(JSON.stringify(shownCards)!==JSON.stringify(expectedCards)) return {ok:false,reason:'las tarjetas de cuentas no coinciden con la lista del host',expected:expectedCards,shown:shownCards,text};
-      effect={page:'accounts',engine:wantedEngine,providers:shownCards,observable:'estado del motor y tarjetas leídos del host; ninguna acción pulsada (sin reinicio, sin inicio de sesión)'};
+      effect={page:'chat',engine:wantedEngine,providers:shownCards,observable:'estado del motor y tarjetas leídos del host; ninguna acción pulsada (sin reinicio, sin inicio de sesión)'};
     } else if(page==='styles') {
       const add=[...root.querySelectorAll('select')].find(s=>s.options[0]?.textContent.includes('Añadir') || s.options[0]?.textContent.includes('Agregar') || s.options[0]?.textContent.includes('Add an app'));
       if(!add) throw Error('selector para añadir app ausente');
@@ -498,7 +498,7 @@
       await click(control);
       if(page==='shortcuts') effect=await wait(async()=>{const h=await invoke('hotkey_action',{action:'view',id:'desktopToggle'});return h.enabled===false && h;},'atajo desactivado');
       else effect=await assertChanged();
-      if(page==='agents') {
+      if(page==='integrations') {
         const instructions=byId('abito-instructions');
         if(!instructions || !root.textContent.includes('Se aplican a los próximos mensajes del chat de Abito.')) throw new Error('instrucciones con explicación falsa o ausente');
         instructions.value='Responde en español neutro.';
@@ -510,8 +510,8 @@
     // Preferences can repaint the page while installer previews arrive asynchronously.
     // Check the CURRENT full DOM as well, not just the pre-interaction/truncated text.
     const finalText=document.querySelector('.hub-page')?.textContent || '';
-    if (page==='agents' && /install_failed|No se pudo completar/i.test(finalText)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text:finalText};
-    if (page==='agents') document.querySelector('.hub-page')?.scrollIntoView({block:'start'});
+    if (page==='integrations' && /install_failed|No se pudo completar/i.test(finalText)) return {ok:false,reason:'una fila de agente mostró un error de instalación',text:finalText};
+    if (page==='integrations') document.querySelector('.hub-page')?.scrollIntoView({block:'start'});
     return {ok:true,page,controls:controls.length,text:text.slice(0,500),effect,unverifiable:limitation};
   }
   async function integrationStates(state) {

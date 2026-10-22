@@ -81,7 +81,7 @@ async function open(scenario = {}) {
           return structuredClone(snap);
         }
         if (cmd === 'agent_action') return a === 'sessions_list' ? { connection, accounts, sessions: { rows: sessions, truncated: false } } : { connection, accounts };
-        if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
+        if (cmd === 'prefs_action') return { sound: true, declaredPills: scenario.declared ? scenario.declared : scenario.github ? ['integration_github'] : [], mainPill: 'abito', pillColors: {}, avatarColors: {}, autoCloseSeconds: 0, openOnHover: false, absenceSeconds: 600 };
         if (cmd === 'github_action' && scenario.githubData === 'real') {
           // the shape src/github.rs serialises (what the validator's fake `gh` produces): PRs carry `repo`/`isDraft`/`review`, mainCI rows carry repo+branch
           const pr = { id: 'fixture/repo#42', title: 'Fixture PR', url: 'https://github.com/fixture/repo/pull/42', repo: 'fixture/repo', number: 42, isDraft: false, ci: 'failure', review: 'pending', headSha: null };
@@ -114,6 +114,8 @@ async function open(scenario = {}) {
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__islandSetState('overview'));
   if (scenario.chat) { await page.evaluate(() => window.__islandSetView('chat', 720, 240)); await page.waitForTimeout(800); }
+  // S32: every declared service that has a card counts as «seen» (the host answered for it), so its pill shows as a row
+  if (scenario.declared) await page.evaluate(ids => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids, source: 'integrations' } })), scenario.declared);
   if (scenario.github) await page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:integration-seen', { detail: { ids: ['integration_github'], source: 'github' } })));
   if (scenario.focusGithub) { await page.waitForTimeout(600); await page.evaluate(() => document.getElementById('pill-choice-integration_github')?.click()); }
   await page.waitForTimeout(scenario.quick ? 1800 : 4200); // spring + the ticker's first poll (`quick`: measurements that only need the card, not the first ticker poll)

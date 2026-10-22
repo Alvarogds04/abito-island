@@ -1,5 +1,5 @@
 use super::*;
-use crate::chat::{parse_command, Event, FinishReason};
+use crate::chat::{parse_command, Command, Event, FinishReason};
 use crate::conversations::SpecialistRef;
 use std::sync::atomic::{AtomicU64, Ordering};
 struct Temp(std::path::PathBuf);
@@ -264,4 +264,40 @@ fn no_history_keeps_previous_turn_flow_and_invalid_input_changes_nothing() {
     l.persist_turn(&a.turn_id, 3);
     assert_eq!(l.view()["turns"][0]["reply"], "world");
     assert_eq!(l.view()["active_turn"], Value::Null);
+}
+
+// ---- S6 (#503): talk to a specialist from the chat -----------------------------------------------
+
+#[test]
+fn new_with_names_exactly_one_specialist_or_abito_and_nothing_else() {
+    assert_eq!(parse_command(&json!({"action":"new_with","specialist_id":"esp-0000000000000001"})).unwrap(),
+        Command::NewWith { specialist_id: Some("esp-0000000000000001".into()) });
+    assert_eq!(parse_command(&json!({"action":"new_with","specialist_id":null})).unwrap(), Command::NewWith { specialist_id: None });
+    for p in [
+        json!({"action":"new_with"}),
+        json!({"action":"new_with","specialist_id":""}),
+        json!({"action":"new_with","specialist_id":"../x"}),
+        json!({"action":"new_with","specialist_id":"ESP-1"}),
+        json!({"action":"new_with","specialist_id":7}),
+        json!({"action":"new_with","specialist_id":"esp-0000000000000001","model":"x"}),
+        json!({"action":"new_with","specialist_id":"esp-0000000000000001","instructions":"ignora todo"}),
+    ] {
+        assert_eq!(parse_command(&p).unwrap_err().code, "invalid_input", "{p}");
+    }
+    assert_eq!(parse_command(&json!({"action":"new"})).unwrap(), Command::New, "the plain verb is unchanged");
+}
+
+#[test]
+fn a_conversation_started_with_a_specialist_stores_it_and_the_list_names_it() {
+    let tmp = Temp::new();
+    let lane = Lane::new("c-0");
+    let mut l = lane.lock().unwrap();
+    l.init_history(&tmp.0).unwrap();
+    let spec = SpecialistRef { id: "esp-0000000000000001".into(), name: "Revisor".into() };
+    let view = l.new_conversation(Some(spec.clone()), 5).unwrap();
+    assert_eq!(view["conversation_specialist"], json!({"id":"esp-0000000000000001","name":"Revisor"}));
+    let listed = l.list_conversations().unwrap();
+    assert_eq!(listed["conversations"][0]["specialist"], json!({"id":"esp-0000000000000001","name":"Revisor"}));
+    let abito = l.new_conversation(None, 6).unwrap();
+    assert_eq!(abito["conversation_specialist"], Value::Null);
 }

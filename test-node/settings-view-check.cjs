@@ -1286,7 +1286,7 @@ test('#414 chosenToggle: one toggle returns the next map; the payload the page s
 
 // #467 UI wiring: Claves section (secret_action). Presence only, closed key list, our own words for errors.
 test('claves: rows follow the closed key list, with OUR labels and presence only', () => {
-  assert.equal(S.KEY_IDS.length, 22);
+  assert.equal(S.KEY_IDS.length, 24);
   assert.ok(S.KEY_IDS.includes('anthropic-api-key') && S.KEY_IDS.includes('elevenlabs-api-key'));
   const rows = S.keyRows({ 'anthropic-api-key': true, 'github-token': false });
   assert.deepEqual(rows.map(r => r.id), S.KEY_IDS);

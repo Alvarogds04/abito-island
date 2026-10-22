@@ -1,5 +1,5 @@
 'use strict';
-// ajustes-accounts (#503 S26): the validator's scene for the «Conexiones» page. The generic branch clicked the first `.switch`, and this
+// ajustes-accounts (#503 S26): the validator's read-only engine scene, now on Chat. The generic branch clicked the first `.switch`, and this
 // page has none (the gate failed with «no se encontró control seguro en accounts» while the page rendered fine). The scene must instead
 // READ the host and compare it with what the page shows, and must NEVER act: no restart, no login, no logout, no key.
 const assert = require('node:assert/strict');
@@ -19,7 +19,7 @@ async function scene({ host = {}, page = {}, buttons } = {}) {
   const tab = el('tab'); const engine = el('engine-status', shown.engine);
   const cards = shown.cards.map(id => el(id, id.replace('provider-', '')));
   const all = buttons || [el('b1', 'Reiniciar'), el('b2', 'Reintentar'), el('b3', 'Conectar…'), el('b4', 'Salir')];
-  const root = { get textContent() { return `Conexiones El motor de Abito y las cuentas ${shown.engine} Motor local Reiniciar ${shown.cards.join(' ')} y más texto para pasar el mínimo`; },
+  const root = { get textContent() { return `Chat El motor de Abito y las cuentas ${shown.engine} Motor local Reiniciar ${shown.cards.join(' ')} y más texto para pasar el mínimo`; },
     scrollIntoView() {}, querySelector: sel => sel === '#engine-status' ? engine : sel === 'button,input,select,textarea' ? all[0] : null,
     querySelectorAll: sel => sel === '[id^="provider-"]' ? cards : sel === 'button' ? all : [...all] };
   let current = null;
@@ -30,7 +30,7 @@ async function scene({ host = {}, page = {}, buttons } = {}) {
     window, document: { querySelector: sel => (sel === '.hub-page' ? current : null), querySelectorAll: () => [tab], getElementById: id => (id === 'engine-status' ? engine : null) },
     addEventListener() {}, console: { error() {} }, performance, setTimeout: fn => { fn(); return 1; }, requestAnimationFrame: fn => fn(),
     getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) });
-  const result = await window.AbitoValidate.hub(0, 'accounts');
+  const result = await window.AbitoValidate.hub(0, 'chat');
   return { result, calls, clicks, buttons: all };
 }
 const ACTING = ['daemon_action', 'account_logout', 'auth_start', 'account_create', 'abito_account_create', 'abito_account_save', 'abito_account_remove', 'secret_action', 'set_prefs'];
@@ -40,7 +40,7 @@ const ACTING = ['daemon_action', 'account_logout', 'auth_start', 'account_create
   const ok = await scene();
   assert.equal(ok.result.ok, true, JSON.stringify(ok.result));
   // hub() returns {ok, page, controls, text, effect}: what this scene observed lives in `effect`
-  assert.equal(ok.result.page, 'accounts'); assert.equal(ok.result.effect.engine, 'connected'); assert.equal(JSON.stringify(ok.result.effect.providers), JSON.stringify(['pi', 'claude'])); // JSON: arrays built inside the vm context have another prototype
+  assert.equal(ok.result.page, 'chat'); assert.equal(ok.result.effect.engine, 'connected'); assert.equal(JSON.stringify(ok.result.effect.providers), JSON.stringify(['claude', 'pi'])); // JSON: arrays built inside the vm context have another prototype
   assert(ok.result.effect.observable.includes('ninguna acción pulsada'), 'the evidence says it pressed nothing');
   assert(ok.calls.some(([c, a]) => c === 'agent_action' && a === 'view'), 'it asks the host for the real state');
   // 2) it NEVER acts: only reads go to the host, and the only click is the sidebar tab
@@ -52,10 +52,10 @@ const ACTING = ['daemon_action', 'account_logout', 'auth_start', 'account_create
     assert.equal((await scene({ host: { connection }, page: { engine: '● Motor corriendo' } })).result.ok, false, `${connection} shown as running is a lie`);
   }
   assert.equal((await scene({ host: { connection: 'connected' }, page: { engine: '✗ Motor caído' } })).result.ok, false, 'a healthy host shown as down is a lie too');
-  // 4) the provider cards must be exactly the host's account list (no invented card, none missing, same order)
+  // 4) provider rows must be the host's list, regardless of their placement in Chat slots
   assert.equal((await scene({ page: { cards: ['provider-pi'] } })).result.ok, false, 'a missing card');
   assert.equal((await scene({ page: { cards: ['provider-pi', 'provider-claude', 'provider-fake'] } })).result.ok, false, 'an invented card');
-  assert.equal((await scene({ page: { cards: ['provider-claude', 'provider-pi'] } })).result.ok, false, 'a reordered list');
+  assert.equal((await scene({ page: { cards: ['provider-claude', 'provider-pi'] } })).result.ok, true, 'slots may reorder the list');
   assert.equal((await scene({ host: { providers: [] }, page: { cards: [] } })).result.ok, true, 'an empty account list is a valid state: zero cards');
   // 5) the page fallback text must never be accepted as a pass
   const failing = await scene();

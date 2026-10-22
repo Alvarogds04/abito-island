@@ -20,6 +20,11 @@ tauri-build = { version = "2", features = [] }
 # Everything else still reuses what Cargo.lock already resolves.
 # OS-neutral: these compile for x86_64-pc-windows-msvc as they are.
 tauri = { version = "2", features = ["tray-icon"] }
+# GitHub OAuth device flow (#503 / 0.2): the OAuth 2.0 client Abito would otherwise hand-write (device authorization,
+# polling with authorization_pending / slow_down, typed errors). Reason for a new crate: a function Abito did not have and the
+# owner asked for (design odd/connectors-oauth-design.md, section 0). MIT OR Apache-2.0. reqwest 0.12 + rustls only (the stack the
+# dictation download already resolves): no native-tls, no openssl.
+oauth2 = { version = "5", default-features = false, features = ["reqwest", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # M1b lifecycle: a second launch focuses/shows the running island and exits.
@@ -93,6 +98,10 @@ ring = "0.17"
 # The phone finds this computer again when its address changes: announced on the local network only
 # while the phone link is on. Pure Rust, no async runtime, default features off.
 mdns-sd = { version = "0.21", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# #503 key store on macOS: the Keychain (same `keyring` API as Linux/Windows; this build is not compiled in CI yet).
+keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(windows)'.dependencies]
 # #467 key store: Windows Credential Manager.

@@ -10,10 +10,14 @@ import { t } from './i18n-es.js';
 import { keyAccountCommand, keyAccountId } from './keyaccounts.js';
 const UNAVAILABLE = 'No disponible todavía';
 const STORE = 'Secret Service (GNOME Keyring, KWallet)';
+// #503 S3: providers outside Coucou's table (core/providers.ts) name their keychain key here.
+const KEYS: Record<string, string> = { nan: 'nan-api-key', opencodego: 'opencode-go-api-key' };
 const CLOUD = [
   ['google','Google AI','AIza…','aistudio.google.com'],
   ['openai','OpenAI','sk-…','platform.openai.com'],
   ['openrouter','OpenRouter','sk-or-…','openrouter.ai/keys'],
+  ['nan','NaN','…','api.nan.builders'],
+  ['opencodego','OpenCode Go','…','opencode.ai/go (sin verificar)'],
 ];
 const button = (key: string, fn: () => void, kind = '') => trusted(h('button', { class: kind, text: t(key), onclick: fn })) as HTMLButtonElement;
 const input = (type: string, placeholder: string, id: string) => h('input', {
@@ -119,35 +123,45 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     keyRefresh[id] = refresh; refresh();
     return { r, dot, stateLabel, feedback, stateBadge, fieldError, testReason };
   }
+  // #503 S4: ONE list of AI providers; every card owns its credential and its model choice (no second system for the same keys).
   const api = keyRow('anthropic-api-key', t('API key'), 'sk-ant-...', true);
-  const model = trusted(h('select', { id: 'chat-anthropic-model', 'aria-label': t('Model') })) as HTMLSelectElement;
+  const models: Record<string, HTMLSelectElement> = {};
+  const FALLBACK: Record<string, string[][]> = { anthropic: [['claude-opus-5','Claude Opus 5'],['claude-sonnet-5','Claude Sonnet 5'],['claude-haiku-4-5','Claude Haiku 4.5']] };
+  const modelPicker = (group: string) => {
+    const select = trusted(h('select', { id: `chat-${group}-model`, 'aria-label': t('Model') })) as HTMLSelectElement;
+    models[group] = select;
+    select.addEventListener('change', e => {
+      if (!e.isTrusted || select.disabled || modelBusy) return;
+      const g = V.modelsTabView(state, prefs.chosenModels || {}).groups?.find((x: any) => x.id === group && x.connected);
+      const choice = g?.models.find((m: any) => m.id === select.value); if (!choice || choice.chosen) return;
+      // Same chosen-model preference as the legacy Modelos tab; preserve the other chosen models.
+      const payload = V.chosenModelsPayload(V.chosenToggle(prefs.chosenModels || {}, group, choice.id), group);
+      if (!payload) return; modelBusy = true; select.disabled = true;
+      work(() => call('prefs_action', payload), next => { prefs = next; }).finally(() => { modelBusy = false; if (s.alive()) drawModels(); });
+    });
+    return select;
+  };
   function drawModels() {
-    clear(model);
     const view = V.modelsTabView(state, prefs.chosenModels || {});
-    const group = view.groups?.find((g: any) => g.id === 'anthropic' && g.connected);
-    const offered = group?.models || [];
-    if (!offered.length) {
-      // Do not invent callable cloud model ids: show the upstream catalogue, disabled.
-      for (const [id,name] of [['claude-opus-5','Claude Opus 5'],['claude-sonnet-5','Claude Sonnet 5'],['claude-haiku-4-5','Claude Haiku 4.5']]) model.append(h('option', { value:id, text:name }));
-    } else for (const m of offered) model.append(h('option', { value: m.id, text: m.name }));
-    model.value = offered.find((m: any) => m.chosen)?.id || offered[0]?.id || 'claude-opus-5';
-    model.disabled = modelBusy || !offered.length; model.title = offered.length ? 'Modelos elegidos de Abito; no cambia el modelo activo de una conversación.' : UNAVAILABLE;
+    for (const [group, select] of Object.entries(models)) {
+      clear(select);
+      const offered = view.groups?.find((g: any) => g.id === group && g.connected)?.models || [];
+      // Do not invent callable cloud model ids: show the upstream catalogue (Claude only), disabled.
+      if (!offered.length) for (const [id, name] of FALLBACK[group] || [['', UNAVAILABLE]]) select.append(h('option', { value: id, text: name }));
+      else for (const m of offered) select.append(h('option', { value: m.id, text: m.name }));
+      select.value = offered.find((m: any) => m.chosen)?.id || offered[0]?.id || FALLBACK[group]?.[0][0] || '';
+      select.disabled = modelBusy || !offered.length; select.title = offered.length ? 'Modelos elegidos de Abito; no cambia el modelo activo de una conversación.' : UNAVAILABLE;
+    }
   }
-  model.addEventListener('change', e => {
-    if (!e.isTrusted || model.disabled || modelBusy) return;
-    const group = V.modelsTabView(state, prefs.chosenModels || {}).groups?.find((g: any) => g.id === 'anthropic' && g.connected);
-    const choice = group?.models.find((m: any) => m.id === model.value); if (!choice || choice.chosen) return;
-    // Same chosen-model preference as the legacy Modelos tab; preserve the other chosen models.
-    const payload = V.chosenModelsPayload(V.chosenToggle(prefs.chosenModels || {}, 'anthropic', choice.id), 'anthropic');
-    if (!payload) return; modelBusy = true; model.disabled = true;
-    work(() => call('prefs_action', payload), next => { prefs = next; }).finally(() => { modelBusy = false; if (s.alive()) drawModels(); });
-  });
-  const apiSection = notchCard('Claude', api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t('Model'), model), api.feedback);
+  const engineSlots: Record<string, HTMLElement> = {};
+  const engineSlot = (group: string) => engineSlots[group] = h('div', { id: `chat-engine-slot-${group}` });
+  const apiSection = notchCard('Claude', api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t('Model'), modelPicker('anthropic')), api.feedback, engineSlot('anthropic'));
   apiSection.children[0].prepend(api.dot);
   const providerCards: HTMLElement[] = [];
   for (const [id, name, placeholder, site] of CLOUD) {
-    const k = keyRow(providerDef(id).key!, name, placeholder);
-    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, h('div', { class: 'hint', text: t('Key from {site}', {site}) }), k.feedback);
+    const k = keyRow(KEYS[id] ?? providerDef(id).key!, name, placeholder);
+    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t('Model'), modelPicker(id)), k.feedback, engineSlot(id));
+    c.setAttribute('title', t('Key from {site}', {site})); // long explanation = tooltip, not a paragraph (S1)
     c.children[0].prepend(k.dot); providerCards.push(c);
   }
   const locals = h('div', { style:'display:flex;flex-direction:column;gap:14px' });
@@ -169,7 +183,8 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     const label = h('label', {}, h('i', { class:'dot', style:`background:${p.accent};margin-right:8px` }), h('span', { text:t(name) }));
     block.append(h('div', { class:'row' }, label, url, connect));
     if (id === 'custom') block.append(row('', key));
-    block.append(hint(`${UNAVAILABLE} — conexión de direcciones arbitrarias; los modelos verificados de Abito siguen debajo.`), exposure);
+    const na = hint(UNAVAILABLE); na.setAttribute('title', 'Conexión de direcciones arbitrarias no disponible todavía; los modelos verificados de Abito siguen debajo.');
+    block.append(na, exposure);
     showExposure(); locals.append(block);
   }
   // #487 (NotchBuddy feature 8): Abito prefs switch, off by default. Reads the previous window's app and title only while on.
@@ -179,6 +194,10 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     const sw = trusted(toggle(prefs.windowContext === true, value => { work(() => call('prefs_action', { action: 'set_window_context', window_context: value }), next => { prefs = next; paintContext(); }, () => paintContext()); }));
     (sw as HTMLButtonElement).disabled = typeof prefs.windowContext !== 'boolean';
     ctxBody.append(row(t('Active window context'), sw));
+    // S5 (#503): the chat's live-state context (agent sessions + integrations), ON by default.
+    const live = trusted(toggle(prefs.liveContext !== false, value => { work(() => call('prefs_action', { action: 'set_live_context', live_context: value }), next => { prefs = next; paintContext(); }, () => paintContext()); }));
+    (live as HTMLButtonElement).disabled = typeof prefs.liveContext !== 'boolean';
+    ctxBody.append(row(t('Live context'), live), h('div', { class: 'hub-note', text: t('When you write in the chat, Abito adds a short read-only summary of what it already knows: your coding-agent sessions, pending questions and the status of your connected integrations. It makes no new requests, and sends no keys, mail bodies or diffs. The chat still cannot run or approve anything. On by default.') }));
     const available = prefs.windowContextAvailable;
     ctxBody.append(h('div', { class: 'hub-note', text: available === true
       ? 'La extensión de GNOME está disponible. Solo se leen la app y el título; no se captura la URL.'
@@ -194,17 +213,20 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     }
   };
   paintContext();
-  const localCard = section(t('Local models'), hint(t('Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.')), locals);
+  const ctxCard = section(t('Active window context'), hint(t('When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.')), ctxBody);
+  ctxCard.setAttribute('id', 'chat-window-context'); // S5 (#503): the live-context row lives inside it
+  const localCard = section(t('Local models'), locals);
+  localCard.setAttribute('title', t('Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.'));
   localCard.setAttribute('id', 'chat-local-models');
+  const engineOthers = h('div', { id: 'chat-engine-others' });
   root.append(apiSection,
-    hint(t('Chat with Google AI, OpenAI or OpenRouter instead of Claude: add a key here, then click the model name above the chat box to switch provider and model. Keys stay in the system keychain. These providers get no web search and no tools: they can answer, never act on this computer.')),
-    ...providerCards, localCard,
-    section(t('Active window context'), hint(t('When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.')), ctxBody), s.message);
+    ...providerCards, engineOthers, h('div', { id: 'chat-extras' }), localCard,
+    ctxCard, s.message);
   drawModels();
   watch('agent:state', next => { state = { ...state, ...next }; drawModels(); });
   watch('prefs:state', next => { prefs = next; drawModels(); paintContext(); });
-  for (const key of ['anthropic-api-key', ...CLOUD.map(([id]) => providerDef(id).key!)]) work(() => call('secret_action', V.keyPayload('present', key)), result => { present[key] = result?.present === true; keyRefresh[key](); });
+  for (const key of ['anthropic-api-key', ...CLOUD.map(([id]) => KEYS[id] ?? providerDef(id).key!)]) work(() => call('secret_action', V.keyPayload('present', key)), result => { present[key] = result?.present === true; keyRefresh[key](); });
   for (const action of ['view','models_list']) work(() => call('agent_action', { action }), next => { state = { ...state, ...next }; drawModels(); });
   work(() => call('prefs_action', { action:'view' }), next => { prefs = next; drawModels(); paintContext(); });
-  return s.finish();
+  return Object.assign(s.finish(), { slotFor: (name: string) => engineSlots[name] || engineOthers });
 }

@@ -2,7 +2,7 @@
 // Active pills adapted from Coucou src/settings/main.ts activePillsSection @434d6a2b, Copyright (c) 2026 Louis Raillé, MIT.
 import { h, clear } from '../views/dom.js';
 import { colorDot } from '../settings/colors.js';
-import { PILL_CATEGORIES, pillDefinition, MAX_DECLARED } from '../core/pills.js';
+import { PILL_CATEGORIES, pillDefinition } from '../core/pills.js';
 import { t } from './i18n-es.js';
 import { notchSection, notchRow, notchHint } from './notch.js';
 import { row, card, select, toggle, segmented, label } from './ui.js';
@@ -63,7 +63,7 @@ export function pillStatus(d: any, hooks: any[], hookIds: Record<string, string>
   if (d.connect?.kind === 'hooks') {
     const state = hooks.find((r: any) => r.id === hookIds[d.id])?.state;
     if (state === 'connected') return { kind: 'ok', icon: '✓', word: 'lista' };
-    if (state && state !== 'unknown') return { kind: 'missing', icon: '✗', word: 'sin hooks', fix: { label: 'Instalar', to: 'agents' } };
+    if (state && state !== 'unknown') return { kind: 'missing', icon: '✗', word: 'sin hooks', fix: { label: 'Instalar', to: 'integrations' } };
     return { kind: 'unknown', icon: '·', word: 'no disponible todavía' };
   }
   if (d.connect?.kind === 'key') return presence[d.connect.key] ? { kind: 'ok', icon: '✓', word: 'lista' } : { kind: 'missing', icon: '✗', word: 'falta llave', fix: { label: 'Configurar', to: 'integrations' } };
@@ -75,7 +75,13 @@ export function pillStatus(d: any, hooks: any[], hookIds: Record<string, string>
   return { kind: 'ok', icon: '✓', word: 'lista' };
 }
 
-export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all', navigate }: any) {
+// `part` (S32, the combined «Integraciones y agentes» page): 'tools' = the main-tool selector and the AI pills (the agents and the
+// services are drawn by their own renderers on the same page); 'abito' = Abito's instructions, the specialists and the colours.
+// Without `part` the old per-page behaviour holds (`page`: 'pills' | 'agents' | 'all').
+export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all', part, navigate }: any) {
+  const wantTools = part ? part === 'tools' : page !== 'agents';
+  const wantAbito = part ? part === 'abito' : page !== 'pills';
+  const wantColors = part ? part === 'abito' : page !== 'agents';
   const s = session(invoke, listen), { root, call, work, watch, message } = s;
   let prefs: any = {}, store: any = null, listing: any = null, saving = false;
   let connection: any = null, presence: Record<string, boolean> = {};
@@ -174,14 +180,13 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
     const restore = preserveFocus(root); closeDots(); clear(root);
     const cur = P.normalize(prefs), choices = C.mainChoices();
     const main = trusted(select(choices.map((d: any) => [d.id,pillDefinition(d.id)?.name || d.name]),cur.mainPill,id => { if(P.chooseMain(cur,id)) run({type:'prefs',payload:{action:'set_main_pill',id}}); })); main.className = ''; main.disabled = saving; main.setAttribute('aria-label','Píldora principal');
-    const slots = h('div', { class: 'hint', text: t("{used}/{max} slots in use — the main tool doesn't take one.", { used: cur.declaredPills.length, max: MAX_DECLARED }) });
-    slots.classList.toggle('full', cur.declaredPills.length >= MAX_DECLARED);
+    const slots = h('div', { class: 'hint', text: t('{used} in the island — the main tool is always there.', { used: cur.declaredPills.length }) });
     const groups = h('div', { style: 'display:flex;flex-direction:column;gap:12px' });
     const hookIds: Record<string,string> = { integration_claude:'claude-code', agent_cursor:'cursor', agent_codex:'codex', agent_gemini:'gemini-cli', agent_copilot:'copilot-cli', agent_opencode:'opencode', agent_amp:'amp' };
     const hooks = V.agentsView(connection).rows || [];
     function pillRow(entry: any) {
       const d = pillDefinition(entry.id) || entry, isMain = d.id === cur.mainPill;
-      const on = cur.declaredPills.includes(d.id), full = !isMain && !on && cur.declaredPills.length >= MAX_DECLARED;
+      const on = cur.declaredPills.includes(d.id), full = false;
       const dot = colorDot(d, 'width:10px;height:10px', () => P.normalize(prefs).pillColors, next => {
         if (saving) return;
         run({type:'prefs',payload:Object.hasOwn(next,d.id) ? {action:'set_pill_color',id:d.id,color:next[d.id]} : {action:'clear_pill_color',id:d.id}});
@@ -207,16 +212,17 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
     }
     for (const cat of PILL_CATEGORIES) {
       if (cat.id === 'service') continue;
+      if (part === 'tools' && (cat.id === 'workspace' || cat.id === 'agent')) continue; // the agents table on the same page owns them
       const pills = C.available().filter((d: any) => d.category === cat.id);
       if (pills.length) groups.append(h('div', { class: 'pill-group' }, h('h3', { text: t(cat.title) }), ...pills.map(pillRow)));
     }
-    const active = notchSection(t('Active pills'),
+    const active = notchSection(part === 'tools' ? t('Main tool') : t('Active pills'),
       notchHint(t('Choose the tools you use. Abito only shows what you declare here.')), slots,
       notchRow(t('Main tool'), main), groups);
-    if (page !== 'agents') {
+    if (wantTools) {
       root.append(active);
       // The exact Integrations page now owns these controls; retain the legacy all-page renderer.
-      if (page !== 'pills') root.append(section('Servicios', ...C.available().filter((d: any) => d.category === 'service').map(pillRow)));
+      if (!part && page !== 'pills') root.append(section('Servicios', ...C.available().filter((d: any) => d.category === 'service').map(pillRow)));
     }
     if (!instructionsDraft) principalInstructions.value = prefs.abitoInstructions || '';
     const principal = section('Abito',row('Instrucciones','Se aplican a los próximos mensajes del chat de Abito.',principalInstructions,action('Guardar instrucciones',() => { run({type:'set_abito_instructions',text:principalInstructions.value}); })));
@@ -247,20 +253,25 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
     if (editorId && !record(editorId)) editor = null;
     if (editor) spec.append(card(editor));
     principal.append(preview());
-    if (page !== 'pills') root.append(principal, spec);
-    if (page !== 'agents') root.append(colors(V,A,prefs,[{id:A.PRINCIPAL_ID,name:'Abito'},...S.identityView(store).identities],(p: any) => run({type:'prefs',payload:p})));
+    if (wantAbito) root.append(principal, spec);
+    if (wantColors) root.append(colors(V,A,prefs,[{id:A.PRINCIPAL_ID,name:'Abito'},...S.identityView(store).identities],(p: any) => run({type:'prefs',payload:p})));
     root.append(message); restore();
   }
   paint(); watch('prefs:state',p => {prefs = p;paint();}); watch('specialists:state',p => {store = p;paint();}); watch('models:state',p => {listing = p;paint();});
   work(() => call('prefs_action',{action:'view'}),p => {prefs = p;paint();});
   work(() => call('specialists_action',{action:'view'}),p => {store = p;paint();});
   work(() => call('models_action',{action:'list'}),p => {listing = p;paint();});
-  if (page !== 'agents') {
+  if (wantTools) {
     watch('agent:state', p => { connection = { ...connection, ...p }; paint(); });
     for (const action of ['view','agents_list']) work(() => call('agent_action',{action}), p => { connection = { ...connection, ...p }; paint(); });
+    // Reading which keys exist is INFORMATION, not an action of the human: with the OS keychain unreachable (no Secret Service, the
+    // validator's isolated session) a failed read means «no key we can see», shown by the row itself as «falta llave». It must not
+    // write the shared «No se pudo completar» notice that is reserved for something the human asked for (#503 S32 gate).
     work(async () => {
       const next: Record<string,boolean> = {};
-      for (const key of ['anthropic-api-key','google-api-key','openai-api-key']) next[key] = (await call('secret_action', V.keyPayload('present',key)))?.present === true;
+      for (const key of ['anthropic-api-key','google-api-key','openai-api-key']) {
+        try { next[key] = (await call('secret_action', V.keyPayload('present',key)))?.present === true; } catch { next[key] = false; }
+      }
       return next;
     }, p => { presence = p; paint(); });
   }
