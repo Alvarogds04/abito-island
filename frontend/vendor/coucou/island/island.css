@@ -1167,3 +1167,12 @@ html[data-motion="reduce"] #edge-strip { animation: none; transition: none; }
 #capsule[data-phase="expanded"][data-notice-band="true"]:not([data-notice-view="notices"]) #notice-card:not([hidden]) { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; height: 100%; min-height: 0; }
 #capsule[data-notice-band="true"] #notices::before { background: radial-gradient(220px 120px at 50% 160%, rgba(52, 211, 153, 0.5) 0%, rgba(0, 0, 0, 0) 70%); }
 #notice-card #notice-card-message[hidden] { display: none; }
+
+/* ══ v8 S12: «Todas» at the bottom of the blobs card (16px row, 44px hit through ::after) ═══════════════════════════════════════ */
+#blobs-links { flex: 0 0 16px; height: 16px; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px 0 8px; }
+#blobs-links[hidden] { display: none; }
+#blobs-links .see-all { position: relative; margin: 0; padding: 0 2px; height: 16px; font: 500 11px/16px var(--font); color: var(--dim-2); opacity: 1; }
+#blobs-links .see-all::after { content: ""; position: absolute; inset: -14px -8px; }
+#blobs-links .see-all:hover { color: var(--ink); }
+#capsule[data-layout="focus"] #blobs-links { justify-content: center; padding: 0; }
+#blobs { overflow: clip; }

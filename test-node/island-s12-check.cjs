@@ -5,9 +5,32 @@ const assert = require('node:assert/strict');
 const H = require('./island-geometry-harness.cjs');
 if (!H.findPlaywright()) { console.log('SKIPPED island-s12-check: no playwright — NOT a pass'); process.exit(0); }
 (async () => {
+  {
+    // v8: «Todas» is anchored to the blobs card (bottom of that column, per the MD), not loose under the mascot; long names show whole in the island tip
+    const r = await H.open({ manyPi: true });
+    try {
+      const sa = (await r.measure('#blobs-links .see-all'))[0], bl = (await r.measure('#blobs'))[0], list = (await r.measure('#pill-choices'))[0];
+      assert.ok(sa.shown, '«Todas» is shown');
+      assert.ok(sa.left >= bl.left - 0.5 && sa.right <= bl.right + 0.5 && sa.bottom <= bl.bottom + 0.5 && sa.top >= list.bottom - 0.5, `«Todas» sits at the bottom of the blobs card, under the list [${Math.round(sa.left)},${Math.round(sa.top)},${Math.round(sa.right)},${Math.round(sa.bottom)}] in blobs [${Math.round(bl.left)},${Math.round(bl.top)},${Math.round(bl.right)},${Math.round(bl.bottom)}]`);
+      const rows = (await r.measure('.pill-choice')).filter(b => b.shown).filter(b => b.top >= list.top - 0.5 && b.bottom <= list.bottom + 0.5);
+      assert.ok(rows.length >= 3, `still 3 whole blob rows (${rows.length})`);
+      assert.deepEqual((await r.hit('.see-all')).filter(h => !h.ok), [], '«Todas» gets its click');
+    } finally { await r.close(); }
+  }
+  {
+    const long = 'isla-expandida-con-un-nombre-muy-largo';
+    const r = await H.open({ sessions: [{ id: 's-00000001', kind: 'pi', cwd: long, state: 'running', origin: null }, { id: 's-00000002', kind: 'pi', cwd: 'settings-pantalla-ajustes-generales', state: 'sleeping', origin: null }] });
+    try {
+      const sa = (await r.measure('#blobs-links .see-all'))[0]; await r.page.mouse.click(sa.left + sa.w / 2, sa.top + sa.h / 2); await r.page.waitForTimeout(700);
+      const c = (await r.measure('.sessions-all-pick')).filter(b => b.shown)[0];
+      await r.page.mouse.move(c.left + c.w / 2, c.top + c.h / 2); await r.page.waitForTimeout(700);
+      const tip = await r.page.evaluate(() => { const t = document.getElementById('island-tip'), b = t.getBoundingClientRect(), i = document.getElementById('island').getBoundingClientRect(); return { shown: !t.hidden && b.width > 0, text: t.textContent, inside: b.left >= i.left - 0.5 && b.right <= i.right + 0.5 && b.bottom <= i.bottom + 0.5, z: getComputedStyle(t).zIndex }; });
+      assert.ok(tip.shown && tip.text.includes(long) && tip.inside, `the tip shows the full name inside the island: ${JSON.stringify(tip)}`);
+    } finally { await r.close(); }
+  }
   const r = await H.open({});
   try {
-    const sa = (await r.measure('.see-all'))[0]; assert.ok(sa && sa.shown, '«Todas» link is drawn');
+    const sa = (await r.measure('#blobs-links .see-all'))[0]; assert.ok(sa && sa.shown, '«Todas» link is drawn');
     await r.page.mouse.click(sa.left + sa.w / 2, sa.top + sa.h / 2); await r.page.waitForTimeout(900);
     const cells = (await r.measure('.sessions-all-pick')).filter(b => b.shown);
     assert.ok(cells.length >= 5, `a cell per session (${cells.length})`);

@@ -260,7 +260,9 @@ function mount(V) {
   // «Ver todas»: the link sits in the who-row; the full list is a dialog over the card (Esc / Volver return to the link).
   let pendingQuestion = null;
   const seeAll = mkEl('button', 'see-all'); seeAll.type = 'button'; seeAll.hidden = true;
-  who.append(seeAll);
+  // v8 S12: «Todas» lives at the bottom of the blobs card (the MD's «Ver todas →»), not loose under the mascot
+  const linksBox = document.getElementById('blobs-links');
+  (linksBox || who).append(seeAll);
   const overlay = mkEl('div', 'sessions-all'); overlay.hidden = true;
   overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', 'Todas las sesiones');
   const overlayHead = mkEl('div', 'sessions-all-head');
@@ -406,7 +408,7 @@ function mount(V) {
     ticker.el.title = task?.steps?.at(-1) ?? ''; // full text fallback when a long step is cut
     if (!raf && ticker.animating) raf = requestAnimationFrame(frame);
     const more = V.moreView(view);
-    seeAll.hidden = !more || !w; if (more) { seeAll.textContent = more.label; seeAll.setAttribute('aria-label', more.aria); }
+    seeAll.hidden = !more || !w; if (linksBox) linksBox.hidden = seeAll.hidden; if (more) { seeAll.textContent = more.label; seeAll.setAttribute('aria-label', more.aria); }
     if (!overlay.hidden) paintOverlay();
     jump.hidden = !memory.focus || integrationFocused;
     jump.setAttribute('aria-label', `Abrir una terminal · ${w?.name || ''}`);

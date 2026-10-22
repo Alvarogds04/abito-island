@@ -286,7 +286,8 @@ function mount(L) {
   function fitList() {
     if (!blobsCard || !blobsList || typeof getComputedStyle !== 'function') return;
     const cs = getComputedStyle(blobsCard);
-    const avail = blobsCard.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+    const links = doc.getElementById('blobs-links');
+    const avail = blobsCard.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0) - (links && !links.hidden ? 16 : 0);
     const v = L.rowsViewport(avail);
     blobsList.style.maxHeight = `${v.height}px`; blobsList.style.flex = '0 0 auto'; blobsList.style.height = `${v.height}px`;
   }
@@ -393,6 +394,7 @@ function mount(L) {
   if (listen) listen('question:state', e => apply(e && e.payload)).catch(() => {});
   if (invoke) invoke('question_action', { payload: { action: 'view' } }).then(apply, () => {});
   new MutationObserver(syncMode).observe(capsule, { attributes: true, attributeFilter: ['data-question', 'data-card'] });
+  const linksBox = doc.getElementById('blobs-links'); if (linksBox) new MutationObserver(fitList).observe(linksBox, { attributes: true, attributeFilter: ['hidden'] });
   new MutationObserver(fitList).observe(capsule, { attributes: true, attributeFilter: ['data-notices-calm', 'data-layout', 'data-phase', 'data-view'] });
   syncMode(); publish();
 }
