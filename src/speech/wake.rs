@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
+use super::train::Learned;
 use super::{models_dir, ModelFile, ModelState, Verifier, SAMPLE_RATE};
 use crate::voiceintent::normalise;
 
@@ -249,19 +250,19 @@ pub fn params(sensitivity: u8) -> Params {
 
 // ── Matching «OK Abito» in a transcript ───────────────────────────────────────
 
-const OK_WORDS: &[&str] = &[
+pub(crate) const OK_WORDS: &[&str] = &[
     "ok", "okey", "okay", "oka", "oca", "okei", "okai", "hey", "oye",
 ];
 /// Longest first, so «okey» is not read as «ok» + «ey».
 const OK_PREFIXES: &[&str] = &["okey", "okay", "okei", "okai", "oka", "oca", "ok"];
 /// Spellings the recognizer is known to give; they never need tolerance.
-const NAMES: &[&str] = &[
+pub(crate) const NAMES: &[&str] = &[
     "abito", "habito", "avito", "abbito", "abeto", "habbito", "abitto", "yavito",
 ];
 /// Mishearings seen from Parakeet. Only accepted right after an «ok» word, never alone.
 const NAMES_AFTER_OK: &[&str] = &["vito", "cavito", "kavito", "cabito", "gavito"];
 
-fn levenshtein(a: &str, b: &str) -> usize {
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
     if a.is_empty() {
         return b.len();
@@ -286,8 +287,8 @@ fn levenshtein(a: &str, b: &str) -> usize {
     row[b.len()]
 }
 
-fn is_name(s: &str, tolerance: usize) -> bool {
-    if NAMES.contains(&s) {
+fn is_name(s: &str, tolerance: usize, learned: &Learned) -> bool {
+    if NAMES.contains(&s) || learned.names.iter().any(|n| n == s) {
         return true;
     }
     let core = s.strip_prefix('h').unwrap_or(s);
@@ -301,17 +302,27 @@ fn is_name(s: &str, tolerance: usize) -> bool {
 /// «Habito, ¿qué hora es?»: Parakeet sometimes drops the «OK» (or hears it as a separate
 /// «Yes.» segment). The name then still counts as a wake, but only when it is a KNOWN spelling,
 /// the FIRST word, written with a comma right after it, and followed by a command.
-fn vocative_end(words: &[&str]) -> Option<usize> {
+fn vocative_end(words: &[&str], learned: &Learned) -> Option<usize> {
     let first = words.first()?;
     if words.len() < 2 || !first.ends_with(',') {
         return None;
     }
-    NAMES.contains(&normalise(first).as_str()).then_some(1)
+    let first = normalise(first);
+    (NAMES.contains(&first.as_str()) || learned.names.contains(&first)).then_some(1)
 }
 
 /// Finds «ok abito» (or «hey/oye abito») in `raw` and returns what follows the LAST
 /// occurrence, in its original spelling. None when the phrase is absent.
 pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
+    match_wake_with(raw, tolerance, &Learned::default())
+}
+
+/// Same, plus what this person trained: extra spellings of the name, extra «OK» lead words
+/// right before a name, and the complete trained phrases (alone in a segment: a bare wake).
+pub fn match_wake_with(raw: &str, tolerance: usize, learned: &Learned) -> Option<String> {
+    if !learned.phrases.is_empty() && learned.phrases.contains(&normalise(raw)) {
+        return Some(String::new());
+    }
     let words: Vec<&str> = raw.split_whitespace().collect();
     let norm: Vec<(usize, String)> = words
         .iter()
@@ -327,15 +338,15 @@ pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
         // Glued: «okabito», «okeyabito».
         let glued = OK_PREFIXES.iter().any(|p| {
             tok.strip_prefix(p)
-                .is_some_and(|rest| !rest.is_empty() && is_name(rest, tolerance))
+                .is_some_and(|rest| !rest.is_empty() && is_name(rest, tolerance, learned))
         });
         if glued {
             end = Some(norm[i].0 + 1);
             i += 1;
             continue;
         }
-        if OK_WORDS.contains(&tok.as_str()) && i + 1 < norm.len() {
-            if is_name(&norm[i + 1].1, tolerance)
+        if (OK_WORDS.contains(&tok.as_str()) || learned.leads.contains(tok)) && i + 1 < norm.len() {
+            if is_name(&norm[i + 1].1, tolerance, learned)
                 || NAMES_AFTER_OK.contains(&norm[i + 1].1.as_str())
             {
                 end = Some(norm[i + 1].0 + 1);
@@ -344,7 +355,7 @@ pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
             }
             // «a vito» → «avito»
             if i + 2 < norm.len()
-                && is_name(&format!("{}{}", norm[i + 1].1, norm[i + 2].1), tolerance)
+                && is_name(&format!("{}{}", norm[i + 1].1, norm[i + 2].1), tolerance, learned)
             {
                 end = Some(norm[i + 2].0 + 1);
                 i += 3;
@@ -353,7 +364,7 @@ pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
             // «Ok ya Vito»: the first syllable heard as a short word of its own.
             if i + 2 < norm.len()
                 && norm[i + 1].1.chars().count() <= 2
-                && (is_name(&norm[i + 2].1, tolerance) || NAMES_AFTER_OK.contains(&norm[i + 2].1.as_str()))
+                && (is_name(&norm[i + 2].1, tolerance, learned) || NAMES_AFTER_OK.contains(&norm[i + 2].1.as_str()))
             {
                 end = Some(norm[i + 2].0 + 1);
                 i += 3;
@@ -362,7 +373,7 @@ pub fn match_wake(raw: &str, tolerance: usize) -> Option<String> {
         }
         i += 1;
     }
-    let end = end.or_else(|| vocative_end(&words))?;
+    let end = end.or_else(|| vocative_end(&words, learned))?;
     let tail = words[end..].join(" ");
     Some(
         tail.trim_start_matches([',', '.', ':', ';', '!', '-', '–', '—', '…', ' '])
@@ -389,6 +400,7 @@ pub struct WakeFlow {
     armed: bool,
     idle: usize,
     in_flight: bool,
+    learned: Learned,
 }
 
 impl Default for WakeFlow {
@@ -403,7 +415,13 @@ impl WakeFlow {
             armed: false,
             idle: 0,
             in_flight: false,
+            learned: Learned::default(),
         }
+    }
+
+    /// What this person trained (replaces the previous training; empty forgets it).
+    pub fn set_learned(&mut self, learned: Learned) {
+        self.learned = learned;
     }
 
     pub fn armed(&self) -> bool {
@@ -442,7 +460,7 @@ impl WakeFlow {
 
     pub fn on_transcript(&mut self, text: &str, tolerance: usize) -> Vec<FlowEvent> {
         self.in_flight = false;
-        let wake = match_wake(text, tolerance);
+        let wake = match_wake_with(text, tolerance, &self.learned);
         if self.armed {
             let command = wake.unwrap_or_else(|| text.to_string());
             let command = command.trim();

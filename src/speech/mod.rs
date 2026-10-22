@@ -12,7 +12,10 @@
 //! (default `~/.local/share/abito/Models`). From then on everything runs offline.
 
 pub mod audio;
+pub mod train;
 pub mod wake;
+#[cfg(test)]
+mod train_tests;
 #[cfg(test)]
 mod wake_tests;
 

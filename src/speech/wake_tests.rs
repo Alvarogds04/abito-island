@@ -124,12 +124,21 @@ fn the_command_in_the_same_segment_keeps_its_spelling() {
 #[test]
 fn ok_then_a_short_word_then_the_name_wakes() {
     // Heard live on 2026-10-22: «Ok ya Vito, que hora es.»
-    assert_eq!(m("Ok ya Vito, que hora es.", 1), Some("que hora es.".into()));
+    assert_eq!(
+        m("Ok ya Vito, que hora es.", 1),
+        Some("que hora es.".into())
+    );
     // …and the same phrase glued, said first: «Yavito, ¿qué hora es?»
     assert_eq!(m("Yavito, ¿qué hora es?", 1), Some("¿qué hora es?".into()));
     assert_eq!(m("okey a habito pon música", 1), Some("pon música".into()));
     // Only a SHORT word in between, and only before the name.
-    for t in ["ok ya", "ok ya voy", "ok vale vito", "ok ya bonito", "ya vito"] {
+    for t in [
+        "ok ya",
+        "ok ya voy",
+        "ok vale vito",
+        "ok ya bonito",
+        "ya vito",
+    ] {
         assert_eq!(m(t, 2), None, "{t}");
     }
 }
