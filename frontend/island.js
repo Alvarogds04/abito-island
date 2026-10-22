@@ -385,6 +385,7 @@
     if (!raf) raf = requestAnimationFrame(tick);
   }
   window.__islandSetState = setPhase;
+  window.__islandConceal = setConcealed; // the page-side hidden state (the host drives it through the edge interaction); also lets the real-layout harness reach it
   // U1: called from Rust (chathost::apply_view) with the chat height from
   // geometry::CHAT_VISIBLE — the frontend never owns that number.
   window.__islandSetView = (view, vw, vh) => {
