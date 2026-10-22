@@ -218,6 +218,14 @@
     delete li.dataset.state; delete li.dataset.decision; // #371: a patched row never keeps the previous card's state
     if ((row.kind === 'tool' || row.kind === 'approval') && Cards) {
       Cards.render(li, row, iconNode);
+    } else if (row.kind === 'context') { // S3 (#503): a closed disclosure with the exact text the model got
+      const d = document.createElement('details');
+      const s = document.createElement('summary');
+      s.textContent = 'Contexto';
+      const pre = document.createElement('pre');
+      pre.textContent = row.detail;
+      d.append(s, pre);
+      li.append(d);
     } else if (row.short) { // note/error: icon + ONE word; the full text is the accessible name
       li.setAttribute('aria-label', row.text);
       const i = document.createElement('span');

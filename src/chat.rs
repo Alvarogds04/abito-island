@@ -442,6 +442,9 @@ pub struct Conversation {
     /// #487: the window context of this live conversation: (turn id it rides with, text). Memory only,
     /// never stored, shown or sent back to the page; NotchBuddy prefixes the FIRST user message with it.
     context: Option<(String, String)>,
+    /// S3 (#503): what the live-state context said on each turn, memory only, so the page can show
+    /// «contexto» (text, omitted lines). Never stored on disk and never part of the user's text.
+    live: std::collections::HashMap<String, (String, usize)>,
 }
 
 impl Conversation {
@@ -452,6 +455,7 @@ impl Conversation {
             next: 0,
             evicted: 0,
             context: None,
+            live: Default::default(),
         }
     }
 
@@ -460,17 +464,24 @@ impl Conversation {
         self.context = Some((turn_id.to_string(), text.to_string()));
     }
 
+    /// S3 (#503): remember what the live context said on `turn_id` (shown, never re-sent from here).
+    pub fn attach_live(&mut self, turn_id: &str, text: &str, trimmed_lines: usize) {
+        let ids: std::collections::HashSet<&str> = self.turns.iter().map(|t| t.turn_id.as_str()).collect();
+        self.live.retain(|id, _| ids.contains(id.as_str()));
+        self.live.insert(turn_id.to_string(), (text.to_string(), trimmed_lines));
+    }
+
     /// Restore the newest page; older presentation pages never enlarge model context.
     pub fn restore(id: &str, turns: Vec<Turn>) -> Self {
         let next = turns.iter().filter_map(|t| t.turn_id.strip_prefix("t-")?.parse::<u64>().ok()).max().unwrap_or(0);
-        let mut convo = Self { id: id.into(), turns: turns.into(), next, evicted: 0, context: None };
+        let mut convo = Self { id: id.into(), turns: turns.into(), next, evicted: 0, context: None, live: Default::default() };
         convo.enforce_cache();
         convo
     }
 
     /// Project a bounded disk page without applying the active model-context cache.
     pub fn project_history(id: &str, turns: Vec<Turn>) -> Value {
-        Self { id: id.into(), turns: turns.into(), next: 0, evicted: 0, context: None }.view()
+        Self { id: id.into(), turns: turns.into(), next: 0, evicted: 0, context: None, live: Default::default() }.view()
     }
 
     pub fn id(&self) -> &str {
@@ -801,6 +812,9 @@ impl Conversation {
                     "attachments": t.attachments,
                 });
                 // #418: optional keys — a plain turn's projection is unchanged.
+                if let Some((text, trimmed)) = self.live.get(&t.turn_id) {
+                    v["live_context"] = json!({"text": text, "trimmed_lines": trimmed});
+                }
                 if !t.tool_calls.is_empty() {
                     v["tool_calls"] = json!(t.tool_calls);
                 }

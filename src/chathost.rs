@@ -247,6 +247,11 @@ pub fn submit(
         let mut l = lane.lock().expect("chat lane lock");
         let first = l.convo.is_empty();
         let accepted = l.submit_with_attachments(text, client_request_id, &target.profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
+        if !accepted.duplicate {
+            if let Some(s) = &live {
+                l.convo.attach_live(&accepted.turn_id, &s.text, s.trimmed_lines);
+            }
+        }
         // Consume explicit context only after a first message was really accepted, never on error/retry.
         if first && !accepted.duplicate {
             let mut cx = state.chat_context.lock().expect("chat context lock");

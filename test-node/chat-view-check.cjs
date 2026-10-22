@@ -705,6 +705,21 @@ test('B4: snapshot ordering uses per-turn sequence, never a global sequence acro
   assert.equal(V.staleSnapshot(snap(3), { conversation_id: 'c1', turns: [{ turn_id: 't-2', seq: 0 }] }), false, 'a new turn has its own sequence');
 });
 
+test('S3 (#503): a turn that carried live context gets a «Contexto» disclosure row with the exact text; one without gets none', () => {
+  const base = { turn_id: 't', state: 'completed', user_text: 'q', reply: 'r', trimmed_turns: 0 };
+  assert.equal(V.turnRows(base).some(r => r.kind === 'context'), false);
+  const rows = V.turnRows({ ...base, live_context: { text: 'Estado en vivo\n- Pi en api: trabajando', trimmed_lines: 0 } });
+  assert.deepEqual(rows.map(r => r.kind), ['user', 'context', 'assistant']);
+  assert.equal(rows[1].detail, 'Estado en vivo\n- Pi en api: trabajando');
+  assert.equal(rows[1].short, 'Contexto');
+  const cut = V.turnRows({ ...base, live_context: { text: 'x', trimmed_lines: 3 } })[1];
+  assert.match(cut.text, /3 líneas recortadas/);
+  assert.equal(V.turnRows({ ...base, live_context: { text: '', trimmed_lines: 0 } }).some(r => r.kind === 'context'), false);
+  assert.equal(V.turnRows({ ...base, live_context: { text: 5 } }).some(r => r.kind === 'context'), false);
+  const chat = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'chat.js'), 'utf8');
+  assert.match(chat, /row\.kind === 'context'/);
+});
+
 console.log(`chat-view-check: ${passed} passed`);
 
 // ---- S10 (human L35): Coucou's growing chat height -----------------------------------------------------------------

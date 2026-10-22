@@ -298,6 +298,15 @@
         text: `Archivos adjuntos: ${names}`,
       });
     }
+    // S3 (#503): «contexto» — exactly what the live-state context told the model on this turn.
+    if (turn.live_context && typeof turn.live_context.text === 'string' && turn.live_context.text) {
+      const omitted = Number(turn.live_context.trimmed_lines) > 0 ? ` (${turn.live_context.trimmed_lines} líneas recortadas)` : '';
+      rows.push({
+        kind: 'context', short: 'Contexto', icon: 'info',
+        text: `Contexto enviado al modelo${omitted}: ${turn.live_context.text}`,
+        detail: turn.live_context.text,
+      });
+    }
     rows.push(...toolRows(turn));
     rows.push(...approvalRows(turn));
     if (turn.trimmed_turns > 0) {
