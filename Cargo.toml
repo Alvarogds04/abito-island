@@ -46,29 +46,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures-util = { version = "0.3", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt", "time", "net", "io-util", "sync", "macros"] }
 
-# ---- Unix-only platform layer (Windows port, U1a) ----------------------------
-# These were unconditional [dependencies], which made the whole crate
-# uncompilable on Windows before a single line of code was read. Moving them
-# here is behaviour-neutral on Linux: same crates, same versions, same features,
-# so Cargo.lock does not change.
-#
-# `xkb`: detectable auto-repeat for the global hotkey. XTest (synthetic input)
-# is deliberately NOT here: it lives in the dev set below so the shipped binary
-# never compiles the input-injection module.
-[target.'cfg(unix)'.dependencies]
-x11rb = { version = "0.13", features = ["xkb"] }
-# #305b: the XDG GlobalShortcuts portal client. NOT ashpd (absent from the
-# offline registry, downloads are forbidden): zbus is ALREADY compiled in via
-# tauri-plugin-single-instance, so this declares the same crate/version/features
-# and adds nothing to Cargo.lock.
-zbus = { version = "5.19", default-features = true }
-# Read-only native audit uses the exact GTK already resolved by Tauri.
-gtk = "=0.18.2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# #467 key store: Secret Service (GNOME Keyring, KWallet) over D-Bus. NEW packages
-# (keyring + dbus-secret-service + libdbus-sys + crypto-rust deps), same features as Coucou.
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 # Dictation (#467): speech to text on this computer. sherpa-onnx (Apache-2.0)
 # with NVIDIA's Parakeet, linked statically (onnxruntime included). The models
 # are downloaded only on the user's explicit click. Build needs
@@ -79,7 +56,7 @@ sherpa-onnx = { version = "1.13.8", default-features = false, features = ["stati
 # which are not available offline; 0.12's rustls-tls is ring + webpki-roots.
 # Dictation (#467): the microphone. Apache-2.0. PulseAudio (or PipeWire's
 # PulseAudio server) for the device list on Linux.
-cpal = { version = "0.18", features = ["pulseaudio"] }
+cpal = "0.18"
 
 # #490 mail: SMTP + MIME for sending from the island with the user's own account (owner decision:
 # a mature implementation beats a hand-written one for AUTH, TLS and MIME encoding). rustls only
@@ -102,6 +79,26 @@ ring = "0.17"
 # while the phone link is on. Pure Rust, no async runtime, default features off.
 mdns-sd = { version = "0.21", default-features = false }
 
+# ---- Linux-only platform layer ----------------------------------------------
+# x11rb/zbus/gtk are X11, XDG portal and GTK: they do not exist on macOS or Windows (the crate
+# was uncompilable there). XTest (synthetic input) is deliberately NOT here: it lives in the
+# dev set below so the shipped binary never compiles the input-injection module.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["xkb"] }
+# #305b: the XDG GlobalShortcuts portal client. NOT ashpd (absent from the
+# offline registry, downloads are forbidden): zbus is ALREADY compiled in via
+# tauri-plugin-single-instance, so this declares the same crate/version/features
+# and adds nothing to Cargo.lock.
+zbus = { version = "5.19", default-features = true }
+# Read-only native audit uses the exact GTK already resolved by Tauri.
+gtk = "=0.18.2"
+# #467 key store: Secret Service (GNOME Keyring, KWallet) over D-Bus. NEW packages
+# (keyring + dbus-secret-service + libdbus-sys + crypto-rust deps), same features as Coucou.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+# Dictation (#467): PulseAudio (or PipeWire's PulseAudio server) for the device list on Linux;
+# the other platforms use cpal's default backend (CoreAudio, WASAPI). Features are additive.
+cpal = { version = "0.18", features = ["pulseaudio"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # #503 key store on macOS: the Keychain (same `keyring` API as Linux/Windows; this build is not compiled in CI yet).
 keyring = { version = "3", features = ["apple-native"] }
@@ -109,7 +106,6 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(windows)'.dependencies]
 # #467 key store: Windows Credential Manager.
 keyring = { version = "3", features = ["windows-native"] }
-cpal = "0.18"
 # U3a: the Win32 global-hotkey bindings (RegisterHotKey + message pump). Not
 # libc (it exposes none of these), not raw FFI (~80 lines of hand-written ABI
 # nothing but the VM could verify): windows-sys 0.61.2 is ALREADY in Cargo.lock
