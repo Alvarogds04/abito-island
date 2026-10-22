@@ -57,6 +57,37 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
     }
     return el;
   }
+  // «Entrenar mi voz»: the user says «OK Abito» TARGET times; the host hears each one through the live path.
+  let hearing = false, training = false;
+  function trainingCard(): HTMLElement {
+    const tr = st?.training ?? { recorded: 0, target: 5, active: false, last: null, learned: {} };
+    const learned = tr.learned ?? {};
+    const phrases: string[] = [...(learned.phrases ?? []), ...(learned.names ?? [])].filter((x, i, a) => a.indexOf(x) === i);
+    const ready = st?.vad?.state === 'ready' && st?.parakeet?.state === 'ready';
+    const step = (fn: () => Promise<any>) => async () => { hearing = true; draw(); try { await work(fn); } finally { hearing = false; if (alive) draw(); } };
+    const status = h('div', { id: 'voice-train-status', class: 'hub-note', role: 'status', 'aria-live': 'polite' });
+    const controls = h('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' });
+    const done = tr.recorded >= tr.target;
+    if (!ready) status.textContent = 'Primero descargá los modelos.';
+    else if (hearing) status.textContent = `Escuchando… decí «OK Abito» (${Math.min(tr.recorded + 1, tr.target)}/${tr.target})`;
+    else if (training || tr.active) {
+      status.textContent = done ? `Listo ${tr.recorded}/${tr.target}. Guardá para que Abito te reconozca.`
+        : tr.recorded === 0 ? `Decí «OK Abito» (1/${tr.target}).` : `Entendí: «${tr.last ?? ''}» — ${tr.recorded}/${tr.target}. Decilo otra vez.`;
+    } else if (phrases.length) status.textContent = `Entendí: ${phrases.map(p => `«${p}»`).join(', ')} — listo`;
+    else status.textContent = `Decí «OK Abito» ${tr.target} veces y Abito aprende cómo te entiende a vos. El audio no se guarda.`;
+    if (ready && !hearing) {
+      if (!(training || tr.active)) {
+        controls.append(trusted(button('Entrenar mi voz', () => { training = true; void step(() => VoiceBridge.trainRecord())(); }, 'primary')));
+        if (phrases.length) controls.append(trusted(button('Borrar entrenamiento', () => void work(VoiceBridge.trainReset), '', true)));
+      } else {
+        if (!done) controls.append(trusted(button('Grabar', () => void step(() => VoiceBridge.trainRecord())(), 'primary')));
+        else controls.append(trusted(button('Guardar', () => void work(async () => { const next = await VoiceBridge.trainFinish(); training = false; return next; }), 'primary')));
+        if (tr.recorded > 0) controls.append(trusted(button('Repetir la última', () => void work(VoiceBridge.trainUndo), '', true)));
+        controls.append(trusted(button('Cancelar', () => void work(async () => { const next = await VoiceBridge.trainCancel(); training = false; return next; }), '', true)));
+      }
+    }
+    return card(row('Entrenar mi voz', 'Abito aprende cómo se transcribe TU «OK Abito». Solo se guarda el texto, en este equipo.', controls), status);
+  }
   function draw() {
     box.replaceChildren();
     paintBanner();
@@ -84,6 +115,7 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
       card(row(t('Listen for « OK Abito »'), t('The microphone stays open; only what follows « OK Abito » goes further.'), trusted(toggle(st.prefs.enabled, on => void save(p => { p.enabled = on; })))), divider(),
         row(t('Parakeet, on your computer'), t('Hears « OK Abito » here, without the internet.'), modelControl()), divider(),
         row(t('Wake-word sensitivity'), t('Higher hears « OK Abito » more easily, and mishears more.'), sensitivity, value, probe), result),
+      label('Tu voz'), trainingCard(),
       label('Respuestas'), card(row(t('Abito answers out loud'), null, output)),
       label('Privacidad'), card(privacy),
       message);

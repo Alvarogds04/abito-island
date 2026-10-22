@@ -66,7 +66,7 @@ const invoke = (command, args) => {
     const p = args?.payload;
     const exact = (v, fields) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(k => Object.hasOwn(v, k));
     if (!exact(args, ['payload']) || !p ||
-      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model'].includes(p.action)) ||
+      !((exact(p, ['action']) && ['status', 'download_model', 'remove_model', 'train_record', 'train_undo', 'train_cancel', 'train_finish', 'train_reset'].includes(p.action)) ||
         (exact(p, ['action', 'prefs']) && p.action === 'set_prefs' && exact(p.prefs, ['enabled', 'output', 'gender', 'sensitivity']) && Number.isInteger(p.prefs.sensitivity) && p.prefs.sensitivity >= 0 && p.prefs.sensitivity <= 100 &&
           typeof p.prefs.enabled === 'boolean' && ['system', 'elevenlabs', 'off'].includes(p.prefs.output) && ['female', 'male'].includes(p.prefs.gender)))) return Promise.reject(new Error('No disponible'));
   }

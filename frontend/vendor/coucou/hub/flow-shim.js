@@ -61,7 +61,13 @@ const VoiceBridge = Object.freeze({
   },
   setPrefs: (p) => voiceCall({ action: "set_prefs", prefs: { enabled: p.enabled === true, output: p.output, gender: p.gender, sensitivity: Math.max(0, Math.min(100, Math.round(Number(p.sensitivity ?? 50)))) } }),
   download: () => voiceCall({ action: "download_model" }),
-  remove: () => voiceCall({ action: "remove_model" })
+  remove: () => voiceCall({ action: "remove_model" }),
+  // «Entrenar mi voz»: closed, argument-free steps; the host keeps the text, never audio.
+  trainRecord: () => voiceCall({ action: "train_record" }),
+  trainUndo: () => voiceCall({ action: "train_undo" }),
+  trainCancel: () => voiceCall({ action: "train_cancel" }),
+  trainFinish: () => voiceCall({ action: "train_finish" }),
+  trainReset: () => voiceCall({ action: "train_reset" })
 });
 export {
   FlowBridge,

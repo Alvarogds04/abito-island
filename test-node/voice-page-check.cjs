@@ -21,6 +21,17 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
     calls.push([cmd, structuredClone(p)]);
     if (cmd === 'voice_action') {
       if (p.action === 'set_prefs') st = { ...st, prefs: { ...p.prefs } };
+      if (p.action.startsWith('train_')) {
+        const tr = st.training || { recorded: 0, target: 5, active: false, last: null, learned: {} };
+        const heard = ['Yes. Avito.', 'yes avito', 'yes avito', 'Yes avito!', 'yes avito'];
+        if (p.action === 'train_record') tr.last = heard[tr.recorded], tr.recorded += 1, tr.active = true;
+        if (p.action === 'train_undo') tr.recorded -= 1, tr.last = null;
+        if (p.action === 'train_cancel') tr.recorded = 0, tr.active = false, tr.last = null;
+        if (p.action === 'train_finish') tr.recorded = 0, tr.active = false, tr.learned = { names: ['avito'], leads: ['yes'], phrases: ['yes avito'] };
+        if (p.action === 'train_reset') tr.learned = {};
+        st = { ...st, training: tr };
+        return structuredClone(st);
+      }
       if (p.action === 'download_model') st = { ...st, vad: { state: 'downloading', fraction: 0 } };
       return structuredClone(st);
     }
@@ -54,15 +65,39 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   range.fire('change'); await new Promise(r => setImmediate(r));
   assert.deepEqual(calls.splice(0), [['voice_action', { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'female', sensitivity: 80 } }]]);
   for (const e of all(page).filter(e => ['button', 'input', 'select'].includes(e.tagName))) assert(!e.disabled || e.textContent === 'Descargar', 'controls are live');
+  // «Entrenar mi voz» with a fake recorder: five recordings, undo, save, reset. Models are ready here.
+  st = { ...st, vad: { state: 'ready' }, parakeet: { state: 'ready' }, training: { recorded: 0, target: 5, active: false, last: null, learned: {} } };
+  const page2 = new Element('div');
+  await voicePage(page2, { hero, status: { prefs: { key: 'right_ctrl' }, platform: 'linux' }, navigate() {}, set onLeave(_) {} });
+  const btn = name => all(page2).find(e => e.tagName === 'button' && e.textContent === name);
+  const tick = () => new Promise(r => setTimeout(r, 5));
+  calls.length = 0;
+  assert(text(page2).includes('5 veces') && !btn('Guardar'), 'idle: explains the training');
+  btn('Entrenar mi voz').fire('click'); await tick();
+  assert.deepEqual(calls.splice(0), [['voice_action', { action: 'train_record' }]], 'the first click records once');
+  assert(text(page2).includes('Entendí: «Yes. Avito.» — 1/5'), text(page2));
+  btn('Repetir la última').fire('click'); await tick();
+  assert.deepEqual(calls.splice(0), [['voice_action', { action: 'train_undo' }]]);
+  for (let i = 0; i < 5; i++) { btn('Grabar').fire('click'); await tick(); }
+  assert.equal(calls.splice(0).filter(([, q]) => q.action === 'train_record').length, 5);
+  assert(text(page2).includes('5/5') && !btn('Grabar'), 'no sixth recording');
+  btn('Guardar').fire('click'); await tick();
+  assert.deepEqual(calls.splice(0), [['voice_action', { action: 'train_finish' }]]);
+  assert(text(page2).includes('Entendí: «yes avito», «avito» — listo'), text(page2));
+  btn('Borrar entrenamiento').fire('click'); await tick();
+  assert.deepEqual(calls.splice(0), [['voice_action', { action: 'train_reset' }]]);
+  assert(text(page2).includes('5 veces'), 'reset returns to idle');
+  btn('Entrenar mi voz').fire('click', false); await tick();
+  assert.deepEqual(calls, [], 'synthetic gestures never record');
   // The closed guard in settings-app.js
   const source = fs.readFileSync(path.resolve(__dirname, '../frontend/settings-app.js'), 'utf8').replace(/^import .*;\n/gm, '');
   const raw = []; document.getElementById = () => new Element('div');
   const ctx = { window: { __TAURI__: { core: { invoke: async (c, a) => { raw.push([c, a]); return {}; } } } }, document, setInvoke() {}, startHub: async () => {}, Set, Promise, inactivePages: {}, TextEncoder, renderUnavailable() {}, card: x => x, row: () => ({}), voicePage, dictationPage() {}, flowSettingsPage() {}, dictionaryPage() {}, snippetsPage() {}, stylesPage() {}, insightsPage() {}, renderGeneral() {} };
   vm.runInNewContext(source + '\nglobalThis.closedInvoke = invoke;', ctx);
-  for (const payload of [{ action: 'status' }, { action: 'download_model' }, { action: 'remove_model' }, { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 0 } }]) {
+  for (const payload of [{ action: 'status' }, { action: 'download_model' }, { action: 'remove_model' }, { action: 'train_record' }, { action: 'train_undo' }, { action: 'train_cancel' }, { action: 'train_finish' }, { action: 'train_reset' }, { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 0 } }]) {
     await ctx.closedInvoke('voice_action', { payload }); assert.deepEqual(raw.pop(), ['voice_action', { payload }]);
   }
-  for (const args of [undefined, {}, { payload: { action: 'x' } }, { payload: { action: 'status', a: 1 } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'loud', gender: 'male', sensitivity: 5 } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male' } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 101 } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 1.5 } } }, { payload: { action: 'set_prefs', prefs: { enabled: 1, output: 'off', gender: 'male', sensitivity: 5 } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 5, z: 1 } } }, { payload: { action: 'status' }, extra: 1 }]) await assert.rejects(ctx.closedInvoke('voice_action', args));
+  for (const args of [undefined, {}, { payload: { action: 'x' } }, { payload: { action: 'train_record', n: 1 } }, { payload: { action: 'train_wipe' } }, { payload: { action: 'status', a: 1 } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'loud', gender: 'male', sensitivity: 5 } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male' } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 101 } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 1.5 } } }, { payload: { action: 'set_prefs', prefs: { enabled: 1, output: 'off', gender: 'male', sensitivity: 5 } } }, { payload: { action: 'set_prefs', prefs: { enabled: true, output: 'off', gender: 'male', sensitivity: 5, z: 1 } } }, { payload: { action: 'status' }, extra: 1 }]) await assert.rejects(ctx.closedInvoke('voice_action', args));
   assert.equal(raw.length, 0);
   console.log('voice-page-check ok');
 })().catch(e => { console.error(e); process.exit(1); });
