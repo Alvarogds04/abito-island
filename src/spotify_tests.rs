@@ -164,7 +164,7 @@ fn anything_outside_the_closed_set_is_refused() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn dbus_variants_become_plain_values() {
     use super::client::value_of;
