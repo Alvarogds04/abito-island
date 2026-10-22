@@ -106,18 +106,18 @@ fn fingerprint_is_stable_and_ignores_volatile_parts() {
 }
 
 fn record() -> FailureRecord {
-    record_failure("island", "voice-load", Reason::ModelLoadFailed(ModelError::MissingFile), Some(2), None,
+    record_failure("voice", "model-load-failed", Reason::ModelLoadFailed(ModelError::MissingFile), Some(2), None,
         &Env { version: "0.2.0".into(), os: "Ubuntu 24.04".into(), session: "wayland".into(), home: HOME.into(), user: USER.into() }, 1_700_000_000)
 }
 
 #[test]
 fn report_has_every_s2_field_and_is_redacted() {
     let rep = build_report(&record(), &["INFO ok".to_owned(), "ERROR in /home/alvaro/x".to_owned()], HOME, USER);
-    for needle in ["0.2.0", "Ubuntu 24.04", "wayland", "island", "voice-load", "voice model failed to load: missing file (2)", &fingerprint_of(&record()), "INFO ok", "ERROR in ~/x"] {
+    for needle in ["0.2.0", "Ubuntu 24.04", "wayland", "voice", "model-load-failed", "voice model failed to load: missing file (2)", &fingerprint_of(&record()), "INFO ok", "ERROR in ~/x"] {
         assert!(rep.body.contains(needle), "missing {needle}: {}", rep.body);
     }
     assert!(!rep.body.contains("sk-ant") && !rep.body.contains("alvaro"), "{}", rep.body);
-    assert!(rep.title.contains("island") && rep.title.contains(&fingerprint_of(&record())), "{}", rep.title);
+    assert!(rep.title.contains("voice") && rep.title.contains(&fingerprint_of(&record())), "{}", rep.title);
     assert!(!rep.title.contains("alvaro") && rep.title.len() <= 120);
 }
 
@@ -375,4 +375,68 @@ fn tmpdir(tag: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("abito-failure-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
+}
+
+// ---- round 3
+
+#[test]
+fn process_and_step_are_a_closed_allowlist() {
+    let e = env();
+    for (p, st) in [("island", "panic"), ("daemon", "daemon-start"), ("daemon", "daemon-exited"), ("island", "agent-refused"), ("island", "agent-no-answer"),
+        ("island", "agent-lost"), ("voice", "model-load-failed"), ("island", "manual-report")] {
+        let rec = record_failure(p, st, Reason::Manual, None, None, &e, 1);
+        assert_eq!((rec.process.as_str(), rec.step.as_str()), (p, st));
+    }
+    for bad in ["alvaro", "Alvaro", "maria-pc", "island2", "ISLAND", "island ", "voz"] {
+        let rec = record_failure(bad, bad, Reason::Manual, None, None, &e, 1);
+        assert_eq!((rec.process.as_str(), rec.step.as_str()), ("unknown", "unknown"), "{bad}");
+    }
+}
+
+#[test]
+fn load_all_drops_stored_records_whose_process_or_step_is_not_on_the_allowlist() {
+    let dir = tmpdir("allowlist");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut good = record();
+    let mut bad_p = record(); bad_p.process = "alvaro".into();
+    let mut bad_s = record(); bad_s.step = "alvaro".into();
+    let unknown = { let mut r = record(); r.process = "unknown".into(); r.step = "unknown".into(); r };
+    good.at_secs = 1;
+    let text: String = [&good, &bad_p, &bad_s, &unknown].iter().map(|r| serde_json::to_string(r).unwrap() + "\n").collect();
+    std::fs::write(dir.join(STORE_FILE), text).unwrap();
+    let all = load_all(&dir);
+    assert!(all.iter().all(|s| s.record.process != "alvaro" && s.record.step != "alvaro"), "{all:?}");
+    assert_eq!(all.len(), 2, "the good record and the explicit unknown one");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn only_crate_source_paths_keep_their_location() {
+    let e = env();
+    let msg = |f: &str| record_failure("island", "panic", Reason::Panic(PanicKind::Explicit), None, Some((f, 3)), &e, 1).message;
+    assert_eq!(msg("src/voicehost.rs"), "panic: explicit panic at src/voicehost.rs:3");
+    assert_eq!(msg("/home/x/y/src/flow/mod.rs"), "panic: explicit panic at src/flow/mod.rs:3");
+    for bad in ["src/Alvaro.rs", "src/my-file.rs", "src/a b.rs", "lib.rs", "/home/alvaro/notes.txt", "src/.rs", "src/a.RS", "src/ñ.rs", "src/../x.rs", "tests/a.rs", ""] {
+        assert_eq!(msg(bad), "panic: explicit panic", "{bad:?}");
+    }
+}
+
+#[test]
+fn a_source_path_that_contains_the_user_name_or_a_secret_loses_its_location() {
+    let e = env();
+    let rec = record_failure("island", "panic", Reason::Panic(PanicKind::Explicit), None, Some(("src/alvaro.rs", 9)), &e, 1);
+    assert_eq!(rec.message, "panic: explicit panic", "{}", rec.message);
+    let rec = record_failure("island", "panic", Reason::Panic(PanicKind::Explicit), None, Some(("src/sk_live_abcdefghij.rs", 9)), &e, 1);
+    assert_eq!(rec.message, "panic: explicit panic");
+    let rec = record_failure("island", "panic", Reason::Panic(PanicKind::Explicit), None, Some(("src/chat.rs", 9)), &e, 1);
+    assert_eq!(rec.message, "panic: explicit panic at src/chat.rs:9");
+}
+
+#[test]
+fn leftover_escapes_after_the_bounded_decode_are_neutralized() {
+    assert_eq!(neutralize_escapes("a%2Fb"), "a%<enc>b");
+    assert_eq!(neutralize_escapes("%41%zz%4"), "%<enc>%zz%4", "only real %XX escapes");
+    assert_eq!(neutralize_escapes("no escapes 100%"), "no escapes 100%");
+    // 4-level encoding of '/': three passes leave one escape behind
+    assert_eq!(neutralize_escapes(&percent_decode_bounded("%2525252Fhome")), "%<enc>home");
 }

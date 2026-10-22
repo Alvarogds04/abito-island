@@ -49,22 +49,22 @@ fn prefs_default_on_round_trip_and_ignore_garbage() {
 
 #[test]
 fn pending_hides_muted_postponed_and_everything_when_the_switch_is_off() {
-    let (a, b, c) = (stored("a", 10), stored("b", 30), stored("c", 20));
+    let (a, b, c) = (stored("agent-lost", 10), stored("agent-refused", 30), stored("agent-no-answer", 20));
     let all = vec![a.clone(), b.clone(), c.clone()];
     let none = BTreeSet::new();
     let steps = |v: Vec<Stored>| v.iter().map(|s| s.record.step.clone()).collect::<Vec<_>>();
-    assert_eq!(steps(pending(&all, &Prefs::default(), &none)), ["b", "c", "a"], "newest first");
+    assert_eq!(steps(pending(&all, &Prefs::default(), &none)), ["agent-refused", "agent-no-answer", "agent-lost"], "newest first");
     let mut prefs = Prefs::default();
     prefs.muted.insert(failure::fingerprint_of(&b.record));
     let mut later = BTreeSet::new(); later.insert(failure::fingerprint_of(&c.record));
-    assert_eq!(steps(pending(&all, &prefs, &later)), ["a"]);
+    assert_eq!(steps(pending(&all, &prefs, &later)), ["agent-lost"]);
     prefs.enabled = false;
     assert!(pending(&all, &prefs, &none).is_empty(), "switch off: no notice at all");
 }
 
 #[test]
 fn manual_report_has_a_neutral_record_and_a_known_fingerprint_finds_its_own() {
-    let s = stored("voice", 5);
+    let s = stored("panic", 5);
     let fp = failure::fingerprint_of(&s.record);
     assert_eq!(record_for(&[s.clone()], Some(&fp), &env(), 9), Some(s.record.clone()));
     assert_eq!(record_for(&[s.clone()], Some("000000000000"), &env(), 9), None);
@@ -74,9 +74,9 @@ fn manual_report_has_a_neutral_record_and_a_known_fingerprint_finds_its_own() {
 
 #[test]
 fn context_lines_are_the_other_failures_oldest_first() {
-    let (a, b, c) = (stored("a", 1), stored("b", 3), stored("c", 2));
+    let (a, b, c) = (stored("agent-lost", 1), stored("agent-refused", 3), stored("agent-no-answer", 2));
     let lines = context_lines(&[b.clone(), a.clone(), c.clone()], &a.record);
-    assert_eq!(lines, ["[island/c] agent daemon connection lost", "[island/b] agent daemon connection lost"]);
+    assert_eq!(lines, ["[island/agent-no-answer] agent daemon connection lost", "[island/agent-refused] agent daemon connection lost"]);
 }
 
 #[test]
@@ -128,4 +128,17 @@ fn percent_encoded_secrets_are_decoded_then_redacted_before_the_url_and_clipboar
     assert!(!out.clipboard.lines().next().unwrap_or("").is_empty());
     let nl = outgoing("a%0Ab", "c", &e.home, &e.user);
     assert_eq!(nl.clipboard.lines().next(), Some("a b"), "a decoded newline cannot split the title");
+}
+
+#[test]
+fn deeper_encoded_text_never_passes_through_the_outgoing_path() {
+    let e = env();
+    // 4-level encoding of "/home/alvaro": three decode passes leave %2F behind
+    let deep = "%2525252Fhome%2525252Falvaro";
+    let out = outgoing(deep, &format!("body {deep}"), &e.home, &e.user);
+    let IssueUrl::Url(url) = &out.url else { panic!("fits") };
+    for text in [&out.clipboard, url] {
+        assert!(!text.contains("alvaro") && !text.contains("%2F") && !text.contains("%252F") && !text.contains("2525"), "{text}");
+    }
+    assert!(out.clipboard.contains("%<enc>"), "{}", out.clipboard);
 }

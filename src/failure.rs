@@ -24,7 +24,6 @@ const LOG_LINE_CHARS: usize = 300;
 const STORE_MAX_BYTES: u64 = 256 * 1024;
 const STORE_KEEP_LINES: usize = 100;
 pub const MESSAGE_MAX: usize = 200;
-const TOKEN_MAX: usize = 40;
 pub const FIELD_MAX: usize = 80;
 pub const RECORD_MAX_BYTES: usize = 2048;
 const SECRET: &str = "<secret>";
@@ -411,12 +410,13 @@ pub fn safe_log_lines(lines: &[String], home: &str, user: &str, max: usize) -> V
 
 // ---------------------------------------------------------------- closed fields
 
-/// `process` and `step` are identifiers chosen by our own code: anything else is not one of ours.
-fn closed_token(t: &str) -> String {
-    if !t.is_empty() && t.chars().count() <= TOKEN_MAX && t.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) && !t.contains("..") {
-        t.to_owned()
-    } else { "unknown".to_owned() }
-}
+/// The components and steps Abito's own code reports. Anything else — a typo, a user name, free text — becomes `unknown`.
+pub const PROCESSES: [&str; 3] = ["island", "daemon", "voice"];
+pub const STEPS: [&str; 8] = ["panic", "daemon-start", "daemon-exited", "agent-refused", "agent-no-answer", "agent-lost", "model-load-failed", "manual-report"];
+
+fn on_list(t: &str, list: &[&str]) -> bool { list.contains(&t) || t == "unknown" }
+fn closed_process(t: &str) -> String { if on_list(t, &PROCESSES) { t.to_owned() } else { "unknown".to_owned() } }
+fn closed_step(t: &str) -> String { if on_list(t, &STEPS) { t.to_owned() } else { "unknown".to_owned() } }
 
 // ---- the record's message is STRUCTURAL: a closed reason + optional numbers + optional source location. No caller text.
 
@@ -483,16 +483,17 @@ pub fn classify_panic(payload: &str) -> PanicKind {
     else { PanicKind::Other }
 }
 
-fn safe_path_char(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '/') }
-
+/// A crate source path: `^src/[a-z0-9_/]+\.rs$` (no `..`, no empty segment).
 fn valid_path(p: &str) -> bool {
-    !p.is_empty() && p.len() <= 80 && p.chars().all(safe_path_char) && !p.contains("..") && !p.starts_with('/') && !p.contains("//")
+    let Some(inner) = p.strip_prefix("src/").and_then(|r| r.strip_suffix(".rs")) else { return false };
+    !inner.is_empty() && inner.len() <= 70 && inner.chars().all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | '/'))
+        && !inner.starts_with('/') && !inner.ends_with('/') && !inner.contains("//")
 }
 
-/// `src/…` when the file is inside a `src/` directory, else the bare file name; dropped if it is not a plain path.
+/// `src/…` when the file is inside a `src/` directory; dropped unless it is a plain crate source path.
 fn source_location(file: &str, line: u32) -> Option<String> {
     let file = file.replace('\\', "/");
-    let rel = match file.rfind("src/") { Some(i) => &file[i..], None => file.rsplit('/').next().unwrap_or("") };
+    let rel = &file[file.rfind("src/")?..];
     valid_path(rel).then(|| format!("{rel}:{line}"))
 }
 
@@ -502,6 +503,13 @@ pub fn compose(reason: &Reason, code: Option<i64>, location: Option<(&str, u32)>
     if let Some(n) = code { m.push_str(&format!(" ({n})")); }
     if let Some((f, l)) = location { if let Some(loc) = source_location(f, l) { m.push_str(&format!(" at {loc}")); } }
     m
+}
+
+/// `compose`, then the belt: the final message goes through `redact`; if that changes anything (a user name or a secret-looking
+/// word inside the path), the location is dropped rather than shown redacted.
+pub fn safe_compose(reason: &Reason, code: Option<i64>, location: Option<(&str, u32)>, env: &Env) -> String {
+    let full = compose(reason, code, location);
+    if redact(&full, &env.home, &env.user) == full { full } else { compose(reason, code, None) }
 }
 
 /// Does `msg` have exactly the shape `compose` produces? Anything else did not come from our code and is never shown.
@@ -622,6 +630,25 @@ pub fn percent_decode_bounded(s: &str) -> String {
     cur
 }
 
+/// After the bounded decode, an escape that is still there means deeper encoding: it is replaced by `%<enc>` so it can never
+/// be decoded later (by the browser or GitHub) into something the redaction did not see.
+pub fn neutralize_escapes(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() && hex_val(b[i + 1]).is_some() && hex_val(b[i + 2]).is_some() {
+            out.push_str("%<enc>");
+            i += 3;
+        } else {
+            let ch = s[i..].chars().next().unwrap_or('\u{FFFD}');
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------- local store
 
 pub fn default_dir() -> Option<PathBuf> {
@@ -655,7 +682,7 @@ pub struct Stored { pub record: FailureRecord, pub count: usize }
 pub fn load_all(dir: &Path) -> Vec<Stored> {
     let text = std::fs::read_to_string(dir.join(STORE_FILE)).unwrap_or_default();
     let mut out: Vec<(String, Stored)> = Vec::new();
-    for rec in text.lines().filter_map(|l| serde_json::from_str::<FailureRecord>(l).ok()).filter(|r| valid_message(&r.message) && closed_token(&r.process) == r.process && closed_token(&r.step) == r.step) {
+    for rec in text.lines().filter_map(|l| serde_json::from_str::<FailureRecord>(l).ok()).filter(|r| valid_message(&r.message) && on_list(&r.process, &PROCESSES) && on_list(&r.step, &STEPS)) {
         let fp = fingerprint_of(&rec);
         match out.iter_mut().find(|(f, _)| *f == fp) {
             Some((_, s)) => { s.count += 1; if rec.at_secs >= s.record.at_secs { s.record = rec; } }
@@ -675,9 +702,9 @@ fn field(v: &str, env: &Env) -> String {
 pub fn record_failure(process: &str, step: &str, reason: Reason, code: Option<i64>, location: Option<(&str, u32)>, env: &Env, at_secs: u64) -> FailureRecord {
     FailureRecord {
         at_secs,
-        process: closed_token(process),
-        step: closed_token(step),
-        message: compose(&reason, code, location),
+        process: closed_process(process),
+        step: closed_step(step),
+        message: safe_compose(&reason, code, location, env),
         version: field(&env.version, env),
         os: field(&env.os, env),
         session: field(&env.session, env),

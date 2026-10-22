@@ -90,7 +90,7 @@ pub struct Outgoing { pub url: IssueUrl, pub clipboard: String }
 
 pub fn outgoing(title: &str, body: &str, home: &str, user: &str) -> Outgoing {
     // the page may have percent-encoded what it sends: decode (bounded) BEFORE redacting so `%2Fhome%2Falvaro` cannot slip through
-    let clean = |t: &str| failure::redact(&failure::percent_decode_bounded(t), home, user);
+    let clean = |t: &str| failure::redact(&failure::neutralize_escapes(&failure::percent_decode_bounded(t)), home, user);
     let title = clean(title).split_whitespace().collect::<Vec<_>>().join(" ");
     let body = clean(body);
     Outgoing { url: failure::issue_url(&title, &body), clipboard: format!("{title}\n\n{body}") }
