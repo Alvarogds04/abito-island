@@ -14,9 +14,9 @@
 //! script.
 
 pub mod agentclient;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod agentconn;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[path = "agentconn_unavailable.rs"]
 pub mod agentconn;
 pub mod approval;
@@ -91,9 +91,9 @@ pub mod voiceintent;
 pub mod voicespeak;
 // The real receiver is Linux-only (UDS + SO_PEERCRED). Windows named pipes
 // and a macOS backend remain separate human decisions with their own cfg arms.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod transport;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[path = "transport_unavailable.rs"]
 pub mod transport;
 pub mod workarea;

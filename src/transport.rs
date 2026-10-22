@@ -217,6 +217,34 @@ fn dev_manifest_dir() -> Option<&'static str> {
     None
 }
 
+/// The per-user runtime base directory. Linux: `$XDG_RUNTIME_DIR` as given (validated by the
+/// callers). macOS has no XDG dir: the per-user temp dir from `confstr(_CS_DARWIN_USER_TEMP_DIR)`,
+/// canonicalized (`/var` is a symlink to `/private/var`, and `directory_chain` rejects symlinks).
+#[cfg(target_os = "linux")]
+fn runtime_base_env() -> Option<String> {
+    std::env::var("XDG_RUNTIME_DIR").ok()
+}
+#[cfg(target_os = "macos")]
+fn runtime_base_env() -> Option<String> {
+    let mut buffer = [0 as libc::c_char; 1024];
+    // SAFETY: the buffer pointer and its length describe one writable allocation.
+    let length = unsafe { libc::confstr(libc::_CS_DARWIN_USER_TEMP_DIR, buffer.as_mut_ptr(), buffer.len()) };
+    if length == 0 || length > buffer.len() {
+        return None;
+    }
+    // SAFETY: confstr NUL-terminates within `length` bytes on success.
+    let text = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_str().ok()?.to_owned();
+    let canonical = std::fs::canonicalize(text.trim_end_matches('/')).ok()?;
+    canonical.to_str().map(str::to_owned)
+}
+
+/// Longest endpoint path `bind` accepts: `sockaddr_un.sun_path` is 108 bytes on Linux and 104 on
+/// macOS, both including the terminating NUL.
+#[cfg(target_os = "linux")]
+pub const SUN_PATH_MAX: usize = 107;
+#[cfg(target_os = "macos")]
+pub const SUN_PATH_MAX: usize = 103;
+
 /// Pure choice of the default root. `Some(manifest)` = dev layout
 /// (`<crate>/.runtime`, the one the legacy app used); `None` = installed
 /// layout `$XDG_RUNTIME_DIR/abito-island`, which needs an absolute,
@@ -237,7 +265,7 @@ pub fn default_runtime_for(
 /// Default runtime root: dev layout in debug builds, the installed own leaf
 /// in release builds (never the source tree).
 pub fn default_runtime() -> Result<PathBuf, TransportError> {
-    let xdg = std::env::var("XDG_RUNTIME_DIR").ok();
+    let xdg = runtime_base_env();
     default_runtime_for(xdg.as_deref(), dev_manifest_dir())
 }
 
@@ -245,7 +273,7 @@ pub fn default_runtime() -> Result<PathBuf, TransportError> {
 pub fn resolve_runtime() -> Result<PathBuf, TransportError> {
     let override_dir = std::env::var(SOCKET_DIR_ENV).ok();
     let default = default_runtime()?;
-    let xdg = std::env::var("XDG_RUNTIME_DIR").ok();
+    let xdg = runtime_base_env();
     resolve_runtime_from(override_dir.as_deref(), &default, xdg.as_deref())
 }
 
@@ -379,8 +407,7 @@ pub fn detect_sockets(root: &Path) -> Vec<PathBuf> {
 
 /// Read-only scan of the two reserved Preview roots (report in the probe).
 pub fn preview_scan() -> Vec<PreviewScan> {
-    let base = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| format!("/run/user/{}", uid()));
+    let base = runtime_base_env().unwrap_or_else(|| format!("/run/user/{}", uid()));
     RESERVED_RUNTIME_NAMES
         .iter()
         .map(|name| {
@@ -677,6 +704,7 @@ fn mkdtemp(runtime: &Path) -> Result<PathBuf, TransportError> {
 
 /// SO_PEERCRED: the peer's uid (None only if the kernel refuses the call —
 /// then the peer is not admitted: fail closed on the owner check).
+#[cfg(target_os = "linux")]
 fn peer_uid(stream: &UnixStream) -> Option<u32> {
     use std::os::unix::io::AsRawFd;
     let mut credentials = libc::ucred {
@@ -695,6 +723,16 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
         )
     };
     (result == 0).then_some(credentials.uid)
+}
+
+/// macOS: `getpeereid` (the LOCAL_PEERCRED query). Any error means the peer is not admitted.
+#[cfg(target_os = "macos")]
+fn peer_uid(stream: &UnixStream) -> Option<u32> {
+    use std::os::unix::io::AsRawFd;
+    let (mut uid, mut gid): (libc::uid_t, libc::gid_t) = (0, 0);
+    // SAFETY: the fd is open for the whole call; both out-pointers are valid locals.
+    let result = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) };
+    (result == 0).then_some(uid)
 }
 
 fn now_millis() -> u128 {
@@ -730,7 +768,7 @@ pub fn create_transport(options: TransportOptions) -> Result<Transport, Transpor
 
     // Linux sockaddr_un has a 108-byte field, including the terminating NUL
     // (transport.cjs line 112) — checked after mkdtemp, like the legacy try.
-    if endpoint.as_os_str().as_bytes().len() > 107 {
+    if endpoint.as_os_str().as_bytes().len() > SUN_PATH_MAX {
         return Err(fail_with(
             TransportError::PathTooLong,
             &directory,

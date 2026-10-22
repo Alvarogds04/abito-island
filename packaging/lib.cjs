@@ -179,7 +179,7 @@ const DAEMON_FILES = ['package.json', 'identity.md', 'THIRD-PARTY-NOTICES.md',
   'src/connectors.cjs', 'src/connector-host.cjs', 'src/connector-host-client.cjs',
   'src/daemon.cjs', 'src/interrupt.cjs', 'src/isolation.cjs', 'src/mcp-import.cjs', 'src/profiles.cjs',
   'src/protocol.cjs', 'src/rotation.cjs', 'src/runtime.cjs', 'src/sdk-helper.mjs', 'src/server.cjs',
-  'src/sessions.cjs', 'src/spaces.cjs'];
+  'src/sessions.cjs', 'src/procinfo.cjs', 'src/spaces.cjs'];
 // L42 F1: the hook installer (apps/desktop-harness) ships NEXT TO the daemon: the daemon derives
 // <package>/desktop-harness/bin/abito-hook.cjs from its own location (src/cli.cjs packagedInstallerBin), so Ajustes can
 // install the Claude/Codex/recap/status-line hooks. Closed under require(): packaging-check pins that.

@@ -48,14 +48,34 @@ fn read_session(path: &Path) -> Result<Session, Reason> {
     let text = std::fs::read_to_string(path).map_err(|_| Reason::BadSession)?;
     let session = Session::parse(&text).map_err(|_| Reason::BadSession)?;
     // the recorded daemon must still be alive; a stale file is "no daemon", never a hang
-    if !Path::new(&format!("/proc/{}", session.pid)).exists() {
+    if !pid_exists(session.pid) {
         return Err(Reason::NoDaemon);
     }
     Ok(session)
 }
 
+#[cfg(target_os = "linux")]
 fn unsafe_uid() -> u32 {
     std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(u32::MAX)
+}
+#[cfg(target_os = "macos")]
+fn unsafe_uid() -> u32 {
+    // SAFETY: getuid has no preconditions.
+    unsafe { libc::getuid() }
+}
+
+#[cfg(target_os = "linux")]
+fn pid_exists(pid: u32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+/// macOS has no /proc: signal 0 probes existence. EPERM means it exists (another user's process);
+/// anything else, including a pid that does not fit a pid_t, means "no daemon".
+#[cfg(target_os = "macos")]
+fn pid_exists(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+    if pid <= 0 { return false }
+    // SAFETY: signal 0 sends nothing; it only checks the target.
+    unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
 }
 
 impl AgentConn {

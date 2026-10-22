@@ -1737,6 +1737,14 @@ fn build_hooks(app: AppHandle) -> approval::SharedHooks {
 }
 
 fn main() {
+    // macOS S1: the same executable doubles as the host-lifetime sentinel (no GUI, no Tauri).
+    #[cfg(target_os = "macos")]
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.first().map(String::as_str) == Some(abito_island::daemonhost::SENTINEL_FLAG) {
+            abito_island::daemonhost::sentinel_main(&args[1..]);
+        }
+    }
     // Heavy constraint (HANDOFF): GTK/Tao under Wayland cannot position a window
     // absolutely nor keep it always-on-top, so the island must run on
     // X11/XWayland. Force the GDK backend before GTK initialises, but only when
