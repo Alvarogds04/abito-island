@@ -41,7 +41,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   // #503 S25: «Restablecer» asks first; the reset runs from the trusted confirmation button only
   const confirmReset=()=>{click(find('shortcut-reset'));click(all(find('shortcut-reset-confirm')).find(e=>e.tagName==='button'&&e.textContent==='Restablecer'));};
   ui=await renderIntegrations(opts);await ui.settled();
-  assert.equal(text(ui.children[0].children[0]).trim(),'Integraciones');
+  assert.equal(text(ui.children[0].children[0]).trim(),'Servicios');
   assert(text(ui).includes('Elige las pestañas para mostrar junto al personaje — 0 en uso.'));
   assert(text(ui).includes('Las claves se quedan en el llavero del sistema.'));
   assert(text(ui).includes('Secret Service (GNOME Keyring, KWallet)'));

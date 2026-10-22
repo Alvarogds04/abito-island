@@ -223,7 +223,7 @@ async function renderIntegrations({ invoke, V, P, C, listen, timers }) {
     refreshColors.push(() => dot.style.setProperty("background", pillColor(def.id, def.color, prefs.pillColors)));
     list.append(body(h("div", { class: "int-head" }, h("div", { class: "int-id" }, sw, dot, h("span", { class: "int-name", text: def.name })), badge, actions)));
   }
-  root.append(section(t("Integrations"), note, list), s.message);
+  root.append(section("Servicios", note, list), s.message);
   refresh();
   watch("prefs:state", (next) => {
     prefs = next;

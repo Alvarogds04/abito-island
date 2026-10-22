@@ -22,13 +22,13 @@ async function scene(band, late = false) {
     addEventListener(){},console:{error(){}},performance,
     setTimeout:fn=>{fn();return 1;},requestAnimationFrame:fn=>fn(),
     getComputedStyle:()=>({display:'block',visibility:'visible'})});
-  return window.AbitoValidate.hub(0,'agents');
+  return window.AbitoValidate.hub(0,'integrations');
 }
 (async()=>{
   for (const band of ['No se pudo completar; no se tocó nada.', 'install_failed', 'No se pudo completar']) {
     for (const late of [false,true]) {
       const result = await scene(band, late);
-      assert.equal(result.ok,false,`ajustes-agents must reject ${band} (late=${late})`);
+      assert.equal(result.ok,false,`ajustes-integrations must reject ${band} (late=${late})`);
     }
   }
   assert.equal((await scene('Codex no disponible')).ok,true,'unavailable is not an installer error');

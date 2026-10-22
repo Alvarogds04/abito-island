@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { classify, extraScenes, hubPages } = require('../packaging/validate/scenes.cjs');
 const expected = ['integracion-github', 'correo-keyring', 'spotify-reproductor', 'sonidos-controles', 'sonidos-audible', 'dictado-sin-modelo', 'voz-sin-modelo', 'voz-reconocimiento', 'bandeja-menu', 'autoinicio', 'personaje-escritorio', 'chat-segundo-turno', 'dictado-inactivo', 'sesiones-motor', 'sin-motor-sin-productor', 'sin-motor-con-productor', 'pi-aviso', 'pi-pregunta'];
 for (const name of expected) assert(extraScenes.includes(name), `missing ${name}`);
-for (const page of ['general','agents','pills','chat','integrations','shortcuts','voice','dictation','flowsettings','dictionary','snippets','styles','insights','notes','phone']) assert(hubPages.includes(page), `missing hub page ${page}`);
+for (const page of ['general','chat','integrations','shortcuts','voice','dictation','flowsettings','dictionary','snippets','styles','insights','notes','phone']) assert(hubPages.includes(page), `missing hub page ${page}`);
 assert.equal(classify({ok:true}).verdict, 'pass');
 assert.equal(classify({ok:false,reason:'composer locked'}).verdict, 'fail');
 assert.equal(classify({ok:true,errors:['uncaught']}).verdict, 'fail');

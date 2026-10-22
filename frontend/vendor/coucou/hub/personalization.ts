@@ -63,7 +63,7 @@ export function pillStatus(d: any, hooks: any[], hookIds: Record<string, string>
   if (d.connect?.kind === 'hooks') {
     const state = hooks.find((r: any) => r.id === hookIds[d.id])?.state;
     if (state === 'connected') return { kind: 'ok', icon: '✓', word: 'lista' };
-    if (state && state !== 'unknown') return { kind: 'missing', icon: '✗', word: 'sin hooks', fix: { label: 'Instalar', to: 'agents' } };
+    if (state && state !== 'unknown') return { kind: 'missing', icon: '✗', word: 'sin hooks', fix: { label: 'Instalar', to: 'integrations' } };
     return { kind: 'unknown', icon: '·', word: 'no disponible todavía' };
   }
   if (d.connect?.kind === 'key') return presence[d.connect.key] ? { kind: 'ok', icon: '✓', word: 'lista' } : { kind: 'missing', icon: '✗', word: 'falta llave', fix: { label: 'Configurar', to: 'integrations' } };
@@ -75,7 +75,13 @@ export function pillStatus(d: any, hooks: any[], hookIds: Record<string, string>
   return { kind: 'ok', icon: '✓', word: 'lista' };
 }
 
-export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all', navigate }: any) {
+// `part` (S32, the combined «Integraciones y agentes» page): 'tools' = the main-tool selector and the AI pills (the agents and the
+// services are drawn by their own renderers on the same page); 'abito' = Abito's instructions, the specialists and the colours.
+// Without `part` the old per-page behaviour holds (`page`: 'pills' | 'agents' | 'all').
+export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all', part, navigate }: any) {
+  const wantTools = part ? part === 'tools' : page !== 'agents';
+  const wantAbito = part ? part === 'abito' : page !== 'pills';
+  const wantColors = part ? part === 'abito' : page !== 'agents';
   const s = session(invoke, listen), { root, call, work, watch, message } = s;
   let prefs: any = {}, store: any = null, listing: any = null, saving = false;
   let connection: any = null, presence: Record<string, boolean> = {};
@@ -206,16 +212,17 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
     }
     for (const cat of PILL_CATEGORIES) {
       if (cat.id === 'service') continue;
+      if (part === 'tools' && (cat.id === 'workspace' || cat.id === 'agent')) continue; // the agents table on the same page owns them
       const pills = C.available().filter((d: any) => d.category === cat.id);
       if (pills.length) groups.append(h('div', { class: 'pill-group' }, h('h3', { text: t(cat.title) }), ...pills.map(pillRow)));
     }
-    const active = notchSection(t('Active pills'),
+    const active = notchSection(part === 'tools' ? t('Main tool') : t('Active pills'),
       notchHint(t('Choose the tools you use. Abito only shows what you declare here.')), slots,
       notchRow(t('Main tool'), main), groups);
-    if (page !== 'agents') {
+    if (wantTools) {
       root.append(active);
       // The exact Integrations page now owns these controls; retain the legacy all-page renderer.
-      if (page !== 'pills') root.append(section('Servicios', ...C.available().filter((d: any) => d.category === 'service').map(pillRow)));
+      if (!part && page !== 'pills') root.append(section('Servicios', ...C.available().filter((d: any) => d.category === 'service').map(pillRow)));
     }
     if (!instructionsDraft) principalInstructions.value = prefs.abitoInstructions || '';
     const principal = section('Abito',row('Instrucciones','Se aplican a los próximos mensajes del chat de Abito.',principalInstructions,action('Guardar instrucciones',() => { run({type:'set_abito_instructions',text:principalInstructions.value}); })));
@@ -246,15 +253,15 @@ export async function renderPills({ invoke, listen, V, S, A, P, C, page = 'all',
     if (editorId && !record(editorId)) editor = null;
     if (editor) spec.append(card(editor));
     principal.append(preview());
-    if (page !== 'pills') root.append(principal, spec);
-    if (page !== 'agents') root.append(colors(V,A,prefs,[{id:A.PRINCIPAL_ID,name:'Abito'},...S.identityView(store).identities],(p: any) => run({type:'prefs',payload:p})));
+    if (wantAbito) root.append(principal, spec);
+    if (wantColors) root.append(colors(V,A,prefs,[{id:A.PRINCIPAL_ID,name:'Abito'},...S.identityView(store).identities],(p: any) => run({type:'prefs',payload:p})));
     root.append(message); restore();
   }
   paint(); watch('prefs:state',p => {prefs = p;paint();}); watch('specialists:state',p => {store = p;paint();}); watch('models:state',p => {listing = p;paint();});
   work(() => call('prefs_action',{action:'view'}),p => {prefs = p;paint();});
   work(() => call('specialists_action',{action:'view'}),p => {store = p;paint();});
   work(() => call('models_action',{action:'list'}),p => {listing = p;paint();});
-  if (page !== 'agents') {
+  if (wantTools) {
     watch('agent:state', p => { connection = { ...connection, ...p }; paint(); });
     for (const action of ['view','agents_list']) work(() => call('agent_action',{action}), p => { connection = { ...connection, ...p }; paint(); });
     work(async () => {
