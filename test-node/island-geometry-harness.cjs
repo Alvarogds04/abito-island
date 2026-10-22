@@ -60,10 +60,10 @@ async function open(scenario = {}) {
       id: UUID, kind: 'question', agent: 'pi', agent_label: 'Pi', project_name: 'e1-ajustes', text: '¿Qué querés instalar?', allow_free_text: true, multi_select: true,
       options: [OPT(0, 'eslint'), OPT(1, 'prettier'), OPT(2, 'vitest')], expires_at: Date.now() + 600000, free_text_max: 4000,
     } : scenario.question ? {
-      id: UUID, kind: scenario.question === 'approval' ? 'question' : 'question', agent: scenario.question === 'approval' ? 'claude-code' : 'pi', agent_label: 'Pi', project_name: 'api',
-      text: scenario.question === 'approval' ? 'Claude Code asks permission: Bash: rm -rf build/ && npm run build' : '¿Qué editor preferís?',
-      options: scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: scenario.described ? 'modal, ya lo usás en el servidor' : '' }, { index: 1, label: 'emacs', description: scenario.described ? 'extensible, más pesado' : '' }, { index: 2, label: 'vscode', description: '' }],
-      allow_free_text: scenario.question !== 'approval', expires_at: Date.now() + 600000, free_text_max: 2000,
+      id: UUID, kind: scenario.question === 'approvalPi' ? 'approval' : 'question', agent: scenario.question === 'approval' ? 'claude-code' : 'pi', agent_label: 'Pi', project_name: 'api',
+      text: scenario.question === 'approvalPi' ? '¿Me das permiso para ejecutar: rm -rf build/ && npm run build?' : scenario.question === 'approval' ? 'Claude Code asks permission: Bash: rm -rf build/ && npm run build' : '¿Qué editor preferís?',
+      options: scenario.question === 'approvalPi' ? [{ index: 0, label: 'Aprobar', description: '' }, { index: 1, label: 'Rechazar', description: '' }] : scenario.question === 'approval' ? [{ index: 0, label: 'Allow once', description: '' }, { index: 1, label: 'Deny', description: '' }] : [{ index: 0, label: 'vim', description: scenario.described ? 'modal, ya lo usás en el servidor' : '' }, { index: 1, label: 'emacs', description: scenario.described ? 'extensible, más pesado' : '' }, { index: 2, label: 'vscode', description: '' }],
+      allow_free_text: scenario.question !== 'approval' && scenario.question !== 'approvalPi', expires_at: Date.now() + 600000, free_text_max: 2000,
     } : null;
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {

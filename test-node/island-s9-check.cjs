@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const H = require('./island-geometry-harness.cjs');
 if (!H.findPlaywright()) { console.log('SKIPPED island-s9-check: no playwright â€” NOT a pass'); process.exit(0); }
 (async () => {
-  const r = await H.open({ question: 'approval' });
+  const r = await H.open({ question: 'approvalPi' });
   try {
     const m = await r.page.evaluate(() => {
       const box = document.getElementById('question-approval-cmd'), cs = getComputedStyle(box);
@@ -16,7 +16,9 @@ if (!H.findPlaywright()) { console.log('SKIPPED island-s9-check: no playwright â
     });
     assert.ok(m.mono, 'the command uses the mono font'); assert.notEqual(m.trunc, 'ellipsis', 'not truncated'); assert.equal(m.over, false);
     assert.match(m.title, /^Ejecutar/); assert.ok(m.inside, 'inside the island');
-    assert.equal(m.btns.length, 2); const [rej, app] = m.btns[0].t.startsWith('Rechazar') ? m.btns : m.btns.reverse();
+    assert.equal(m.btns.length, 2);
+    assert.match(m.btns[0].t, /^Rechazar\s*N/, 'MD order: Rechazar N first'); assert.match(m.btns[1].t, /^Aprobar\s*Y/, 'then Aprobar Y');
+    assert.ok(/q-approve/.test(m.btns[1].cls) && !/q-approve/.test(m.btns[0].cls), 'Aprobar is the primary'); const [rej, app] = m.btns[0].t.startsWith('Rechazar') ? m.btns : m.btns.reverse();
     assert.match(rej.t, /Rechazar\s*N/); assert.match(app.t, /Aprobar\s*Y/);
     const gap = Math.max(app.l - rej.r, rej.l - app.r); assert.ok(gap >= 8, `buttons are ${gap}px apart (>= 8)`);
     assert.deepEqual((await r.hit('.q-approval-btn')).filter(h => !h.ok), [], 'buttons receive their own click');

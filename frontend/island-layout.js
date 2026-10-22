@@ -107,8 +107,16 @@
     if (!n || typeof n !== 'object' || !Array.isArray(n.options) || n.options.length !== 2 || n.allowFreeText === true) return null;
     const label = typeof agentLabel === 'string' && agentLabel ? agentLabel : 'El agente';
     if (n.kind === 'approval') {
-      return { badge: '!', title: "Aprobar:", tool: null, command: String(n.text || ''), secretsHidden: false,
-        actions: n.options.map((o, i) => ({ role: 'option', label: o.label, key: String(i + 1), index: o.index })) };
+      // v8 S9: Pi's own approval. The exact pair «Aprobar»/«Rechazar» (matched by LABEL, never by position) gets the MD layout
+      // (Rechazar N | Aprobar Y, Aprobar primary); any other wording keeps its own labels and order with numeric keys. The title is the
+      // S28-short «Ejecutar:» when the text names a command, else «Permiso:».
+      const text = String(n.text || '');
+      const ex = /^[¿]?\s*(?:me das )?permiso para ejecutar:?\s*([\s\S]*?)\??\s*$/i.exec(text);
+      const yes = n.options.find(o => o.label === 'Aprobar'), no = n.options.find(o => o.label === 'Rechazar');
+      const known = yes && no && yes !== no;
+      return { badge: '!', title: ex ? 'Ejecutar:' : 'Permiso:', tool: null, command: ex ? ex[1] : text, secretsHidden: false,
+        actions: known ? [{ role: 'reject', label: 'Rechazar', key: 'N', index: no.index }, { role: 'approve', label: 'Aprobar', key: 'Y', index: yes.index }]
+          : n.options.map((o, i) => ({ role: 'option', label: o.label, key: String(i + 1), index: o.index })) };
     }
     const m = n.kind === 'question' && typeof n.text === 'string' ? ASKS.exec(n.text) : null;
     if (!m) return null;
