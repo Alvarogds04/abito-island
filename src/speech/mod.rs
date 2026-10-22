@@ -13,9 +13,12 @@
 
 pub mod audio;
 pub mod train;
+pub mod words;
 pub mod wake;
 #[cfg(test)]
 mod train_tests;
+#[cfg(test)]
+mod words_tests;
 #[cfg(test)]
 mod wake_tests;
 

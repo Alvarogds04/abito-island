@@ -16,7 +16,7 @@ pub const FILE: &str = "voice-training.json";
 const MIN_SEEN: usize = 2;
 
 /// Everyday words that must never become a wake spelling or a lead word.
-const COMMON: &[&str] = &[
+pub(crate) const COMMON: &[&str] = &[
     "hola", "bonito", "aqui", "abrir", "abrigo", "abril", "okupa", "vale", "habia", "habla", "hablar", "hacer", "hace", "tengo", "monje",
     "musica", "pausa", "tiempo", "gracias", "bueno", "bien", "hasta", "hacia", "claro", "listo", "ahora", "mismo", "cosa", "casa", "abajo", "arriba",
     "adios", "ayuda", "abre", "cierra", "hello", "thanks", "okay", "great", "right", "habit",
