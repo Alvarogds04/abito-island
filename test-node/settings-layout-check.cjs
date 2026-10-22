@@ -196,6 +196,32 @@ test('S32 Integraciones y agentes: ONE sidebar entry replaces «Pestañas activa
   assert.equal(items.filter(t => /integraciones|agentes|pestañas/i.test(t)).length, 1, 'no other entry for the three');
 });
 
+test('S32 gate: every Ajustes page that reads the host at load stays under the host\'s 30-calls-per-second limiter (no «No se pudo completar» on load)', async r => {
+  await r.close();
+  for (const title of ['Integraciones y agentes', 'Chat', 'General', 'Atajos']) {
+    const f = await H.open({ width: 960, height: 680 });
+    try {
+      await f.go(title); await f.page.waitForTimeout(1500);
+      const out = await f.page.evaluate(() => ({ refused: window.__rateRefused || 0, text: (document.querySelector('.hub-page') || document.body).textContent.replace(/\s+/g, ' ') }));
+      assert.equal(out.refused, 0, `${title}: the host refused ${out.refused} call(s) with rate-exceeded while the page loaded`);
+      assert.doesNotMatch(out.text, /No se pudo completar|Rate exceeded|rate-exceeded/, `${title}: a failure notice shows at load`);
+    } finally { await f.close(); }
+  }
+});
+
+test('S32 gate: «Integraciones y agentes» loads with NO error notice when the OS keychain is unreachable (validator env) or has no keys', async r => {
+  await r.close();
+  for (const [label, scenario] of [['no keys stored', {}], ['keychain unreachable', { keychainDown: true }], ['keychain unreachable and agents not reported', { keychainDown: true, agentsOk: false }]]) {
+    const f = await H.open({ width: 960, height: 680, ...scenario });
+    try {
+      await f.go('Integraciones y agentes'); await f.page.waitForTimeout(900);
+      const page = await f.page.evaluate(() => document.querySelector('.hub-page').textContent.replace(/\s+/g, ' '));
+      assert.doesNotMatch(page, /No se pudo completar/, `${label}: the page shows a failure notice at load`);
+      assert.match(page, /falta llave/, `${label}: the AI rows still say «falta llave» (a missing key is a state, not an error)`);
+    } finally { await f.close(); }
+  }
+});
+
 test('S32 Integraciones y agentes: the one page holds the main tool, the agents, the AI, the services and Abito\'s instructions + specialists, with no limit text', async r => {
   await r.go('Integraciones y agentes');
   const page = await r.page.evaluate(() => { const root = document.querySelector('.hub-page'); return { text: root.textContent.replace(/\s+/g, ' '),

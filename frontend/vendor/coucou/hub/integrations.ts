@@ -125,7 +125,9 @@ export async function renderIntegrations({ invoke, V, P, C, listen, timers }: an
       });
       rows.append(h('div',{class:'row'},h('label',{style:'min-width:104px',text:t(label)}),input,saveBtn,dot));
       if(!supported){input.title=saveBtn.title=UNAVAILABLE;rows.append(hint(UNAVAILABLE));}
-      else work(()=>call('secret_action',V.keyPayload('present',key)),result=>{
+      // Reading whether a key exists is information, not something the human asked for: a failed read (OS keychain unreachable) must not
+      // write the page's shared «No se pudo completar» notice (#503 S32 gate); the card just stays «sin clave» / unknown.
+      else work(()=>call('secret_action',V.keyPayload('present',key)).catch(()=>null),result=>{
         if(typeof result?.present!=='boolean')return;
         input.placeholder=result.present?`••••••••  ${t('(stored)')}`:placeholder;
         dot.style.setProperty('background',result.present?'#22c55e':'#f4505e');
