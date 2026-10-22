@@ -95,3 +95,25 @@ fn the_training_commands_are_closed_and_take_no_arguments() {
     assert_eq!(parse_command(&json!({ "action": "status" })), Some(Command::Status));
     assert_eq!(parse_command(&json!({ "action": "train" })), None);
 }
+
+#[test]
+fn the_speech_commands_accept_only_catalog_models_known_languages_and_short_word_lists() {
+    let ok = json!({ "action": "set_speech", "speech": { "language": "es", "model": "whisper-small", "words": ["Kubernetes"] } });
+    assert_eq!(parse_command(&ok), Some(Command::SetSpeech { language: "es".into(), model: "whisper-small".into(), words: vec!["Kubernetes".into()] }));
+    for bad in [
+        json!({ "action": "set_speech", "speech": { "language": "xx", "model": "whisper-small", "words": [] } }),
+        json!({ "action": "set_speech", "speech": { "language": "es", "model": "../x", "words": [] } }),
+        json!({ "action": "set_speech", "speech": { "language": "es", "model": "whisper-small", "words": [1] } }),
+        json!({ "action": "set_speech", "speech": { "language": "es", "model": "whisper-small", "words": ["x".repeat(41)] } }),
+        json!({ "action": "set_speech", "speech": { "language": "es", "model": "whisper-small" } }),
+        json!({ "action": "set_speech", "speech": { "language": "es", "model": "whisper-small", "words": [], "z": 1 } }),
+        json!({ "action": "model_download", "id": "nope" }),
+        json!({ "action": "model_download" }),
+        json!({ "action": "model_delete", "id": "whisper-small", "x": 1 }),
+    ] {
+        assert_eq!(parse_command(&bad), None, "{bad}");
+    }
+    assert_eq!(parse_command(&json!({ "action": "model_download", "id": "whisper-small" })), Some(Command::ModelDownload("whisper-small".into())));
+    assert_eq!(parse_command(&json!({ "action": "model_cancel", "id": "whisper-turbo" })), Some(Command::ModelCancel("whisper-turbo".into())));
+    assert_eq!(parse_command(&json!({ "action": "model_delete", "id": "whisper-base" })), Some(Command::ModelDelete("whisper-base".into())));
+}

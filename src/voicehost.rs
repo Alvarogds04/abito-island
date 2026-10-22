@@ -8,7 +8,7 @@
 //! said after it (or `voice-timeout` {} when nothing was).
 use crate::{now_ms, AppState};
 use abito_island::bridge::{self, BridgeError};
-use abito_island::speech::{self, audio, train, wake};
+use abito_island::speech::{self, audio, catalog, train, wake};
 use abito_island::prefs::Command as PrefsCommand;
 use abito_island::voicecmd::{self, Command, VoicePrefs};
 use abito_island::voiceintent::{self, Effect, Hands, MusicOp, Outcome, Session, World};
@@ -160,6 +160,7 @@ pub struct Host {
     /// How this person's «OK Abito» is transcribed (text only), and the training in progress.
     learned: train::Learned,
     trainer: train::Trainer,
+    speech: catalog::SpeechPrefs,
 }
 
 /// Hears ONE phrase through the same path as the live listener: microphone, Silero VAD, Parakeet.
@@ -367,8 +368,24 @@ fn sync(app: &AppHandle) {
     }
 }
 
+fn speech_json(h: &Host) -> Value {
+    let root = speech::models_dir();
+    let models: Vec<Value> = catalog::entries()
+        .iter()
+        .map(|e| json!({
+            "id": e.id, "name": e.name, "sizeMb": e.size_mb(), "languages": e.languages, "forcesLanguage": e.forces_language,
+            "license": e.license, "note": e.note, "state": speech::model_state(e.id), "installed": catalog::state_in(e, &root) == catalog::Installed::Yes,
+            "active": e.id == h.speech.model,
+        }))
+        .collect();
+    json!({ "language": h.speech.language, "model": h.speech.model, "words": h.speech.words, "languages": catalog::LANGUAGES, "models": models })
+}
+
 pub fn start(app: &AppHandle) {
-    app.manage(Mutex::new(Host { prefs: voicecmd::load_prefs_in(&voicecmd::prefs_dir()), listener: None, last_error: None, learned: train::load_in(&voicecmd::prefs_dir()), trainer: train::Trainer::default() }));
+    let speech_prefs = catalog::load_prefs_in(&voicecmd::prefs_dir());
+    speech::set_active(&speech_prefs.model, &speech_prefs.language);
+    speech::set_custom_words(&speech_prefs.words);
+    app.manage(Mutex::new(Host { prefs: voicecmd::load_prefs_in(&voicecmd::prefs_dir()), listener: None, last_error: None, learned: train::load_in(&voicecmd::prefs_dir()), trainer: train::Trainer::default(), speech: speech_prefs }));
     let app = app.clone();
     std::thread::spawn(move || sync(&app));
 }
@@ -384,6 +401,7 @@ fn status_json(app: &AppHandle) -> Value {
         "listening": h.listener.is_some(),
         "error": h.last_error,
         "training": training_json(&h),
+        "speech": speech_json(&h),
     })
 }
 
@@ -468,6 +486,38 @@ pub async fn voice_action(
             h.learned = train::Learned::default();
             h.trainer.cancel();
             drop(h);
+            Ok(status_json(&app))
+        }
+        Command::SetSpeech { language, model, words } => {
+            let prefs = catalog::SpeechPrefs { language, model, words }.sanitised();
+            // Only a downloaded model can be put in use.
+            if catalog::find(&prefs.model).is_some_and(|e| !e.set.is_present()) {
+                return Err(err("model_missing"));
+            }
+            catalog::save_prefs_in(&voicecmd::prefs_dir(), &prefs).map_err(|_| err("save_failed"))?;
+            speech::set_active(&prefs.model, &prefs.language);
+            speech::set_custom_words(&prefs.words);
+            app.state::<Mutex<Host>>().lock().expect("voice host").speech = prefs;
+            // The loaded model changed: reopen the listener on the new one.
+            let old = app.state::<Mutex<Host>>().lock().expect("voice host").listener.take();
+            drop(old);
+            sync(&app);
+            Ok(status_json(&app))
+        }
+        Command::ModelDownload(id) => {
+            let a = app.clone();
+            speech::download_model(&id, move |_| {
+                let _ = a.emit("voice-model", status_json(&a));
+            })
+            .map_err(|_| err("unavailable"))?;
+            Ok(status_json(&app))
+        }
+        Command::ModelCancel(id) => {
+            speech::cancel_model(&id);
+            Ok(status_json(&app))
+        }
+        Command::ModelDelete(id) => {
+            speech::delete_model(&id).map_err(|_| err("in_use"))?;
             Ok(status_json(&app))
         }
         Command::Remove => {
