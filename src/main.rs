@@ -40,6 +40,7 @@ mod monitorshost;
 mod secretshost;
 mod oauthhost;
 mod soundshost;
+mod failurehost;
 mod recaphost;
 mod planhost;
 mod dictationhost;
@@ -1745,6 +1746,8 @@ fn main() {
     }
     // #310: the renderer choice that stops the window going blank for 2 frames when it shrinks (see renderenv).
     abito_island::renderenv::apply();
+    // #503 S1: any panic leaves a LOCAL failure record (redacted, no network); the human decides later whether to report it.
+    if let Some(dir) = abito_island::failure::default_dir() { abito_island::failure::install_panic_hook("island", dir); }
 
     let project = project_id_for_this_checkout().unwrap_or_default();
     // M3: approval lane configuration. The credential source follows legacy
@@ -1894,6 +1897,7 @@ fn main() {
             mailhost::mail_action,
             monitorshost::monitor_action,
             soundshost::sound_action,
+            failurehost::failure_action,
             recaphost::recap_action,
             planhost::plan_action,
             dictationhost::dictation_action,

@@ -10,7 +10,7 @@ import { icon, keyLabel } from "./ui.js";
 
 export type PageId =
   | "dictation" | "notes" | "insights" | "dictionary" | "snippets" | "styles" | "flowsettings"
-  | "general" | "chat" | "voice" | "integrations" | "phone" | "shortcuts";
+  | "general" | "chat" | "voice" | "integrations" | "phone" | "shortcuts" | "privacy";
 
 interface PageDef {
   id: PageId;
@@ -38,6 +38,7 @@ export const NOTCH_PAGES: PageDef[] = [
   { id: "voice", icon: "wave", title: () => "OK Abito" },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
   { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") },
+  { id: "privacy", icon: "lock", title: () => "Privacidad", subtitle: () => "Avisos de fallos y reportes que vos decidís enviar." },
 ];
 
 const ALL = [...FLOW_PAGES, ...NOTCH_PAGES];

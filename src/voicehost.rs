@@ -360,7 +360,12 @@ fn sync(app: &AppHandle) {
                 drop(h);
                 drop(l);
             }
-            Err(e) => h.last_error = Some(e),
+            Err(e) => {
+                // #503 S1: a local failure record with a CLOSED class only; the error text (`e`) is never passed on.
+                let class = if wake::VAD.is_present() { abito_island::failure::ModelError::Other } else { abito_island::failure::ModelError::MissingFile };
+                abito_island::failure::report("voice", "model-load-failed", abito_island::failure::Reason::ModelLoadFailed(class), None);
+                h.last_error = Some(e);
+            }
         }
     } else if !want && running {
         let old = slot.lock().expect("voice host").listener.take();

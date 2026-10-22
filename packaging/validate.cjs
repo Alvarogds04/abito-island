@@ -8,6 +8,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
 const { buildReport, exitCode, spanishSummary } = require('./validate/report.cjs');
+const { readSnapshot, annotateFailure } = require('./validate/load.cjs');
 const L = require('./lib.cjs');
 const { extraScenes, classify } = require('./validate/scenes.cjs');
 const { producerFailures } = require('./validate/producer.cjs');
@@ -37,6 +38,9 @@ async function main(args = process.argv.slice(2)) {
   if (args.some(a => !['--skip-build', '--fail-producer'].includes(a))) throw new Error('uso: node packaging/validate.cjs [--skip-build] [--fail-producer]');
   process.umask(0o077);
   const started = Date.now();
+  // The machine's load when the gate starts, and again when each scene fails (see validate/load.cjs): a timeout on a busy machine says
+  // «posible carga». Reporting only: no verdict, exit code or timeout changes.
+  const startLoad = readSnapshot(), loadAtFailure = new Map();
   const out = fs.mkdtempSync('/tmp/abito-validate-');
   const children = [];
   let piRuntime, github, integrationFake;
@@ -182,7 +186,9 @@ async function main(args = process.argv.slice(2)) {
         if (row.step === 'validation_scene') rows.push(row);
         if (row.step === 'validation_observation') {
           if (row.name === 'integracion-github' && github.requests.length === 0) row.observation = {ok:false,reason:'gh no llegó al HTTP falso'};
-          rows.push({ name: row.name, ...classify(row.observation) });
+          const classified = { name: row.name, ...classify(row.observation) };
+          if (classified.verdict === 'fail') loadAtFailure.set(row.name, readSnapshot());
+          rows.push(classified);
         }
       } catch { /* native diagnostics may be non-JSON */ }
     };
@@ -232,7 +238,7 @@ async function main(args = process.argv.slice(2)) {
     if (piRuntime) fs.rmSync(piRuntime, { recursive: true, force: true });
     process.off('SIGINT', signal); process.off('SIGTERM', signal);
   }
-  const scenes = sceneNames.map(name => {
+  const built = sceneNames.map(name => {
     const matches = rows.filter(row => row.name === name);
     const row = matches[0];
     const visual = visuals.get(name);
@@ -240,8 +246,10 @@ async function main(args = process.argv.slice(2)) {
     if (!visual?.ok || !visual.path || !fs.existsSync(visual.path) || fs.statSync(visual.path).size === 0) return { ...row, verdict: 'fail', reason: [row.reason, visual?.error || 'falta captura PNG'].filter(Boolean).join('; ') };
     return { ...row, png: visual.path };
   });
-  if (failure && scenes.every(s => s.verdict !== 'fail')) scenes.push({ name: 'harness', verdict: 'fail', reason: failure });
-  const report = buildReport(scenes, { ...provenance, durationMs: Date.now() - started, outputDir: out, scope: 'T1–T5 S1 S3 S4 S5; T6 S2 mediante packaging/preview.cjs', input: 'shared shortcut/action handlers + validator-owned XTest header click' });
+  if (failure && built.every(s => s.verdict !== 'fail')) built.push({ name: 'harness', verdict: 'fail', reason: failure });
+  const endLoad = readSnapshot();
+  const scenes = built.map(scene => annotateFailure(scene, loadAtFailure.get(scene.name) || endLoad));
+  const report = buildReport(scenes, { ...provenance, load: startLoad, durationMs: Date.now() - started, outputDir: out, scope: 'T1–T5 S1 S3 S4 S5; T6 S2 mediante packaging/preview.cjs', input: 'shared shortcut/action handlers + validator-owned XTest header click' });
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
   console.log(spanishSummary(report)); console.log(`Informe: ${out}/report.json`);
   return exitCode(report);
