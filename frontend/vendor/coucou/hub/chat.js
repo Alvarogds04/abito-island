@@ -203,12 +203,14 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
       select.title = offered.length ? "Modelos elegidos de Abito; no cambia el modelo activo de una conversación." : UNAVAILABLE;
     }
   }
-  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), modelPicker("anthropic")), api.feedback);
+  const engineSlots = {};
+  const engineSlot = (group) => engineSlots[group] = h("div", { id: `chat-engine-slot-${group}` });
+  const apiSection = notchCard("Claude", api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t("Model"), modelPicker("anthropic")), api.feedback, engineSlot("anthropic"));
   apiSection.children[0].prepend(api.dot);
   const providerCards = [];
   for (const [id, name, placeholder, site] of CLOUD) {
     const k = keyRow(providerDef(id).key, name, placeholder);
-    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t("Model"), modelPicker(id)), k.feedback);
+    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t("Model"), modelPicker(id)), k.feedback, engineSlot(id));
     c.setAttribute("title", t("Key from {site}", { site }));
     c.children[0].prepend(k.dot);
     providerCards.push(c);
@@ -270,9 +272,11 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
   const localCard = section(t("Local models"), locals);
   localCard.setAttribute("title", t("Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box."));
   localCard.setAttribute("id", "chat-local-models");
+  const engineOthers = h("div", { id: "chat-engine-others" });
   root.append(
     apiSection,
     ...providerCards,
+    engineOthers,
     h("div", { id: "chat-extras" }),
     localCard,
     (() => {
@@ -305,7 +309,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     drawModels();
     paintContext();
   });
-  return s.finish();
+  return Object.assign(s.finish(), { slotFor: (name) => engineSlots[name] || engineOthers });
 }
 export {
   renderChatSettings

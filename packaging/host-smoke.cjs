@@ -54,9 +54,8 @@ let socket;
     console.log('providers=' + JSON.stringify(providers));
     send({ type: 'accounts_list' });
     console.log('accounts=' + JSON.stringify(await frame('accounts')));
-    send({ type: 'connectors_list' });
-    await waitFor(() => frames.some(f => f.type === 'connectors' || (f.type === 'error' && f.code === 'unavailable')));
-    console.log('connectors=' + JSON.stringify(frames.find(f => f.type === 'connectors' || (f.type === 'error' && f.code === 'unavailable'))));
+    // Chat owns the engine accounts; the removed Conexiones connector section is no longer a UI smoke target.
+    console.log('chat_engine_providers=' + JSON.stringify((providers.providers || []).filter(p => Array.isArray(p.methods) && p.methods.length).map(p => p.id)));
     // No chat request: private root has no credentials, and paid/external calls
     // are not authorized. Report that honestly rather than enrolling host auth.
     console.log('chat=NOT_RUN: no isolated provider account configured; no paid/external call authorized');

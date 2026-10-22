@@ -149,12 +149,14 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
       select.disabled = modelBusy || !offered.length; select.title = offered.length ? 'Modelos elegidos de Abito; no cambia el modelo activo de una conversación.' : UNAVAILABLE;
     }
   }
-  const apiSection = notchCard('Claude', api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t('Model'), modelPicker('anthropic')), api.feedback);
+  const engineSlots: Record<string, HTMLElement> = {};
+  const engineSlot = (group: string) => engineSlots[group] = h('div', { id: `chat-engine-slot-${group}` });
+  const apiSection = notchCard('Claude', api.stateBadge, api.stateLabel, api.r, api.fieldError, api.testReason, row(t('Model'), modelPicker('anthropic')), api.feedback, engineSlot('anthropic'));
   apiSection.children[0].prepend(api.dot);
   const providerCards: HTMLElement[] = [];
   for (const [id, name, placeholder, site] of CLOUD) {
     const k = keyRow(providerDef(id).key!, name, placeholder);
-    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t('Model'), modelPicker(id)), k.feedback);
+    const c = notchCard(name, k.stateBadge, k.stateLabel, k.r, k.fieldError, k.testReason, row(t('Model'), modelPicker(id)), k.feedback, engineSlot(id));
     c.setAttribute('title', t('Key from {site}', {site})); // long explanation = tooltip, not a paragraph (S1)
     c.children[0].prepend(k.dot); providerCards.push(c);
   }
@@ -206,8 +208,9 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
   const localCard = section(t('Local models'), locals);
   localCard.setAttribute('title', t('Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.'));
   localCard.setAttribute('id', 'chat-local-models');
+  const engineOthers = h('div', { id: 'chat-engine-others' });
   root.append(apiSection,
-    ...providerCards, h('div', { id: 'chat-extras' }), localCard,
+    ...providerCards, engineOthers, h('div', { id: 'chat-extras' }), localCard,
     (() => { const w = section(t('Active window context'), hint(t('When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.')), ctxBody); w.setAttribute('id', 'chat-window-context'); return w; })(), s.message);
   drawModels();
   watch('agent:state', next => { state = { ...state, ...next }; drawModels(); });
@@ -215,5 +218,5 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
   for (const key of ['anthropic-api-key', ...CLOUD.map(([id]) => providerDef(id).key!)]) work(() => call('secret_action', V.keyPayload('present', key)), result => { present[key] = result?.present === true; keyRefresh[key](); });
   for (const action of ['view','models_list']) work(() => call('agent_action', { action }), next => { state = { ...state, ...next }; drawModels(); });
   work(() => call('prefs_action', { action:'view' }), next => { prefs = next; drawModels(); paintContext(); });
-  return s.finish();
+  return Object.assign(s.finish(), { slotFor: (name: string) => engineSlots[name] || engineOthers });
 }

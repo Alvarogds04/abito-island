@@ -79,7 +79,7 @@ const options = { invoke, listen: window.__TAURI__?.event?.listen, V: window.Abi
 // Catalog and chat view have distinct roles; keep their injected interfaces explicit.
 const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
-  // The page Rust chose when it opened this window (a closed list: the shell ignores anything else), e.g. «Configurar Pi…» -> accounts.
+  // The page Rust chose when it opened this window (a closed list: the shell ignores anything else), e.g. «Configurar Pi…» -> chat.
   initialPage: window.__abitoHubPage,
   version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
   async renderNotch(page, container, navigate) {
@@ -96,7 +96,9 @@ startHub(root, {
         if (page === 'agents') mounted.push(await renderAgentSettings(options));  // options.P = the pills module: «En isla» is the pill declaration
         if (page === 'pills' || page === 'agents') mounted.push(await renderPills({ ...personal, page, navigate }));
         if (page === 'chat') {
-          const chat = await renderChatSettings(options); mounted.push(chat);
+          const chat = await renderChatSettings(options);
+          const accounts = await renderAccounts({ ...options, page: 'chat', slotFor: chat.slotFor });
+          mounted.push(accounts, chat); // Engine line BEFORE the provider cards; rows use the cards' slots.
           const models = await renderModels({ ...options, connected: false }); // #503 S4: one list; the cards own the model choice
           // Preserve Abito's verified model controls inside Coucou's Local models section.
           chat.querySelector?.('#chat-local-models')?.append(models);
@@ -104,11 +106,7 @@ startHub(root, {
           chat.dispose = () => { models.dispose(); disposeChat(); };
         }
         if (page === 'integrations') mounted.push(await renderIntegrations(personal));
-        // #503 S26: the engine and the accounts have their own page; their keys already live in Chat and Integraciones (no second list).
-        if (page === 'accounts') mounted.push(await renderAccounts({ ...options, page: 'all', keys: false }));
         if (page === 'shortcuts') mounted.push(await renderShortcuts(options));
-        // #503 S4: Chat no longer mounts the accounts system (its own provider list and keys); Conexiones keeps it.
-        if (page === 'integrations') mounted.push(await renderAccounts({ ...options, page, keys: true }));
         if (mounted.length) container.append(...mounted);
         else container.append(renderUnavailable(page));
       } catch {

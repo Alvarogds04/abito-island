@@ -385,8 +385,8 @@
   // The inert seam for the visual probe (a script click is rightly not a trusted gesture): a CustomEvent
   // that only opens a screen, never a setting. The shipped binary has no probe, so nothing ever fires it.
   document.addEventListener('abito:settings-select', e => {
-    // #503 S26: the island's «Configurar Pi…» / engine row deep links land on the window's Conexiones page, not on its default page
-    if (!WINDOW_MODE) { openSettingsWindow(Object.prototype.hasOwnProperty.call(V.PI_SECTIONS, e.detail) || e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key' ? 'accounts' : undefined); return; }
+    // #503 S5: engine/account deep links land on Chat, not on the window's default page
+    if (!WINDOW_MODE) { openSettingsWindow(Object.prototype.hasOwnProperty.call(V.PI_SECTIONS, e.detail) || e.detail === 'accounts:oauth' || e.detail === 'accounts:api_key' ? 'chat' : undefined); return; }
     if (e.detail === 'open') open(screen);
     else if (V.tabAlias(e.detail) && !String(e.detail).includes(':')) { filter = ''; if (isOpen()) showScreen(e.detail); else open(V.tabAlias(e.detail)); }
     // Pi deep links from the island's status row: land on Conexiones, then scroll/focus the right section

@@ -40,15 +40,15 @@ const text = e => [e.textContent || '', ...e.children.map(text)].join(' ');
     .replace('"./flow-shim.js"', '"../core/flow"').replace('the keys the app suggests.', 'the keys Coucou suggests.');
   assert.equal(hash(upstreamUi), '67c5f63da4a672ddc74649f28fe17f032d49af5bbb1efcddbbc6eaea46ea6269');
   assert.deepEqual(FLOW_PAGES.map(p => [p.id, p.icon]), [['dictation','mic'],['notes','record'],['insights','chart'],['dictionary','book'],['snippets','bolt'],['styles','text'],['flowsettings','sliders']]);
-  assert.deepEqual(NOTCH_PAGES.map(p => [p.id,p.icon]), [['general','gear'],['pills','grid'],['agents','terminal'],['chat','chat'],['accounts','lock'],['voice','wave'],['integrations','puzzle'],['phone','phone'],['shortcuts','keyboard']]);
+  assert.deepEqual(NOTCH_PAGES.map(p => [p.id,p.icon]), [['general','gear'],['pills','grid'],['agents','terminal'],['chat','chat'],['voice','wave'],['integrations','puzzle'],['phone','phone'],['shortcuts','keyboard']]);
   const events = {};
   global.window = { __TAURI__: { event: { listen: async (name, handler) => { events[name] = handler; return () => {}; } } } };
   const pages = [], host = new Element('div');
   await startHub(host, { version: 'test', flowPages: {}, renderNotch: async p => { pages.push(p); } });
-  assert.equal(all(host).filter(e => e.className === 'hub-item' || e.className === 'hub-item on').length, 16);
+  assert.equal(all(host).filter(e => e.className === 'hub-item' || e.className === 'hub-item on').length, 15);
   assert.deepEqual(pages, ['dictation']);
   const items = all(host).filter(e => e.className.split(' ').includes('hub-item'));
-  assert.deepEqual(items.map(e => e.children[1].textContent), ['Dictado','Notetaker','Estadísticas','Diccionario','Fragmentos','Estilos','Ajustes','General','Pestañas activas','Agentes','Chat','Conexiones','OK Abito','Integraciones','Teléfono Android','Atajos']);
+  assert.deepEqual(items.map(e => e.children[1].textContent), ['Dictado','Notetaker','Estadísticas','Diccionario','Fragmentos','Estilos','Ajustes','General','Pestañas activas','Agentes','Chat','OK Abito','Integraciones','Teléfono Android','Atajos']);
   for (const item of items) { item.fire('click'); await Promise.resolve(); }
   assert.deepEqual(pages.slice(1), [...FLOW_PAGES, ...NOTCH_PAGES].map(p => p.id));
   events['hub-page']({ payload: 'future-page' }); await Promise.resolve();
