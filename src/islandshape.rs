@@ -109,10 +109,10 @@ fn edge_input_tracks_four_pixel_strip_and_protected_cards_refuse_it() {
 
 #[cfg(test)]
 #[test]
-fn the_hidden_strip_input_zone_is_the_drawn_8px_at_both_compact_widths_and_never_wider_than_the_pill() {
+fn the_hidden_strip_input_zone_is_the_drawn_8px_at_every_compact_width_and_never_wider_than_the_pill() {
     // S1: the hidden strip is 24 px up, leaving an 8 px activation zone. The pill is 288 wide, or 440 once there are session rows or a
-    // pending ask (island-layout.js COMPACT_WIDE), so the zone must be 8 px tall at BOTH widths (it used to be 32 at 440).
-    for w in [288, 440] {
+    // pending ask (COMPACT_WIDE), or 560 for the «Responder» pill (COMPACT_ASK), so the zone must be 8 px tall at BOTH widths (it used to be 32 at 440).
+    for w in abito_island::geometry::COMPACT_WIDTHS {
         let strip = Report { w, h: 8, settled: true };
         let (x, y, rw, rh) = input_rect(strip, (752, 340), false);
         assert_eq!((rw, rh), (w, 8), "zone {w} wide, 8 px tall");
@@ -122,6 +122,37 @@ fn the_hidden_strip_input_zone_is_the_drawn_8px_at_both_compact_widths_and_never
     }
     // a pill or card that is NOT a strip keeps today's rule
     assert_eq!(input_rect(Report { w: 440, h: 32, settled: true }, (752, 340), false), (156, 0, 440, 32));
+    assert_eq!(input_rect(Report { w: 560, h: 8, settled: true }, (752, 340), false), (96, 0, 560, 8), "the ask pill is a strip too (hidden)");
+    assert_eq!(input_rect(Report { w: 560, h: 8, settled: true }, (752, 340), true), (96, 0, 560, 32), "but with a protected ask pending it refuses the thin zone");
     assert_eq!(input_rect(Report { w: 720, h: 8, settled: true }, (752, 340), false).3, 32, "only compact widths can be a strip");
     assert_eq!(input_rect(Report { w: 300, h: 8, settled: true }, (752, 340), false).3, 32, "an unknown width is not a strip");
+}
+
+#[cfg(test)]
+#[test]
+fn the_input_region_covers_exactly_what_is_drawn_for_every_native_size_of_the_island() {
+    // The island's full size list (logical px, inside the fixed 752x340 window): compact pill 288/440/560 x 32; hidden strip: same
+    // widths x 8; expanded 720x184, 720x220 with the «terminó»/problem band; question 224; recap 208; chat 720 x 240..300.
+    let window = (752, 340);
+    let centred = |w: i32| (window.0 - w) / 2;
+    for w in abito_island::geometry::COMPACT_WIDTHS {
+        assert_eq!(input_rect(Report { w, h: 32, settled: true }, window, false), (centred(w), 0, w, 32), "compact {w}x32");
+        assert_eq!(input_rect(Report { w, h: 8, settled: true }, window, false), (centred(w), 0, w, 8), "hidden strip {w}x8");
+        // a click just BELOW the drawn strip (y = 8) is outside the region, so it passes through to the app underneath
+        let (_, y, _, h) = input_rect(Report { w, h: 8, settled: true }, window, false);
+        assert!(8 >= y + h, "y=8 is below the {w} strip's zone");
+    }
+    for (w, h) in [(720, 184), (720, 220), (720, 224), (720, 208), (720, 240), (720, 270), (720, 300)] {
+        assert_eq!(input_rect(Report { w, h, settled: true }, window, false), (centred(w), 0, w, h), "expanded {w}x{h} is fully clickable and nothing more");
+        assert_eq!(input_rect(Report { w, h, settled: true }, window, true), (centred(w), 0, w, h), "a protected ask changes nothing for a drawn card");
+    }
+    // whatever the page reports is clamped into the window: never an input region bigger than the native window
+    assert_eq!(input_rect(Report { w: 10_000, h: 10_000, settled: true }, window, false), (0, 0, 752, 340));
+    // placement: the logical window is 752x340 at every scale, the input region is in LOGICAL px (GDK scales it with the window)
+    for (scale, monitor_w) in [(1.0, 1920), (2.0, 3072), (2.0, 3840)] {
+        let monitor = abito_island::geometry::Rect { x: 0, y: 0, w: monitor_w, h: monitor_w * 9 / 16 };
+        let r = abito_island::geometry::island_window_rect_for(Some(monitor), monitor, scale, 340).unwrap();
+        assert_eq!((r.w as f64 / scale, r.h as f64 / scale), (752.0, 340.0), "scale {scale}");
+        assert_eq!(r.x + r.w / 2, monitor_w / 2, "centred at scale {scale}");
+    }
 }

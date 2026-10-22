@@ -13,8 +13,8 @@ impl Rect {
 pub enum Edge { #[default] Top, Bottom }
 
 pub const COMPACT_BAR: (i32, i32) = (288, 32);
-/// The compact pill's widths in logical px: at rest, and widened for session rows or a pending ask (island-layout.js COMPACT_W / COMPACT_WIDE).
-pub const COMPACT_WIDTHS: [i32; 2] = [288, 440];
+/// The compact pill's widths in logical px: at rest, and widened for session rows, or 560 for a pending question/permission (island-layout.js COMPACT_W / COMPACT_WIDE / COMPACT_ASK; a test keeps the two in step).
+pub const COMPACT_WIDTHS: [i32; 3] = [288, 440, 560];
 pub const OVERVIEW_VISIBLE: (i32, i32) = (720, 184);
 /// One logical native window for compact, overview, question/recap and chat.
 pub const ISLAND_WINDOW: (i32, i32) = (752, 340);
@@ -423,4 +423,28 @@ mod tests {
         assert_eq!(waited, present);
     }
 
+
+    #[test]
+    fn every_compact_width_the_island_page_declares_is_known_here() {
+        // One source of truth: island-layout.js declares the compact pill's widths (COMPACT_W, COMPACT_WIDE, COMPACT_ASK, ...); the
+        // hidden strip's input zone in islandshape.rs only recognises the widths listed in COMPACT_WIDTHS. A width added on the page
+        // and not here silently gave the strip a 32 px input zone instead of the drawn 8 (it happened with 440).
+        let js = include_str!("../frontend/island-layout.js");
+        let mut declared: Vec<i32> = Vec::new();
+        for (at, _) in js.match_indices("COMPACT_") {
+            let rest = &js[at + "COMPACT_".len()..];
+            let name_end = rest.find(|c: char| !(c.is_ascii_uppercase() || c == '_')).unwrap_or(0);
+            let after = rest[name_end..].trim_start();
+            if name_end == 0 || !after.starts_with('=') || after.starts_with("==") { continue; }
+            let digits: String = after[1..].trim_start().chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(w) = digits.parse::<i32>() { declared.push(w); }
+        }
+        declared.sort_unstable();
+        declared.dedup();
+        assert!(declared.len() >= 3, "the page declares its compact widths as COMPACT_* = N constants: found {declared:?}");
+        let mut known = COMPACT_WIDTHS.to_vec();
+        known.sort_unstable();
+        assert_eq!(declared, known, "island-layout.js compact widths vs geometry::COMPACT_WIDTHS");
+        assert!(COMPACT_WIDTHS.iter().all(|&w| w <= ISLAND_WINDOW.0), "every compact pill fits the window");
+    }
 }
