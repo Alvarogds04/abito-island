@@ -22,11 +22,11 @@ import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
 const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action']);
-// The host answers these six commands through ONE shared limiter: 30 calls per fixed 1 s window (src/bridge.rs RATE_LIMIT_PER_WINDOW),
+// The host answers these commands through ONE shared limiter: 30 calls per fixed 1 s window (src/bridge.rs RATE_LIMIT_PER_WINDOW),
 // shared with the island window. A page that reads a lot at load (the combined «Integraciones y agentes» makes ~34 calls) used to get
 // `rate-exceeded` on its tail calls and paint «No se pudo completar» before the human touched anything (#503 S32 gate). So they leave
 // in order and at most PACE_MAX per rolling second, which keeps every fixed window well under 30 and leaves room for the island.
-const LIMITED = new Set(['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action']);
+const LIMITED = new Set(['prefs_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'plan_action', 'voice_action']);
 const PACE_MAX = 20, PACE_MS = 1000;
 const sent = [];
 let paceTail = Promise.resolve();

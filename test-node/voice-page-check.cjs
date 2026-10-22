@@ -121,6 +121,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   assert.deepEqual(calls.splice(0), [['voice_action', { action: 'set_speech', speech: { language: 'auto', model: 'whisper-base', words: ['Kubernetes', 'Doña Ana'] } }]]);
   // The closed guard in settings-app.js
   const source = fs.readFileSync(path.resolve(__dirname, '../frontend/settings-app.js'), 'utf8').replace(/^import .*;\n/gm, '');
+  assert(/const LIMITED = new Set\([^)]*'voice_action'/.test(source), 'Voz host calls (they share the 30-per-second limiter) go through the Ajustes pacing queue');
   const raw = []; document.getElementById = () => new Element('div');
   const ctx = { window: { __TAURI__: { core: { invoke: async (c, a) => { raw.push([c, a]); return {}; } } } }, document, setInvoke() {}, startHub: async () => {}, Set, Promise, inactivePages: {}, TextEncoder, renderUnavailable() {}, card: x => x, row: () => ({}), voicePage, dictationPage() {}, flowSettingsPage() {}, dictionaryPage() {}, snippetsPage() {}, stylesPage() {}, insightsPage() {}, renderGeneral() {} };
   vm.runInNewContext(source + '\nglobalThis.closedInvoke = invoke;', ctx);
