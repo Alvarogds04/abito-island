@@ -684,6 +684,42 @@ fn shared_credential_ref(id: &str) -> Option<&'static str> {
 fn credential_ref(id: &str) -> String {
     shared_credential_ref(id).map(str::to_owned).unwrap_or_else(|| format!("account-{id}"))
 }
+fn owned_reference(reference: &str) -> bool {
+    reference.strip_prefix("account-").is_some_and(|id| strict_id(id) && !id.starts_with("key-"))
+        || reference.strip_prefix("account-").and_then(|s| s.rsplit_once('-')).is_some_and(|(id, suffix)| {
+            strict_id(id) && !id.starts_with("key-") && hex_suffix(suffix)
+        })
+}
+fn hex_suffix(s: &str) -> bool {
+    s.len() == 8 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+fn account_reference_ok(id: &str, reference: &str) -> bool {
+    if let Some(shared) = shared_credential_ref(id) { return reference == shared; }
+    let legacy = format!("account-{id}");
+    !id.starts_with("key-") && (reference == legacy || reference.strip_prefix(&format!("{legacy}-")).is_some_and(hex_suffix))
+}
+fn new_owned_reference(id: &str) -> Result<String, crate::bridge::BridgeError> {
+    #[cfg(target_os = "linux")]
+    {
+        use ring::rand::SecureRandom;
+        let mut bytes = [0u8; 4];
+        ring::rand::SystemRandom::new().fill(&mut bytes).map_err(|_| account_error("save_failed"))?;
+        return Ok(format!("account-{id}-{:08x}", u32::from_be_bytes(bytes)));
+    }
+    // Other targets have no directly declared RNG. This is a uniqueness token,
+    // not a secret; the caller also checks journal, live refs and keychain collisions.
+    #[cfg(not(target_os = "linux"))]
+    {
+        use std::hash::{Hash, Hasher};
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().hash(&mut hash);
+        std::process::id().hash(&mut hash);
+        NEXT.fetch_add(1, Ordering::Relaxed).hash(&mut hash);
+        Ok(format!("account-{id}-{:08x}", hash.finish() as u32))
+    }
+}
 fn valid_account_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= 4096 && !key.chars().any(char::is_whitespace) && !has_control(key)
 }
@@ -761,12 +797,14 @@ fn parse_account(payload: &Value) -> Result<AccountCommand, CommandError> {
 pub struct AccountStore {
     path: std::path::PathBuf,
     records: Vec<AccountRecord>,
+    pending_cleanup: Vec<String>,
     secrets: std::sync::Arc<dyn crate::secrets::SecretStore + Send + Sync>,
 }
 impl AccountStore {
     pub fn load(path: std::path::PathBuf, secrets: std::sync::Arc<dyn crate::secrets::SecretStore + Send + Sync>) -> Result<Self, crate::bridge::BridgeError> {
         use std::io::Read;
         let mut records = Vec::new();
+        let mut pending_cleanup = Vec::new();
         match std::fs::symlink_metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
             Err(_) => return Err(account_error("store_unavailable")),
@@ -780,11 +818,11 @@ impl AccountStore {
                 file.take(1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|_| account_error("store_unavailable"))?;
                 if bytes.len() > 1024 * 1024 { return Err(account_error("store_unavailable")); }
                 let disk: AccountDisk = serde_json::from_slice(&bytes).map_err(|_| account_error("store_unavailable"))?;
-                if disk.version != 1 || disk.accounts.len() > 64 { return Err(account_error("store_unavailable")); }
+                if disk.version != 1 || disk.accounts.len() > 64 || disk.pending_cleanup.len() > 64 { return Err(account_error("store_unavailable")); }
+                pending_cleanup = disk.pending_cleanup;
                 let mut ids = std::collections::HashSet::new();
                 for record in disk.accounts {
-                    let expected_ref = credential_ref(&record.account_id);
-                    if record.credential_ref.as_ref().is_some_and(|r| r != &expected_ref)
+                    if record.credential_ref.as_ref().is_some_and(|r| !account_reference_ok(&record.account_id, r))
                         || record.config.api_key.as_ref().is_some_and(|k| !valid_account_key(k)) {
                         return Err(account_error("store_unavailable"));
                     }
@@ -794,12 +832,21 @@ impl AccountStore {
                         "provider":record.provider,"config":record.config});
                     let mut parsed = parse_account(&payload).map_err(|_| account_error("store_unavailable"))?;
                     if !ids.insert(parsed.record.account_id.clone()) { return Err(account_error("store_unavailable")); }
+                    parsed.record.credential_ref = record.credential_ref.or_else(|| {
+                        if record.config.api_key.is_some() { Some(credential_ref(&record.account_id)) }
+                        else { shared_credential_ref(&record.account_id).map(str::to_owned) }
+                    });
                     parsed.record.config.api_key = record.config.api_key;
                     records.push(parsed.record);
                 }
             }
         }
-        let mut store = Self { path, records, secrets };
+        let mut seen = std::collections::HashSet::new();
+        if pending_cleanup.iter().any(|r| !owned_reference(r) || !seen.insert(r.clone())
+            || records.iter().any(|a| a.credential_ref.as_ref() == Some(r))) {
+            return Err(account_error("store_unavailable"));
+        }
+        let mut store = Self { path, records, pending_cleanup, secrets };
         let migrating = store.records.iter().any(|r| r.config.api_key.is_some());
         if migrating {
             for record in &store.records {
@@ -815,10 +862,37 @@ impl AccountStore {
                 }
             }
             // No file write (not even a temporary file) until EVERY secret is safe.
-            store.persist(&store.records).map_err(|_| account_error("save_failed"))?;
+            store.persist(&store.records, &store.pending_cleanup).map_err(|_| account_error("save_failed"))?;
             for record in &mut store.records { record.config.api_key = None; }
         }
+        store.sweep();
         Ok(store)
+    }
+    // Only journaled, unreferenced owned entries are eligible. Failed deletion or
+    // persistence retains the intent for an idempotent retry on the next load.
+    fn sweep(&mut self) {
+        for reference in self.pending_cleanup.clone() {
+            if self.records.iter().any(|r| r.credential_ref.as_ref() == Some(&reference)) { continue; }
+            if self.secrets.delete(&reference).is_ok() {
+                let next: Vec<_> = self.pending_cleanup.iter().filter(|r| **r != reference).cloned().collect();
+                if self.persist(&self.records, &next).is_ok() { self.pending_cleanup = next; }
+            }
+        }
+    }
+    fn commit(&mut self, records: Vec<AccountRecord>, pending: Vec<String>) -> Result<(), crate::bridge::BridgeError> {
+        if pending.len() > 64 { return Err(account_error("save_failed")); }
+        self.persist(&records, &pending).map_err(|_| account_error("save_failed"))?;
+        self.records = records;
+        self.pending_cleanup = pending;
+        Ok(())
+    }
+    fn cleanup(&mut self, reference: Option<String>) -> Result<(), crate::bridge::BridgeError> {
+        if let Some(reference) = reference {
+            self.secrets.delete(&reference).map_err(|_| account_error("keychain_unavailable"))?;
+            let pending = self.pending_cleanup.iter().filter(|r| **r != reference).cloned().collect();
+            self.commit(self.records.clone(), pending)?;
+        }
+        Ok(())
     }
     pub fn view(&self) -> Value {
         let accounts: Vec<_> = self.records.iter().map(|r| json!({
@@ -831,22 +905,12 @@ impl AccountStore {
     }
     fn remove(&mut self, account_id: &str, publish: impl FnOnce(Value)) -> Result<Value, crate::bridge::BridgeError> {
         let at = self.records.iter().position(|r| r.account_id == account_id).ok_or_else(|| account_error("account_missing"))?;
-        let record = &self.records[at];
-        let owned_ref = credential_ref(account_id);
-        let owned = shared_credential_ref(account_id).is_none()
-            && record.credential_ref.as_deref() == Some(owned_ref.as_str());
-        let mut next = self.records.clone();
-        next.remove(at);
-        // Ordering (C3 verifier): the FILE commits first. It holds no secret, so a failed commit touches nothing and the key
-        // cannot be lost; the key is deleted only afterwards. If that delete fails, the file is put back (best effort) and the key
-        // is still there: the worst case is an orphan entry, never a lost one.
-        let previous_records = self.records.clone();
-        self.persist(&next).map_err(|_| account_error("save_failed"))?;
-        if owned && self.secrets.delete(&owned_ref).is_err() {
-            let _ = self.persist(&previous_records);
-            return Err(account_error("keychain_unavailable"));
-        }
-        self.records = next;
+        let owned_ref = self.records[at].credential_ref.clone().filter(|r| owned_reference(r));
+        let mut next = self.records.clone(); next.remove(at);
+        let mut pending = self.pending_cleanup.clone();
+        if let Some(reference) = &owned_ref { pending.push(reference.clone()); }
+        self.commit(next, pending)?;
+        self.cleanup(owned_ref)?;
         let snapshot = self.view();
         publish(snapshot.clone());
         Ok(snapshot)
@@ -866,29 +930,38 @@ impl AccountStore {
         if let Some(at) = at {
             if self.records[at].provider != command.record.provider { return Err(account_error("account_identity")); }
         }
-        let reference = credential_ref(&command.record.account_id);
+        let old_ref = at.and_then(|i| self.records[i].credential_ref.clone());
         let changed_key = !command.keep_key;
-        let new_key = if changed_key { command.record.config.api_key.take() } else { None };
-        // Same ordering as `remove`: validate the keychain is reachable, commit the secret-free FILE, then change the key. A failed
-        // file commit never touched the keychain, so the previous key is intact with or without a working compensation.
-        if changed_key { self.secrets.read(&reference).map_err(|_| account_error("keychain_unavailable"))?; }
-        let previous_records = self.records.clone();
+        let new_key = command.record.config.api_key.take();
+        command.record.credential_ref = if command.keep_key {
+            old_ref.clone().or_else(|| shared_credential_ref(&command.record.account_id).map(str::to_owned))
+        } else { None };
+        if let Some(key) = new_key {
+            // Persist intent BEFORE writing a fresh key. Never overwrite a live entry,
+            // including on the unlikely 32-bit suffix collision.
+            let reference = loop {
+                let r = new_owned_reference(&command.record.account_id)?;
+                if !self.pending_cleanup.contains(&r) && !self.records.iter().any(|a| a.credential_ref.as_ref() == Some(&r))
+                    && self.secrets.read(&r).map_err(|_| account_error("keychain_unavailable"))?.is_none() { break r; }
+            };
+            let mut pending = self.pending_cleanup.clone(); pending.push(reference.clone());
+            self.commit(self.records.clone(), pending)?;
+            self.secrets.write(&reference, &key).map_err(|_| account_error("keychain_unavailable"))?;
+            command.record.credential_ref = Some(reference);
+        }
+        let mut pending = self.pending_cleanup.clone();
+        if let Some(reference) = &command.record.credential_ref { pending.retain(|r| r != reference); }
+        let retired = old_ref.filter(|r| changed_key && owned_reference(r));
+        if let Some(reference) = &retired { pending.push(reference.clone()); }
         let mut next = self.records.clone();
         match at { Some(at) => next[at] = command.record, None => next.push(command.record) }
-        self.persist(&next).map_err(|_| account_error("save_failed"))?;
-        if changed_key {
-            let applied = match &new_key { Some(key) => self.secrets.write(&reference, key), None => self.secrets.delete(&reference) };
-            if applied.is_err() {
-                let _ = self.persist(&previous_records); // best effort; the file holds no secret and the old key was not touched
-                return Err(account_error("keychain_unavailable"));
-            }
-        }
-        self.records = next;
+        self.commit(next, pending)?;
+        self.cleanup(retired)?;
         let snapshot = self.view();
         publish(snapshot.clone());
         Ok(snapshot)
     }
-    fn persist(&self, records: &[AccountRecord]) -> std::io::Result<()> {
+    fn persist(&self, records: &[AccountRecord], pending_cleanup: &[String]) -> std::io::Result<()> {
         use std::io::{Error, ErrorKind, Write};
         let denied = || Error::new(ErrorKind::PermissionDenied, "account store unavailable");
         let parent = self.path.parent().ok_or_else(denied)?;
@@ -900,7 +973,7 @@ impl AccountStore {
             Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
             _ => {},
         }
-        let bytes = serde_json::to_vec(&AccountDisk { version: 1, accounts: records.to_vec() }).map_err(|_| denied())?;
+        let bytes = serde_json::to_vec(&AccountDisk { version: 1, accounts: records.to_vec(), pending_cleanup: pending_cleanup.to_vec() }).map_err(|_| denied())?;
         if bytes.len() > 1024 * 1024 { return Err(denied()); }
         let tmp = parent.join(".accounts.json.pending");
         let mut options = std::fs::OpenOptions::new(); options.write(true).create_new(true);
@@ -925,7 +998,11 @@ impl AccountStore {
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AccountDisk { version: u32, accounts: Vec<AccountRecord> }
+struct AccountDisk {
+    version: u32, accounts: Vec<AccountRecord>,
+    #[serde(default, rename = "pendingCleanup")]
+    pending_cleanup: Vec<String>,
+}
 fn private_account_file(meta: &std::fs::Metadata) -> bool {
     #[cfg(unix)] {
         use std::os::unix::fs::MetadataExt;

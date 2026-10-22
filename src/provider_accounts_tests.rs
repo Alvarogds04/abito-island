@@ -11,6 +11,9 @@ struct FakeSecrets {
     fail_key: Mutex<Option<String>>,
     /// Allow this many more mutations (write/delete), then fail every one: the compensation of an earlier mutation fails too.
     mutations_left: Mutex<Option<usize>>,
+    crash_before: Mutex<bool>,
+    crash_after_write: Mutex<bool>,
+    observe_delete: Mutex<Option<std::path::PathBuf>>,
 }
 impl FakeSecrets {
     fn mutation_allowed(&self) -> bool {
@@ -24,11 +27,19 @@ impl SecretStore for FakeSecrets {
         Ok(self.values.lock().unwrap().get(key).cloned())
     }
     fn write(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        if *self.crash_before.lock().unwrap() { panic!("simulated interruption before mutation"); }
         if let Some(error) = *self.failure.lock().unwrap() { return Err(error); }
         if self.fail_key.lock().unwrap().as_deref() == Some(key) || !self.mutation_allowed() { return Err(StoreError::Failed); }
-        self.values.lock().unwrap().insert(key.into(), value.into()); Ok(())
+        self.values.lock().unwrap().insert(key.into(), value.into());
+        if *self.crash_after_write.lock().unwrap() { panic!("simulated interruption after write"); }
+        Ok(())
     }
     fn delete(&self, key: &str) -> Result<(), StoreError> {
+        if *self.crash_before.lock().unwrap() { panic!("simulated interruption before mutation"); }
+        if let Some(path) = self.observe_delete.lock().unwrap().as_ref() {
+            let disk: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert!(disk["accounts"].as_array().unwrap().iter().all(|a| a["credentialRef"] != key));
+        }
         if let Some(error) = *self.failure.lock().unwrap() { return Err(error); }
         if !self.mutation_allowed() { return Err(StoreError::Failed); }
         self.values.lock().unwrap().remove(key); Ok(())
@@ -37,6 +48,139 @@ impl SecretStore for FakeSecrets {
 thread_local! { static SECRETS: Arc<FakeSecrets> = Arc::new(FakeSecrets::default()); }
 fn load(path: std::path::PathBuf) -> Result<AccountStore, crate::bridge::BridgeError> {
     SECRETS.with(|secrets| AccountStore::load(path, secrets.clone()))
+}
+
+fn disk(dir: &Sandbox) -> Value {
+    serde_json::from_slice(&std::fs::read(dir.file()).unwrap()).unwrap()
+}
+fn active_ref(dir: &Sandbox) -> String { disk(dir)["accounts"][0]["credentialRef"].as_str().unwrap().into() }
+fn interrupt(f: impl FnOnce()) {
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err());
+}
+
+#[test]
+fn account_journal_interrupted_remove_is_swept_on_reload() {
+    let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
+    let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    let mut p = request("abito_account_create", "openai", "https://example.com/v1");
+    p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    let reference = active_ref(&dir);
+    *secrets.crash_before.lock().unwrap() = true;
+    interrupt(|| { let _ = store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| {}); });
+    drop(store);
+    assert_eq!(disk(&dir)["accounts"], json!([]));
+    assert_eq!(disk(&dir)["pendingCleanup"], json!([reference]));
+    assert!(secrets.read(&reference).unwrap().is_some());
+    *secrets.crash_before.lock().unwrap() = false;
+    AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    assert_eq!(secrets.read(&reference).unwrap(), None);
+    assert_eq!(disk(&dir)["pendingCleanup"], json!([]));
+}
+
+#[test]
+fn account_journal_interrupted_legacy_clear_does_not_reactivate_retired_ref() {
+    let dir = Sandbox::new(); legacy_file(&dir, "example");
+    let secrets = Arc::new(FakeSecrets::default());
+    let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    let reference = active_ref(&dir);
+    let mut p = request("abito_account_save", "openai", "https://example.com/v1");
+    p["config"]["apiKey"] = Value::Null;
+    *secrets.crash_before.lock().unwrap() = true;
+    interrupt(|| { let _ = store.command(&p, |_| {}); }); drop(store);
+    assert!(disk(&dir)["accounts"][0]["credentialRef"].is_null());
+    *secrets.crash_before.lock().unwrap() = false;
+    let loaded = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    assert_eq!(loaded.view()["accounts"][0]["hasCredential"], false);
+    assert_eq!(secrets.read(&reference).unwrap(), None);
+    assert_eq!(disk(&dir)["pendingCleanup"], json!([]));
+}
+
+#[test]
+fn account_journal_interruptions_preserve_previous_account_and_sweep_only_orphan() {
+    for replacing in [false, true] { for after_write in [false, true] {
+        let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
+        let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+        let mut p = request("abito_account_create", "openai", "https://example.com/v1");
+        p["config"]["apiKey"] = json!("original-key");
+        let previous = if replacing { store.command(&p, |_| {}).unwrap(); Some(active_ref(&dir)) } else { None };
+        let before = store.view();
+        if replacing { p["action"] = json!("abito_account_save"); }
+        p["config"]["apiKey"] = json!("new-key");
+        *secrets.crash_before.lock().unwrap() = !after_write;
+        *secrets.crash_after_write.lock().unwrap() = after_write;
+        interrupt(|| { let _ = store.command(&p, |_| {}); }); drop(store);
+        assert_eq!(disk(&dir)["pendingCleanup"].as_array().unwrap().len(), 1);
+        *secrets.crash_before.lock().unwrap() = false;
+        *secrets.crash_after_write.lock().unwrap() = false;
+        secrets.write("openai-api-key", "shared-key").unwrap();
+        secrets.write("key-other", "untouched-key").unwrap();
+        secrets.write("account-untracked", "untracked-key").unwrap();
+        let reloaded = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+        assert_eq!(reloaded.view(), before);
+        if let Some(reference) = previous { assert_eq!(secrets.read(&reference).unwrap().as_deref(), Some("original-key")); }
+        assert_eq!(secrets.read("openai-api-key").unwrap().as_deref(), Some("shared-key"));
+        assert!(secrets.read("key-other").unwrap().is_some());
+        assert!(secrets.read("account-untracked").unwrap().is_some());
+        assert!(!secrets.values.lock().unwrap().values().any(|v| v == "new-key"));
+        assert_eq!(disk(&dir)["pendingCleanup"], json!([]));
+    } }
+}
+
+#[test]
+fn account_journal_rotation_and_failed_create() {
+    let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
+    let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    let mut p = request("abito_account_create", "openai", "https://example.com/v1");
+    p["config"]["apiKey"] = json!("original-key");
+    *secrets.mutations_left.lock().unwrap() = Some(0);
+    assert!(store.command(&p, |_| panic!("no publication")).is_err());
+    assert_eq!(store.view()["accounts"], json!([]));
+    *secrets.mutations_left.lock().unwrap() = None;
+    store.command(&p, |_| {}).unwrap(); let old = active_ref(&dir);
+    assert!(old.starts_with("account-example-"));
+    *secrets.observe_delete.lock().unwrap() = Some(dir.file());
+    p["action"] = json!("abito_account_save"); p["config"]["apiKey"] = json!("new-key");
+    store.command(&p, |_| {}).unwrap(); let new = active_ref(&dir);
+    assert_ne!(old, new); assert_eq!(secrets.read(&old).unwrap(), None);
+    assert_eq!(secrets.read(&new).unwrap().as_deref(), Some("new-key"));
+}
+
+#[test]
+fn account_journal_validation_and_bound() {
+    use std::os::unix::fs::PermissionsExt;
+    for bad in ["openai-api-key", "key-openai", "account-example", "account-../bad", "account-key-openai", "account-x-ABCDEF12"] {
+        let dir = Sandbox::new(); legacy_file(&dir, "example");
+        let mut value = disk(&dir); value["pendingCleanup"] = json!([bad]);
+        std::fs::write(dir.file(), serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(AccountStore::load(dir.file(), Arc::new(FakeSecrets::default())).err().expect("hostile journal rejected").code, "store_unavailable");
+    }
+    // A legacy dangling ref remains visible as missing, while foreign/malformed
+    // active refs are rejected before touching the keychain.
+    for reference in ["account-example", "account-example-0123abcd", "account-example-0123ABCD", "account-other", "account-example-short"] {
+        let dir = Sandbox::new(); legacy_file(&dir, "example");
+        let mut value = disk(&dir);
+        value["accounts"][0]["config"].as_object_mut().unwrap().remove("apiKey");
+        value["accounts"][0]["credentialRef"] = json!(reference);
+        std::fs::write(dir.file(), serde_json::to_vec(&value).unwrap()).unwrap();
+        let result = AccountStore::load(dir.file(), Arc::new(FakeSecrets::default()));
+        if ["account-example", "account-example-0123abcd"].contains(&reference) {
+            assert_eq!(result.unwrap().view()["accounts"][0]["hasCredential"], false);
+        } else { assert_eq!(result.err().unwrap().code, "store_unavailable"); }
+    }
+    for count in [64, 65] {
+        let dir = Sandbox::new();
+        let refs: Vec<_> = (0..count).map(|n| format!("account-orphan{n}")).collect();
+        std::fs::write(dir.file(), serde_json::to_vec(&json!({"version":1,"accounts":[],"pendingCleanup":refs})).unwrap()).unwrap();
+        std::fs::set_permissions(dir.file(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        let secrets = Arc::new(FakeSecrets::default()); *secrets.mutations_left.lock().unwrap() = Some(0);
+        let loaded = AccountStore::load(dir.file(), secrets);
+        assert_eq!(loaded.is_ok(), count == 64);
+        if let Ok(mut store) = loaded {
+            let mut p = request("abito_account_create", "openai", "https://example.com/v1"); p["config"]["apiKey"] = json!("new-key");
+            assert!(store.command(&p, |_| {}).is_err());
+            assert_eq!(disk(&dir)["pendingCleanup"].as_array().unwrap().len(), 64);
+        }
+    }
 }
 
 fn request(action: &str, provider: &str, url: &str) -> Value {
@@ -288,19 +432,21 @@ fn account_migration_partial_keychain_success_never_scrubs_input_and_can_retry()
 }
 
 #[test]
-fn account_keychain_command_failure_does_not_commit_or_publish() {
+fn account_keychain_failure_preserves_previous_key_and_journals_committed_removal() {
     let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
     let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
     let mut p = request("abito_account_create", "openai", "https://example.com/v1");
     p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
-    let bytes = std::fs::read(dir.file()).unwrap(); let before = store.view();
+    let reference = active_ref(&dir);
+    let before = store.view();
     *secrets.failure.lock().unwrap() = Some(StoreError::Failed);
     p["action"] = json!("abito_account_save"); p["config"]["apiKey"] = json!("replacement-key");
     assert_eq!(store.command(&p, |_| panic!("failure must not publish")).unwrap_err().code, "keychain_unavailable");
-    assert_eq!(std::fs::read(dir.file()).unwrap(), bytes); assert_eq!(store.view(), before);
-    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"));
+    assert_eq!(store.view(), before);
+    assert_eq!(secrets.read(&reference).unwrap().as_deref(), Some("original-key"));
     assert_eq!(store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| panic!("failure must not publish")).unwrap_err().code, "keychain_unavailable");
-    assert_eq!(std::fs::read(dir.file()).unwrap(), bytes); assert_eq!(store.view(), before);
+    assert_eq!(store.view()["accounts"], json!([]));
+    assert!(secrets.read(&reference).unwrap().is_some());
 }
 
 #[test]
@@ -331,9 +477,10 @@ fn account_owned_removal_clears_key_and_shared_presence_tracks_keychain() {
     let mut p = request("abito_account_create", "openai", "https://example.com/v1");
     p["config"]["apiKey"] = json!("owned-test-key");
     store.command(&p, |_| {}).unwrap();
-    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("owned-test-key"));
+    let reference = active_ref(&dir);
+    assert_eq!(secrets.read(&reference).unwrap().as_deref(), Some("owned-test-key"));
     store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| {}).unwrap();
-    assert_eq!(secrets.read("account-example").unwrap(), None);
+    assert_eq!(secrets.read(&reference).unwrap(), None);
     p["accountId"] = json!("key-openai"); p["config"].as_object_mut().unwrap().remove("apiKey");
     store.command(&p, |_| {}).unwrap();
     assert_eq!(store.view()["accounts"][0]["hasCredential"], false);
@@ -370,11 +517,12 @@ fn account_remove_with_failed_file_commit_and_failed_compensation_keeps_the_key(
     let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
     let mut p = request("abito_account_create", "openai", "https://example.com/v1");
     p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    let reference = active_ref(&dir);
     std::fs::write(dir.0.join(".accounts.json.pending"), b"owned obstruction").unwrap(); // the file commit will fail
     *secrets.mutations_left.lock().unwrap() = Some(1);                                    // one keychain mutation works, the rest fail
     let result = store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| panic!("failure must not publish"));
     assert!(result.is_err());
-    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"), "the key must survive");
+    assert_eq!(secrets.read(&reference).unwrap().as_deref(), Some("original-key"), "the key must survive");
 }
 
 #[test]
@@ -383,11 +531,12 @@ fn account_replace_with_failed_file_commit_and_failed_compensation_keeps_the_pre
     let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
     let mut p = request("abito_account_create", "openai", "https://example.com/v1");
     p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    let reference = active_ref(&dir);
     std::fs::write(dir.0.join(".accounts.json.pending"), b"owned obstruction").unwrap();
     *secrets.mutations_left.lock().unwrap() = Some(1);
     p["action"] = json!("abito_account_save"); p["config"]["apiKey"] = json!("replacement-key");
     assert!(store.command(&p, |_| panic!("failure must not publish")).is_err());
-    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"), "the previous key must survive");
+    assert_eq!(secrets.read(&reference).unwrap().as_deref(), Some("original-key"), "the previous key must survive");
 }
 
 #[test]
@@ -396,8 +545,10 @@ fn account_remove_commits_the_file_first_and_a_failed_key_delete_keeps_the_key()
     let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
     let mut p = request("abito_account_create", "openai", "https://example.com/v1");
     p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    let reference = active_ref(&dir);
     *secrets.mutations_left.lock().unwrap() = Some(0);
     assert!(store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| panic!("no publish")).is_err());
-    assert_eq!(store.view()["accounts"].as_array().unwrap().len(), 1, "the account stays when its key could not be removed");
-    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"));
+    assert_eq!(store.view()["accounts"], json!([]), "removal stays committed; cleanup is journaled");
+    assert_eq!(secrets.read(&reference).unwrap().as_deref(), Some("original-key"));
+    assert_eq!(disk(&dir)["pendingCleanup"], json!([reference]));
 }
