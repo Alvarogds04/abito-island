@@ -189,7 +189,7 @@ impl train::Recorder for MicRecorder {
             }
         }
         drop(capture);
-        Ok(segment.and_then(|seg| speech::transcribe(wake::clip(&seg))))
+        Ok(segment.and_then(|seg| speech::transcribe_raw(wake::clip(&seg))))
     }
 }
 
