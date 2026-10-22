@@ -12,22 +12,28 @@ function parseLoadavg(text) {
   return [load1, load5, load15].every(Number.isFinite) ? { load1, load5, load15 } : null;
 }
 
-/** The machine's load, the core count, the threshold (cores / 2) and how many cargo/rustc processes are running. */
+// «Busy» is either of two conditions (parent decision, after cores / 2 would not have flagged the 13.55-load run on this 32-core
+// machine): the 1-minute load is STRICTLY above cores / 4, or two or more cargo/rustc processes are running.
+const LOAD_DIVISOR = 4, BUILDERS_BUSY = 2;
+
+/** The machine's load, the core count, the threshold (cores / 4), how many cargo/rustc processes run, and whether it counts as busy. */
 function snapshot({ loadavgText, cores, processNames = [] }) {
   const load = parseLoadavg(loadavgText);
   if (!load || !Number.isInteger(cores) || cores <= 0) return { available: false };
-  const threshold = cores / 2;
-  return { available: true, ...load, cores, threshold, high: load.load1 > threshold,
-    builders: processNames.filter(name => name === 'cargo' || name === 'rustc').length };
+  const threshold = cores / LOAD_DIVISOR;
+  const builders = processNames.filter(name => name === 'cargo' || name === 'rustc').length;
+  const loadHigh = load.load1 > threshold, builderHigh = builders >= BUILDERS_BUSY;
+  return { available: true, ...load, cores, threshold, loadHigh, builders, builderHigh, high: loadHigh || builderHigh };
 }
 
 const isTimeoutReason = reason => typeof reason === 'string' && reason.includes('tiempo agotado');
 
-/** A failed scene with the load at that moment. A timeout above the threshold also says «posible carga» in its reason. */
+/** A failed scene with the load at that moment. A timeout on a busy machine also says «posible carga» in its reason. */
 function annotateFailure(scene, load) {
   if (!scene || scene.verdict !== 'fail') return scene;
   const possibleLoad = !!(load && load.available && load.high && isTimeoutReason(scene.reason));
-  const reason = possibleLoad ? `${scene.reason} — posible carga (load ${load.load1} > ${load.threshold}, ${load.builders} cargo/rustc)` : scene.reason;
+  // the line says WHY: the comparison that held (or not) for the load, and the builders
+  const reason = possibleLoad ? `${scene.reason} — posible carga (load ${load.load1} ${load.loadHigh ? '>' : '<='} ${load.threshold}, ${load.builders} cargo/rustc)` : scene.reason;
   return { ...scene, reason, possibleLoad, load };
 }
 
