@@ -324,10 +324,13 @@ function mount(L) {
       const text = L.tipFor({ title: el.getAttribute('data-tip'), visibleText: el.textContent });
       if (!text) return;
       const island = doc.getElementById('island').getBoundingClientRect(), b = el.getBoundingClientRect();
-      tip.textContent = text; tip.hidden = false; tipFor = el;
+      tip.textContent = text; tip.hidden = false; tipFor = el; shownAt = Date.now();
       const p = L.tipPlacement({ x: b.left - island.left, y: b.top - island.top, w: Math.min(tip.offsetWidth || 160, 220), h: b.height }, { w: island.width, h: island.height });
       tip.style.left = `${p.left}px`; tip.style.top = `${p.top}px`;
     }
+    // v8: a lost/synthetic pointer never sends pointerout: poll the row's hover/focus state and cap the tip at 6 s
+    let shownAt = 0;
+    setInterval(() => { if (tip.hidden || !tipFor) return; const active = (tipFor.matches && (tipFor.matches(':hover') || tipFor.matches(':focus-visible') || tipFor.contains(doc.activeElement))); if (!active || Date.now() - shownAt > 6000) hideTip(); }, 400);
     const arm = el => { clearTimeout(tipTimer); if (!el || el === tipFor) return; hideTip(); tipTimer = setTimeout(() => showTip(el), 350); };
     doc.addEventListener('pointerover', e => { const el = titled(e.target); if (el && doc.getElementById('island').contains(el)) arm(el); else hideTip(); });
     doc.addEventListener('pointerleave', hideTip); doc.addEventListener('pointerdown', hideTip, true);
