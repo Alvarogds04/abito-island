@@ -78,14 +78,19 @@ pub fn load_selection(app: &AppHandle, state: &AppState) {
         }
         Saved::Absent
     };
+    *state.chat_cloud.lock().expect("cloud selection lock") = match &saved {
+        Saved::Selected(id) => abito_island::cloudprofiles::select(id).ok(),
+        _ => None,
+    };
     let target = models::initial_selection(&saved).and_then(target_of);
-    if target.is_none() {
+    if target.is_none() && state.chat_cloud.lock().expect("cloud selection lock").is_none() {
         eprintln!("models: saved selection invalid or unknown — no local model selected");
     }
     *state.chat_target.lock().expect("chat target lock") = target;
 }
 
 fn selected_id(state: &AppState) -> Option<String> {
+    if let Some(e) = *state.chat_cloud.lock().expect("cloud selection lock") { return Some(e.id.into()); }
     state
         .chat_target
         .lock()
@@ -112,6 +117,10 @@ fn last(state: &AppState) -> Value {
                    "choice_note": "Todavía no se leyeron los modelos locales.",
                    "remote": "Sin nube y sin claves: sólo modelos de esta máquina."});
     }
+    let mut profiles = v["profiles"].as_array().cloned().unwrap_or_default();
+    profiles.extend(abito_island::cloudprofiles::cloud_entries(&abito_island::secrets::Keychain).into_iter().map(|e| e.listing()));
+    v["profiles"] = json!(profiles);
+    v["remote"] = json!("Nube: sólo proveedores con credencial en Ajustes → Chat.");
     v["selected"] = json!(selected_id(state));
     v["persisted"] = json!(state.models_persisted.load(Ordering::SeqCst));
     v
@@ -130,9 +139,15 @@ pub fn publish_models(app: &AppHandle) {
 /// Explicit selection: registered + selectable only; effective next turn.
 pub fn select(app: &AppHandle, state: &AppState, profile_id: &str) -> Result<(), BridgeError> {
     let registry = registry(state);
-    let entry = models::select(&registry, profile_id).map_err(err)?;
-    let target = target_of(entry).ok_or_else(|| err(ChatError::profile_missing()))?;
-    *state.chat_target.lock().expect("chat target lock") = Some(target);
+    if profile_id.starts_with("cloud-") {
+        let cloud = abito_island::cloudprofiles::select(profile_id).map_err(err)?;
+        *state.chat_cloud.lock().expect("cloud selection lock") = Some(cloud);
+    } else {
+        let entry = models::select(&registry, profile_id).map_err(err)?;
+        let target = target_of(entry).ok_or_else(|| err(ChatError::profile_missing()))?;
+        *state.chat_target.lock().expect("chat target lock") = Some(target);
+        *state.chat_cloud.lock().expect("cloud selection lock") = None;
+    }
     #[cfg(unix)]
     let persisted = match config_dir(app) {
         Some(dir) => match models::write_saved_file(&dir, profile_id) {

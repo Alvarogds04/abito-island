@@ -83,6 +83,9 @@ No ves la pantalla, no puedes usar el mouse, el teclado, archivos ni herramienta
 y no puedes aprobar ni ejecutar nada: si te piden una acción, explica en qué parte de \
 la app se hace y que desde este chat no puedes hacerla.";
 
+/// Cloud-only identity replacement; the local system prompt above remains byte-identical.
+pub const CLOUD_MODEL_PROMPT: &str = "Funcionas con el proveedor de nube elegido en Abito. ";
+
 /// S1 (#503): the turn's effective system message plus the live-state snapshot. Disabled, or with
 /// nothing to say, the system message is returned byte-identical.
 pub fn with_live_context(system: &str, enabled: bool, snapshot: Option<&crate::chatsnapshot::Snapshot>) -> String {

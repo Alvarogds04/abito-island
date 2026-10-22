@@ -132,7 +132,7 @@
     if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(normalized)) return 'Caracteres no válidos';
     return '';
   }
-  const targetAria = t => (t ? `${t.alias}, sólo local, ${String(t.origin || '').replace(/^http:\/\//, '')}` : 'Sin modelo local elegido');
+  const targetAria = t => (t ? `${t.alias}, ${String(t.profile_id || '').startsWith('cloud-') ? 'nube' : 'sólo local'}, ${String(t.origin || '').replace(/^https?:\/\//, '')}` : 'Sin modelo local elegido');
 
   const lastTurn = view => (view && Array.isArray(view.turns) && view.turns.length)
     ? view.turns[view.turns.length - 1] : null;
@@ -358,7 +358,7 @@
   const kTokens = n => (n >= 1024 ? `${Math.round(n / 1024)}k` : String(n));
 
   function modelChips(p) {
-    const chips = [{ icon: 'lock', text: 'local', label: 'Sólo local' }];
+    const chips = p.cloud === true ? [{ icon: '', text: 'nube', label: `Nube · ${p.provider || ''}` }] : [{ icon: 'lock', text: 'local', label: 'Sólo local' }];
     if (Number.isFinite(p.context_tokens)) chips.push({ icon: '', text: kTokens(p.context_tokens), label: `Contexto ${thousands(p.context_tokens)} tokens` });
     if (Number.isFinite(p.size_bytes)) chips.push({ icon: '', text: `${oneDecimal(p.size_bytes / 1e9)} GB`, label: `${decimal(p.size_bytes / 1e9, 'GB')} en memoria` });
     if (Number.isFinite(p.params)) chips.push({ icon: '', text: `${oneDecimal(p.params / 1e9)}B`, label: `${decimal(p.params / 1e9, 'mil millones')} de parámetros` });
@@ -380,13 +380,13 @@
       for (const id of value) if (typeof id === 'string') ids.add(id);
     }
     if (!ids.size) return list;
-    return list.filter(r => !!r && typeof r === 'object' && (typeof r.provider !== 'string' || !r.provider || ids.has(r.id)));
+    return list.filter(r => !!r && typeof r === 'object' && (typeof r.provider !== 'string' || !r.provider || ids.has(r.id) || (r.cloud && ids.has(r.model))));
   }
 
   function modelRows(listing) {
     const profiles = listing && Array.isArray(listing.profiles) ? listing.profiles : [];
     return profiles.map(p => {
-      const facts = [`local ${port(p.origin)}`];
+      const facts = p.cloud === true ? [`nube · ${p.provider || ''}`] : [`local ${port(p.origin)}`];
       if (Number.isFinite(p.context_tokens)) facts.push(`contexto ${thousands(p.context_tokens)} tokens`);
       if (Number.isFinite(p.max_output_tokens)) facts.push(`salida ≤${thousands(p.max_output_tokens)}`);
       if (Number.isFinite(p.size_bytes)) facts.push(`${decimal(p.size_bytes / 1e9, 'GB')} en memoria`);
@@ -403,6 +403,8 @@
       const note = p.note || '';
       return {
         id: p.profile_id || null,
+        cloud: p.cloud === true,
+        model: p.alias,
         title,
         // #414: the provenance the allowlist needs — a provider model row names its provider;
         // local profiles carry none and are never filtered out.

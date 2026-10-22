@@ -228,6 +228,7 @@ fn principal_test_state(instructions: &str) -> AppState {
         probe_fake: Mutex::new(None),
         chat: chatlane::Lane::new("c-principal-test"),
         chat_target: Mutex::new(None),
+        chat_cloud: Mutex::new(None),
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
         hotkey: hotkeyhost::HotkeyHost::default(),
         settings: settingshost::with_test_prefs(prefs),

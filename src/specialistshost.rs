@@ -149,6 +149,11 @@ pub fn turn_configuration(state: &AppState, base: &str) -> Result<(Option<Target
 /// Copy prefs while holding the role lock: both values coexist at the prefs read, and
 /// subsequent edits cannot mix a new role or new principal instructions into this turn.
 pub fn turn_snapshot(state: &AppState, base: &str) -> Result<(Option<Target>, String, Option<abito_island::conversations::SpecialistRef>), ChatError> {
+    turn_snapshot_selected(state, base).map(|(target, system, specialist, _)| (target, system, specialist))
+}
+
+/// Freeze the role and cloud selection together; an explicitly local role always wins.
+pub fn turn_snapshot_selected(state: &AppState, base: &str) -> Result<(Option<Target>, String, Option<abito_island::conversations::SpecialistRef>, Option<abito_island::cloudprofiles::CloudSelection>), ChatError> {
     let (role, principal_instructions) = {
         let store = state.specialists.store.lock().expect("specialists lock");
         let instructions = crate::settingshost::abito_instructions(&state.settings);
@@ -156,9 +161,12 @@ pub fn turn_snapshot(state: &AppState, base: &str) -> Result<(Option<Target>, St
     };
     let fallback = state.chat_target.lock().expect("chat target lock").clone();
     let registry = modelshost::registry(state);
+    let cloud = if role.as_ref().is_some_and(|r| r.model.is_some()) { None } else { *state.chat_cloud.lock().expect("cloud selection lock") };
+    let cloud_base = base.replace("Funcionas con un modelo local de esta máquina. ", abito_island::chatlane::CLOUD_MODEL_PROMPT);
+    let base = if cloud.is_some() { &cloud_base } else { base };
     let (target, system) = resolve_turn(role.as_ref(), fallback, &registry, base, principal_instructions.as_deref())?;
     let specialist = role.map(|s| abito_island::conversations::SpecialistRef { id: s.id, name: s.name });
-    Ok((target, system, specialist))
+    Ok((target, system, specialist, cloud))
 }
 
 /// Restore a conversation's creation-time role identity without inventing a replacement role.

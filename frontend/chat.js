@@ -134,7 +134,7 @@
       name.textContent = row.title;
       const state = document.createElement('span');
       state.className = 'picker-state';
-      state.textContent = row.state;
+      state.textContent = row.cloud ? `${row.provider} · nube` : row.state;
       b.append(name, state);
       b.setAttribute('aria-pressed', row.selected ? 'true' : 'false');
       b.setAttribute('aria-label', `${row.selected ? 'Elegido. ' : 'Elegir. '}${row.aria}`);

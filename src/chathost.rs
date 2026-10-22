@@ -56,6 +56,28 @@ pub fn current_target(state: &AppState) -> Option<Target> {
     specialistshost::effective_target(state).ok().flatten()
 }
 
+fn current_cloud(state: &AppState) -> Option<abito_island::cloudprofiles::CloudSelection> {
+    if state.specialists.role().is_some_and(|r| r.model.is_some()) { return None; }
+    *state.chat_cloud.lock().expect("cloud selection lock")
+}
+
+fn prepare_target(local: Option<Target>, cloud: Option<abito_island::cloudprofiles::CloudSelection>, source: &dyn abito_island::cloudmodel::CredentialSource) -> Result<chatlane::TargetSelection, chat::ChatError> {
+    if let Some(e) = cloud {
+        // OAuth refresh owns a synchronous runtime: never nest it in Tauri's runtime.
+        std::thread::scope(|s| s.spawn(|| source.credential(&e.profile())).join())
+            .map_err(|_| e.missing())?.map_err(|_| e.missing())?;
+        Ok(chatlane::TargetSelection::Cloud(e.target()))
+    } else {
+        Ok(chatlane::TargetSelection::Local(local.ok_or_else(chat::ChatError::profile_missing)?))
+    }
+}
+
+fn cloud_availability(e: abito_island::cloudprofiles::Entry) -> chatlane::Availability {
+    if e.present(&abito_island::secrets::Keychain) {
+        chatlane::Availability { state: "ready", message: "Credencial presente.".into() }
+    } else { chatlane::Availability { state: "blocked", message: e.missing().safe_message } }
+}
+
 /// `chat:state` payload: the conversation projection, the current view, the
 /// chat geometry (from the ONE Rust constant) and the target's visible
 /// identity (origin + alias, never a credential — there is none).
@@ -74,7 +96,11 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
     let asked = state.core.lock().expect("core lock").chat_height();
     let (cw, ch) = geometry::chat_visible_for(area.h, scale, asked);
     v["chat_visible"] = json!([cw, ch]);
-    v["target"] = match current_target(state) {
+    v["target"] = if let Some(e) = current_cloud(state) {
+        let a = cloud_availability(e);
+        v["availability"] = json!({"state": a.state, "message": a.message});
+        e.view()
+    } else { match current_target(state) {
         Some(t) => json!({
             "origin": t.endpoint.origin(),
             "alias": t.alias,
@@ -83,11 +109,14 @@ pub fn chat_view(app: &AppHandle, state: &AppState) -> Value {
             "max_output_tokens": t.max_output,
         }),
         None => Value::Null,
-    };
+    }};
     v["producer"] = json!({
         "pi": "not_connected",
         "note": "Chat con el modelo local. El productor de Pi no existe todavía en el escritorio."
     });
+    if current_cloud(state).is_some() {
+        v["producer"]["note"] = json!("Chat con el proveedor de nube elegido. No requiere Pi.");
+    }
     v
 }
 
@@ -143,6 +172,7 @@ pub fn switch_view(app: &AppHandle, state: &AppState, chat: bool) {
     publish_chat(app);
     if opened {
         capture_window_context(app);
+        if current_cloud(state).is_some() { return; }
         if current_target(state).is_none() {
             state.chat.lock().expect("chat lane lock").availability = chatlane::Availability {
                 state: "blocked",
@@ -215,15 +245,20 @@ pub fn submit(
         return Ok(serde_json::to_value(dup).unwrap_or(Value::Null)); // same turn, no new job
     }
     // #327: one role snapshot supplies both model and system. Later changes affect the next turn.
-    let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
+    let (local, system, specialist, cloud) = specialistshost::turn_snapshot_selected(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
-    let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
+    let store = abito_island::secrets::Keychain;
+    let http = abito_island::provider_oauth::RustlsHttp;
+    let oauth = abito_island::provider_oauth::OAuth::new(&store, &http, &abito_island::cloudprofiles::clock);
+    let source = abito_island::cloudmodel::KeychainCredentials { store: &store, oauth: &oauth, resolve: &abito_island::cloudprofiles::resolve, clock: &abito_island::cloudprofiles::clock };
+    let selected = prepare_target(local, cloud, &source).map_err(chat_error)?;
+    let profile = match &selected { chatlane::TargetSelection::Local(t) => &t.profile, chatlane::TargetSelection::Cloud(t) => &t.profile };
     // S1: frozen at submit like the specialist's own system message; the human can see it (T3).
     let live = live_snapshot(app, state);
     let system = chatlane::with_live_context(&system, live.is_some(), live.as_ref());
-    let gate = crate::model_gate(state, &target);
-    if let Err(e) = gate {
-        return Err(chat_error(e));
+    if let chatlane::TargetSelection::Local(target) = &selected {
+        let gate = crate::model_gate(state, target);
+        if let Err(e) = gate { return Err(chat_error(e)); }
     }
     // #487: NotchBuddy prefixes the FIRST user message with the window context. It is held for the
     // conversation in memory and added to the prompt only: never to the stored or shown text.
@@ -246,7 +281,7 @@ pub fn submit(
     let (accepted, conversation_id) = {
         let mut l = lane.lock().expect("chat lane lock");
         let first = l.convo.is_empty();
-        let accepted = l.submit_with_attachments(text, client_request_id, &target.profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
+        let accepted = l.submit_with_attachments(text, client_request_id, profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
         if !accepted.duplicate {
             if let Some(s) = &live {
                 l.convo.attach_live(&accepted.turn_id, &s.text, s.trimmed_lines);
@@ -270,7 +305,16 @@ pub fn submit(
         std::thread::spawn(move || {
             let publish_app = app.clone();
             let publish = move || publish_chat(&publish_app);
-            chatlane::run_turn_scoped_uploads(&lane, &conversation_id, &turn, &target, &system, deadlines, &publish, uploads_dir.as_deref());
+            match &selected {
+                chatlane::TargetSelection::Local(target) => chatlane::run_turn_scoped_uploads(&lane, &conversation_id, &turn, target, &system, deadlines, &publish, uploads_dir.as_deref()),
+                chatlane::TargetSelection::Cloud(_) => {
+                    let store = abito_island::secrets::Keychain;
+                    let http = abito_island::provider_oauth::RustlsHttp;
+                    let oauth = abito_island::provider_oauth::OAuth::new(&store, &http, &abito_island::cloudprofiles::clock);
+                    let source = abito_island::cloudmodel::KeychainCredentials { store: &store, oauth: &oauth, resolve: &abito_island::cloudprofiles::resolve, clock: &abito_island::cloudprofiles::clock };
+                    chatlane::run_selected(&lane, &turn, &selected, &source, &system, deadlines, &publish);
+                }
+            }
         });
     }
     Ok(serde_json::to_value(accepted).unwrap_or(Value::Null))
@@ -335,7 +379,9 @@ pub async fn chat_action(
         }
         Command::Check => {
             // metadata only, off the main thread; never a prompt
-            if let Some(target) = current_target(&state) {
+            if let Some(e) = current_cloud(&state) {
+                state.chat.lock().expect("chat lane lock").availability = cloud_availability(e);
+            } else if let Some(target) = current_target(&state) {
                 let lane = Arc::clone(&state.chat);
                 let handle = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
@@ -494,6 +540,51 @@ pub fn start_history(app: &AppHandle) {
     } else if crate::probe_requested() { None }
     else { app.path().app_data_dir().ok().map(|p| p.join("conversations")) };
     if let Some(dir) = dir { let _ = state.chat.lock().expect("chat lane lock").init_history(&dir); }
+}
+
+#[cfg(test)]
+mod cloud_selection_tests {
+    use super::*;
+    struct Missing;
+    impl abito_island::cloudmodel::CredentialSource for Missing {
+        fn credential(&self, _: &abito_island::chat::ProfileRef) -> Result<abito_island::cloudmodel::Credential, abito_island::provider_oauth::OauthError> { Err(abito_island::provider_oauth::OauthError::NeedsSignIn) }
+        fn refresh(&self, p: &abito_island::chat::ProfileRef, _: &str) -> Result<abito_island::cloudmodel::Credential, abito_island::provider_oauth::OauthError> { self.credential(p) }
+    }
+    #[test]
+    fn missing_cloud_leaves_lane_unchanged() {
+        let lane = chatlane::Lane::new("c-no-cloud");
+        let before = lane.lock().unwrap().view();
+        let cloud = abito_island::cloudprofiles::select("cloud-openai-gpt-4o").unwrap();
+        let err = prepare_target(Some(chatlane::default_target()), Some(cloud), &Missing).err().unwrap();
+        assert_eq!(err.code, "credential_missing");
+        assert_eq!(err.safe_message, "Configura OpenAI en Ajustes → Chat.");
+        assert_eq!(lane.lock().unwrap().view(), before);
+    }
+    struct Present;
+    impl abito_island::cloudmodel::CredentialSource for Present {
+        fn credential(&self, _: &abito_island::chat::ProfileRef) -> Result<abito_island::cloudmodel::Credential, abito_island::provider_oauth::OauthError> { Ok(abito_island::cloudmodel::Credential::new("fixture".into(), None, None)) }
+        fn refresh(&self, _: &abito_island::chat::ProfileRef, _: &str) -> Result<abito_island::cloudmodel::Credential, abito_island::provider_oauth::OauthError> { panic!("must not refresh") }
+    }
+    #[test]
+    fn present_cloud_never_uses_retained_local_target() {
+        let cloud = abito_island::cloudprofiles::select("cloud-openai-gpt-4o").unwrap();
+        let selected = prepare_target(Some(chatlane::default_target()), Some(cloud), &Present).unwrap();
+        let chatlane::TargetSelection::Cloud(target) = selected else { panic!("silent local fallback") };
+        assert_eq!(target.profile.profile_id, cloud.id);
+        assert_eq!(target.origin(), "https://api.openai.com");
+        assert_eq!(target.model, "gpt-4o");
+    }
+    #[test]
+    fn local_selection_is_identical_and_never_reads_credentials() {
+        let original = chatlane::default_target();
+        let selected = prepare_target(Some(original.clone()), None, &Missing).unwrap();
+        let chatlane::TargetSelection::Local(target) = selected else { panic!("local changed") };
+        assert_eq!(target.endpoint.origin(), original.endpoint.origin());
+        assert_eq!(target.alias, original.alias);
+        assert_eq!(target.profile, original.profile);
+        assert_eq!(target.max_output, original.max_output);
+        assert_eq!(abito_island::localmodel::completion_body(&target.alias, &[], target.max_output).as_bytes(), br#"{"chat_template_kwargs":{"enable_thinking":false},"max_tokens":1024,"messages":[],"model":"Abito-gpt","stream":true}"#);
+    }
 }
 
 /// Default deadlines for production turns.

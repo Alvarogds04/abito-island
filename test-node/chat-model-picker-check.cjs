@@ -276,6 +276,18 @@ const pickerRows = page => page.picker().children.filter(n => n.tagName === 'BUT
 const rowNames = rows => rows.map(r => (r.children.find(c => c.className === 'picker-name') || {}).textContent);
 
 async function main() {
+  await check('credentialed cloud models share the picker and select IPC', async () => {
+    const page = await loadPage({ extraProfiles: [{ profile_id: 'cloud-openai-gpt-4o', revision: 1, alias: 'gpt-4o', origin: 'https://api.openai.com', cloud: true, provider: 'OpenAI', selectable: true, gate: { state: 'ready' } }] });
+    page.btn().click(); await page.settle();
+    const row = pickerRows(page).find(r => r.getAttribute('aria-label').includes('gpt-4o'));
+    assert.ok(row);
+    assert.match(row.getAttribute('aria-label'), /OpenAI/);
+    assert.match(row.getAttribute('aria-label'), /nube/i);
+    assert.doesNotMatch(row.getAttribute('aria-label'), /local/i);
+    row.click(); await page.settle();
+    assert.ok(page.byAction('models_action').some(p => p.action === 'select' && p.profile_id === 'cloud-openai-gpt-4o'));
+    assert.match(page.btn().getAttribute('aria-label'), /nube/);
+  });
   await check('F024 markup: the row and its named controls sit above the composer', async () => {
     const html = fs.readFileSync(path.join(FRONTEND, 'index.html'), 'utf8');
     for (const id of ['chat-model-row', 'chat-model-btn', 'chat-model-name', 'chat-model-picker', 'chat-model-note']) {

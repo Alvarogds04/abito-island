@@ -24,6 +24,8 @@ const CLOUD_PROVIDERS: [(CloudProvider, Kind, &str); 7] = [
 #[derive(Clone)]
 pub struct CloudTarget { kind: Kind, pub profile: ProfileRef, pub model: String, base_url: String, pub max_output: usize }
 impl CloudTarget {
+    /// Public identity is the vendor origin only, never an API path or credential.
+    pub fn origin(&self) -> String { reqwest::Url::parse(&self.base_url).expect("fixed URL").origin().ascii_serialization() }
     pub fn new(provider: CloudProvider, profile: ProfileRef, model: String, max_output: usize) -> Self {
         let (_, _, base) = CLOUD_PROVIDERS.iter().find(|(p, _, _)| *p == provider).expect("closed provider table");
         Self::fixed(provider, profile, model, max_output, base).expect("fixed provider URL")

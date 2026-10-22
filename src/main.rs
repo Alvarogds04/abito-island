@@ -367,6 +367,7 @@ struct AppState {
     /// U1: the selected LOCAL target (U2 picker writes it; `None` = no
     /// verified local model selected → Send refuses with `profile_missing`).
     chat_target: Mutex<Option<Target>>,
+    chat_cloud: Mutex<Option<abito_island::cloudprofiles::CloudSelection>>,
     /// U1: `chat_action` rate gate (same 30/s rule, its own budget).
     chat_rate: Mutex<bridge::RateLimiter>,
     /// #305: the global show/hide shortcut (config + X11 grab).
@@ -1820,6 +1821,7 @@ fn main() {
         chat: chatlane::Lane::new("c-island"),
         // U2: resolved from the saved selection in `setup` (fail closed).
         chat_target: Mutex::new(None),
+        chat_cloud: Mutex::new(None),
         chat_rate: Mutex::new(bridge::RateLimiter::new()),
         window_h: AtomicI32::new(geometry::ISLAND_WINDOW.1),
         hotkey: hotkeyhost::HotkeyHost::default(),

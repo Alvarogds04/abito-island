@@ -56,6 +56,7 @@ pub mod integrations_net;
 pub mod servicedetail;
 pub mod localmodel;
 pub mod cloudmodel;
+pub mod cloudprofiles;
 pub mod imapcmd;
 pub mod mailcmd;
 #[cfg(target_os = "linux")]
