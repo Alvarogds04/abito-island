@@ -41,7 +41,7 @@ fn high_entropy_strings_are_redacted_but_plain_words_paths_and_short_hashes_stay
 fn redacts_oauth_codes_and_url_credentials() {
     let out = r("callback http://127.0.0.1:8080/cb?code=4%2F0AbCdEf&state=xyz123&scope=mail more");
     assert!(!out.contains("4%2F0AbCdEf") && !out.contains("xyz123"), "{out}");
-    assert!(out.contains("scope=mail") && out.contains("127.0.0.1:8080/cb"), "{out}");
+    assert!(out.contains("scope=mail") && out.contains("<ip>:8080/cb"), "{out}");
     let out = r("fetch https://user:pw0rd@example.test/x?access_token=aaa&id_token=bbb ok");
     assert!(!out.contains("pw0rd") && !out.contains("aaa") && !out.contains("bbb"), "{out}");
 }
@@ -209,4 +209,41 @@ fn each_listed_prefix_is_redacted_on_its_own() {
             assert!(!out.contains(&secret[..12]), "leaked {secret} in {text:?}: {out}");
         }
     }
+}
+
+#[test]
+fn ipv4_addresses_are_redacted_including_private_and_tailnet_ranges() {
+    for ip in ["8.8.8.8", "192.168.1.20", "10.0.0.5", "172.16.4.9", "100.64.0.1", "100.97.187.82", "127.0.0.1"] {
+        assert_eq!(r(&format!("connect to {ip}:1725 failed")), "connect to <ip>:1725 failed", "{ip}");
+        assert_eq!(r(&format!("http://{ip}/x")), "http://<ip>/x", "{ip}");
+    }
+    assert_eq!(r("Abito 0.2.0 build 1.2.3 at 12:34:56"), "Abito 0.2.0 build 1.2.3 at 12:34:56", "versions and times stay");
+}
+
+#[test]
+fn ipv6_addresses_are_redacted_but_rust_paths_and_times_stay() {
+    for ip in ["::1", "fe80::1ff:fe23:4567:890a", "2001:db8::8a2e:370:7334", "2001:0db8:0000:0000:0000:ff00:0042:8329", "fd7a:115c:a1e0::1", "::ffff:192.168.1.1"] {
+        assert_eq!(r(&format!("bind {ip} refused")), "bind <ip> refused", "{ip}");
+        assert_eq!(r(&format!("http://[{ip}]:80/")), "http://[<ip>]:80/", "{ip}");
+    }
+    let keep = "panicked in std::io::Error and core::fmt::Display at 12:34:56 deadbeef::cafe_fn";
+    assert_eq!(r(keep), keep);
+}
+
+#[test]
+fn tailnet_and_local_hostnames_are_redacted() {
+    for host in ["alvaro-pc.tail1234.ts.net", "ubuntu.local", "nas.lan", "db.internal", "router.home.arpa", "Mi-PC.TS.NET"] {
+        assert_eq!(r(&format!("resolve {host} failed")), "resolve <host> failed", "{host}");
+        assert_eq!(r(&format!("https://{host}:8443/api")), "https://<host>:8443/api", "{host}");
+    }
+    assert_eq!(r("see github.com and example.org"), "see github.com and example.org");
+}
+
+#[test]
+fn the_machines_own_hostname_is_redacted() {
+    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default().trim().to_owned();
+    if host.len() < 3 || host == "localhost" { return; } // nothing distinctive to hide on this machine
+    let out = r(&format!("host {host} unreachable, also {}", host.to_uppercase()));
+    assert!(!out.to_lowercase().contains(&host.to_lowercase()), "{out}");
+    assert!(out.contains("<host>"), "{out}");
 }

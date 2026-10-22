@@ -78,6 +78,7 @@ pub fn redact(text: &str, home: &str, user: &str) -> String {
     let t = redact_kv(&t);
     let t = redact_bearer(&t);
     let t = redact_emails(&t);
+    let t = redact_net(&t);
     let t = redact_tokens(&t);
     let t = redact_home(&t, home);
     redact_user(&t, user)
@@ -182,6 +183,75 @@ fn redact_emails(s: &str) -> String {
         i += 1;
     }
     out.into_iter().collect()
+}
+
+// ---- network identity: IPs and hostnames
+
+const HOST_SUFFIXES: [&str; 5] = [".ts.net", ".local", ".lan", ".internal", ".home.arpa"];
+
+fn machine_hostname() -> &'static str {
+    static HOST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| {
+        let h = std::fs::read_to_string("/proc/sys/kernel/hostname").ok()
+            .or_else(|| std::env::var("HOSTNAME").ok()).unwrap_or_default().trim().to_owned();
+        if h.chars().count() < 3 || h.eq_ignore_ascii_case("localhost") { String::new() } else { h }
+    })
+}
+
+fn is_ipv4(run: &str) -> bool {
+    let parts: Vec<&str> = run.split('.').collect();
+    parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u16>().is_ok_and(|n| n <= 255))
+}
+
+fn is_ipv6(run: &str) -> bool {
+    let colons = run.matches(':').count();
+    if colons < 2 || !(run.contains("::") || colons == 7) || run.matches("::").count() > 1 { return false; }
+    if !run.chars().any(|c| c.is_ascii_hexdigit()) { return false; }
+    let groups: Vec<&str> = run.split(':').collect();
+    let last = groups.len() - 1;
+    groups.iter().enumerate().all(|(i, g)| g.is_empty() || (g.len() <= 4 && g.bytes().all(|b| b.is_ascii_hexdigit())) || (i == last && is_ipv4(g)))
+}
+
+fn redact_net(s: &str) -> String {
+    let b: Vec<char> = s.chars().collect();
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        // hostname-ish token: letters, digits, '-', '.'
+        if (b[i].is_ascii_alphanumeric()) && (i == 0 || !(word(b[i - 1]) || b[i - 1] == '-' || b[i - 1] == '.')) {
+            let mut j = i;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == '-' || b[j] == '.') { j += 1; }
+            let mut e = j;
+            while e > i && b[e - 1] == '.' { e -= 1; }
+            let tok: String = b[i..e].iter().collect();
+            let low = tok.to_ascii_lowercase();
+            let host = machine_hostname().to_ascii_lowercase();
+            let after_ok = e >= b.len() || !word(b[e]);
+            if after_ok && (is_ipv4(&tok) || HOST_SUFFIXES.iter().any(|x| low.ends_with(x) && low.len() > x.len())
+                || (!host.is_empty() && (low == host || low.starts_with(&format!("{host}.")))) ) {
+                out.push_str(if is_ipv4(&tok) { "<ip>" } else { "<host>" });
+                i = e;
+                continue;
+            }
+        }
+        // hex/colon run: IPv6
+        if (b[i].is_ascii_hexdigit() || b[i] == ':') && (i == 0 || !(word(b[i - 1]) || b[i - 1] == ':' || b[i - 1] == '.')) {
+            let mut j = i;
+            while j < b.len() && (b[j].is_ascii_hexdigit() || b[j] == ':' || b[j] == '.') { j += 1; }
+            let mut e = j;
+            while e > i && b[e - 1] == '.' { e -= 1; }
+            let tok: String = b[i..e].iter().collect();
+            if (e >= b.len() || !word(b[e])) && is_ipv6(&tok) {
+                out.push_str("<ip>");
+                i = e;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
 }
 
 fn entropy(s: &str) -> f64 {
