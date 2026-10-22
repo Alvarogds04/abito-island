@@ -70,7 +70,7 @@ test('island_window_height is registered and gated like island_shape: main windo
   assert.ok(order.every(i => i >= 0), JSON.stringify(order));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
   assert.match(main, /island_shape,\s+island_window_height,/);
-  assert.match(main, /geometry::island_window_rect_on\(monitor, area, io\.scale\(\), state\.window_h\.load\(Ordering::SeqCst\)\)/, 'the single native size funnel honours the requested height AND centres on the monitor');
+  assert.match(main, /geometry::island_window_rect_for\(monitor, area, io\.scale\(\), state\.window_h\.load\(Ordering::SeqCst\)\)/, 'the single native size funnel honours the requested height AND centres on the monitor, and places nothing while no monitor backs the scale');
   assert.match(main, /monitor: Mutex<Rect>,/, 'the monitor the island centres on is part of the app state');
   assert.match(main, /window_h: AtomicI32::new\(geometry::ISLAND_WINDOW\.1\)/);
   const capabilities = JSON.parse(fs.readFileSync(path.join(__dirname, '../capabilities/main.json'), 'utf8'));
