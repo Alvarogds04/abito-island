@@ -84,3 +84,14 @@ fn an_old_prefs_file_without_sensitivity_still_loads_with_the_default() {
     assert!(p.enabled);
     assert_eq!(p.sensitivity, 50);
 }
+
+#[test]
+fn the_training_commands_are_closed_and_take_no_arguments() {
+    for (a, c) in [("train_record", Command::TrainRecord), ("train_undo", Command::TrainUndo), ("train_cancel", Command::TrainCancel), ("train_finish", Command::TrainFinish), ("train_reset", Command::TrainReset)] {
+        assert_eq!(parse_command(&json!({ "action": a })), Some(c));
+        assert_eq!(parse_command(&json!({ "action": a, "x": 1 })), None, "{a} with an extra field");
+    }
+    // The previous commands are untouched.
+    assert_eq!(parse_command(&json!({ "action": "status" })), Some(Command::Status));
+    assert_eq!(parse_command(&json!({ "action": "train" })), None);
+}

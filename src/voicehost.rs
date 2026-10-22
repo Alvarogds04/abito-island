@@ -8,7 +8,7 @@
 //! said after it (or `voice-timeout` {} when nothing was).
 use crate::{now_ms, AppState};
 use abito_island::bridge::{self, BridgeError};
-use abito_island::speech::{self, audio, wake};
+use abito_island::speech::{self, audio, train, wake};
 use abito_island::prefs::Command as PrefsCommand;
 use abito_island::voicecmd::{self, Command, VoicePrefs};
 use abito_island::voiceintent::{self, Effect, Hands, MusicOp, Outcome, Session, World};
@@ -157,6 +157,44 @@ pub struct Host {
     prefs: VoicePrefs,
     listener: Option<Listener>,
     last_error: Option<String>,
+    /// How this person's «OK Abito» is transcribed (text only), and the training in progress.
+    learned: train::Learned,
+    trainer: train::Trainer,
+}
+
+/// Hears ONE phrase through the same path as the live listener: microphone, Silero VAD, Parakeet.
+/// The audio lives only in memory and is dropped as soon as it is transcribed.
+struct MicRecorder {
+    sensitivity: u8,
+}
+
+impl train::Recorder for MicRecorder {
+    fn hear(&self) -> Result<Option<String>, String> {
+        let params = wake::params(self.sensitivity);
+        let mut vad = wake::SileroGate::create(&wake::VAD.path(), params).ok_or("the voice detector could not be loaded")?;
+        let (tx, rx) = mpsc::channel::<Vec<f32>>();
+        let capture = audio::Capture::start(audio::Source::Mic(None), move |s| {
+            let _ = tx.send(s.to_vec());
+        })?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        let mut segment = None;
+        while segment.is_none() {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            match rx.recv_timeout(left) {
+                Ok(chunk) => segment = vad.feed(&chunk).into_iter().next(),
+                Err(_) => break,
+            }
+        }
+        drop(capture);
+        Ok(segment.and_then(|seg| speech::transcribe(wake::clip(&seg))))
+    }
+}
+
+fn training_json(h: &Host) -> Value {
+    json!({ "recorded": h.trainer.recorded(), "target": train::TARGET, "active": h.trainer.active(), "last": h.trainer.last(), "learned": h.learned })
 }
 
 fn slot_prefs(app: &AppHandle) -> VoicePrefs {
@@ -270,6 +308,7 @@ fn start_listener(app: &AppHandle, sensitivity: u8) -> Result<Listener, String> 
                         if voice_debug() {
                             eprintln!("abito voice: heard {:?} (normalised {:?}, tolerance {})", text, voiceintent::normalise(&text), tolerance);
                         }
+                        flow.set_learned(handle.state::<Mutex<Host>>().lock().expect("voice host").learned.clone());
                         for ev in flow.on_transcript(&text, tolerance) {
                             match ev {
                                 wake::FlowEvent::Wake => {
@@ -329,7 +368,7 @@ fn sync(app: &AppHandle) {
 }
 
 pub fn start(app: &AppHandle) {
-    app.manage(Mutex::new(Host { prefs: voicecmd::load_prefs_in(&voicecmd::prefs_dir()), listener: None, last_error: None }));
+    app.manage(Mutex::new(Host { prefs: voicecmd::load_prefs_in(&voicecmd::prefs_dir()), listener: None, last_error: None, learned: train::load_in(&voicecmd::prefs_dir()), trainer: train::Trainer::default() }));
     let app = app.clone();
     std::thread::spawn(move || sync(&app));
 }
@@ -344,6 +383,7 @@ fn status_json(app: &AppHandle) -> Value {
         "parakeet": speech::status().parakeet,
         "listening": h.listener.is_some(),
         "error": h.last_error,
+        "training": training_json(&h),
     })
 }
 
@@ -358,7 +398,7 @@ pub async fn voice_action(
     bridge::sender_ok(webview.label(), &url)?;
     state.chat_rate.lock().expect("chat rate lock").check(now_ms())?;
     let command = voicecmd::parse_command(&payload).ok_or_else(|| err("invalid_schema"))?;
-    tauri::async_runtime::spawn_blocking(move || match command {
+    tauri::async_runtime::spawn_blocking(move || match command.clone() {
         Command::Status => Ok(status_json(&app)),
         Command::SetPrefs(prefs) => {
             voicecmd::save_prefs_in(&voicecmd::prefs_dir(), &prefs).map_err(|_| err("save_failed"))?;
@@ -380,6 +420,54 @@ pub async fn voice_action(
                 let _ = a.emit("voice-model", status_json(&a));
                 sync(&a);
             });
+            Ok(status_json(&app))
+        }
+        Command::TrainRecord => {
+            // The microphone belongs to the training while it hears: pause the wake listener, then restore it.
+            let (old, sensitivity, mut trainer) = {
+                let slot = app.state::<Mutex<Host>>();
+                let mut h = slot.lock().expect("voice host");
+                (h.listener.take(), h.prefs.sensitivity, std::mem::take(&mut h.trainer))
+            };
+            drop(old);
+            let result = trainer.record(&MicRecorder { sensitivity });
+            {
+                let slot = app.state::<Mutex<Host>>();
+                let mut h = slot.lock().expect("voice host");
+                h.trainer = trainer;
+                h.last_error = result.as_ref().err().cloned();
+            }
+            sync(&app);
+            Ok(status_json(&app))
+        }
+        Command::TrainUndo | Command::TrainCancel => {
+            let slot = app.state::<Mutex<Host>>();
+            let mut h = slot.lock().expect("voice host");
+            if command == Command::TrainUndo { h.trainer.undo() } else { h.trainer.cancel() }
+            drop(h);
+            Ok(status_json(&app))
+        }
+        Command::TrainFinish => {
+            let slot = app.state::<Mutex<Host>>();
+            let mut h = slot.lock().expect("voice host");
+            match h.trainer.finish() {
+                Ok(learned) => {
+                    train::save_in(&voicecmd::prefs_dir(), &learned).map_err(|_| err("save_failed"))?;
+                    h.learned = learned;
+                    h.last_error = None;
+                }
+                Err(e) => h.last_error = Some(e),
+            }
+            drop(h);
+            Ok(status_json(&app))
+        }
+        Command::TrainReset => {
+            train::reset_in(&voicecmd::prefs_dir()).map_err(|_| err("save_failed"))?;
+            let slot = app.state::<Mutex<Host>>();
+            let mut h = slot.lock().expect("voice host");
+            h.learned = train::Learned::default();
+            h.trainer.cancel();
+            drop(h);
             Ok(status_json(&app))
         }
         Command::Remove => {

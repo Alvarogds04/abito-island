@@ -193,3 +193,26 @@ fn a_corrupt_or_hostile_file_loads_as_nothing_and_cannot_loosen_the_rules() {
     assert_eq!(l.leads, v(&["yes"]));
     assert_eq!(l.phrases, v(&["yes gabito"]));
 }
+
+// ── Live transcripts of a Spanish speaker over RDP (2026-10-22) ──────────────
+
+#[test]
+fn endings_in_a_and_split_forms_heard_live_are_learned() {
+    let l = learn(&v(&["Okay, Yavita que ahora es que", "Yavita.", "Yavita,", "Ok ya Vito", "Ok ya vito.", "Yes."]));
+    assert!(l.names.contains(&"yavita".to_string()), "{l:?}");
+    // «ya vito» joins into «yavito», already a known spelling, so nothing new is stored for it.
+    assert!(!l.names.contains(&"yavito".to_string()), "{l:?}");
+    assert!(!l.names.contains(&"vito".to_string()), "a bare «vito» is never a name: {l:?}");
+    // Noise and the English auto-detection are not learned.
+    let noise = learn(&v(&["Yes.", "Yes.", "So", "So", "Años", "Años", "", "", "So it doesn't seem like this time.", "So it doesn't seem like this time."]));
+    assert!(noise.is_empty(), "{noise:?}");
+}
+
+#[test]
+fn a_trained_person_wakes_with_their_own_spellings_including_split_forms() {
+    let l = learn(&v(&["Yavita.", "Yavita.", "ok ya vito", "ok ya vito", "Habito."]));
+    assert_eq!(match_wake_with("Yavita, ¿qué hora es?", 0, &l), Some("¿qué hora es?".into()));
+    assert_eq!(match_wake_with("ok ya vato, que hora es", 0, &l), None, "only what was heard");
+    assert_eq!(match_wake_with("ok ya vito, que hora es", 0, &l), Some("que hora es".into()));
+    assert_eq!(match_wake_with("Años", 0, &l), None);
+}

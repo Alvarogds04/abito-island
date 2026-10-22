@@ -50,7 +50,7 @@ fn plain_word(w: &str) -> bool {
 
 fn valid_name(w: &str) -> bool {
     let n = w.chars().count();
-    plain_word(w) && (4..=12).contains(&n) && !COMMON.contains(&w) && !OK_WORDS.contains(&w) && levenshtein(w.strip_prefix('h').unwrap_or(w), "abito") <= 3
+    plain_word(w) && (5..=12).contains(&n) && !COMMON.contains(&w) && !OK_WORDS.contains(&w) && levenshtein(&w[w.len() - 5..], "abito") <= 2
 }
 
 fn valid_lead(w: &str) -> bool {
@@ -58,24 +58,33 @@ fn valid_lead(w: &str) -> bool {
     plain_word(w) && (2..=8).contains(&n) && !STOP_LEADS.contains(&w) && !COMMON.contains(&w) && !OK_WORDS.contains(&w)
 }
 
-/// Splits a normalised phrase into (lead, name) when it looks like a wake phrase.
+/// Splits a normalised phrase into (lead, name) when it looks like a wake phrase. A name split
+/// in two short words («ya vito») is learned joined; the matcher already joins such pairs.
 fn parts(text: &str) -> Option<(Option<String>, String)> {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.is_empty() || words.len() > 3 {
         return None;
     }
-    let name = *words.last()?;
-    if !valid_name(name) {
+    let last = *words.last()?;
+    if words.len() >= 2 {
+        let prev = words[words.len() - 2];
+        let joined = format!("{prev}{last}");
+        if prev.chars().count() <= 2 && !OK_WORDS.contains(&prev) && !STOP_LEADS.contains(&prev) && valid_name(&joined) {
+            let lead = (words.len() == 3).then(|| words[0].to_string());
+            return Some((lead, joined));
+        }
+    }
+    if !valid_name(last) {
         return None;
     }
     let lead = (words.len() >= 2).then(|| words[words.len() - 2].to_string());
-    Some((lead, name.to_string()))
+    Some((lead, last.to_string()))
 }
 
 fn ranked(counts: Vec<(String, usize)>, cap: usize) -> Vec<String> {
     let mut v: Vec<(usize, String)> = counts.into_iter().filter(|(_, c)| *c >= MIN_SEEN).map(|(w, c)| (c, w)).collect();
     // Stable: most heard first, ties keep the order of first appearance.
-    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.sort_by_key(|e| std::cmp::Reverse(e.0));
     v.into_iter().take(cap).map(|(_, w)| w).collect()
 }
 
