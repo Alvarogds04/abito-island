@@ -23,6 +23,8 @@ pub const LOG_LINES: usize = 50;
 const LOG_LINE_CHARS: usize = 300;
 const STORE_MAX_BYTES: u64 = 256 * 1024;
 const STORE_KEEP_LINES: usize = 100;
+pub const MESSAGE_MAX: usize = 200;
+const TOKEN_MAX: usize = 40;
 const SECRET: &str = "<secret>";
 
 /// One local failure. All text fields are already redacted when a record is created.
@@ -383,6 +385,43 @@ pub fn safe_log_lines(lines: &[String], home: &str, user: &str, max: usize) -> V
     kept[skip..].to_vec()
 }
 
+// ---------------------------------------------------------------- closed fields
+
+fn looks_like_conversation(text: &str) -> bool {
+    let low = text.to_lowercase();
+    CONTENT_MARKERS.iter().any(|m| low.contains(m))
+}
+
+/// The short free-form part of a record: first line only, redacted, withheld when it looks like chat content, capped.
+pub fn safe_message(msg: &str, home: &str, user: &str) -> String {
+    let first = msg.lines().next().unwrap_or("").trim();
+    if looks_like_conversation(first) { return "<message withheld: may contain conversation content>".to_owned(); }
+    let r = redact(first, home, user);
+    if r.chars().count() > MESSAGE_MAX { let mut c: String = r.chars().take(MESSAGE_MAX).collect(); c.push('…'); c } else { r }
+}
+
+/// `process` and `step` are identifiers chosen by our own code: anything else is not one of ours.
+fn closed_token(t: &str) -> String {
+    if !t.is_empty() && t.chars().count() <= TOKEN_MAX && t.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) && !t.contains("..") {
+        t.to_owned()
+    } else { "unknown".to_owned() }
+}
+
+/// The only panic payloads whose text is ours (std/core wording with no user data). Everything else — an `expect` message,
+/// an `Err` value, a formatted string — can carry chat text and is reduced to its kind.
+fn panic_kind(payload: &str) -> String {
+    const SAFE: [&str; 9] = ["index out of bounds", "attempt to ", "explicit panic", "assertion failed", "already borrowed", "already mutably borrowed", "capacity overflow", "slice index", "byte index"];
+    if let Some(p) = SAFE.iter().find(|p| payload.starts_with(**p)) {
+        let line = payload.lines().next().unwrap_or("");
+        let cut = if *p == "assertion failed" { "assertion failed" } else { line };
+        return cut.chars().take(MESSAGE_MAX).collect();
+    }
+    if payload.starts_with("called `Option::unwrap()`") { return "called `Option::unwrap()` on a `None` value".to_owned(); }
+    if payload.starts_with("called `Result::unwrap()`") { return "called `Result::unwrap()` on an `Err` value (value withheld)".to_owned(); }
+    if payload.contains("PoisonError") || payload.contains("poisoned") { return "poisoned lock".to_owned(); }
+    "panic (message withheld)".to_owned()
+}
+
 // ---------------------------------------------------------------- fingerprint
 
 fn normalize(msg: &str) -> String {
@@ -420,7 +459,7 @@ pub struct Report { pub title: String, pub body: String }
 pub fn build_report(rec: &FailureRecord, log: &[String], home: &str, user: &str) -> Report {
     let rd = |t: &str| redact(t, home, user);
     let fp = fingerprint_of(rec);
-    let msg = rd(&rec.message);
+    let msg = safe_message(&rec.message, home, user);
     let first: String = msg.lines().next().unwrap_or("").chars().take(60).collect();
     let title = format!("[{}] {}: {} ({fp})", rd(&rec.process), rd(&rec.step), first.trim());
     let log_lines = safe_log_lines(log, home, user, LOG_LINES);
@@ -499,9 +538,9 @@ pub fn load_all(dir: &Path) -> Vec<Stored> {
 pub fn record_failure(process: &str, step: &str, message: &str, env: &Env, at_secs: u64) -> FailureRecord {
     FailureRecord {
         at_secs,
-        process: process.to_owned(),
-        step: step.to_owned(),
-        message: redact(message, &env.home, &env.user),
+        process: closed_token(process),
+        step: closed_token(step),
+        message: safe_message(message, &env.home, &env.user),
         version: env.version.clone(),
         os: env.os.clone(),
         session: env.session.clone(),
@@ -509,7 +548,8 @@ pub fn record_failure(process: &str, step: &str, message: &str, env: &Env, at_se
 }
 
 pub fn record_from_panic(process: &str, payload: &str, location: Option<(&str, u32)>, env: &Env, at_secs: u64) -> FailureRecord {
-    let msg = match location { Some((f, l)) => format!("{payload} at {f}:{l}"), None => payload.to_owned() };
+    let kind = panic_kind(payload);
+    let msg = match location { Some((f, l)) => format!("{kind} at {f}:{l}"), None => kind };
     record_failure(process, "panic", &msg, env, at_secs)
 }
 

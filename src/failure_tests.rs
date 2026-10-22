@@ -173,15 +173,6 @@ fn a_corrupt_store_is_ignored_not_fatal() {
 }
 
 #[test]
-fn panic_info_becomes_a_record_with_location_and_no_network() {
-    let env = Env { version: "0.2.0".into(), os: "Ubuntu".into(), session: "x11".into(), home: HOME.into(), user: USER.into() };
-    let rec = record_from_panic("island", "payload /home/alvaro/x token=abc123", Some(("src/voicehost.rs", 12)), &env, 5);
-    assert_eq!((rec.step.as_str(), rec.at_secs, rec.version.as_str()), ("panic", 5, "0.2.0"));
-    assert!(rec.message.contains("payload ~/x") && rec.message.contains("src/voicehost.rs:12"), "{}", rec.message);
-    assert!(!rec.message.contains("abc123"), "the record is redacted before it ever touches disk");
-}
-
-#[test]
 fn multibyte_text_next_to_path_like_prefixes_never_panics() {
     assert_eq!(r("describí acá qué pasó: C:\\Users\\Eve\\ñ y ñandú"), "describí acá qué pasó: ~\\ñ y ñandú");
     assert_eq!(r("é:ü ü"), "é:ü ü");
@@ -246,4 +237,56 @@ fn the_machines_own_hostname_is_redacted() {
     let out = r(&format!("host {host} unreachable, also {}", host.to_uppercase()));
     assert!(!out.to_lowercase().contains(&host.to_lowercase()), "{out}");
     assert!(out.contains("<host>"), "{out}");
+}
+
+fn env() -> Env { Env { version: "0.2.0".into(), os: "Ubuntu".into(), session: "x11".into(), home: HOME.into(), user: USER.into() } }
+
+#[test]
+fn panic_info_becomes_a_record_with_location_and_kind_and_no_network() {
+    let rec = record_from_panic("island", "index out of bounds: the len is 3 but the index is 5", Some(("src/voicehost.rs", 12)), &env(), 5);
+    assert_eq!((rec.step.as_str(), rec.at_secs, rec.version.as_str()), ("panic", 5, "0.2.0"));
+    assert!(rec.message.contains("index out of bounds") && rec.message.contains("src/voicehost.rs:12"), "{}", rec.message);
+}
+
+#[test]
+fn a_panic_message_with_chat_text_never_reaches_the_record() {
+    for payload in [
+        "called `Result::unwrap()` on an `Err` value: ParseError(\"dime algo sobre mi madre y mi diagnóstico\")",
+        "called `Option::expect()` failed: hola abito escribí a mi madre",
+        "conversation 42: el usuario dijo que quiere ayuda con su divorcio",
+        "something odd: hola abito, mandale un mail a mi jefe",
+        "Error: 'dime la clave de mi banco'",
+    ] {
+        let rec = record_from_panic("island", payload, Some(("src/chat.rs", 7)), &env(), 1);
+        for leaked in ["madre", "diagnóstico", "divorcio", "jefe", "banco", "dijo", "escribí"] {
+            assert!(!rec.message.contains(leaked), "leaked {leaked} from {payload:?}: {}", rec.message);
+        }
+        assert!(rec.message.contains("src/chat.rs:7"), "the location is kept: {}", rec.message);
+    }
+}
+
+#[test]
+fn free_form_messages_are_withheld_when_they_look_like_conversation_and_capped_otherwise() {
+    let rec = record_failure("island", "x", "chat: user said: my diagnosis is private", &env(), 1);
+    assert!(!rec.message.contains("diagnosis"), "{}", rec.message);
+    let long = record_failure("island", "x", &"e".repeat(5000), &env(), 1);
+    assert!(long.message.chars().count() <= MESSAGE_MAX + 1, "{}", long.message.len());
+    let multi = record_failure("island", "x", "first line\nsecond line with stuff", &env(), 1);
+    assert_eq!(multi.message, "first line");
+}
+
+#[test]
+fn process_and_step_are_closed_tokens() {
+    let rec = record_failure("is land/../", "step with spaces <b>", "m", &env(), 1);
+    assert_eq!((rec.process.as_str(), rec.step.as_str()), ("unknown", "unknown"));
+    let ok = record_failure("daemon", "agent-no-answer", "m", &env(), 1);
+    assert_eq!((ok.process.as_str(), ok.step.as_str()), ("daemon", "agent-no-answer"));
+}
+
+#[test]
+fn the_report_caps_a_stored_message_even_if_an_older_record_has_chat_in_it() {
+    let mut rec = record();
+    rec.message = "conversation 9: user said hello about my mother".into();
+    let rep = build_report(&rec, &[], HOME, USER);
+    assert!(!rep.body.contains("mother"), "{}", rep.body);
 }
