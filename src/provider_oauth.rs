@@ -102,13 +102,15 @@ fn token_post_controlled(url: &str, form: &[(String, String)], cancelled: &(dyn 
 }
 // Shared across instances as well as callers: refresh and sign-out cannot race credential writes.
 static TOKEN_LOCK: Mutex<()> = Mutex::new(());
-pub struct OAuth<'a> { store: &'a (dyn SecretStore + Sync), http: &'a dyn TokenHttp, clock: &'a (dyn Fn() -> u64 + Sync), configs: &'a [ProviderConfig; 2], control: Option<(&'a (dyn Fn() -> bool + Sync), std::time::Instant)> }
+pub struct OAuth<'a> { store: &'a (dyn SecretStore + Sync), http: &'a dyn TokenHttp, clock: &'a (dyn Fn() -> u64 + Sync), configs: &'a [ProviderConfig; 2], loopback: std::net::SocketAddr, control: Option<(&'a (dyn Fn() -> bool + Sync), std::time::Instant)> }
 impl<'a> OAuth<'a> {
-    pub fn new(store: &'a (dyn SecretStore + Sync), http: &'a dyn TokenHttp, clock: &'a (dyn Fn() -> u64 + Sync)) -> Self { Self { store, http, clock, configs: &PROVIDERS, control: None } }
+    pub fn new(store: &'a (dyn SecretStore + Sync), http: &'a dyn TokenHttp, clock: &'a (dyn Fn() -> u64 + Sync)) -> Self { Self { store, http, clock, configs: &PROVIDERS, loopback: (std::net::Ipv4Addr::LOCALHOST, 1455).into(), control: None } }
     #[cfg(test)]
-    fn with_configs(store: &'a (dyn SecretStore + Sync), http: &'a dyn TokenHttp, clock: &'a (dyn Fn() -> u64 + Sync), configs: &'a [ProviderConfig; 2]) -> Self { Self { store, http, clock, configs, control: None } }
+    fn with_configs(store: &'a (dyn SecretStore + Sync), http: &'a dyn TokenHttp, clock: &'a (dyn Fn() -> u64 + Sync), configs: &'a [ProviderConfig; 2]) -> Self { Self { configs, ..Self::new(store, http, clock) } }
+    #[cfg(test)]
+    pub(crate) fn with_loopback(mut self, loopback: std::net::SocketAddr) -> Self { self.loopback = loopback; self }
     pub fn controlled<'b>(&'b self, cancelled: &'b (dyn Fn() -> bool + Sync), deadline: std::time::Instant) -> OAuth<'b> {
-        OAuth { store: self.store, http: self.http, clock: self.clock, configs: self.configs, control: Some((cancelled, deadline)) }
+        OAuth { store: self.store, http: self.http, clock: self.clock, configs: self.configs, loopback: self.loopback, control: Some((cancelled, deadline)) }
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'static, ()>, OauthError> {
         if let Some((cancelled, deadline)) = self.control {
@@ -125,7 +127,7 @@ impl<'a> OAuth<'a> {
     }
     fn config(&self, p: Provider) -> &ProviderConfig { &self.configs[match p { Provider::Claude => 0, Provider::Chatgpt => 1 }] }
     pub fn begin(&self, provider: Provider) -> Result<Begun, OauthError> {
-        let listener = if provider == Provider::Chatgpt { Some(std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 1455)).map_err(|_| OauthError::PortBusy)?) } else { None };
+        let listener = if provider == Provider::Chatgpt { Some(std::net::TcpListener::bind(self.loopback).map_err(|_| OauthError::PortBusy)?) } else { None };
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256(); let state = CsrfToken::new_random(); let c = self.config(provider);
         let mut url = oauth2::url::Url::parse(c.authorize_url).map_err(|_| OauthError::Invalid)?;
         url.query_pairs_mut().extend_pairs([("response_type", "code"), ("client_id", c.client_id), ("redirect_uri", c.redirect), ("scope", c.scopes), ("state", state.secret()), ("code_challenge", challenge.as_str()), ("code_challenge_method", "S256")]).extend_pairs(c.extra.iter().copied());
@@ -254,8 +256,11 @@ impl<'a> OAuth<'a> {
     pub fn sign_out(&self, p: Provider) -> Result<(), OauthError> { let _lock = self.lock()?; self.store.delete(p.key()).map_err(|_| OauthError::Store) }
 }
 fn state_equal(a: &[u8], b: &[u8]) -> bool {
+    use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
-    bool::from(a.ct_eq(b))
+    // Hashing accepts variable-length input; the constant-time comparison always
+    // receives two 32-byte digests, never unequal-length state slices.
+    bool::from(Sha256::digest(a).ct_eq(&Sha256::digest(b)))
 }
 pub fn account_id(jwt: &str) -> Option<String> {
     use base64::Engine;

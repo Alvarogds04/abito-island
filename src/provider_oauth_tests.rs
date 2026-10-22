@@ -131,25 +131,22 @@ fn loopback_exchange_uses_test_client_and_never_exposes_secrets() {
     assert!(store.read("claude-oauth").unwrap().unwrap().contains("access-secret"));
 }
 #[test]
-fn chatgpt_loopback_callback_and_fixed_port_busy() {
+fn chatgpt_loopback_callback_and_port_busy() {
     use std::io::{Read, Write};
     use base64::Engine;
     let store = Memory::default(); let http = Fake::new(); let clock = || 100;
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"account-secret"}}"#);
     http.0.lock().unwrap().push((200, serde_json::json!({"access_token":"access-secret","refresh_token":"refresh-secret","expires_in":3600,"token_type":"Bearer","id_token":format!("e30.{payload}.sig")}).to_string()));
     let mut config = PROVIDERS; config[1].client_id = "test-codex";
-    let flow = OAuth::with_configs(&store, &http, &clock, &config);
-    let _port = CALLBACK_TEST_LOCK.lock().unwrap();
-    let mut pending = match flow.begin(Provider::Chatgpt) {
-        Ok(b) => b.pending,
-        Err(OauthError::PortBusy) => { eprintln!("SKIP: 127.0.0.1:1455 is occupied"); return; }
-        Err(e) => panic!("begin failed: {e}"),
-    };
-    assert_eq!(flow.begin(Provider::Chatgpt).unwrap_err(), OauthError::PortBusy);
+    let flow = OAuth::with_configs(&store, &http, &clock, &config).with_loopback("127.0.0.1:0".parse().unwrap());
+    let mut pending = flow.begin(Provider::Chatgpt).unwrap().pending;
+    let address = pending.listener.as_ref().unwrap().local_addr().unwrap();
+    let occupied = OAuth::new(&store, &http, &clock).with_loopback(address);
+    assert_eq!(occupied.begin(Provider::Chatgpt).unwrap_err(), OauthError::PortBusy);
     assert!(!flow.complete_loopback(&mut pending).unwrap());
     let state = pending.state.secret().clone();
     let browser = std::thread::spawn(move || {
-        let mut stream = std::net::TcpStream::connect("127.0.0.1:1455").unwrap();
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
         stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
         write!(stream, "GET /auth/callback?code=code-secret&state={state} HTTP/1.1\r\nHost: localhost:1455\r\n\r\n").unwrap();
         let mut response = String::new(); stream.read_to_string(&mut response).unwrap();
@@ -182,7 +179,20 @@ fn token_transport_cancellation_and_deadline() {
         server.join().unwrap();
     }
 }
-static CALLBACK_TEST_LOCK: Mutex<()> = Mutex::new(());
+#[test]
+fn injected_loopback_listeners_are_independent() {
+    let store = Memory::default(); let http = Fake::new(); let clock = || 100;
+    let production = OAuth::new(&store, &http, &clock);
+    assert_eq!(production.loopback, "127.0.0.1:1455".parse().unwrap());
+    let flow = production.with_loopback("127.0.0.1:0".parse().unwrap());
+    let first = flow.begin(Provider::Chatgpt).unwrap();
+    let second = flow.controlled(&|| false, std::time::Instant::now() + std::time::Duration::from_secs(5)).begin(Provider::Chatgpt).unwrap();
+    let a = first.pending.listener.as_ref().unwrap().local_addr().unwrap();
+    let b = second.pending.listener.as_ref().unwrap().local_addr().unwrap();
+    assert!(a.ip().is_loopback()); assert!(b.ip().is_loopback()); assert_ne!(a, b);
+    let url = oauth2::url::Url::parse(&first.auth_url).unwrap();
+    assert_eq!(url.query_pairs().find(|(k, _)| k == "redirect_uri").unwrap().1, "http://localhost:1455/auth/callback");
+}
 #[test]
 fn state_comparison_covers_mismatch_prefix_lengths_equal_and_empty() {
     for (a, b, equal) in [
@@ -195,17 +205,13 @@ fn state_comparison_covers_mismatch_prefix_lengths_equal_and_empty() {
 }
 fn invalid_loopback_consumes_flow(request: Option<Vec<u8>>) {
     use std::io::{Read, Write};
-    let _port = CALLBACK_TEST_LOCK.lock().unwrap();
     let store = Memory::default(); let http = Fake::new(); let clock = || 100;
-    let flow = OAuth::new(&store, &http, &clock);
-    let mut pending = match flow.begin(Provider::Chatgpt) {
-        Ok(b) => b.pending,
-        Err(OauthError::PortBusy) => { eprintln!("SKIP: 127.0.0.1:1455 is occupied"); return; }
-        Err(e) => panic!("begin failed: {e}"),
-    };
-    assert_eq!(pending.listener.as_ref().unwrap().local_addr().unwrap(), "127.0.0.1:1455".parse().unwrap());
+    let flow = OAuth::new(&store, &http, &clock).with_loopback("127.0.0.1:0".parse().unwrap());
+    let mut pending = flow.begin(Provider::Chatgpt).unwrap().pending;
+    let address = pending.listener.as_ref().unwrap().local_addr().unwrap();
+    assert_eq!(address.ip(), std::net::Ipv4Addr::LOCALHOST);
     // Connect before polling so the test does not depend on scheduling.
-    let mut browser = std::net::TcpStream::connect("127.0.0.1:1455").unwrap();
+    let mut browser = std::net::TcpStream::connect(address).unwrap();
     browser.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
     if let Some(bytes) = request { browser.write_all(&bytes).unwrap(); }
     let start = std::time::Instant::now();

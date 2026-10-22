@@ -113,29 +113,34 @@ mod tests {
         flows.apply(&oauth,cmd("begin","claude"),&open).unwrap(); safe(&flows.apply(&oauth,cmd("cancel","claude"),&open).unwrap());
         assert_eq!(flows.apply(&oauth,cmd("poll","claude"),&open).unwrap()["state"],"none");
     }
-    // Run the fixed-port tests with RUST_TEST_THREADS=1, like the core loopback test.
     #[test]
     fn chatgpt_opener_replacement_poll_and_cleanup() {
         use std::io::Write;
         let store = Memory::default(); let clock = std::sync::atomic::AtomicU64::new(100);
         let now = || clock.load(std::sync::atomic::Ordering::SeqCst);
-        let oauth = OAuth::new(&store,&Fake,&now); let flows = Flows::default();
-        assert_eq!(flows.apply(&oauth,cmd("begin","chatgpt"),&|_| false),Err("opener_unavailable"));
-        assert!(std::net::TcpListener::bind("127.0.0.1:1455").is_ok());
+        let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = reservation.local_addr().unwrap();
+        let oauth = OAuth::new(&store,&Fake,&now).with_loopback(address); let flows = Flows::default();
+        drop(reservation);
+        assert_eq!(flows.apply(&oauth,cmd("begin","chatgpt"),&|_| {
+            assert!(std::net::TcpListener::bind(address).is_err(), "begin must hold the configured port before opening");
+            false
+        }),Err("opener_unavailable"));
+        assert!(std::net::TcpListener::bind(address).is_ok(), "failed opener must release the same port");
         let seen = Mutex::new(String::new());
         let open = |url: &str| { *seen.lock().unwrap() = url.into(); true };
         for _ in 0..2 { safe(&flows.apply(&oauth,cmd("begin","chatgpt"),&open).unwrap()); }
         let url = oauth2::url::Url::parse(&seen.lock().unwrap()).unwrap(); assert_eq!(url.host_str(),Some("auth.openai.com"));
         assert_eq!(flows.apply(&oauth,cmd("poll","chatgpt"),&open).unwrap()["state"],"waiting");
         let state = url.query_pairs().find(|(k,_)| k == "state").unwrap().1.into_owned();
-        let mut browser = std::net::TcpStream::connect("127.0.0.1:1455").unwrap();
+        let mut browser = std::net::TcpStream::connect(address).unwrap();
         write!(browser,"GET /auth/callback?code=code-secret&state={state} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
         let done = flows.apply(&oauth,cmd("poll","chatgpt"),&open).unwrap(); safe(&done); assert_eq!(done["state"],"done");
         flows.apply(&oauth,cmd("begin","chatgpt"),&open).unwrap(); clock.store(800,std::sync::atomic::Ordering::SeqCst);
         let expired = flows.apply(&oauth,cmd("poll","chatgpt"),&open).unwrap(); safe(&expired); assert_eq!(expired["state"],"error");
         for action in ["cancel","sign_out"] {
             flows.apply(&oauth,cmd("begin","chatgpt"),&open).unwrap(); safe(&flows.apply(&oauth,cmd(action,"chatgpt"),&open).unwrap());
-            assert!(std::net::TcpListener::bind("127.0.0.1:1455").is_ok());
+            assert!(std::net::TcpListener::bind(address).is_ok());
         }
     }
     #[test]
