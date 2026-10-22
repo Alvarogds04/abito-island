@@ -97,6 +97,7 @@ impl AgentConn {
         };
         let _ = stream.set_write_timeout(Some(HELLO_WAIT));
         if stream.write_all(session.hello().as_bytes()).is_err() {
+            crate::failure::report("island", "agent-no-answer", "the agent daemon refused the hello");
             return self.set(ClientState::disconnected(Reason::Refused));
         }
         // the daemon answers `ready` or closes without detail
@@ -105,7 +106,10 @@ impl AgentConn {
         let mut chunk = [0u8; 4096];
         let first = loop {
             match stream.read(&mut chunk) {
-                Ok(0) | Err(_) => return self.set(ClientState::disconnected(Reason::Refused)),
+                Ok(0) | Err(_) => {
+                    crate::failure::report("island", "agent-no-answer", "the agent daemon did not answer the hello");
+                    return self.set(ClientState::disconnected(Reason::Refused));
+                }
                 Ok(n) => match buf.push(&chunk[..n]) {
                     Ok(frames) if !frames.is_empty() => break frames,
                     Ok(_) => continue,
@@ -157,6 +161,7 @@ impl AgentConn {
             }
             if !stop.load(Ordering::SeqCst) {
                 *writer.lock().expect("agent writer lock") = None;
+                crate::failure::report("island", "agent-lost", "the connection with the agent daemon was lost");
                 let lost = ClientState::disconnected(Reason::Lost);
                 let view = serde_json::to_value(&lost).unwrap_or(Value::Null);
                 *state.lock().expect("agent state lock") = lost;

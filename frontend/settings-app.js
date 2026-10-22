@@ -18,10 +18,11 @@ import { dictationPage, flowSettingsPage } from './vendor/coucou/hub/dictation-p
 import { dictionaryPage, snippetsPage, stylesPage, insightsPage } from './vendor/coucou/hub/data-pages.js';
 import { inactivePages, renderUnavailable } from './vendor/coucou/hub/pages.js';
 import { voicePage } from './vendor/coucou/hub/voice-page.js';
+import { privacyPage } from './vendor/coucou/hub/privacy-page.js';
 import { renderGeneral } from './vendor/coucou/hub/general.js';
 import { card, row } from './vendor/coucou/hub/ui.js';
 const rawInvoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
-const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action']);
+const allowed = new Set(['prefs_action', 'hotkey_action', 'settings_window_action', 'agent_action', 'secret_action', 'models_action', 'specialists_action', 'daemon_action', 'plan_action', 'recap_action', 'monitor_action', 'sound_action', 'dictation_action', 'voice_action', 'failure_action']);
 const invoke = (command, args) => {
   if (!allowed.has(command) || !rawInvoke) return Promise.reject(new Error('No disponible'));
   if (command === 'daemon_action' && (Object.keys(args || {}).length !== 1 || Object.keys(args?.payload || {}).length !== 1 || args.payload.action !== 'restart')) return Promise.reject(new Error('No disponible'));
@@ -62,6 +63,15 @@ const invoke = (command, args) => {
           ['bottom', 'left', 'right'].includes(p.prefs.edge) && typeof p.prefs.mic === 'string' && new TextEncoder().encode(p.prefs.mic).length <= 200 &&
           [0, 7, 30, 365, -1].includes(p.prefs.keepDays) && typeof p.prefs.cleanup === 'boolean' && ['verbatim', 'natural', 'polished'].includes(p.prefs.defaultStyle)))) return Promise.reject(new Error('No disponible'));
   }
+  if (command === 'failure_action') {
+    const p = args?.payload, ks = Object.keys(p || {}).sort().join(',');
+    const fp = v => typeof v === 'string' && /^[0-9a-f]{12}$/.test(v);
+    if (Object.keys(args || {}).length !== 1 || !p ||
+      !((ks === 'action' && ['view', 'preview'].includes(p.action)) ||
+        (ks === 'action,fingerprint' && ['preview', 'later', 'never'].includes(p.action) && fp(p.fingerprint)) ||
+        (ks === 'action,enabled' && p.action === 'set_enabled' && typeof p.enabled === 'boolean') ||
+        (ks === 'action,body,title' && p.action === 'send' && typeof p.title === 'string' && typeof p.body === 'string'))) return Promise.reject(new Error('No disponible'));
+  }
   if (command === 'voice_action') {
     const p = args?.payload;
     const exact = (v, fields) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(k => Object.hasOwn(v, k));
@@ -81,7 +91,7 @@ const personal = { ...options, C: window.AbitoPillCatalog };
 startHub(root, {
   // The page Rust chose when it opened this window (a closed list: the shell ignores anything else), e.g. «Configurar Pi…» -> accounts.
   initialPage: window.__abitoHubPage,
-  version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
+  version: '0.1.0', flowPages: { ...inactivePages, voice: voicePage, privacy: (page, ctx) => privacyPage(page, ctx, invoke), dictation: dictationPage, flowsettings: (page, ctx) => flowSettingsPage(page, ctx, invoke), dictionary: dictionaryPage, snippets: snippetsPage, styles: stylesPage, insights: insightsPage },
   async renderNotch(page, container, navigate) {
     if (page === 'general') {
       try {

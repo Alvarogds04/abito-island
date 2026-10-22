@@ -266,12 +266,12 @@ fn replace_windows_users(s: &str) -> String {
     let mut out = String::new();
     let mut i = 0;
     while i < s.len() {
-        if i + 9 <= s.len() && b[i].is_ascii_alphabetic() && &s[i + 1..i + 3] == ":\\" && s[i + 3..i + 9].eq_ignore_ascii_case("users\\") {
+        if i + 9 <= s.len() && b[i].is_ascii_alphabetic() && &b[i + 1..i + 3] == b":\\" && b[i + 3..i + 9].eq_ignore_ascii_case(b"users\\") {
             let after = &s[i + 9..];
             let e = seg_end(after);
             if e > 0 { out.push('~'); i += 9 + e; continue; }
         }
-        let ch = s[i..].chars().next().unwrap();
+        let Some(ch) = s[i..].chars().next() else { break };
         out.push(ch);
         i += ch.len_utf8();
     }
@@ -450,6 +450,11 @@ fn now_secs() -> u64 {
 /// Record a non-panic failure (model load error, daemon down, agent not answering). Local only; errors are swallowed.
 pub fn note(dir: &Path, process: &str, step: &str, message: &str) {
     let _ = store(dir, &record_failure(process, step, message, &Env::detect(), now_secs()));
+}
+
+/// `note` into the default store; the one-line hook other modules call at a failure site. Never fails, never blocks the caller on the network.
+pub fn report(process: &str, step: &str, message: &str) {
+    if let Some(dir) = default_dir() { note(&dir, process, step, message); }
 }
 
 /// Chain a panic hook that records the panic locally and then runs the previous hook. No network, never panics itself.

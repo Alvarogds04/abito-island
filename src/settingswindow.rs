@@ -144,7 +144,7 @@ fn err(code: &str) -> BridgeError {
 /// uses): the page that reaches the webview is always one of these exact strings, never text from the payload.
 pub(crate) const PAGES: &[&str] = &[
     "dictation", "notes", "insights", "dictionary", "snippets", "styles", "flowsettings",
-    "general", "pills", "agents", "chat", "accounts", "voice", "integrations", "phone", "shortcuts",
+    "general", "pills", "agents", "chat", "accounts", "voice", "integrations", "phone", "shortcuts", "privacy",
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -382,10 +382,11 @@ mod tests {
     /// never silently become reachable from the settings window.
     #[test]
     fn f093_the_commands_reachable_from_settings_are_pinned_exactly() {
-        const REACHABLE: [&str; 14] = [
+        const REACHABLE: [&str; 15] = [
             "agent_action",
             "daemon_action",
             "dictation_action",
+            "failure_action",
             "hotkey_action",
             "models_action",
             "monitor_action",

@@ -180,3 +180,21 @@ fn panic_info_becomes_a_record_with_location_and_no_network() {
     assert!(rec.message.contains("payload ~/x") && rec.message.contains("src/voicehost.rs:12"), "{}", rec.message);
     assert!(!rec.message.contains("abc123"), "the record is redacted before it ever touches disk");
 }
+
+#[test]
+fn multibyte_text_next_to_path_like_prefixes_never_panics() {
+    assert_eq!(r("describí acá qué pasó: C:\\Users\\Eve\\ñ y ñandú"), "describí acá qué pasó: ~\\ñ y ñandú");
+    assert_eq!(r("é:ü ü"), "é:ü ü");
+}
+
+#[test]
+fn note_writes_a_redacted_local_record_without_network() {
+    let dir = std::env::temp_dir().join(format!("abito-failure-{}-{}", std::process::id(), line!()));
+    let _ = std::fs::remove_dir_all(&dir);
+    note(&dir, "daemon", "daemon-down", "exited: password=hunter22 at /home/zz/x");
+    let all = load_all(&dir);
+    assert_eq!(all.len(), 1);
+    assert_eq!((all[0].record.process.as_str(), all[0].record.step.as_str()), ("daemon", "daemon-down"));
+    assert!(!all[0].record.message.contains("hunter22"), "{}", all[0].record.message);
+    let _ = std::fs::remove_dir_all(&dir);
+}

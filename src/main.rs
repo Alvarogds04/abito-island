@@ -39,6 +39,7 @@ mod mailhost;
 mod monitorshost;
 mod secretshost;
 mod soundshost;
+mod failurehost;
 mod recaphost;
 mod planhost;
 mod dictationhost;
@@ -1892,6 +1893,7 @@ fn main() {
             mailhost::mail_action,
             monitorshost::monitor_action,
             soundshost::sound_action,
+            failurehost::failure_action,
             recaphost::recap_action,
             planhost::plan_action,
             dictationhost::dictation_action,

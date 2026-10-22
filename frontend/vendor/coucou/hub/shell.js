@@ -24,7 +24,8 @@ const NOTCH_PAGES = [
   { id: "voice", icon: "wave", title: () => "OK Abito" },
   { id: "integrations", icon: "puzzle", title: () => t("Integrations"), subtitle: () => t("Stripe, GitHub, Vercel, n8n, Notion and the rest.") },
   { id: "phone", icon: "phone", title: () => t("Android phone"), subtitle: () => t("Your agents and their approvals on your Android phone, over your Wi-Fi.") },
-  { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") }
+  { id: "shortcuts", icon: "keyboard", title: () => t("Shortcuts"), subtitle: () => t("The keys that open the island and its actions.") },
+  { id: "privacy", icon: "lock", title: () => "Privacidad", subtitle: () => "Avisos de fallos y reportes que vos decidís enviar." }
 ];
 const ALL = [...FLOW_PAGES, ...NOTCH_PAGES];
 const DEFAULT_STATUS = {
