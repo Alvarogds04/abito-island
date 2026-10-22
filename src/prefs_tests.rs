@@ -1248,6 +1248,7 @@ mod chosen_models {
             show_plan_in_notch: Some(true),
             show_codex_plan_in_notch: Some(true),
             window_context: Some(true),
+            live_context: None,
             desktop_character: Some(DesktopCharacter { on: true, spot: Some((5, -6)) }),
         };
         let text = full.to_text();
@@ -2309,6 +2310,54 @@ fn a_stored_absence_in_minutes_migrates_to_seconds_and_the_next_write_uses_the_n
     // a file with neither key writes neither
     let none: Value = serde_json::from_str(&Prefs::default().to_text()).unwrap();
     assert!(none.get("absence_seconds").is_none() && none.get("absence_minutes").is_none());
+}
+
+// ---- S5 (#503): `liveContext`, the chat's live-state context switch (default ON) ------------------
+
+#[test]
+fn live_context_is_an_exact_closed_two_key_command() {
+    assert_eq!(parse_command(&json!({"action":"set_live_context","live_context":true})), Ok(Command::SetLiveContext(true)));
+    assert_eq!(parse_command(&json!({"action":"set_live_context","live_context":false})), Ok(Command::SetLiveContext(false)));
+    for bad in [
+        json!({"action":"set_live_context"}),
+        json!({"action":"set_live_context","live_context":"true"}),
+        json!({"action":"set_live_context","live_context":0}),
+        json!({"action":"set_live_context","live_context":null}),
+        json!({"action":"set_live_context","live_context":true,"x":1}),
+        json!({"action":"set_live_context","window_context":true}),
+    ] {
+        assert!(parse_command(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn live_context_is_on_by_default_old_files_load_on_and_only_off_is_written() {
+    assert!(Prefs::default().live_context(), "on by default");
+    assert!(Prefs::from_text(Some(r#"{"v":1,"window_context":true}"#)).live_context(), "old file without the field is ON");
+    assert!(Prefs::from_text(None).live_context());
+    let off = update(&Prefs::default(), &Command::SetLiveContext(false), |_| true).unwrap();
+    assert!(!off.live_context());
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&off.to_text()).unwrap()["live_context"], json!(false));
+    assert!(!Prefs::from_text(Some(&off.to_text())).live_context(), "round trip");
+    let on = update(&off, &Command::SetLiveContext(true), |_| true).unwrap();
+    assert!(on.live_context());
+    assert!(!on.to_text().contains("live_context"), "the default writes no key");
+    for hostile in ["\"no\"", "0", "null"] {
+        let text = format!(r#"{{"v":1,"live_context":{hostile}}}"#);
+        assert!(Prefs::from_text(Some(&text)).live_context(), "{hostile} falls back to ON");
+    }
+}
+
+#[test]
+fn live_context_failed_save_changes_nothing() {
+    assert!(update(&Prefs::default(), &Command::SetLiveContext(false), |_| false).is_err());
+}
+
+#[test]
+fn live_context_does_not_touch_window_context() {
+    let a = update(&Prefs::default(), &Command::SetWindowContext(true), |_| true).unwrap();
+    let b = update(&a, &Command::SetLiveContext(false), |_| true).unwrap();
+    assert!(b.window_context() && !b.live_context());
 }
 
 // ── S32: no limit on the declared pills (#503) ──

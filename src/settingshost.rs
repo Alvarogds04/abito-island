@@ -161,12 +161,18 @@ fn view_prefs(p: &Prefs) -> Value {
         "showPlanInNotch": p.show_plan_in_notch(),
         "showCodexPlanInNotch": p.show_codex_plan_in_notch(),
         "windowContext": p.window_context(),
+        "liveContext": p.live_context(),
         "windowContextAvailable": context_extension_available(),
         "openSettingsAtLaunch": p.open_settings_at_launch(),
         "settingsWindow": true})
 }
 
 /// #487: the explicit opt-in to read the previous window's app and title (off by default).
+/// S5 (#503): the chat's live-state context switch (default ON).
+pub fn live_context(host: &SettingsHost) -> bool {
+    host.prefs.lock().expect("prefs lock").live_context()
+}
+
 pub fn window_context(host: &SettingsHost) -> bool {
     host.prefs.lock().expect("prefs lock").window_context()
 }

@@ -123,3 +123,33 @@ fn system_prompt_names_only_abito_and_knows_the_app_features() {
         assert!(p.contains(feature), "the prompt does not mention {feature}");
     }
 }
+
+// ---- S1/S4 (#503): the live-state context rides in the turn's system message --------------------
+
+fn snap() -> crate::chatsnapshot::Snapshot {
+    crate::chatsnapshot::Snapshot { text: "Estado en vivo de la app (solo lectura):\n- Pi en api: trabajando".into(), trimmed_lines: 0 }
+}
+
+#[test]
+fn live_context_is_appended_after_the_system_message_and_leaves_it_intact() {
+    let out = super::with_live_context("SYS", true, Some(&snap()));
+    assert_eq!(out, "SYS\n\nEstado en vivo de la app (solo lectura):\n- Pi en api: trabajando");
+}
+
+#[test]
+fn disabled_or_empty_live_context_adds_nothing_at_all() {
+    assert_eq!(super::with_live_context("SYS", false, Some(&snap())), "SYS", "switch off: byte-identical");
+    assert_eq!(super::with_live_context("SYS", true, None), "SYS", "nothing to say: byte-identical");
+}
+
+#[test]
+fn the_prompt_says_it_knows_the_live_state_and_still_cannot_act() {
+    let p = super::SYSTEM_PROMPT;
+    assert!(p.contains("resumen del estado en vivo"), "{p}");
+    assert!(p.contains("agentes de código"), "{p}");
+    assert!(p.contains("integraciones conectadas"), "{p}");
+    assert!(p.contains("solo de lectura"), "{p}");
+    assert!(p.contains("no puedes aprobar ni ejecutar nada"), "{p}");
+    assert!(p.contains("explica en qué parte de la app se hace"), "{p}");
+    assert!(p.contains("Si no hay resumen, no sabes qué está pasando: dilo, no lo inventes."), "{p}");
+}

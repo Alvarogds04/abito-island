@@ -190,6 +190,10 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     const sw = trusted(toggle(prefs.windowContext === true, value => { work(() => call('prefs_action', { action: 'set_window_context', window_context: value }), next => { prefs = next; paintContext(); }, () => paintContext()); }));
     (sw as HTMLButtonElement).disabled = typeof prefs.windowContext !== 'boolean';
     ctxBody.append(row(t('Active window context'), sw));
+    // S5 (#503): the chat's live-state context (agent sessions + integrations), ON by default.
+    const live = trusted(toggle(prefs.liveContext !== false, value => { work(() => call('prefs_action', { action: 'set_live_context', live_context: value }), next => { prefs = next; paintContext(); }, () => paintContext()); }));
+    (live as HTMLButtonElement).disabled = typeof prefs.liveContext !== 'boolean';
+    ctxBody.append(row(t('Live context'), live), h('div', { class: 'hub-note', text: t('When you write in the chat, Abito adds a short read-only summary of what it already knows: your coding-agent sessions, pending questions and the status of your connected integrations. It makes no new requests, and sends no keys, mail bodies or diffs. The chat still cannot run or approve anything. On by default.') }));
     const available = prefs.windowContextAvailable;
     ctxBody.append(h('div', { class: 'hub-note', text: available === true
       ? 'La extensión de GNOME está disponible. Solo se leen la app y el título; no se captura la URL.'
@@ -205,13 +209,15 @@ export async function renderChatSettings({ invoke, V, listen, timers }: any) {
     }
   };
   paintContext();
+  const ctxCard = section(t('Active window context'), hint(t('When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.')), ctxBody);
+  ctxCard.setAttribute('id', 'chat-window-context'); // S5 (#503): the live-context row lives inside it
   const localCard = section(t('Local models'), locals);
   localCard.setAttribute('title', t('Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.'));
   localCard.setAttribute('id', 'chat-local-models');
   const engineOthers = h('div', { id: 'chat-engine-others' });
   root.append(apiSection,
     ...providerCards, engineOthers, h('div', { id: 'chat-extras' }), localCard,
-    (() => { const w = section(t('Active window context'), hint(t('When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.')), ctxBody); w.setAttribute('id', 'chat-window-context'); return w; })(), s.message);
+    ctxCard, s.message);
   drawModels();
   watch('agent:state', next => { state = { ...state, ...next }; drawModels(); });
   watch('prefs:state', next => { prefs = next; drawModels(); paintContext(); });
