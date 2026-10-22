@@ -835,16 +835,16 @@ impl AccountStore {
         let owned_ref = credential_ref(account_id);
         let owned = shared_credential_ref(account_id).is_none()
             && record.credential_ref.as_deref() == Some(owned_ref.as_str());
-        let previous = if owned {
-            let previous = self.secrets.read(&owned_ref).map_err(|_| account_error("keychain_unavailable"))?;
-            self.secrets.delete(&owned_ref).map_err(|_| account_error("keychain_unavailable"))?;
-            previous
-        } else { None };
         let mut next = self.records.clone();
         next.remove(at);
-        if self.persist(&next).is_err() {
-            if let Some(key) = previous { let _ = self.secrets.write(&owned_ref, &key); }
-            return Err(account_error("save_failed"));
+        // Ordering (C3 verifier): the FILE commits first. It holds no secret, so a failed commit touches nothing and the key
+        // cannot be lost; the key is deleted only afterwards. If that delete fails, the file is put back (best effort) and the key
+        // is still there: the worst case is an orphan entry, never a lost one.
+        let previous_records = self.records.clone();
+        self.persist(&next).map_err(|_| account_error("save_failed"))?;
+        if owned && self.secrets.delete(&owned_ref).is_err() {
+            let _ = self.persist(&previous_records);
+            return Err(account_error("keychain_unavailable"));
         }
         self.records = next;
         let snapshot = self.view();
@@ -868,23 +868,20 @@ impl AccountStore {
         }
         let reference = credential_ref(&command.record.account_id);
         let changed_key = !command.keep_key;
-        let previous = if changed_key {
-            let previous = self.secrets.read(&reference).map_err(|_| account_error("keychain_unavailable"))?;
-            match command.record.config.api_key.take() {
-                Some(key) => self.secrets.write(&reference, &key),
-                None => self.secrets.delete(&reference),
-            }.map_err(|_| account_error("keychain_unavailable"))?;
-            previous
-        } else { None };
+        let new_key = if changed_key { command.record.config.api_key.take() } else { None };
+        // Same ordering as `remove`: validate the keychain is reachable, commit the secret-free FILE, then change the key. A failed
+        // file commit never touched the keychain, so the previous key is intact with or without a working compensation.
+        if changed_key { self.secrets.read(&reference).map_err(|_| account_error("keychain_unavailable"))?; }
+        let previous_records = self.records.clone();
         let mut next = self.records.clone();
         match at { Some(at) => next[at] = command.record, None => next.push(command.record) }
-        if self.persist(&next).is_err() {
-            if changed_key {
-                // Best-effort compensation: two independent stores cannot commit atomically.
-                match previous { Some(key) => { let _ = self.secrets.write(&reference, &key); },
-                    None => { let _ = self.secrets.delete(&reference); } }
+        self.persist(&next).map_err(|_| account_error("save_failed"))?;
+        if changed_key {
+            let applied = match &new_key { Some(key) => self.secrets.write(&reference, key), None => self.secrets.delete(&reference) };
+            if applied.is_err() {
+                let _ = self.persist(&previous_records); // best effort; the file holds no secret and the old key was not touched
+                return Err(account_error("keychain_unavailable"));
             }
-            return Err(account_error("save_failed"));
         }
         self.records = next;
         let snapshot = self.view();
@@ -914,7 +911,9 @@ impl AccountStore {
         let result = (|| {
             if !private_account_file(&file.metadata()?) { return Err(denied()); }
             file.write_all(&bytes)?; file.sync_all()?;
-            std::fs::rename(&tmp, &self.path)
+            std::fs::rename(&tmp, &self.path)?;
+            // Durability: without this a crash can bring the pre-migration (plaintext) file back after the keys moved.
+            std::fs::File::open(parent)?.sync_all()
         })();
         if result.is_err() { let _ = std::fs::remove_file(&tmp); }
         result

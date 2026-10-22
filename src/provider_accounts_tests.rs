@@ -9,6 +9,14 @@ struct FakeSecrets {
     values: Mutex<std::collections::BTreeMap<String, String>>,
     failure: Mutex<Option<StoreError>>,
     fail_key: Mutex<Option<String>>,
+    /// Allow this many more mutations (write/delete), then fail every one: the compensation of an earlier mutation fails too.
+    mutations_left: Mutex<Option<usize>>,
+}
+impl FakeSecrets {
+    fn mutation_allowed(&self) -> bool {
+        let mut left = self.mutations_left.lock().unwrap();
+        match left.as_mut() { None => true, Some(0) => false, Some(n) => { *n -= 1; true } }
+    }
 }
 impl SecretStore for FakeSecrets {
     fn read(&self, key: &str) -> Result<Option<String>, StoreError> {
@@ -17,11 +25,12 @@ impl SecretStore for FakeSecrets {
     }
     fn write(&self, key: &str, value: &str) -> Result<(), StoreError> {
         if let Some(error) = *self.failure.lock().unwrap() { return Err(error); }
-        if self.fail_key.lock().unwrap().as_deref() == Some(key) { return Err(StoreError::Failed); }
+        if self.fail_key.lock().unwrap().as_deref() == Some(key) || !self.mutation_allowed() { return Err(StoreError::Failed); }
         self.values.lock().unwrap().insert(key.into(), value.into()); Ok(())
     }
     fn delete(&self, key: &str) -> Result<(), StoreError> {
         if let Some(error) = *self.failure.lock().unwrap() { return Err(error); }
+        if !self.mutation_allowed() { return Err(StoreError::Failed); }
         self.values.lock().unwrap().remove(key); Ok(())
     }
 }
@@ -352,4 +361,43 @@ fn nan_and_opencode_go_accounts_share_the_chat_key() {
     assert_eq!(super::shared_credential_ref("key-nan"), Some("nan-api-key"));
     assert_eq!(super::shared_credential_ref("key-opencodego"), Some("opencode-go-api-key"));
     assert_eq!(super::shared_credential_ref("personal"), None);
+}
+
+/// Verifier finding (C3): a failed FILE commit must never leave the old key unrecoverable, even when compensation also fails.
+#[test]
+fn account_remove_with_failed_file_commit_and_failed_compensation_keeps_the_key() {
+    let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
+    let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    let mut p = request("abito_account_create", "openai", "https://example.com/v1");
+    p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    std::fs::write(dir.0.join(".accounts.json.pending"), b"owned obstruction").unwrap(); // the file commit will fail
+    *secrets.mutations_left.lock().unwrap() = Some(1);                                    // one keychain mutation works, the rest fail
+    let result = store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| panic!("failure must not publish"));
+    assert!(result.is_err());
+    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"), "the key must survive");
+}
+
+#[test]
+fn account_replace_with_failed_file_commit_and_failed_compensation_keeps_the_previous_key() {
+    let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
+    let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    let mut p = request("abito_account_create", "openai", "https://example.com/v1");
+    p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    std::fs::write(dir.0.join(".accounts.json.pending"), b"owned obstruction").unwrap();
+    *secrets.mutations_left.lock().unwrap() = Some(1);
+    p["action"] = json!("abito_account_save"); p["config"]["apiKey"] = json!("replacement-key");
+    assert!(store.command(&p, |_| panic!("failure must not publish")).is_err());
+    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"), "the previous key must survive");
+}
+
+#[test]
+fn account_remove_commits_the_file_first_and_a_failed_key_delete_keeps_the_key() {
+    let dir = Sandbox::new(); let secrets = Arc::new(FakeSecrets::default());
+    let mut store = AccountStore::load(dir.file(), secrets.clone()).unwrap();
+    let mut p = request("abito_account_create", "openai", "https://example.com/v1");
+    p["config"]["apiKey"] = json!("original-key"); store.command(&p, |_| {}).unwrap();
+    *secrets.mutations_left.lock().unwrap() = Some(0);
+    assert!(store.command(&json!({"action":"abito_account_remove","accountId":"example"}), |_| panic!("no publish")).is_err());
+    assert_eq!(store.view()["accounts"].as_array().unwrap().len(), 1, "the account stays when its key could not be removed");
+    assert_eq!(secrets.read("account-example").unwrap().as_deref(), Some("original-key"));
 }
