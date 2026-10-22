@@ -13,13 +13,9 @@ fn choosing_a_model_or_language_changes_what_is_active_and_unknown_ids_are_ignor
 }
 
 #[test]
-fn the_active_model_decides_whether_speech_is_ready() {
-    let root = std::env::temp_dir().join(format!("abito-ready-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let small = find("whisper-small").unwrap();
-    assert!(!small.set.files.iter().all(|f| std::fs::metadata(small.set.dir_in(&root).join(f.name)).is_ok()));
-    // A download that is not asked for never starts: the state of an untouched model is Missing.
-    assert_eq!(model_state("whisper-small"), ModelState::Missing);
+fn looking_at_a_model_never_starts_a_download_and_unknown_ids_are_missing() {
+    // The state reflects the disk (Ready if the user downloaded it) or Missing; never Downloading by itself.
+    assert!(!matches!(model_state("whisper-small"), ModelState::Downloading { .. }));
     assert_eq!(model_state("nope"), ModelState::Missing);
 }
 
@@ -27,7 +23,7 @@ fn the_active_model_decides_whether_speech_is_ready() {
 fn cancelling_a_download_that_is_not_running_is_harmless_and_unknown_models_cannot_be_downloaded() {
     cancel_model("whisper-turbo");
     assert!(download_model("../x", |_| {}).is_err());
-    assert_eq!(model_state("whisper-turbo"), ModelState::Missing);
+    assert!(!matches!(model_state("whisper-turbo"), ModelState::Downloading { .. }));
 }
 
 #[test]
