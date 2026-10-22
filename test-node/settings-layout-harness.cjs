@@ -59,7 +59,7 @@ async function open(scenario = {}) {
         if (cmd === 'recap_action') return a === 'prefs' ? { enabled: true } : { ok: true };
         if (cmd === 'monitor_action') return { monitors: [{ key: 'DP-1' }] };
         if (cmd === 'sound_action') return a === 'list' ? { names: [] } : { ok: true };
-        if (cmd === 'secret_action') return { present: false };
+        if (cmd === 'secret_action') { if (scenario.keychainDown) throw new Error('keychain_unavailable'); return { present: false }; }
         if (cmd === 'models_action') return { profiles: [] };
         if (cmd === 'specialists_action') return { specialists: [], active: null };
         if (cmd === 'plan_action') return { available: false };

@@ -183,7 +183,7 @@ async function renderIntegrations({ invoke, V, P, C, listen, timers }) {
       if (!supported) {
         input.title = saveBtn.title = UNAVAILABLE;
         rows.append(hint(UNAVAILABLE));
-      } else work(() => call("secret_action", V.keyPayload("present", key)), (result) => {
+      } else work(() => call("secret_action", V.keyPayload("present", key)).catch(() => null), (result) => {
         if (typeof result?.present !== "boolean") return;
         input.placeholder = result.present ? `••••••••  ${t("(stored)")}` : placeholder;
         dot2.style.setProperty("background", result.present ? "#22c55e" : "#f4505e");

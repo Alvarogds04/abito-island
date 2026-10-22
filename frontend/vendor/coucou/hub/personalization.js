@@ -439,7 +439,13 @@ async function renderPills({ invoke, listen, V, S, A, P, C, page = "all", part, 
     });
     work(async () => {
       const next = {};
-      for (const key of ["anthropic-api-key", "google-api-key", "openai-api-key"]) next[key] = (await call("secret_action", V.keyPayload("present", key)))?.present === true;
+      for (const key of ["anthropic-api-key", "google-api-key", "openai-api-key"]) {
+        try {
+          next[key] = (await call("secret_action", V.keyPayload("present", key)))?.present === true;
+        } catch {
+          next[key] = false;
+        }
+      }
       return next;
     }, (p) => {
       presence = p;
