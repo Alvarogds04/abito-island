@@ -435,7 +435,7 @@ pub enum Command {
     Enable,
     Disable,
     // The Linux catalog host owns clear; the separate Windows host is unchanged.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     Clear,
     Reset,
     Set(Combo),
@@ -515,7 +515,7 @@ pub fn parse_command(payload: &serde_json::Value) -> Result<Command, CommandErro
         "view" => exact(1).map(|_| Command::View),
         "enable" => exact(1).map(|_| Command::Enable),
         "disable" => exact(1).map(|_| Command::Disable),
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         "clear" => exact(1).map(|_| Command::Clear),
         "reset" => exact(1).map(|_| Command::Reset),
         "suspend" => exact(1).map(|_| Command::Suspend),

@@ -514,7 +514,7 @@ fn catalog_portal_ids_never_activate_another_action() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 #[test]
 fn cleared_binding_stays_cleared_across_restart_and_releases_combo() {
     let raw = r#"{"v":1,"combo":"Ctrl+Alt+A","enabled":true,"bound":false}"#;
