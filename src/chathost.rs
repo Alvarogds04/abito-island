@@ -179,6 +179,28 @@ fn capture_window_context(app: &AppHandle) {
     });
 }
 
+/// S1/S2 (#503): the live-state snapshot of THIS turn, from what the island already holds
+/// (cached agent sessions, pending question, settled notices, cached GitHub pulse, cached
+/// integration updates). Nothing here fetches; `None` when the switch is off or there is nothing.
+fn live_snapshot(app: &AppHandle, state: &AppState) -> Option<abito_island::chatsnapshot::Snapshot> {
+    if !crate::settingshost::live_context(&state.settings) {
+        return None;
+    }
+    let sessions = state.settings.agent.try_lock().ok()
+        .and_then(|a| a.as_ref().map(|c| c.view()["sessions"].clone()))
+        .unwrap_or(Value::Null);
+    let notices = state.notices.lock().expect("notices lock").snapshot(now_ms() as u64)
+        .into_iter().map(|n| serde_json::to_value(n).unwrap_or(Value::Null)).collect();
+    abito_island::chatsnapshot::build(&abito_island::chatsnapshot::LiveInputs {
+        sessions,
+        question: crate::questionhost::question_view(state),
+        notices,
+        github: crate::githubhost::cached_pulse(),
+        integrations: crate::integrationshost::cached_updates(app),
+        unread_mail: None,
+    })
+}
+
 /// Submit one message: validated, accepted with native ids, then ONE
 /// background turn against the frozen local target.
 pub fn submit(
@@ -196,6 +218,9 @@ pub fn submit(
     let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
     let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
+    // S1: frozen at submit like the specialist's own system message; the human can see it (T3).
+    let live = live_snapshot(app, state);
+    let system = chatlane::with_live_context(&system, live.is_some(), live.as_ref());
     let gate = crate::model_gate(state, &target);
     if let Err(e) = gate {
         return Err(chat_error(e));
@@ -222,6 +247,11 @@ pub fn submit(
         let mut l = lane.lock().expect("chat lane lock");
         let first = l.convo.is_empty();
         let accepted = l.submit_with_attachments(text, client_request_id, &target.profile, specialist, chatlane::history_now(), attachments).map_err(chat_error)?;
+        if !accepted.duplicate {
+            if let Some(s) = &live {
+                l.convo.attach_live(&accepted.turn_id, &s.text, s.trimmed_lines);
+            }
+        }
         // Consume explicit context only after a first message was really accepted, never on error/retry.
         if first && !accepted.duplicate {
             let mut cx = state.chat_context.lock().expect("chat context lock");
@@ -266,6 +296,24 @@ pub async fn chat_action(
         Command::New => {
             let specialist = state.specialists.role().map(|s| SpecialistRef { id: s.id, name: s.name });
             let mut lane = state.chat.lock().expect("chat lane lock");
+            lane.new_conversation(specialist, chatlane::history_now()).map_err(chat_error)?;
+            state.chat_context.lock().expect("chat context lock").new_conversation();
+            drop(lane);
+            publish_chat(&app);
+            Ok(chat_view(&app, &state))
+        }
+        Command::NewWith { specialist_id } => {
+            // Same role switch as a restore (model checks, missing role = refused here), held under the lane lock.
+            let mut lane = state.chat.lock().expect("chat lane lock");
+            if lane.convo.active().is_some() { return Err(chat_error(chat::ChatError::queue_full())); }
+            if let Some(id) = specialist_id.as_deref() {
+                if specialistshost::select_conversation_role(&app, &state, Some(id))? {
+                    return Err(BridgeError::denied("specialist not found"));
+                }
+            } else {
+                specialistshost::select_conversation_role(&app, &state, None)?;
+            }
+            let specialist = state.specialists.role().map(|s| SpecialistRef { id: s.id, name: s.name });
             lane.new_conversation(specialist, chatlane::history_now()).map_err(chat_error)?;
             state.chat_context.lock().expect("chat context lock").new_conversation();
             drop(lane);

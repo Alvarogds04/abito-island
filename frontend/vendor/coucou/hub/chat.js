@@ -245,6 +245,14 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     }));
     sw.disabled = typeof prefs.windowContext !== "boolean";
     ctxBody.append(row(t("Active window context"), sw));
+    const live = trusted(toggle(prefs.liveContext !== false, (value) => {
+      work(() => call("prefs_action", { action: "set_live_context", live_context: value }), (next) => {
+        prefs = next;
+        paintContext();
+      }, () => paintContext());
+    }));
+    live.disabled = typeof prefs.liveContext !== "boolean";
+    ctxBody.append(row(t("Live context"), live), h("div", { class: "hub-note", text: t("When you write in the chat, Abito adds a short read-only summary of what it already knows: your coding-agent sessions, pending questions and the status of your connected integrations. It makes no new requests, and sends no keys, mail bodies or diffs. The chat still cannot run or approve anything. On by default.") }));
     const available = prefs.windowContextAvailable;
     ctxBody.append(h("div", { class: "hub-note", text: available === true ? "La extensión de GNOME está disponible. Solo se leen la app y el título; no se captura la URL." : available === false ? "La extensión de GNOME no está disponible. En GNOME Wayland no se pueden leer ventanas nativas sin ella; el respaldo X11 solo ve ventanas XWayland." : "No se pudo comprobar la extensión de GNOME." }));
     if (available !== true) {
@@ -258,6 +266,8 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     }
   };
   paintContext();
+  const ctxCard = section(t("Active window context"), hint(t("When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.")), ctxBody);
+  ctxCard.setAttribute("id", "chat-window-context");
   const localCard = section(t("Local models"), hint(t("Chat with a model you run yourself: Ollama or LM Studio (leave the address empty for the usual one on this computer), or any server that speaks the OpenAI API, such as vLLM or llama.cpp. Once connected, pick it above the chat box.")), locals);
   localCard.setAttribute("id", "chat-local-models");
   root.append(
@@ -265,7 +275,7 @@ async function renderChatSettings({ invoke, V, listen, timers }) {
     hint(t("Chat with Google AI, OpenAI or OpenRouter instead of Claude: add a key here, then click the model name above the chat box to switch provider and model. Keys stay in the system keychain. These providers get no web search and no tools: they can answer, never act on this computer.")),
     ...providerCards,
     localCard,
-    section(t("Active window context"), hint(t("When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.")), ctxBody),
+    ctxCard,
     s.message
   );
   drawModels();

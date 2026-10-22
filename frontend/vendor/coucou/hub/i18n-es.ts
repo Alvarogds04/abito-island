@@ -3,6 +3,8 @@
 // Copyright (c) 2026 Louis Raillé, MIT; brand names replaced.
 const es: Record<string, string> = {
   // J2: Spanish values from the same upstream tables, brand substitutions only.
+  'Live context': 'Contexto en vivo',
+  'When you write in the chat, Abito adds a short read-only summary of what it already knows: your coding-agent sessions, pending questions and the status of your connected integrations. It makes no new requests, and sends no keys, mail bodies or diffs. The chat still cannot run or approve anything. On by default.': 'Al escribir en el chat, Abito agrega un resumen corto y de solo lectura de lo que ya sabe: tus sesiones de agentes de código, las preguntas pendientes y el estado de tus integraciones conectadas. No hace consultas nuevas ni envía claves, cuerpos de correo ni diffs. El chat sigue sin poder ejecutar ni aprobar nada. Activado de fábrica.',
   'Active window context': 'Contexto de la ventana activa',
   'When you open the chat, Abito reads the app name and the title of the window you were using and attaches them to your first message. Off by default; nothing is read while it is off. The title goes to the model you chat with.': 'Al abrir el chat, Abito lee el nombre de la app y el título de la ventana que estabas usando y los adjunta a tu primer mensaje. Apagado de fábrica; mientras está apagado no se lee nada. El título llega al modelo con el que chateas.',
   'Add': 'Añadir', 'Add a word, e.g. Supabase': 'Añade una palabra, p. ej. Supabase',
@@ -89,7 +91,7 @@ const es: Record<string, string> = {
   "words/min": "palabras/min",
   "days in a row": "días seguidos",
   // Slice 4: Spanish entries/substrings from upstream strings.json/extra.json, brand replacement only.
-  'Pick up to {max} pills to show next to el personaje — {used}/{max} in use.': 'Elige hasta {max} pestañas para mostrar junto al personaje — {used}/{max} en uso.',
+  'Pick the pills to show next to el personaje — {used} in use.': 'Elige las pestañas para mostrar junto al personaje — {used} en uso.',
   'Keys are stored in the {store}.': 'Las claves se guardan en {store}.',
   'Keys stay in the system keychain.': 'Las claves se quedan en el llavero del sistema.',
   'Secret key': 'Clave secreta', 'Token': 'Token', 'Instance URL': 'URL de la instancia', 'Integration token': 'Token de integración',
@@ -191,7 +193,7 @@ const es: Record<string, string> = {
   'Counts and project names only — never commands, files or prompts. Kept on this computer for 12 weeks.': 'Solo recuentos y nombres de proyecto — nunca comandos, archivos ni prompts. Se guarda en este equipo durante 12 semanas.',
   'Language': 'Idioma', 'System': 'Sistema',
   'Choose the tools you use. Abito only shows what you declare here.': 'Elige las herramientas que usas. Abito solo muestra lo que declares aquí.',
-  '{used}/{max} slots in use — the main tool doesn\'t take one.': '{used}/{max} espacios en uso — la herramienta principal no ocupa ninguno.',
+  '{used} in the island — the main tool is always there.': '{used} en la isla — la herramienta principal siempre está.',
   'Main tool': 'Herramienta principal', 'Main': 'Principal', 'Where you code': 'Dónde programas', 'AI for the chat': 'IA para el chat',
   'Coming soon': 'Próximamente', 'Hooks not installed': 'Hooks no instalados', 'Key not configured': 'Clave no configurada', 'Not connected': 'No conectado',
 };
