@@ -482,6 +482,16 @@
       const select=await wait(()=>[...root.querySelectorAll('.hub-row')].find(r=>r.textContent.includes('Writer del validador'))?.querySelector('select'),'estilo por app');
       await click(select); await key('Home'); await key('Down'); await key('Down'); await key('Return');
       effect=await wait(async()=>{const styles=await invoke('dictation_action',{action:'styles'});return styles.some(s=>s.id==='org.example.writer' && s.style==='polished') && styles;},'estilo pulido guardado');
+    } else if(page==='privacy') {
+      // #503 «reportar fallos»: this switch persists to failure-prefs.json through `failure_action`, not to the prefs the generic
+      // snapshot reads. Flip it, wait for the REAL answer of the host, put it back. Never press «Reportar» (it opens a browser).
+      const failureView=()=>invoke('failure_action',{action:'view'});
+      const start=(await failureView()).enabled;
+      await click(()=>document.querySelector('.hub-page .switch:not(:disabled)'));
+      await wait(async()=> (await failureView()).enabled===!start,'preferencia persistida privacy (avisos de fallos)');
+      await click(()=>document.querySelector('.hub-page .switch:not(:disabled)'));
+      await wait(async()=> (await failureView()).enabled===start,'preferencia de avisos de fallos restaurada');
+      effect={page:'privacy',noticesWere:start,observable:'interruptor de avisos de fallos cambiado y restaurado, leído de failure_action',input:'XTest sobre el interruptor real'};
     } else if(page==='flowsettings') {
       // Keyboard navigation on a real select produces trusted change events.
       const selects=[...root.querySelectorAll('select')].filter(s=>!s.disabled && s.options.length>1);
