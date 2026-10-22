@@ -1,5 +1,5 @@
 'use strict';
-/* S29: the shell is rounded on ALL four corners (Sileo's pill family, 16px+), a few px off the top edge, background alpha < 0.8 (dark and light),
+/* S29: the shell is rounded on ALL four corners (Sileo's pill family, 16px+), flush to the top edge, background alpha < 0.8 (dark and light),
    text/controls/mascot opaque and >= 4.5:1 over BOTH a busy dark and a busy light backdrop, nothing clipped by the radius.
    S30: no coloured outline on the blob rows; the selected row is still distinguishable; keyboard focus keeps a ring. Real layout. */
 const assert = require('node:assert/strict');
@@ -18,7 +18,7 @@ const over = (fg, a, bg) => fg.map((c, i) => Math.round(c * a + bg[i] * (1 - a))
         const clay = getComputedStyle(document.getElementById('clay')).opacity;
         return { radii: [c.borderTopLeftRadius, c.borderTopRightRadius, c.borderBottomRightRadius, c.borderBottomLeftRadius].map(parseFloat), top: b.top, bg: c.backgroundColor, ink, rows, clay, w: b.width, h: b.height }; });
       assert.ok(m.radii.every(x => x >= 16), `${theme}: all four corners rounded >= 16px (Sileo family): ${m.radii}`);
-      assert.ok(m.top >= 4 && m.top <= 10, `${theme}: a few px off the top edge (${m.top})`);
+      assert.equal(Math.round(m.top), 0, `${theme}: the shell is flush to the top edge (${m.top})`);
       const a = parse(m.bg)[3] ?? 1; assert.ok(a < 0.8 && a >= 0.6, `${theme}: shell alpha in [0.6,0.8): ${m.bg}`);
       assert.equal(+m.clay, 1, `${theme}: mascot opaque`);
       const shell = parse(m.bg).slice(0, 3), ink = parse(m.ink).slice(0, 3);

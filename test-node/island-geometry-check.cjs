@@ -5,8 +5,8 @@ const assert = require('node:assert/strict');
 const H = require('./island-geometry-harness.cjs');
 if (!H.findPlaywright()) { console.log('SKIPPED island-geometry-check: playwright is not installed here (no real layout engine) — NOT a pass'); process.exit(0); }
 
-const ISLAND = { left: 16, top: 6, right: 736, bottom: 190 };
-const CARD = { top: 48, bottom: 180 };
+const ISLAND = { left: 16, top: 0, right: 736, bottom: 184 };
+const CARD = { top: 42, bottom: 174 };
 const overlap = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
 const inside = (a, c) => a.left >= c.left - 0.5 && a.top >= c.top - 0.5 && a.right <= c.right + 0.5 && a.bottom <= c.bottom + 0.5;
 const label = e => `${e.id}[${Math.round(e.left)},${Math.round(e.top)},${Math.round(e.right)},${Math.round(e.bottom)}]`;
@@ -209,7 +209,7 @@ function noOverlaps(list, why) {
       const mode = await r.page.evaluate(() => ({ q: document.getElementById('capsule').dataset.question || '', badge: !document.getElementById('clay-badge').hidden, layout: document.getElementById('capsule').dataset.layout }));
       assert.deepEqual(mode, { q: '', badge: false, layout: 'normal' }, `nothing of the question is left over: ${JSON.stringify(mode)}`);
       assert.ok(Math.abs(await islandH() - 184) < 2, `the island is back to the 184px overview, got ${await islandH()}`);
-      assert.ok(Math.abs(await clayTop() - 81) < 2, `the mascot is back at the overview position (81 = 75 + the 6px top gap), got ${await clayTop()}`);
+      assert.ok(Math.abs(await clayTop() - 75) < 2, `the mascot is back at the overview position (75), got ${await clayTop()}`);
       const list = await boxes(r);
       noOverlaps(list, 'after answering: overlapping boxes');
       passed += 1;

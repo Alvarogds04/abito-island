@@ -782,7 +782,7 @@ test('L34 Coucou\'s bar: the collapsed island is 288x32 with corners 0 0 14 14 i
   const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), clayX: (\d+), drop: (\d+) \}/.exec(islandSrc);
   assert.ok(m, 'COMPACT constant');
   const [w, h, r, gap, clay, clayX] = m.slice(1, 7).map(Number);
-  assert.deepEqual([w, h, r, gap], [288, 32, 16, 6], 'S29: the compact pill is a Sileo-family pill (r16) floating 6px under the top edge; only the HIDDEN strip is flush');
+  assert.deepEqual([w, h, r, gap], [288, 32, 16, 0], 'S29: the compact pill is a Sileo-family pill (r16), flush to the top edge (human: «pegada»)');
   assert.equal(clayX, 40, 'Coucou botPosition(compact): cx 40');
   const vbx = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   const visible = clay * 112 / vbx[2];
