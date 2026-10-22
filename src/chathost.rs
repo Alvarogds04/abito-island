@@ -302,6 +302,24 @@ pub async fn chat_action(
             publish_chat(&app);
             Ok(chat_view(&app, &state))
         }
+        Command::NewWith { specialist_id } => {
+            // Same role switch as a restore (model checks, missing role = refused here), held under the lane lock.
+            let mut lane = state.chat.lock().expect("chat lane lock");
+            if lane.convo.active().is_some() { return Err(chat_error(chat::ChatError::queue_full())); }
+            if let Some(id) = specialist_id.as_deref() {
+                if specialistshost::select_conversation_role(&app, &state, Some(id))? {
+                    return Err(BridgeError::denied("specialist not found"));
+                }
+            } else {
+                specialistshost::select_conversation_role(&app, &state, None)?;
+            }
+            let specialist = state.specialists.role().map(|s| SpecialistRef { id: s.id, name: s.name });
+            lane.new_conversation(specialist, chatlane::history_now()).map_err(chat_error)?;
+            state.chat_context.lock().expect("chat context lock").new_conversation();
+            drop(lane);
+            publish_chat(&app);
+            Ok(chat_view(&app, &state))
+        }
         Command::Restore { conversation_id } => {
             // Hold the lane across role restoration: another send cannot slip into the old context.
             let mut l = state.chat.lock().expect("chat lane lock");

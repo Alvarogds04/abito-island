@@ -859,6 +859,9 @@ pub enum Command {
     /// Re-read the local model's availability (metadata only, no inference).
     Check,
     New,
+    /// S6 (#503): start a conversation with exactly this specialist (`None` = Abito), the same role
+    /// switch a restored conversation performs. Only an id travels; instructions and model stay in Rust.
+    NewWith { specialist_id: Option<String> },
     List,
     Restore { conversation_id: String },
     History { conversation_id: String, before: Option<u64> },
@@ -879,6 +882,14 @@ fn valid_turn_id(id: &str) -> bool {
         && id
             .strip_prefix("t-")
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// S6 (#503): the SHAPE of a specialist id (the specialists store, in the binary crate, owns the
+/// full rule and decides whether it exists): 1..=32 of `a-z 0-9 . - _`, not starting with a symbol.
+fn specialist_id_shape(id: &str) -> bool {
+    let b = id.as_bytes();
+    !b.is_empty() && b.len() <= 32 && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'-' | b'_'))
 }
 
 /// Validate a `chat_action` payload: size cap first, a JSON object, an
@@ -904,6 +915,14 @@ pub fn parse_command(payload: &Value) -> Result<Command, ChatError> {
         }
         "check" if keys(&["action"]) => Ok(Command::Check),
         "new" if keys(&["action"]) => Ok(Command::New),
+        "new_with" if keys(&["action", "specialist_id"]) => {
+            let specialist_id = match map.get("specialist_id") {
+                Some(Value::Null) => None,
+                Some(Value::String(id)) if specialist_id_shape(id) => Some(id.clone()),
+                _ => return Err(bad()),
+            };
+            Ok(Command::NewWith { specialist_id })
+        }
         "list" if keys(&["action"]) => Ok(Command::List),
         "restore" if keys(&["action", "conversation_id"]) => {
             let conversation_id = text_of("conversation_id").filter(|id| crate::conversations::valid_id(id)).ok_or_else(bad)?;

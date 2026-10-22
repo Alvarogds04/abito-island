@@ -448,6 +448,25 @@
         });
         li.append(button); conversationsList.append(li);
       }
+      const specialistsList = $('specialists-list');
+      if (specialistsList) {
+        specialistsList.replaceChildren();
+        for (const row of V.specialistRows(specialistsView)) {
+          const li = document.createElement('li');
+          const button = document.createElement('button'); button.type = 'button';
+          button.textContent = row.text; button.setAttribute('aria-label', row.aria);
+          button.setAttribute('aria-current', row.current ? 'true' : 'false');
+          button.addEventListener('click', () => {
+            if (inFlight) return;
+            inFlight = true; renderControls();
+            action({ action: 'new_with', specialist_id: row.id }).then(next => {
+              closeConversations(); resetHistory(next); input.value = ''; pendingId = null; localProblem = ''; autosize(); apply(next); input.focus();
+            }, error => { $('conversations-note').textContent = error.message || 'No se pudo abrir la conversación.'; })
+              .finally(() => { inFlight = false; renderControls(); });
+          });
+          li.append(button); specialistsList.append(li);
+        }
+      }
       let note = listing.conversations.length ? '' : 'Todavía no hay conversaciones guardadas.';
       if (listing.skipped) note = `Se omitieron ${listing.skipped} registros o archivos dañados.`;
       $('conversations-note').textContent = note;

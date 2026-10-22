@@ -720,6 +720,18 @@ test('S3 (#503): a turn that carried live context gets a «Contexto» disclosure
   assert.match(chat, /row\.kind === 'context'/);
 });
 
+test('S6 (#503): the specialist picker lists Abito first, then each specialist, and marks the active one', () => {
+  assert.deepEqual(V.specialistRows(null), [{ id: null, text: 'Abito', aria: 'Hablar con Abito', current: true }]);
+  const sv = { active: 'esp-2', specialists: [{ id: 'esp-1', name: 'Revisor' }, { id: 'esp-2', name: 'Redactor' }, { id: 5, name: 'x' }, { id: 'esp-3', name: '' }] };
+  const rows = V.specialistRows(sv);
+  assert.deepEqual(rows.map(r => r.id), [null, 'esp-1', 'esp-2'], 'Abito + valid specialists only');
+  assert.deepEqual(rows.map(r => r.current), [false, false, true]);
+  assert.equal(rows[1].text, 'Revisor');
+  assert.equal(rows[1].aria, 'Hablar con Revisor');
+  assert.equal(V.specialistRows({ active: null, specialists: [] })[0].current, true);
+  assert.equal(V.specialistRows({ active: 'esp-9', specialists: [] })[0].current, true, 'an unknown active id means Abito');
+});
+
 console.log(`chat-view-check: ${passed} passed`);
 
 // ---- S10 (human L35): Coucou's growing chat height -----------------------------------------------------------------
