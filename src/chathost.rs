@@ -179,6 +179,28 @@ fn capture_window_context(app: &AppHandle) {
     });
 }
 
+/// S1/S2 (#503): the live-state snapshot of THIS turn, from what the island already holds
+/// (cached agent sessions, pending question, settled notices, cached GitHub pulse, cached
+/// integration updates). Nothing here fetches; `None` when the switch is off or there is nothing.
+fn live_snapshot(app: &AppHandle, state: &AppState) -> Option<abito_island::chatsnapshot::Snapshot> {
+    if !crate::settingshost::live_context(&state.settings) {
+        return None;
+    }
+    let sessions = state.settings.agent.try_lock().ok()
+        .and_then(|a| a.as_ref().map(|c| c.view()["sessions"].clone()))
+        .unwrap_or(Value::Null);
+    let notices = state.notices.lock().expect("notices lock").snapshot(now_ms() as u64)
+        .into_iter().map(|n| serde_json::to_value(n).unwrap_or(Value::Null)).collect();
+    abito_island::chatsnapshot::build(&abito_island::chatsnapshot::LiveInputs {
+        sessions,
+        question: crate::questionhost::question_view(state),
+        notices,
+        github: crate::githubhost::cached_pulse(),
+        integrations: crate::integrationshost::cached_updates(app),
+        unread_mail: None,
+    })
+}
+
 /// Submit one message: validated, accepted with native ids, then ONE
 /// background turn against the frozen local target.
 pub fn submit(
@@ -196,6 +218,9 @@ pub fn submit(
     let (target, system, specialist) = specialistshost::turn_snapshot(state, chatlane::SYSTEM_PROMPT)
         .map_err(chat_error)?;
     let target = target.ok_or_else(|| chat_error(chat::ChatError::profile_missing()))?;
+    // S1: frozen at submit like the specialist's own system message; the human can see it (T3).
+    let live = live_snapshot(app, state);
+    let system = chatlane::with_live_context(&system, live.is_some(), live.as_ref());
     let gate = crate::model_gate(state, &target);
     if let Err(e) = gate {
         return Err(chat_error(e));

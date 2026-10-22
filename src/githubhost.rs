@@ -12,6 +12,12 @@ use tauri::State;
 // The key stays native. A credential change discards both sections, so accounts never mix.
 static CACHE: Mutex<(Option<String>, Option<Cache>)> = Mutex::new((None, None));
 
+/// S2 (#503): the pulse the island already holds, for the chat's live context. Never fetches and
+/// never waits: if a poll holds the cache right now, the chat simply goes without GitHub this turn.
+pub fn cached_pulse() -> Option<Value> {
+    CACHE.try_lock().ok()?.1.as_ref()?.cached_pulse()
+}
+
 #[tauri::command]
 pub async fn github_action(
     webview: tauri::Webview,

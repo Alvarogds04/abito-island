@@ -65,9 +65,22 @@ el correo (bandeja IMAP, responder y enviar), el enlace con el teléfono, \
 el personaje de escritorio, los avisos y preguntas de los agentes Pi, Claude Code y Codex, \
 el resumen semanal, los sonidos de la isla y la ventana de Ajustes, donde se configura todo. \
 Si en Ajustes se activa, recibes como contexto la ventana activa (app, título y dirección). \
+Si en Ajustes está activo el contexto en vivo (lo está de fábrica), cada mensaje del usuario trae al final de estas instrucciones \
+un resumen del estado en vivo de la app, solo de lectura: agentes de código (proyecto, estado, preguntas pendientes, qué terminó) \
+e integraciones conectadas (GitHub, Vercel, n8n, Resend, Stripe, Notion, Cal.com, correo). \
+Úsalo para decirle qué le toca hacer ahora. Si no hay resumen, no sabes qué está pasando: dilo, no lo inventes. \
 No ves la pantalla, no puedes usar el mouse, el teclado, archivos ni herramientas, \
 y no puedes aprobar ni ejecutar nada: si te piden una acción, explica en qué parte de \
 la app se hace y que desde este chat no puedes hacerla.";
+
+/// S1 (#503): the turn's effective system message plus the live-state snapshot. Disabled, or with
+/// nothing to say, the system message is returned byte-identical.
+pub fn with_live_context(system: &str, enabled: bool, snapshot: Option<&crate::chatsnapshot::Snapshot>) -> String {
+    match snapshot.filter(|_| enabled) {
+        Some(s) => format!("{system}\n\n{}", s.text),
+        None => system.to_string(),
+    }
+}
 
 /// Spanish decimal gigabytes with one decimal (`18,2 GB`).
 pub fn gigabytes(bytes: u64) -> String {
