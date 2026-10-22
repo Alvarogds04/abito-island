@@ -68,6 +68,24 @@ test('S21 Chat: «Probar» is VISIBLE on a card without a key, disabled, and its
   for (const p of probes) { assert(p.visible, `${p.card}: Probar not visible`); assert(p.disabled, `${p.card}: Probar must be disabled without a key`); assert.equal(p.reason, 'Guarda una clave para poder probarla.'); assert(p.reasonVisible, `${p.card}: the reason must be on screen`); }
 });
 
+test('S4 Chat: ONE list of AI providers: no second «Configuración de proveedores» / «Buscar proveedor» system, one key field per provider, each card has its model', async r => {
+  await r.go('Chat');
+  const page = await r.text('.hub-page');
+  for (const dup of ['Configuración de proveedores', 'Buscar proveedor', 'Cuentas conectadas']) assert(!page.includes(dup), `duplicate system still on Chat: ${dup}`);
+  const keys = await r.page.evaluate(() => [...document.querySelectorAll('input[id^="chat-key-"]')].map(i => i.id));
+  assert.equal(new Set(keys).size, keys.length, `a key field twice: ${JSON.stringify(keys)}`);
+  const cards = await r.page.evaluate(() => [...document.querySelectorAll('.abito-card')].filter(c => c.querySelector('input[id^="chat-key-"]')).map(c => [c.querySelector('h2').textContent.trim().split(/\s/)[0], !!c.querySelector('select[id^="chat-"][id$="-model"]')]));
+  assert(cards.length >= 4 && cards.every(([, hasModel]) => hasModel), `every provider card owns its model: ${JSON.stringify(cards)}`);
+  const names = cards.map(c => c[0]); assert.equal(new Set(names).size, names.length, `a provider twice: ${names}`);
+  assert(await r.page.evaluate(() => !!document.getElementById('chat-window-context') && !!document.getElementById('chat-extras')), 'slots for the context toggle');
+});
+
+test('S1 Chat: no long paragraph on the provider cards (explanations are tooltips)', async r => {
+  await r.go('Chat');
+  const long = await r.page.evaluate(() => [...document.querySelectorAll('.abito-card .hint, #chat-local-models .hint')].filter(e => e.textContent.length > 90 && !e.closest('#chat-window-context')).map(e => e.textContent.slice(0, 50)));
+  assert.deepEqual(long, [], `long text on the cards: ${JSON.stringify(long)}`);
+});
+
 test('S23 Integraciones: state and actions form COLUMNS shared by every card (a row without «¿Dónde?» no longer shifts «Conectar»), off the card border', async r => {
   await r.go('Integraciones');
   const rows = await r.page.evaluate(() => [...document.querySelectorAll('.int-card')].map(c => { const cb = c.getBoundingClientRect();
@@ -171,11 +189,10 @@ test('S27 Ajustes (dictado): the microphone meter moves with the host\'s levels 
   const calls = (await r.calls()).map(([c]) => c); assert(!calls.some(c => /mic|record|level/i.test(c)), 'the page only listens: no command was sent for the meter');
 });
 
-test('S32 Integraciones y agentes: ONE sidebar entry replaces «Pestañas activas», «Integraciones» and «Agentes»; «Conexiones» stays apart', async r => {
+test('S32 Integraciones y agentes: ONE sidebar entry replaces «Pestañas activas», «Integraciones» and «Agentes»', async r => {
   const items = await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item')].map(e => e.textContent.trim()));
   assert.equal(items.filter(t => t === 'Integraciones y agentes').length, 1, `the combined entry exists once: ${JSON.stringify(items)}`);
   for (const gone of ['Pestañas activas', 'Agentes', 'Integraciones']) assert(!items.includes(gone), `«${gone}» is not a sidebar entry any more: ${JSON.stringify(items)}`);
-  assert(items.includes('Conexiones'), 'Conexiones stays its own page');
   assert.equal(items.filter(t => /integraciones|agentes|pestañas/i.test(t)).length, 1, 'no other entry for the three');
 });
 
@@ -221,34 +238,40 @@ test('S32 Integraciones y agentes: the one page holds the main tool, the agents,
   assert.doesNotMatch(page.text, /\d\/4|hasta 4|las 4 píldoras|Pestañas activas/, 'no «N/4» and no limit sentence anywhere');
 });
 
-test('S26 Conexiones: the sidebar has a «Conexiones» entry that opens a page with the engine state first and one card per account', async r => {
+test('S5 Chat replaces Conexiones: engine first, provider rows inside the matching chat cards, extras before the reserved toggle slot', async r => {
   const titles = await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item')].map(e => e.textContent.trim()));
-  assert(titles.includes('Conexiones'), `no «Conexiones» entry in ${JSON.stringify(titles)}`);
-  await r.go('Conexiones');
-  assert.equal((await r.text('.hub-hero h1')).trim(), 'Conexiones');
+  assert(!titles.includes('Conexiones'), `FAIL S5: obsolete «Conexiones» entry in ${JSON.stringify(titles)}`);
+  await r.go('Chat');
+  assert.equal((await r.text('.hub-hero h1')).trim(), 'Chat');
+  assert.equal(await r.page.locator('#chat-engine-slot-anthropic #provider-claude').count(), 1);
+  assert.equal(await r.page.locator('#chat-engine-others #provider-pi').count(), 1);
+  assert(await r.page.evaluate(() => !!(document.getElementById('chat-engine-others').compareDocumentPosition(document.getElementById('chat-extras')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+  assert.equal(await r.page.locator('#engine-status button', { hasText: 'Reiniciar' }).count(), 1);
+  assert.equal(await r.page.locator('#settings-filter').count(), 0);
+  assert.doesNotMatch(await r.text('.hub-page'), /Configuración de proveedores|Conectores|Buscar proveedor/);
   // the first thing a person sees: the topmost visible element with an id inside the page
   const first = await r.page.evaluate(() => { const ids = [...document.querySelectorAll('#settings-root [id]')].filter(e => e.getBoundingClientRect().height > 0).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); return ids[0] ? ids[0].id : null; });
   assert.equal(first, 'engine-status', 'the engine state comes first');
-  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('[id^="provider-"]')].map(e => e.id)), ['provider-pi', 'provider-claude']);
+  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('[id^="provider-"]')].map(e => e.id).sort()), ['provider-claude', 'provider-pi']);
 });
 
-test('S26 deep link: opened FOR «Configurar Pi…» (Rust names the page), Ajustes lands on Conexiones, not on Dictado', async r => {
+test('S5 legacy accounts deep link lands on Chat, not on Dictado', async r => {
   await r.close();
   const f = await H.open({ width: 960, height: 680, page: 'accounts' });
   try {
     await f.shellAfter(); await f.page.waitForTimeout(700);
     const on = await f.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim()));
-    assert.deepEqual(on, ['Conexiones'], `landed on ${JSON.stringify(on)}`);
-    assert.equal((await f.text('.hub-hero h1')).trim(), 'Conexiones');
+    assert.deepEqual(on, ['Chat'], `landed on ${JSON.stringify(on)}`);
+    assert.equal((await f.text('.hub-hero h1')).trim(), 'Chat');
   } finally { await f.close(); }
 });
 
 test('S26 deep link on an ALREADY OPEN window: Rust sends abito:hub-select and the page changes; a foreign id is ignored', async r => {
   await r.go('General');
   await r.page.evaluate(() => document.dispatchEvent(new CustomEvent('abito:hub-select', { detail: 'accounts' }))); await r.page.waitForTimeout(500);
-  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim())), ['Conexiones']);
+  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim())), ['Chat']);
   for (const bad of ['../x', 'Accounts', '', 7, null, { detail: 'general' }, ['general']]) { await r.page.evaluate(b => document.dispatchEvent(new CustomEvent('abito:hub-select', { detail: b })), bad); await r.page.waitForTimeout(150); }
-  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim())), ['Conexiones'], 'a foreign id never moves the window');
+  assert.deepEqual(await r.page.evaluate(() => [...document.querySelectorAll('.hub-side .hub-item.on')].map(e => e.textContent.trim())), ['Chat'], 'a foreign id never moves the window');
 });
 
 test('S26 deep link: an unknown or hostile page name falls back to the default page (the closed list decides)', async r => {
@@ -265,7 +288,7 @@ test('S26 deep link: an unknown or hostile page name falls back to the default p
 // Every Ajustes page, as the sidebar lists them. A card or input-looking box with nothing in it is a defect wherever it appears: the
 // human found it three times (Pills, Integraciones, Conexiones), each time by eye, each time the same pattern (a card created before
 // its children exist, then left empty by the state).
-const PAGES = ['Dictado', 'Notetaker', 'Estadísticas', 'Diccionario', 'Fragmentos', 'Estilos', 'Ajustes', 'General', 'Integraciones y agentes', 'Chat', 'Conexiones', 'OK Abito', 'Teléfono Android', 'Atajos'];
+const PAGES = ['Dictado', 'Notetaker', 'Estadísticas', 'Diccionario', 'Fragmentos', 'Estilos', 'Ajustes', 'General', 'Integraciones y agentes', 'Chat', 'OK Abito', 'Teléfono Android', 'Atajos'];
 const EMPTY_BOXES = () => [...document.querySelectorAll('.hub-page .hub-card, .hub-page section, .hub-page .abito-card, .hub-page .hub-row, .hub-page .row')].filter(el => {
   const b = el.getBoundingClientRect(); if (b.width < 40 || b.height < 8) return false;               // not drawn
   if (el.querySelector('input, select, textarea, button, a, svg, canvas, img, .switch, .keycap, .swatch, .hub-segmented')) return false;

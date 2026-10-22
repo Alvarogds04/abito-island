@@ -8,7 +8,7 @@ const { test, all, text, dom, load } = require('./settings-designs-check.cjs');
 const base = (over = {}) => ({ connection: 'connected', ownedAccounts: { accounts: [] }, providers: [
   { id: 'pi', name: 'Pi', configured: false, methods: ['api_key'] },
   { id: 'claude', name: 'Claude', configured: true, methods: ['oauth'] }], accounts: [{ accountId: 'acc-claude', provider: 'claude', configured: true, label: 'alvaro@x' }], auth: {}, connectors: { items: [] }, ...over });
-async function mount(state, { page = 'all' } = {}) {
+async function mount(state, { page = 'chat', slotFor } = {}) {
   dom();
   const { renderAccounts } = await load('accounts.js');
   const V = require('../frontend/settings-view.js');
@@ -19,7 +19,7 @@ async function mount(state, { page = 'all' } = {}) {
     if (cmd === 'daemon_action') return { ok: true };
     return structuredClone(current);
   };
-  const ui = await renderAccounts({ invoke, V, page, listen: async (n, f) => { events[n] = f; return () => { delete events[n]; }; }, timers: { setTimeout: () => 1, clearTimeout() {} } });
+  const ui = await renderAccounts({ invoke, V, page, slotFor, listen: async (n, f) => { events[n] = f; return () => { delete events[n]; }; }, timers: { setTimeout: () => 1, clearTimeout() {} } });
   await ui.settled();
   return { ui, calls, events, set: next => { current = structuredClone(next); } };
 }
@@ -30,7 +30,7 @@ const btn = (scope, word) => all(scope).find(e => e.tagName === 'button' && !e.h
 test('S26 Conexiones: the engine banner is the FIRST thing, with icon + word from the real connection state', async () => {
   const ok = await mount(base());
   const banner = byId(ok.ui, 'engine-status'); assert(banner); assert.equal(ok.ui.children[0], banner, 'first child of the page');
-  assert.equal(banner.attrs.role, 'status'); assert.equal(words(banner), '● Motor corriendo');
+  assert.equal(banner.attrs.role, 'status'); assert.equal(words(banner), '● Motor corriendo Reiniciar');
   assert(all(banner).some(e => e.className === 'state-ico' && e.attrs['aria-hidden'] === 'true'));
   for (const [connection, word] of [['no_daemon', '○ Sin motor'], ['lost', '✗ Motor caído'], ['refused', '✗ Motor no responde'], ['bad_session', '✗ Sesión no válida']]) {
     const m = await mount(base({ connection })); assert.equal(words(byId(m.ui, 'engine-status')).startsWith(word), true, `${connection}: ${words(byId(m.ui, 'engine-status'))}`);
@@ -76,10 +76,28 @@ test('S26 Conexiones: the unavailable engine disables the account actions and sa
   assert(words(byId(ui, 'engine-status')).includes('El motor del agente no está corriendo'));
 });
 
-test('S26 Conexiones: the other sections (provider config, connectors, keys, filter) survive in the same order after the cards', async () => {
-  const { ui } = await mount(base());
-  const heads = all(ui).filter(e => e.tagName === 'h2' || e.className === 'hub-label').map(e => words(e));
-  for (const needle of ['Configuración de proveedores', 'Conectores', 'Claves']) assert(heads.some(h => h.startsWith(needle)), needle);
-  assert(all(ui).some(e => e.attrs.id === 'settings-filter'), 'the provider filter is still there');
-  assert(all(ui).some(e => e.attrs.id && e.attrs.id.startsWith('key-input-')), 'the keychain rows are still there');
+test('S5 Chat: only Otros endpoints remains, with no second provider config, connectors, key list or filter', async () => {
+  const { ui, calls } = await mount(base());
+  assert(words(ui).includes('Otros endpoints'));
+  for (const needle of ['Configuración de proveedores', 'Conectores', 'Claves', 'Buscar proveedor']) assert(!words(ui).includes(needle), needle);
+  assert(!all(ui).some(e => e.attrs.id === 'settings-filter' || e.attrs.id?.startsWith('key-input-')));
+  assert(!calls.some(([cmd, p]) => cmd === 'secret_action' || ['connectors_list', 'agents_list', 'hooks_preview'].includes(p.action)));
+});
+
+test('S5 Chat: prefix aliases share the matching card slot; unknown providers and non-key owned accounts use one extras container', async () => {
+  dom();
+  const slots = Object.fromEntries(['anthropic', 'openai', 'google', 'openrouter', ''].map(id => [id, document.createElement('div')]));
+  const ids = ['anthropic-api', 'claude-code', 'openai-api', 'codex-cli', 'google-ai', 'gemini-cli', 'openrouter-api', 'pi'];
+  const owned = accountId => ({ accountId, provider: 'openai', config: { nombre: accountId, baseUrl: 'https://example.com/v1', api: 'openai-completions', models: [] } });
+  const { ui, events } = await mount(base({ providers: ids.map(id => ({ id, name: id, methods: ['api_key'] })), ownedAccounts: { accounts: [owned('key-openai'), owned('custom-endpoint')] } }), { slotFor: name => slots[name] });
+  for (const [group, expected] of [['anthropic', ids.slice(0,2)], ['openai', ids.slice(2,4)], ['google', ids.slice(4,6)], ['openrouter', ids.slice(6,7)], ['', ['pi']]]) {
+    assert.deepEqual(all(slots[group]).map(e => e.attrs.id).filter(id => id?.startsWith('provider-')), expected.map(id => `provider-${id}`));
+  }
+  assert(!words(slots['']).includes('key-openai')); assert(words(slots['']).includes('custom-endpoint'));
+  assert.equal(all(slots['']).filter(e => e.tagName === 'h2' && words(e) === 'Otros endpoints').length, 1);
+  assert(!all(ui).some(e => e.attrs.id?.startsWith('provider-')), 'no second provider list under the engine line');
+  events['agent:state']({ payload: { connection: 'lost' } });
+  assert.equal(all(slots.anthropic).filter(e => e.attrs.id === 'provider-claude-code').length, 1, 'repaint replaces rather than duplicates slotted rows');
+  ui.dispose();
+  for (const target of Object.values(slots)) assert.equal(target.children.length, 0, 'dispose releases external slots');
 });

@@ -33,7 +33,7 @@ const rowOf = (c, input) => all(c).find(e => e.className === 'row' && e.children
 test('S21 Chat: the page is cards in the wireframe order, each provider with its own state badge (icon + word)', async () => {
   const { ui } = await mount({ present: { 'google-api-key': true } });
   assert.deepEqual(all(ui).filter(e => e.tagName === 'h2').map(e => text(e).replace(/\s+/g, ' ').trim()).map(s => s.split(' ').slice(0, 2).join(' ').replace(/ [✓✗·].*/, '')),
-    ['Claude', 'Google AI', 'OpenAI', 'OpenRouter', 'Modelos locales', 'Contexto de']);
+    ['Claude', 'Google AI', 'OpenAI', 'OpenRouter', 'NaN', 'OpenCode Go', 'Modelos locales', 'Contexto de']);
   assert.equal(stateOf(card(ui, 'Google AI')), '✓ lista'); assert.equal(stateOf(card(ui, 'OpenAI')), '✗ sin clave'); assert.equal(stateOf(card(ui, 'OpenRouter')), '✗ sin clave');
   assert.equal(stateOf(card(ui, 'Claude')), '✗ sin clave');
   for (const t of ['Claude', 'Google AI', 'OpenAI', 'OpenRouter']) assert(all(card(ui, t)).some(e => e.attrs['aria-hidden'] === 'true' && e.className === 'state-ico'), `${t}: the icon is decorative, the word carries the state`);
@@ -113,4 +113,21 @@ test('S21 Chat: every control and closed command that existed survives: keys, mo
   const fs = require('node:fs'), path = require('node:path');
   const entry = fs.readFileSync(path.join(__dirname, '../frontend/settings-app.js'), 'utf8');
   assert.match(entry, /chat\.querySelector\?\.\('#chat-local-models'\)/, 'the models list mounts by id, not by child index');
+});
+
+test('S3 Chat: NaN and OpenCode Go are cards with a key, state, model and Probar; saving creates their HTTPS chat account', async () => {
+  const { ui, calls } = await mount({ present: { 'nan-api-key': true } });
+  assert.equal(stateOf(card(ui, 'NaN')), '✓ lista'); assert.equal(stateOf(card(ui, 'OpenCode Go')), '✗ sin clave');
+  for (const [title, id] of [['NaN', 'nan-api-key'], ['OpenCode Go', 'opencode-go-api-key']]) {
+    const c = card(ui, title); assert(field(c, `chat-key-${id}`), id); assert(btn(c, 'Probar'), `${title}: Probar`); assert(all(c).some(e => e.tagName === 'select'), `${title}: model`);
+  }
+  const go = card(ui, 'OpenCode Go'); calls.length = 0;
+  field(go, 'chat-key-opencode-go-api-key').value = 'fixture-secret-value'; btn(go, 'Guardar').fire('click'); await ui.settled();
+  const created = calls.find(([c, p]) => c === 'agent_action' && p.action === 'abito_account_create' && p.accountId === 'key-opencodego');
+  assert(created, 'OpenCode Go account'); assert.equal(created[1].config.baseUrl, 'https://opencode.ai/inference/go/openai/v1'); assert.equal(created[1].config.api, 'openai-completions');
+  assert(!JSON.stringify(created[1]).includes('fixture-secret-value'), 'the key travels only in secret_action (single source)');
+  assert(!all(ui).some(e => (e.attrs.value || '').includes('fixture-secret-value')), 'no secret left in the DOM');
+  const nan = card(ui, 'NaN'); calls.length = 0;
+  field(nan, 'chat-key-nan-api-key').value = 'fixture-secret-2'; btn(nan, 'Guardar').fire('click'); await ui.settled();
+  assert.equal(calls.find(([c, p]) => c === 'agent_action' && p.action === 'abito_account_create' && p.accountId === 'key-nan')[1].config.baseUrl, 'https://api.nan.builders/v1');
 });

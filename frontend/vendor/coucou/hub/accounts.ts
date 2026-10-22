@@ -1,7 +1,7 @@
 // Abito-owned migration of settings.js/accounts and models.js; rendered with MIT hub/ui.ts.
 import { h, clear } from '../views/dom.js';
 import { card, row, select, label } from './ui.js';
-import { notchCard } from './notch.js';
+import { notchCard, notchRow } from './notch.js';
 import { action, field, note, section, status, trusted, session, preserveFocus } from './runtime.js';
 const PRESETS = [
   ['anthropic', 'Anthropic', 'https://api.anthropic.com/v1', 'anthropic-messages'],
@@ -12,13 +12,17 @@ const PRESETS = [
   ['lmstudio', 'LM Studio (local)', 'http://127.0.0.1:1234/v1', 'openai-completions'],
   ['custom', 'Endpoint personalizado (HTTPS)', '', 'openai-completions'],
 ];
-export async function renderAccounts({ invoke, V, listen, timers, page = 'all', keys: showKeys = true }: any) {
+export async function renderAccounts({ invoke, V, listen, timers, page = 'all', keys: showKeys = true, slotFor }: any) {
   const s = session(invoke, listen, timers), { root, call, work, watch, later, message } = s;
+  const chat = page === 'chat';
+  const slots = new Set<HTMLElement>();
+  const groupFor = (id: string) => /^(anthropic|claude)/.test(id) ? 'anthropic' : /^(openai|codex)/.test(id) ? 'openai' : /^(google|gemini)/.test(id) ? 'google' : /^openrouter/.test(id) ? 'openrouter' : '';
+  const slot = (id: string) => { const target = chat && slotFor ? slotFor(groupFor(id)) : root; if (target !== root) slots.add(target); return target; };
+  if (chat) root.style.setProperty('display', 'contents');
   const agent = (p: any) => call('agent_action', p);
   let state: any = null, owned: any = null, form: HTMLElement | null = null, generation = 0;
   let saving = false, busy = false, daemonBusy = false, login: any = null, pendingLogin: any = null;
   let filter = '', flow: HTMLElement | null = null, flowKey = '', waiting: any = null, lastKey = '';
-  const ask = { at: 0, timedOut: false };
   let keyPresence: any = null, keyBusy = '', keyError = '';
   const keys = h('section', {});
   const withoutError = (st: any) => JSON.stringify({ ...st, last_error: null });
@@ -136,9 +140,10 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all', 
     if (keyError) keys.append(note(keyError));
   }
   function paint() {
-    const key = JSON.stringify([state,owned,!!form,generation,saving,daemonBusy,login,pendingLogin,filter,ask.at,ask.timedOut]);
+    const key = JSON.stringify([state,owned,!!form,generation,saving,daemonBusy,login,pendingLogin,filter]);
     if (key === lastKey) return; lastKey = key;
-    const restore = preserveFocus(root); clear(root);
+    const restores = [root, ...slots].map(preserveFocus);
+    clear(root); for (const target of slots) clear(target);
     const conn = V.connectionView(state), d = V.daemonRestartView(daemonBusy);
     const restart = action(d.action.label, () => {
       if (daemonBusy) return; daemonBusy = true; paint();
@@ -154,20 +159,20 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all', 
     }, daemonBusy) : null;
     const engine = h('div', { id: 'engine-status', class: `engine-status ${engineWord[0]}`, role: 'status', 'aria-live': 'polite' },
       h('span', { class: 'state-ico', 'aria-hidden': 'true', text: engineWord[1] }), h('span', { class: 'state-word', text: engineWord[2] }),
-      ...(conn?.aria && conn.kind !== 'connecting' ? [h('span', { class: 'hint', text: conn.aria.replace(/^[^:]+: /, '') })] : []), ...(retry ? [retry] : []));
+      ...(conn?.aria && conn.kind !== 'connecting' ? [h('span', { class: 'hint', text: conn.aria.replace(/^[^:]+: /, '') })] : []), ...(retry ? [retry] : chat ? [restart] : []));
     if (page !== 'integrations') root.append(engine);
-    if (page !== 'integrations') root.append(section('Motor', row(d.rowTitle, conn?.aria || d.rowSub, restart)));
-    const ownedSec = section('Configuración de proveedores');
+    if (!chat && page !== 'integrations') root.append(section('Motor', row(d.rowTitle, conn?.aria || d.rowSub, restart)));
+    const ownedSec = chat ? notchCard('Otros endpoints') : section('Configuración de proveedores');
     if (form) ownedSec.append(card(form));
     else if (!owned) ownedSec.append(note('El almacén de cuentas no está disponible. No se modificó ninguna cuenta.'));
     else {
-      for (const a of owned.accounts) ownedSec.append(card(row(a.config.nombre, a.hasCredential ? 'Clave guardada' : 'Sin clave', action('Editar', () => { form = accountForm(a); paint(); }, saving), action('Quitar conexión', () => {
+      for (const a of owned.accounts.filter((a: any) => !chat || !a.accountId.startsWith('key-'))) ownedSec.append(card(row(a.config.nombre, a.hasCredential ? 'Clave guardada' : 'Sin clave', action('Editar', () => { form = accountForm(a); paint(); }, saving), action('Quitar conexión', () => {
         if (saving) return; saving = true;
         work(() => agent({ action: 'abito_account_remove', accountId: a.accountId }), next => { apply(next); message.textContent = 'Conexión quitada. La clave se borró del almacén de Abito.'; }).finally(() => { saving = false; if (s.alive()) paint(); });
       }, saving))));
       ownedSec.append(action('Configurar proveedor', () => { form = accountForm(null); paint(); }, saving));
     }
-    if (page !== 'integrations') root.append(ownedSec);
+    if (page !== 'integrations' && !chat) root.append(ownedSec);
     const auth = state?.auth || {}, prompt = V.promptView(auth.prompt), ev = V.eventView(auth.event);
     const flowLive = !!(prompt || ev || (auth.flowId && !auth.last));
     if (login?.phase === 'active') {
@@ -189,48 +194,52 @@ export async function renderAccounts({ invoke, V, listen, timers, page = 'all', 
       if (primary) primary.setAttribute('aria-label', r.logout ? `${V.LOGOUT_WORD}: ${r.name}` : r.cancel ? r.cancel.aria : `${(r.auth || r.api).aria}`);
       const extra: HTMLElement[] = []; // a provider that offers both OAuth and an API key keeps both ways in, behind the same card
       if (!r.logout && !r.cancel && r.auth && r.api) extra.push(action(r.api.word, () => start(r.id, r.api.method), r.api.disabled));
-      const c = notchCard(r.name, h('span', { class: `card-state ${kind}` }, h('span', { class: 'state-ico', 'aria-hidden': 'true', text: icon }), h('span', { class: 'state-word', text: word })),
+      const target = slot(r.id);
+      const compact = chat && !!groupFor(r.id);
+      const c = (compact ? notchRow : notchCard)(r.name, h('span', { class: `card-state ${kind}` }, h('span', { class: 'state-ico', 'aria-hidden': 'true', text: icon }), h('span', { class: 'state-word', text: word })),
         ...(primary ? [primary] : []), ...extra, ...([r.error, r.note].filter(Boolean).length ? [h('div', { class: 'hint', text: [r.error, r.note].filter(Boolean).join(' · ') })] : []));
       c.setAttribute('id', `provider-${r.id}`);
-      cards.push(c);
+      if (chat) target.append(c); else cards.push(c);
     }
-    if (flowLive) providers.append(card(renderFlow(auth, prompt, ev)));
+    if (flowLive) {
+      const target = chat ? slot(login?.providerId || '') : providers;
+      target.append(card(renderFlow(auth, prompt, ev)));
+    }
     else if (flow) { for (const input of flow.querySelectorAll('input')) (input as HTMLInputElement).value = ''; flow = null; }
-    if (page !== 'integrations') root.append(...cards, providers);
-    const connectors = section('Conectores'), av = V.agentsView(state, { askedAtError: ask.at, timedOut: ask.timedOut });
-    connectors.append(label('Agentes'));
-    if (av.kind !== 'ready') connectors.append(status(av));
-    else for (const r of av.rows) connectors.append(card(row(r.name, [r.word, r.summary, r.note].filter(Boolean).join(' · '), r.primary ? action(r.primary.label, () => send(r.primary.command, `${r.name}: ${r.primary.label === 'Actualizar' ? 'actualizado' : 'conectado'}.`)) : null, r.secondary ? action(r.secondary.label, () => send(r.secondary.command, `${r.name}: desconectado.`)) : null)));
-    const services = V.connectorsView(state); connectors.append(label('Servicios'));
-    if (services.kind !== 'ready') connectors.append(status(services));
-    else for (const i of services.items) connectors.append(row(i.label, [i.word, i.sends ? 'Puede enviar' : ''].filter(Boolean).join(' · ')));
-    // Legacy services are read-only: do not invent a connector toggle command.
-    if (page !== 'chat') root.append(connectors);
-    if (page !== 'integrations' && showKeys) root.append(keys);
-    root.append(message); restore();
+    if (chat) slot('').append(ownedSec);
+    else if (page !== 'integrations') root.append(...cards, providers);
+    if (!chat && page !== 'integrations' && showKeys) root.append(keys);
+    root.append(message); for (const restore of restores) restore();
   }
-  if (page !== 'integrations' && showKeys) paintKeys();
+  if (!chat && page !== 'integrations' && showKeys) paintKeys();
   paint();
   watch('agent:state', apply);
   later(() => { if (state === null) { state = { connection: 'no_daemon' }; paint(); } }, V.CONNECT_WAIT_MS);
-  work(() => agent({ action: 'view' }), next => { ask.at = next?.last_error?.n || 0; apply(next); });
-  for (const a of ['connectors_list','agents_list','hooks_preview']) work(() => agent({ action: a }), apply);
-  later(() => { ask.timedOut = true; paint(); }, V.AGENTS_WAIT_MS);
-  if (page !== 'integrations' && showKeys) work(async () => {
+  work(() => agent({ action: 'view' }), apply);
+  if (!chat && page !== 'integrations' && showKeys) work(async () => {
     const presence: any = {};
     for (const id of V.KEY_IDS) { const r = await call('secret_action', V.keyPayload('present', id)); presence[id] = r?.present === true; }
     keyPresence = presence; paintKeys();
   }, () => {}, error => { keyError = V.keyError(error); paintKeys(); });
-  return s.finish();
+  const ui = s.finish(), dispose = ui.dispose;
+  ui.dispose = () => {
+    dispose();
+    for (const target of slots) {
+      for (const input of target.querySelectorAll('input')) if ((input as HTMLInputElement).type === 'password') (input as HTMLInputElement).value = '';
+      clear(target);
+    }
+  };
+  return ui;
 }
 
-export async function renderModels({ invoke, V, C, listen }: any) {
+export async function renderModels({ invoke, V, C, listen, connected = true }: any) {
   const s = session(invoke, listen), { root, message, call, work, watch } = s;
   let state: any = null, prefs: any = {}, listing: any = null, busy = false;
   const apply = (next: any) => { listing = next; paint(); };
   function change(cmd: string, p: any, done: any) { if (busy) return; busy = true; paint(); work(() => call(cmd, p), done).finally(() => { busy = false; if (s.alive()) paint(); }); }
   function paint() {
     const restore = preserveFocus(root); clear(root);
+    // #503 S4: the chat cards already own each provider's model choice; `connected:false` leaves only the local models.
     const providers = section('Cuentas conectadas'), view = V.modelsTabView(state, prefs.chosenModels || {});
     if (view.kind !== 'ready') providers.append(status(view));
     else for (const g of view.groups) if (g.connected) for (const m of g.models) {
@@ -242,7 +251,8 @@ export async function renderModels({ invoke, V, C, listen }: any) {
     if (listing?.resources_text) locals.append(note(`Recursos: ${listing.resources_text}`));
     if (C) for (const meter of C.modelMeters(listing)) locals.append(row(meter.label, meter.aria));
     if (C) for (const m of C.modelRows(listing)) locals.append(row(m.title, [m.word, m.facts, m.message, m.note, ...m.chips.map((c: any) => c.text)].filter(Boolean).join(' · '), action(m.selected ? 'Elegido' : 'Elegir', () => change('models_action', { action: 'select', profile_id: m.id }, apply), busy || !m.selectable || m.selected)));
-    root.append(providers, locals, message); restore();
+    if (connected) root.append(providers);
+    root.append(locals, message); restore();
   }
   paint(); watch('agent:state', p => { state = { ...state, ...p }; paint(); }); watch('prefs:state', p => { prefs = p; paint(); }); watch('models:state', apply);
   work(() => call('agent_action', { action: 'view' }), p => { state = p; paint(); });

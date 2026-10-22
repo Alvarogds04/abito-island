@@ -10,7 +10,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
   const base = path.resolve(__dirname, '../frontend/vendor/coucou/hub');
   const { inactivePages, renderUnavailable } = await import(pathToFileURL(path.join(base, 'pages.js')));
   const { hero } = await import(pathToFileURL(path.join(base, 'hero.js')));
-  const ids = ['dictation','notes','insights','dictionary','snippets','styles','flowsettings','general','integrations','chat','accounts','voice','phone','shortcuts'];
+  const ids = ['dictation','notes','insights','dictionary','snippets','styles','flowsettings','general','integrations','chat','voice','phone','shortcuts'];
   const invoked = [], disposed = [];
   let config;
   const fake = name => async opts => { invoked.push([name, opts.page]); return Object.assign(new Element('section'), { dispose() { disposed.push(name); } }); };
@@ -73,7 +73,7 @@ const { dom, Element, all, text } = require('./settings-accounts-check.cjs');
       }
     } else {
       const cleanup = await config.renderNotch(id, container);
-      const expected = {general:[['general',undefined]], chat:[['chat-settings',undefined],['models',undefined],['accounts','chat']], accounts:[['accounts','all']], integrations:[['pills','pills'],['agent-settings',undefined],['integrations',undefined],['pills','agents']], shortcuts:[['shortcuts',undefined]]}[id];
+      const expected = {general:[['general',undefined]], chat:[['chat-settings',undefined],['accounts','chat'],['models',undefined]], integrations:[['pills','pills'],['agent-settings',undefined],['integrations',undefined],['pills','agents']], shortcuts:[['shortcuts',undefined]]}[id];
       if (expected) { assert.deepEqual(invoked, expected); assert(container.children.length); cleanup?.(); }
       else {
         assert(text(container).includes(id === 'phone' ? 'No disponible' : 'pendiente de conectar'));

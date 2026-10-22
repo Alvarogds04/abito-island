@@ -31,7 +31,7 @@ pub struct SettingsHost {
     // (try_lock only — never a blocking read inside publish).
     pub(crate) agent: Mutex<Option<AgentConn>>,
     // Retained through disk commit and masked publication; never forwarded to the daemon.
-    accounts: Mutex<Option<AccountStore>>,
+    accounts: Mutex<Result<AccountStore, BridgeError>>,
     prefs: Mutex<Prefs>,
     prefs_serial: Mutex<()>, // commands retain this gate through publication
 }
@@ -40,7 +40,7 @@ impl Default for SettingsHost {
     fn default() -> Self {
         SettingsHost {
             agent: Mutex::new(None),
-            accounts: Mutex::new(None),
+            accounts: Mutex::new(Err(err("account_store_unavailable"))),
             prefs: Mutex::new(Prefs::default()),
             prefs_serial: Mutex::new(()),
         }
@@ -114,8 +114,8 @@ pub fn start(app: &AppHandle) {
     *state.settings.accounts.lock().expect("accounts lock") = app
         .path()
         .app_config_dir()
-        .ok()
-        .and_then(|dir| AccountStore::load(dir.join("accounts.json")).ok());
+        .map_err(|_| err("account_store_unavailable"))
+        .and_then(|dir| AccountStore::load(dir.join("accounts.json"), std::sync::Arc::new(abito_island::secrets::Keychain)));
 }
 
 /// #488: the same transaction `prefs_action` runs, for a voice command ("add GitHub").
@@ -386,7 +386,7 @@ pub async fn agent_action(
             let mut accounts = state.settings.accounts.lock().expect("accounts lock");
             let store = accounts
                 .as_mut()
-                .ok_or_else(|| err("account_store_unavailable"))?;
+                .map_err(|error| BridgeError { code: error.code.clone(), message: error.message.clone() })?;
             let saved = store.command(&payload, |snapshot| {
                 let _ = handle.emit("agent:state", json!({"ownedAccounts":snapshot}));
             })?;
