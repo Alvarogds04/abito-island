@@ -14,6 +14,15 @@ test('no scene uses the retired minutes command or reads absenceMinutes', () => 
   assert.doesNotMatch(src, /set_absence_minutes/);
   assert.doesNotMatch(src, /absenceMinutes/);
 });
+test('S1 hidden geometry: the scenes wait for the island bottom <= 8.1 px (compact 32 high, hidden 24 px up = bottom 8), never the old 4 px strip', () => {
+  assert.doesNotMatch(src, /bottom<=4\.1/, 'the 4px slice is gone (S1: 24px up, 8px activation zone)');
+  assert.equal((src.match(/bottom<=8\.1,'(ausencia de 5 s deja franja|mute oculta hacia borde)'/g) || []).length, 2, 'both scenes use the 8px bound');
+  const through = between('async function edgeWake()', 'async function islandHoverPin()');
+  assert.match(through, /o\.y\+12\*o\.scale/, 'the pass-through probe sits 12px down: below the 8px zone, so a click there must reach the window underneath');
+  assert.match(through, /o\.y\+2\*o\.scale/, 'the wake probe sits 2px down: inside the 8px zone');
+  const isl = fs.readFileSync(path.join(__dirname, '../frontend/island.js'), 'utf8');
+  assert.match(isl, /24 \* conceal\.x/, 'the page hides the island 24px up');
+});
 test('edgeIdle sets 5 seconds, waits at most 15 s, asserts the elapsed window, and edgeWake restores the previous seconds', () => {
   const idle = between('async function edgeIdle()', 'async function edgeWake()');
   assert.match(idle, /action:'set_absence_seconds',seconds:5/);
