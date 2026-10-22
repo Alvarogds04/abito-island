@@ -782,13 +782,13 @@ test('L34 Coucou\'s bar: the collapsed island is 288x32 with corners 0 0 14 14 i
   const m = /const COMPACT = \{ w: (\d+), h: (\d+), r: (\d+), gap: (\d+), clay: (\d+), clayX: (\d+), drop: (\d+) \}/.exec(islandSrc);
   assert.ok(m, 'COMPACT constant');
   const [w, h, r, gap, clay, clayX] = m.slice(1, 7).map(Number);
-  assert.deepEqual([w, h, r, gap], [288, 32, 14, 0], 'the visible bar remains flush with the top edge');
+  assert.deepEqual([w, h, r, gap], [288, 32, 16, 6], 'S29: the compact pill is a Sileo-family pill (r16) floating 6px under the top edge; only the HIDDEN strip is flush');
   assert.equal(clayX, 40, 'Coucou botPosition(compact): cx 40');
   const vbx = /OVERVIEW_VB = \[(\d+), (\d+), (\d+), (\d+)\]/.exec(islandSrc).slice(1).map(Number);
   const visible = clay * 112 / vbx[2];
   assert.ok(Math.abs(visible - 20) <= 1, `the visible character (${visible.toFixed(1)}px) is Coucou's 20px bot`);
   assert.ok(clayX - clay / 2 >= 0 && clay <= h, 'the character box sits inside the bar');
-  assert.match(islandSrc, /const rTop = 0, rBottom = lerp\(COMPACT\.r, OVERVIEW\.r, p\);/);
+  assert.match(islandSrc, /const rTop = lerp\(COMPACT\.r, OVERVIEW\.r, p\), rBottom = rTop;/);
 });
 
 test('L34 the bar keeps the badge/contour vocabulary: the sun badge rides the character, the contour is inside the bar (no window margin to draw outside)', () => {

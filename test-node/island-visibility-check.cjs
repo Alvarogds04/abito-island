@@ -17,7 +17,7 @@ class Element {
   remove() {}
 }
 
-test('B1 reproduction: expand then collapse settles the visible island and input report at 288x32', () => {
+test('B1 reproduction: expand then collapse settles the visible island at 288x32 and the input report at 288x38 (S29: the shell floats 6px under the top edge; the rect starts at y=0)', () => {
   const source = fs.readFileSync(path.join(frontend, 'island.js'), 'utf8');
   const capsule = new Element(), island = new Element(), clayEl = new Element();
   const calls = [], frames = new Map(); let serial = 0, now = 0;
@@ -40,7 +40,7 @@ test('B1 reproduction: expand then collapse settles the visible island and input
   console.log('B1 rendered:', capsule.dataset.phase, island.style.width, island.style.height, 'shape:', JSON.stringify(calls.at(-1)));
   assert.equal(capsule.dataset.phase, 'compact');
   assert.equal(island.style.width, '288px'); assert.equal(island.style.height, '32px');
-  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['island_shape', { payload: { w: 288, h: 32, settled: true } }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['island_shape', { payload: { w: 288, h: 38, settled: true } }]);
 });
 
 test('B1 click: a named header fold control collapses through the guarded host verb, never an arbitrary control press', async () => {

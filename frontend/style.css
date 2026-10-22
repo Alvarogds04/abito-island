@@ -775,7 +775,7 @@ html[data-motion="reduce"] .switch::before, html[data-motion="reduce"] .switch .
    disconnected preview's reducers, fixtures and harness never ship here. */
 :root {
   --island-bg: #000;
-  --island-bg-glass: rgba(0, 0, 0, .88);
+  --island-bg-glass: rgba(0, 0, 0, .74);
   --card-bg: #141518;
   --card-line: rgba(255, 255, 255, .035);
   --ink: #F5F6F8;
@@ -1169,7 +1169,7 @@ html[data-theme="light"] {
   /* surfaces: warm sand, derived from the clay the character is made of */
   --island: #ece4d2;
   --island-bg: #ece4d2;
-  --island-bg-glass: rgba(236, 228, 210, .9);
+  --island-bg-glass: rgba(236, 228, 210, .76);
   --surface: #fbf8f1;
   --card-bg: #f7f2e7;
   --tab-on: #e7e0d0;
