@@ -276,11 +276,4 @@ fn spawn_initial_connect(app: &AppHandle) {
 pub fn start(app: &AppHandle) {
     // No tray off Unix in this round: nothing is created, nothing is pretended.
 }
-
-#[cfg(not(unix))]
-#[allow(unused_variables)]
-pub fn refresh(app: &AppHandle, snapshot: &Value) {}
-
-#[cfg(not(unix))]
-#[allow(unused_variables)]
-pub fn note_question_change(app: &AppHandle) {}
+// `refresh` and `note_question_change` above are platform-neutral (the icon redraw inside is unix-only).

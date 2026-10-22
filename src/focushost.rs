@@ -27,7 +27,7 @@
 use crate::bridge::{BridgeError, RateLimiter};
 use serde_json::Value;
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "focushost_tests.rs"]
 mod tests;
 

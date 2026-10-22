@@ -51,6 +51,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_text_travels_on_stdin_never_in_the_arguments() {
         let dir = std::env::temp_dir().join(format!("abito-paste-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

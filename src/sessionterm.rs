@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "sessionterm_tests.rs"]
 mod tests;
 

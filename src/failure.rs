@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "failure_tests.rs"]
 mod tests;
 
@@ -659,10 +659,12 @@ pub fn default_dir() -> Option<PathBuf> {
 
 pub fn store(dir: &Path, rec: &FailureRecord) -> std::io::Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let line = serde_json::to_string(rec).map_err(std::io::Error::other)?;
     if line.len() > RECORD_MAX_BYTES { return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "failure record too large")); }
     std::fs::create_dir_all(dir)?;
+    #[cfg(unix)] // Windows: no mode bits; the dir is under the user's profile
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     let path = dir.join(STORE_FILE);
     if std::fs::metadata(&path).map(|m| m.len() > STORE_MAX_BYTES).unwrap_or(false) {
@@ -670,7 +672,12 @@ pub fn store(dir: &Path, rec: &FailureRecord) -> std::io::Result<()> {
         let tail = keep[keep.len().saturating_sub(STORE_KEEP_LINES)..].join("\n");
         std::fs::write(&path, format!("{tail}\n"))?;
     }
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(&path)?;
+    let mut oo = std::fs::OpenOptions::new();
+    oo.create(true).append(true);
+    #[cfg(unix)]
+    oo.mode(0o600);
+    let mut f = oo.open(&path)?;
+    #[cfg(unix)]
     f.set_permissions(std::fs::Permissions::from_mode(0o600))?; // an older, looser file is tightened, never trusted
     writeln!(f, "{line}")
 }

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "failure_cmd_tests.rs"]
 mod tests;
 
@@ -72,13 +72,19 @@ impl Prefs {
     }
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         use std::io::Write;
+        #[cfg(unix)]
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         std::fs::create_dir_all(dir)?;
+        #[cfg(unix)] // Windows: no mode bits; the dir is under the user's profile
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         let path = dir.join(PREFS_FILE);
         let tmp = dir.join(format!(".{PREFS_FILE}.{}", std::process::id()));
         let bytes = serde_json::to_vec(&json!({"enabled": self.enabled, "muted": self.muted})).map_err(std::io::Error::other)?;
-        let mut f = std::fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(&tmp)?;
+        let mut oo = std::fs::OpenOptions::new();
+        oo.create(true).truncate(true).write(true);
+        #[cfg(unix)]
+        oo.mode(0o600);
+        let mut f = oo.open(&tmp)?;
         f.write_all(&bytes)?;
         std::fs::rename(&tmp, path)
     }

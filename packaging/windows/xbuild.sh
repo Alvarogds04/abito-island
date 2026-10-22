@@ -43,6 +43,7 @@ run() {
     -v "$VOL_TARGET":/abito/target:U \
     -v "$VOL_XWIN":/xwin-cache:U \
     -e CARGO_TARGET_DIR=/abito/target \
+    -e SHERPA_ONNX_ARCHIVE_DIR=/xwin-cache/sherpa \
     -w /abito/src \
     "$IMAGE" "$@"
 }
@@ -79,6 +80,7 @@ case "$cmd" in
       -v "$VOL_XWIN":/xwin-cache:U \
       -v "$crate/dist":/abito/dist \
       -e CARGO_TARGET_DIR=/abito/target \
+    -e SHERPA_ONNX_ARCHIVE_DIR=/xwin-cache/sherpa \
       -w /abito/src \
       "$IMAGE" sh -eu -c "
         cargo xwin build --release --locked --target x86_64-pc-windows-msvc --features tauri/custom-protocol
@@ -87,11 +89,20 @@ case "$cmd" in
         sha256sum /abito/dist/abito-island.exe /abito/dist/abito-island-$version-win-x64-setup.exe"
     echo "artifacts: $crate/dist (exe + setup + hashes above; receipt: packaging/windows/stage-win.cjs)"
     ;;
+  sherpa)
+    # One-time, human-authorised download (123 MB, official k2-fsa release) into the xwin volume; the
+    # build then runs offline through SHERPA_ONNX_ARCHIVE_DIR. The SHA-256 is pinned in sherpa-onnx.sha256.
+    f=$(cut -d' ' -f3 "$crate/packaging/windows/sherpa-onnx.sha256")
+    "$rt" run --rm -v "$VOL_XWIN":/xwin-cache:U -v "$crate/packaging/windows":/pin:ro "$IMAGE" sh -eu -c "
+      mkdir -p /xwin-cache/sherpa && cd /xwin-cache/sherpa
+      [ -f $f ] || curl -fsSL -O https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$f
+      sha256sum -c /pin/sherpa-onnx.sha256"
+    ;;
   shell)
     run sh "$@"
     ;;
   *)
-    echo "usage: xbuild.sh {image|check|build|package|shell}" >&2
+    echo "usage: xbuild.sh {image|sherpa|check|build|package|shell}" >&2
     exit 2
     ;;
 esac

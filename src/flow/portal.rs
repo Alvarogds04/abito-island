@@ -8,23 +8,36 @@
 //! tree) with the sender and session checks of `hotkey::portal::client`.
 //! Blocking `zbus`, its own thread, never panics.
 
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
+#[cfg(target_os = "linux")]
+use std::time::Duration;
 
+// Windows has no XDG portal and no zbus: the D-Bus half is unix-only; Windows gets a `listen`
+// stub below that reports `KeyStatus::Unsupported` (the page already renders that state).
+#[cfg(target_os = "linux")]
 use zbus::blocking::{Connection, MessageIterator, Proxy};
+#[cfg(target_os = "linux")]
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 
 use super::KeyEvent;
+#[cfg(target_os = "linux")]
 use crate::hotkey::portal::{outcome_of_response, request_path, token, Outcome};
 
+#[cfg(target_os = "linux")]
 const DEST: &str = "org.freedesktop.portal.Desktop";
+#[cfg(target_os = "linux")]
 const PATH: &str = "/org/freedesktop/portal/desktop";
+#[cfg(target_os = "linux")]
 const IFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
+#[cfg(target_os = "linux")]
 const REQUEST_IFACE: &str = "org.freedesktop.portal.Request";
 pub const SHORTCUT_ID: &str = "abito-dictate";
+#[cfg(target_os = "linux")]
 const WAIT: Duration = Duration::from_secs(120);
 
 /// A portal signal as the listener sees it.
@@ -81,6 +94,7 @@ impl Drop for HoldKey {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn call_request(
     conn: &Connection,
     proxy: &Proxy<'_>,
@@ -123,6 +137,7 @@ fn call_request(
 
 /// Asks the desktop for the shortcut (it shows its own dialog the first time)
 /// and sends `Down` / `Up` to `tx` while the user holds it.
+#[cfg(target_os = "linux")]
 pub fn listen(tx: Sender<(KeyEvent, Instant)>, description: &str, trigger: &str) -> HoldKey {
     let status = Arc::new(std::sync::atomic::AtomicU8::new(1));
     let stop = Arc::new(AtomicBool::new(false));
@@ -201,6 +216,12 @@ pub fn listen(tx: Sender<(KeyEvent, Instant)>, description: &str, trigger: &str)
         }
     });
     HoldKey { status, stop }
+}
+
+/// Windows: there is no portal, so no hold-to-talk key is held (status `Unsupported`, value 4).
+#[cfg(not(target_os = "linux"))]
+pub fn listen(_tx: Sender<(KeyEvent, Instant)>, _description: &str, _trigger: &str) -> HoldKey {
+    HoldKey { status: Arc::new(std::sync::atomic::AtomicU8::new(4)), stop: Arc::new(AtomicBool::new(false)) }
 }
 
 #[cfg(test)]

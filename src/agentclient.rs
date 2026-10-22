@@ -23,7 +23,7 @@ use std::fmt;
 #[path = "agentclient_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "provider_accounts_tests.rs"]
 mod provider_accounts_tests;
 

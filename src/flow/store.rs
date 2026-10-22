@@ -409,6 +409,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_private_folder_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
         let (s, dir) = temp_store();

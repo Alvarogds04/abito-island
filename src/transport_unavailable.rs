@@ -50,6 +50,11 @@ impl Transport {
         match self.never {}
     }
 
+    /// Click-only navigation guard: without a transport there is never a current notice.
+    pub fn with_question_click<T>(&self, _id: &str, _operation: impl FnOnce() -> T) -> Result<T, crate::bridge::BridgeError> {
+        match self.never {}
+    }
+
     /// Host-only entry points. UI supplies exactly an id and index/text, never
     /// scope/source/connection or an opaque wire token. Trusted human input must
     /// still be enforced by the later closed IPC/UI gate; this is not attestation.

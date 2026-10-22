@@ -7,10 +7,11 @@
 //! are taken per read.
 use serde_json::Value;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "recap_spool_tests.rs"]
 mod tests;
 
@@ -34,19 +35,18 @@ pub fn take(runtime: &Path) -> Vec<Value> {
 }
 
 fn read_work(work: &Path) -> Vec<Value> {
-    let Ok(file) = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(work)
-    else {
-        return Vec::new();
-    };
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(unix)]
+    open.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    let Ok(file) = open.open(work) else { return Vec::new() };
     let Ok(meta) = file.metadata() else { return Vec::new() };
-    if !meta.is_file()
-        || meta.len() > MAX_BYTES
-        || meta.mode() & 0o7777 != 0o600
-        || meta.uid() != unsafe { libc::geteuid() }
-    {
+    if !meta.is_file() || meta.len() > MAX_BYTES {
+        return Vec::new();
+    }
+    // Owner/mode are unix-only hardening (Windows: no mode bits/euid; the runtime dir is in the user's profile).
+    #[cfg(unix)]
+    if meta.mode() & 0o7777 != 0o600 || meta.uid() != unsafe { libc::geteuid() } {
         return Vec::new();
     }
     let mut bytes = Vec::new();

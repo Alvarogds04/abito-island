@@ -6,10 +6,11 @@
 //! and data older than 10 minutes (or from the future) is "unknown". Extra keys are dropped.
 use serde_json::{json, Value};
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // the tests exercise unix file modes
 #[path = "claude_plan_tests.rs"]
 mod tests;
 
@@ -32,13 +33,19 @@ fn window(raw: Option<&Value>, now_ms: i64) -> Option<Value> {
 /// The plan as the page's gauge reads it (`{updatedAt, fiveHour?, sevenDay?}`), or `None`.
 pub fn read_at(runtime: &Path, now_ms: i64) -> Option<Value> {
     let path = runtime.join(FILE);
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(&path)
-        .ok()?;
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(unix)]
+    open.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    let file = open.open(&path).ok()?;
     let meta = file.metadata().ok()?;
-    if !meta.is_file() || meta.len() > MAX_BYTES || meta.mode() & 0o7777 != 0o600 || meta.uid() != unsafe { libc::geteuid() } {
+    if !meta.is_file() || meta.len() > MAX_BYTES {
+        return None;
+    }
+    // Windows has no mode bits or euid: the runtime dir sits under the user's profile (inherited ACL), so the
+    // owner/mode check is a unix-only hardening; the symlink/size/shape checks above and below stay everywhere.
+    #[cfg(unix)]
+    if meta.mode() & 0o7777 != 0o600 || meta.uid() != unsafe { libc::geteuid() } {
         return None;
     }
     let mut bytes = Vec::new();
