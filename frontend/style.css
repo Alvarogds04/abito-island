@@ -1129,6 +1129,11 @@ html[data-motion="reduce"] #capsule #island-header { transition: none; }
 #conversations-bar { display: flex; align-items: center; justify-content: space-between; }
 #conversations h2 { font-size: var(--fs-title); margin: 0; text-wrap: balance; }
 #conversations-note { color: var(--muted); font-size: var(--fs-caption); }
+#conversations h3 { font-size: var(--fs-body); margin: 8px 0 4px; color: var(--muted); font-weight: 600; }
+#specialists-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+#specialists-list button { min-height: 44px; padding: 8px 14px; color: inherit; background: transparent; border: 1px solid var(--muted); border-radius: 999px; font: inherit; font-size: var(--fs-body); overflow-wrap: anywhere; }
+#specialists-list button:hover, #specialists-list button:focus-visible { background: rgba(255, 255, 255, .08); }
+#specialists-list button[aria-current="true"] { border-color: var(--text, currentColor); }
 #conversations-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
 #conversations-list button { width: 100%; min-height: 44px; padding: 10px; text-align: left; color: inherit; background: transparent; border: 1px solid transparent; border-radius: 10px; overflow-wrap: anywhere; font: inherit; font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
 #conversations-list button:hover, #conversations-list button:focus-visible { background: rgba(255, 255, 255, .08); }

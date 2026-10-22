@@ -685,3 +685,28 @@ fn the_height_verb_is_exact_closed_and_integer_only() {
         assert!(parse_command(&bad).is_err(), "{bad} must be refused");
     }
 }
+
+// ---- S3 (#503): the page can show what the live context said on a turn --------------------------
+
+#[test]
+fn live_context_is_shown_on_its_turn_only_and_never_changes_the_user_text_or_the_prompt() {
+    let mut c = convo();
+    let a = c.submit("hola", "req-0000000001", &profile()).unwrap();
+    c.attach_live(&a.turn_id, "Estado en vivo\n- Pi en api: trabajando", 2);
+    let v = c.view();
+    assert_eq!(v["turns"][0]["live_context"], json!({"text": "Estado en vivo\n- Pi en api: trabajando", "trimmed_lines": 2}));
+    assert_eq!(v["turns"][0]["user_text"], "hola");
+    assert_eq!(c.prompt_for(&a.turn_id, "SYS", 4096, 512).unwrap().messages[1].content, "hola", "the history never carries it");
+    c.apply(&a.turn_id, 1, Event::Delta("ok".into())).unwrap();
+    c.apply(&a.turn_id, 2, Event::Complete(FinishReason::Stop)).unwrap();
+    let b = c.submit("otra", "req-0000000002", &profile()).unwrap();
+    assert!(c.view()["turns"][1].get("live_context").is_none(), "a turn without the context has no key");
+    let _ = b;
+}
+
+#[test]
+fn a_turn_projection_without_live_context_is_unchanged() {
+    let mut c = convo();
+    c.submit("hola", "req-0000000001", &profile()).unwrap();
+    assert!(c.view()["turns"][0].get("live_context").is_none());
+}

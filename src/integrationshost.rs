@@ -22,6 +22,14 @@ fn cache() -> &'static Mutex<HashMap<&'static str, Value>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// S2 (#503): the last update of every DECLARED service, as the island holds it. No poll, no wait.
+pub fn cached_updates(app: &AppHandle) -> Vec<Value> {
+    let Ok(map) = cache().try_lock() else { return Vec::new() };
+    let mut out: Vec<(&&str, &Value)> = map.iter().filter(|(id, _)| is_declared(app, id)).collect();
+    out.sort_by_key(|(id, _)| **id);
+    out.into_iter().map(|(_, u)| u.clone()).collect()
+}
+
 fn seen() -> &'static Seen {
     static SEEN: OnceLock<Seen> = OnceLock::new();
     SEEN.get_or_init(Seen::default)
